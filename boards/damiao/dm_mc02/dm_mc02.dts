@@ -1,0 +1,251 @@
+/*
+ * Copyright (c) 2025 RobotPilots-SZU
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <st/h7/stm32h723Xg.dtsi>
+#include <st/h7/stm32h723vgtx-pinctrl.dtsi>
+
+#include <zephyr/dt-bindings/spi/spi.h>
+#include <zephyr/dt-bindings/led/led.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+    model = "Shenzhen Damiao Tech. MC-02 board";
+    compatible = "damiao,mc02";
+
+    chosen {
+        zephyr,console = &usart10;
+		zephyr,shell-uart = &usart10;
+		zephyr,sram = &sram0;
+		zephyr,button = &user_button;
+		zephyr,flash = &flash0;
+		zephyr,dtcm = &dtcm;
+		zephyr,itcm = &itcm;
+    };
+
+    gpio_keys {
+        compatible = "gpio-keys";
+        user_button: button_0 {
+            label = "User";
+            gpios = <&gpioa 15 GPIO_ACTIVE_HIGH>;
+            zephyr,code = <INPUT_KEY_0>;
+        };
+    };
+
+    aliases {
+        sw0 = &user_button;
+        led-strip = &rgb_led;
+    };
+
+    power_en {
+        power1: xt30_1_regulator {
+            compatible = "regulator-fixed";
+            regulator-name = "XT30_1";
+            enable-gpios = <&gpioc 14 GPIO_ACTIVE_HIGH>;
+            regulator-boot-off;
+        };
+
+        power2: xt30_2_regulator {
+            compatible = "regulator-fixed";
+            regulator-name = "XT30_2";
+            enable-gpios = <&gpioc 13 GPIO_ACTIVE_HIGH>;
+            regulator-boot-off;
+        };
+    };
+};
+
+&clk_lsi {
+    status = "okay";
+};
+
+&clk_hsi48 {
+    status = "okay";
+};
+
+&clk_hse {
+    clock-frequency = <DT_FREQ_M(24)>; /* On-board 24MHz RCC */
+    status = "okay";
+};
+
+&pll {
+    div-m = <2>;
+    mul-n = <40>;
+    div-p = <1>;    /* DIVP1: 480 MHz */
+    div-q = <4>;    /* DIVQ1: 120 MHz */
+    div-r = <2>;    /* DIVR1: 240 MHz */
+    clocks = <&clk_hse>;
+    status = "okay";
+};
+
+&pll2 {
+    div-m = <2>;
+    mul-n = <16>;
+    div-p = <2>;    /* DIVP2: 96 MHz */
+    div-q = <2>;    /* DIVQ2: 96 MHz */
+    div-r = <2>;    /* DIVR2: 96 MHz */
+    clocks = <&clk_hse>;
+    status = "okay";
+};
+
+&rcc {
+    clocks = <&pll>;
+    clock-frequency = <DT_FREQ_M(480)>;
+    d1cpre = <1>;   /* CPU: 480 MHz */
+    hpre = <2>;     /* HCLK: 240 MHz */
+    d1ppre = <2>;   /* APB3: 120 MHz */
+    d2ppre1 = <2>;  /* APB1: 120 MHz */
+    d2ppre2 = <2>;  /* APB2: 120 MHz */
+    d3ppre = <2>;   /* APB4: 120 MHz */
+};
+
+&pwr {
+    power-supply = "ldo";
+};
+
+&backup_sram {
+    status = "okay";
+};
+
+&dma1 {
+    status = "okay";
+};
+
+&dma2 {
+    status = "okay";
+};
+
+&dmamux1 {
+    status = "okay";
+};
+
+&digi_die_temp {
+    status = "okay";
+};
+
+&spi2 {
+    status = "okay";
+    clocks = <&rcc STM32_CLOCK(APB1, 14U)>,
+             <&rcc STM32_SRC_PLL1_Q SPI123_SEL(0)>;
+    pinctrl-0 = <&spi2_sck_pb13 &spi2_miso_pc2_c &spi2_mosi_pc1>;
+    pinctrl-names = "default";
+    cs-gpios = <&gpioc 0 GPIO_ACTIVE_LOW>,
+               <&gpioc 3 GPIO_ACTIVE_LOW>;
+    dmas = <&dmamux1 2 2 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 1 1 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
+
+    bmi08x_accel: bmi08x@0 {
+        compatible = "bosch,bmi08x-accel";
+        // SPI
+        reg = <0>;
+        spi-max-frequency = <DT_FREQ_M(8)>;
+        // BMI08x
+        int-gpios = <&gpioe 10 GPIO_ACTIVE_HIGH>;
+        int1-map-io = <0x01>;
+        int2-map-io = <0x00>;
+        int1-conf-io = <0x04>;
+        int2-conf-io = <0x00>;
+        accel-hz = "800";
+        accel-fs = <24>;
+    };
+
+    bmi08x_gyro: bmi08x@1 {
+        compatible = "bosch,bmi08x-gyro";
+        // SPI
+        reg = <1>;
+        spi-max-frequency = <DT_FREQ_M(8)>;
+        // BMI08x
+        int-gpios = <&gpioe 12 GPIO_ACTIVE_HIGH>;
+        int3-4-map-io = <0x01>;
+        int3-4-conf-io = <0x02>;
+        gyro-hz = "1000_116";
+        gyro-fs = <1000>;
+    };
+};
+
+&spi6 {
+    status = "okay";
+    clocks = <&rcc STM32_CLOCK(APB4, 5U)>,
+             <&rcc STM32_SRC_HSE SPI6_SEL(5)>;
+    pinctrl-0 = <&spi6_sck_pa5 &spi6_mosi_pa7>;
+    pinctrl-names = "default";
+
+    rgb_led: ws2812@0 {
+        compatible = "worldsemi,ws2812-spi";
+        // SPI
+        reg = <0>;
+        spi-max-frequency = <DT_FREQ_M(4)>;
+        frame-format = <SPI_FRAME_FORMAT_TI>;
+        // WS2812
+        chain-length = <1>;
+        spi-one-frame = <0x70>;
+        spi-zero-frame = <0x40>;
+        color-mapping = <LED_COLOR_ID_GREEN>,
+                        <LED_COLOR_ID_RED>,
+                        <LED_COLOR_ID_BLUE>;
+        reset-delay = <250>;
+    };
+};
+
+&usart2 {
+    // RS485
+    status = "okay";
+    pinctrl-0 = <&usart3_de_pb14 &usart2_rx_pd6 &usart2_tx_pd5>;
+    pinctrl-names = "default";
+    de-enable;
+};
+
+&usart3 {
+    // RS485
+    status = "okay";
+    pinctrl-0 = <&usart3_de_pb14 &usart3_rx_pd9 &usart3_tx_pd8>;
+    pinctrl-names = "default";
+    de-enable;
+};
+
+&uart5 {
+    // SBUS
+    status = "okay";
+    pinctrl-0 = <&uart5_rx_pd2 &uart5_tx_pc12>;
+    pinctrl-names = "default";
+    current-speed = <100000>;
+    data-bits = <8>;
+    stop-bits = "2";
+};
+
+&usart10 {
+    status = "okay";
+    pinctrl-0 = <&usart10_rx_pe2 &usart10_tx_pe3>;
+    pinctrl-names = "default";
+    current-speed = <115200>;
+};
+
+can1: &fdcan1 {
+    status = "okay";
+    clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
+             <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
+    pinctrl-0 = <&fdcan1_rx_pd0 &fdcan1_tx_pd1>;
+    pinctrl-names = "default";
+    bitrate = <1000000>;
+};
+
+can2: &fdcan2 {
+    status = "okay";
+    clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
+             <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
+    pinctrl-0 = <&fdcan2_rx_pb5 &fdcan2_tx_pb6>;
+    pinctrl-names = "default";
+    bitrate = <1000000>;
+};
+
+can3: &fdcan3 {
+    status = "okay";
+    clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
+             <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
+    pinctrl-0 = <&fdcan3_rx_pd12 &fdcan3_tx_pd13>;
+    pinctrl-names = "default";
+    bitrate = <1000000>;
+};

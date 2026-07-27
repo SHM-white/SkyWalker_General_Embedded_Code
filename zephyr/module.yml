@@ -1,0 +1,7 @@
+name: "skywalker"
+build:
+  kconfig: Kconfig
+  cmake: .
+  settings:
+    board_root: .
+    dts_root: .

@@ -1,0 +1,6 @@
+# Copyright (c) 2025 RobotPilots-SZU
+# SPDX-License-Identifier: Apache-2.0
+
+menu "Skywalker Libraries"
+
+endmenu

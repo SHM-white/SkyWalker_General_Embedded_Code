@@ -1,0 +1,20 @@
+manifest:
+  self:
+    path: skywalker_code
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://www.github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: 6085aadeb337f27ee7411fa2ecbe8cf49164e360
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_st
+          - hal_stm32
+          - mcuboot
+          - segger
