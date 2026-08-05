@@ -1,5 +1,3 @@
-# Copyright (c) 2025 RobotPilots-SZU
-# SPDX-License-Identifier: Apache-2.0
-
-# Skywalker libraries — add subdirectories as libs are created
-# add_subdirectory(ares)
+add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_KALMAN_FILTER kalman_filter)
+add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_MATRIX      matrix)
+add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_VOFA    vofa)

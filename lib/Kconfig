@@ -1,6 +1,24 @@
-# Copyright (c) 2025 RobotPilots-SZU
-# SPDX-License-Identifier: Apache-2.0
-
 menu "Skywalker Libraries"
+
+config SKYWALKER_LIB_KALMAN_FILTER
+    bool "Kalman Filter"
+    help
+        Enable the Kalman Filter library.
+
+config SKYWALKER_LIB_MATRIX
+    bool "Matrix"
+    select CMSIS_DSP
+    select FILE_SYSTEM
+    select ZMS
+    select FLASH_PAGE_LAYOUT
+    select FLASH_MAP
+    help
+        Enable the Matrix library for matrix operations.
+
+config SKYWALKER_LIB_VOFA
+    bool "vofa"
+    depends on SERIAL
+    help
+        Enable the VOFA library for debug
 
 endmenu
