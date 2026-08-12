@@ -1,13 +1,9 @@
 menu "Skywalker Libraries"
 
-config SKYWALKER_LIB_KALMAN_FILTER
-    bool "Kalman Filter"
-    help
-        Enable the Kalman Filter library.
-
 config SKYWALKER_LIB_MATRIX
     bool "Matrix"
     select CMSIS_DSP
+    select CMSIS_DSP_MATRIX
     select FILE_SYSTEM
     select ZMS
     select FLASH_PAGE_LAYOUT

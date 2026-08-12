@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+
+description: Skywalker Kalman Filter
+
+compatible: "skywalker,kalman_filter"
+
+include: [base.yaml]
+
+properties:
+  state-dim:
+    type: int
+    required: true
+    description: 状态维度
+  measure-dim:
+    type: int
+    required: true
+    description: 测量维度

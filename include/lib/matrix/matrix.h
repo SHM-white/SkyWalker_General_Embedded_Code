@@ -12,16 +12,14 @@
 #define Matrix_Inverse      arm_mat_inverse_f32
 
 // 工具函数：将矩阵所有元素置零
-static inline void Matrix_Zero(Matrix *mat)
-{
+static inline void Matrix_Zero(Matrix *mat) {
     for (uint16_t i = 0; i < mat->numRows; i++)
         for (uint16_t j = 0; j < mat->numCols; j++)
             mat->pData[i * mat->numCols + j] = 0.0f;
 }
 
 // 工具函数：将矩阵设为对角阵（非对角置零，对角设为 val）
-static inline void Matrix_SetDiag(Matrix *mat, float val)
-{
+static inline void Matrix_SetDiag(Matrix *mat, float val) {
     Matrix_Zero(mat);
     uint16_t n = (mat->numRows < mat->numCols) ? mat->numRows : mat->numCols;
     for (uint16_t i = 0; i < n; i++)

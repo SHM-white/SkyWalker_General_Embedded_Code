@@ -1,0 +1,4 @@
+zephyr: ../zephyr
+board: dm_mc02
+board_root: .
+dts_root: .

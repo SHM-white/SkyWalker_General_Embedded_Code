@@ -1,3 +1,2 @@
-add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_KALMAN_FILTER kalman_filter)
 add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_MATRIX      matrix)
 add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_VOFA    vofa)

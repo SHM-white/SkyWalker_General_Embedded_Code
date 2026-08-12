@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+
+description: Skywalker IMU
+
+compatible: "skywalker,imu"
+
+include: [base.yaml]
+
+properties:
+  accel-dev:
+    type: phandle
+    required: true
+    description: 加速度计设备节点
+  gyro-dev:
+    type: phandle
+    required: true
+    description: 陀螺仪设备节点
+  heat-dev:
+    type: phandle
+    required: true
+    description: PWM 加热设备节点
+  filter-dev:
+    type: phandle
+    required: true
+    description: 解算滤波器设备节点（kalman_filter 等）
+  pid-dev:
+    type: phandle
+    required: true
+    description: 温度控制 PID 设备节点
+  estimator:
+    type: string
+    required: true
+    enum:
+      - "ekf"
+    description: 解算方法选择

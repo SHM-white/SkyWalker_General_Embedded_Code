@@ -1,61 +1,89 @@
-#include "lib/kalman_filter/kalman_filter.h"
+#include "drivers/kalman_filter/kalman_filter.h"
 
+#include <string.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 
-/**
- * @brief 初始化卡尔曼滤波器，将所有矩阵绑定到调用者分配的 buffer
- *
- * 调用者按尺寸分配 float 数组，init 只绑定，不分配内存。
- * m=0 时 H/R/K 的 pData 传 NULL，跳过更新步骤。
- *
- * @param kf     滤波器结构体指针
- * @param n      状态向量维度
- * @param m      观测向量维度
- * @param F_buf  F 矩阵 buffer，长度 n*n
- * @param H_buf  H 矩阵 buffer，长度 m*n
- * @param R_buf  R 矩阵 buffer，长度 m*m
- * @param X_buf  X 矩阵 buffer，长度 n
- * @param P_buf  P 矩阵 buffer，长度 n*n
- * @param Q_buf  Q 矩阵 buffer，长度 n*n
- * @param K_buf  K 矩阵 buffer，长度 n*m
- */
-void KalmanFilter_Init(KalmanFilter *kf, uint16_t n, uint16_t m,
-                       float *F_buf,
-                       float *H_buf, float *R_buf,
-                       float *X_buf, float *P_buf, float *Q_buf,
-                       float *K_buf)
-{
-    // ─── 预测参数 ───
-    // F: 状态转移矩阵 (n×n)，描述系统自身动力学
+#define DT_DRV_COMPAT skywalker_kalman_filter
+
+#define KALMAN_FILTER_CONFIG_DEFINE(inst)                                    \
+    static const kalmanfilter_config kalmanfilter_config_##inst = {          \
+        .state_dim   = DT_INST_PROP(inst, state_dim),                        \
+        .measure_dim = DT_INST_PROP(inst, measure_dim),                      \
+    }
+
+#define KF_N(inst) DT_INST_PROP(inst, state_dim)
+#define KF_M(inst) DT_INST_PROP(inst, measure_dim)
+
+#define KALMAN_FILTER_DATA_DEFINE(inst)                                      \
+    static struct {                                                          \
+        KalmanFilter kf;                                                     \
+        float F_buf[KF_N(inst) * KF_N(inst)];                                \
+        float H_buf[KF_M(inst) * KF_N(inst)];                                \
+        float R_buf[KF_M(inst) * KF_M(inst)];                                \
+        float X_buf[KF_N(inst)];                                             \
+        float P_buf[KF_N(inst) * KF_N(inst)];                                \
+        float Q_buf[KF_N(inst) * KF_N(inst)];                                \
+        float K_buf[KF_N(inst) * KF_M(inst)];                                \
+    } kalman_filter_data_##inst
+
+static int skywalker_kalman_filter_init(const struct device *dev) {
+    const kalmanfilter_config *cfg = dev->config;
+    KalmanFilter              *kf  = dev->data;
+    uint16_t n = cfg->state_dim;
+    uint16_t m = cfg->measure_dim;
+
+    /* 指针偏移定位 data 内部各 buffer */
+    uint8_t *base  = (uint8_t *)dev->data;
+    float   *F_buf = (float *)(base + sizeof(KalmanFilter));
+    float   *H_buf = F_buf + n * n;
+    float   *R_buf = H_buf + m * n;
+    float   *X_buf = R_buf + m * m;
+    float   *P_buf = X_buf + n;
+    float   *Q_buf = P_buf + n * n;
+    float   *K_buf = Q_buf + n * n;
+
+    /* 绑定矩阵 */
     Matrix_Init(&kf->F, n, n, F_buf);
-
-    // ─── 更新参数 ───
-    // H: 观测矩阵 (m×n)，从状态空间中挑出可观测分量
     Matrix_Init(&kf->H, m, n, H_buf);
-
-    // R: 测量噪声协方差 (m×m)，表征传感器不确定度
     Matrix_Init(&kf->R, m, m, R_buf);
-
-    // ─── 状态变量 ───
-    // X: 状态估计向量 (n×1)，滤波器的最终输出
     Matrix_Init(&kf->X, n, 1, X_buf);
-
-    // P: 误差协方差矩阵 (n×n)，当前估计的不确定度
     Matrix_Init(&kf->P, n, n, P_buf);
-
-    // Q: 过程噪声协方差 (n×n)，系统模型的不确定度
     Matrix_Init(&kf->Q, n, n, Q_buf);
-
-    // ─── 卡尔曼增益（内部计算） ───
-    // K: 卡尔曼增益 (n×m)，update 中计算，决定观测对状态的修正权重
     Matrix_Init(&kf->K, n, m, K_buf);
+
+    /* 设置初始值 */
+    Matrix_SetDiag(&kf->F, 1.0f);        /* F = I */
+    Matrix_SetDiag(&kf->P, 1000.0f);     /* 高初始不确定度 */
+    Matrix_SetDiag(&kf->Q, 0.001f);      /* 过程噪声 */
+    Matrix_SetDiag(&kf->R, 1.0f);        /* 测量噪声 */
+    Matrix_Zero(&kf->H);
+    for (uint16_t i = 0; i < m && i < n; i++)
+        kf->H.pData[i * n + i] = 1.0f;   /* H = I 的前 m 行 */
+    Matrix_Zero(&kf->X);                 /* X = 0 */
+
+    return 0;
 }
+
+#define KALMAN_FILTER_INST(inst)                                             \
+    KALMAN_FILTER_CONFIG_DEFINE(inst);                                       \
+    KALMAN_FILTER_DATA_DEFINE(inst);                                         \
+    DEVICE_DT_DEFINE(DT_DRV_INST(inst),                                      \
+                     skywalker_kalman_filter_init,                           \
+                     NULL,                                                   \
+                     &kalman_filter_data_##inst,                             \
+                     &kalmanfilter_config_##inst,                            \
+                     POST_KERNEL,                                            \
+                     50,                                                     \
+                     NULL);
+
+DT_INST_FOREACH_STATUS_OKAY(KALMAN_FILTER_INST)
 
 /**
  * @brief 预测步骤：x = F·x,  P = F·P·Fᵀ + Q
  * @param kf 滤波器结构体指针
  */
-void KalmanFilter_Predict(KalmanFilter *kf)
-{
+void KalmanFilter_Predict(KalmanFilter *kf) {
     uint16_t n = kf->F.numRows;
 
     // ─── ① x = F·x ───
@@ -94,8 +122,7 @@ void KalmanFilter_Predict(KalmanFilter *kf)
  * @param kf 滤波器结构体指针
  * @param z  观测向量 (m×1)
  */
-void KalmanFilter_Update(KalmanFilter *kf, const Matrix *z)
-{
+void KalmanFilter_Correct(KalmanFilter *kf, const Matrix *z) {
     uint16_t n = kf->F.numRows;
     uint16_t m = kf->H.numRows;
 

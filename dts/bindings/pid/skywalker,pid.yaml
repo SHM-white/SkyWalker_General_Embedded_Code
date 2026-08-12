@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+
+description: Skywalker PID Controller
+
+compatible: "skywalker,pid"
+
+include: [base.yaml]
+
+properties:
+  k-p:
+    type: string
+    required: true
+    description: 比例增益 Kp
+  k-i:
+    type: string
+    required: true
+    description: 积分增益 Ki
+  k-d:
+    type: string
+    required: true
+    description: 微分增益 Kd
+  i-max:
+    type: string
+    required: true
+    description: I 项输出限幅
+  out-max:
+    type: string
+    required: true
+    description: 总输出限幅
+  deadband:
+    type: string
+    required: true
+    description: 死区

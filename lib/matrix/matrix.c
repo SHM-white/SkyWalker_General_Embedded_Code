@@ -37,15 +37,13 @@ static K_MUTEX_DEFINE(zms_lock); // 互斥锁：防止多线程同时读写 flas
  *
  * @return 0 成功，负数 errno 失败
  */
-static int zms_init(void)
-{
+static int zms_init(void) {
     if (zms_ready)
         return 0; // 已初始化，跳过
 
     // 获取 flash 设备指针
     fs.flash_device = ZMS_PARTITION_DEVICE;
-    if (!device_is_ready(fs.flash_device))
-    {
+    if (!device_is_ready(fs.flash_device)) {
         LOG_ERR("Flash device not ready");
         return -ENODEV;
     }
@@ -85,10 +83,8 @@ static int zms_init(void)
  * @param cols 矩阵列数
  * @return 0 成功，其他值失败
  */
-int matrix_storage_save(uint32_t id, const float *data, uint16_t rows, uint16_t cols)
-{
-    if (!data || rows == 0 || cols == 0)
-    {
+int matrix_storage_save(uint32_t id, const float *data, uint16_t rows, uint16_t cols) {
+    if (!data || rows == 0 || cols == 0) {
         return -EINVAL; // 无效参数
     }
 
@@ -103,19 +99,16 @@ int matrix_storage_save(uint32_t id, const float *data, uint16_t rows, uint16_t 
     k_mutex_lock(&zms_lock, K_FOREVER); // 拿锁
 
     int rc = zms_init(); // 懒加载，第一次调用时 mount
-    if (rc)
-    {
+    if (rc) {
         k_mutex_unlock(&zms_lock); // 初始化失败，放锁
         return rc;
     }
 
     rc = zms_write(&fs, id, buf, total_size); // 写 flash
-    if (rc < 0)
-    {
+    if (rc < 0) {
         LOG_ERR("zms_write failed: %d", rc); // 写入失败
     }
-    else
-    {
+    else {
         rc = 0; // 写入成功
     }
 
@@ -130,8 +123,7 @@ int matrix_storage_save(uint32_t id, const float *data, uint16_t rows, uint16_t 
  * @param cols 输出：列数
  * @return 0 成功，其他值失败
  */
-int matrix_storage_get_size(uint32_t id, uint16_t *rows, uint16_t *cols)
-{
+int matrix_storage_get_size(uint32_t id, uint16_t *rows, uint16_t *cols) {
     if (!rows || !cols)
         return -EINVAL;
 
@@ -140,20 +132,17 @@ int matrix_storage_get_size(uint32_t id, uint16_t *rows, uint16_t *cols)
     k_mutex_lock(&zms_lock, K_FOREVER);
 
     int rc = zms_init();
-    if (rc)
-    {
+    if (rc) {
         k_mutex_unlock(&zms_lock);
         return rc;
     }
 
     ssize_t n = zms_read(&fs, id, header, sizeof(header));
-    if (n < 0)
-    {
+    if (n < 0) {
         k_mutex_unlock(&zms_lock);
         return (int)n;
     }
-    if (n < 4)
-    {
+    if (n < 4) {
         k_mutex_unlock(&zms_lock);
         return -ENODATA;
     }
@@ -171,8 +160,7 @@ int matrix_storage_get_size(uint32_t id, uint16_t *rows, uint16_t *cols)
  * @param mat 目标矩阵（调用者需提前分配 pData 并设置 numRows/numCols）
  * @return 0 成功，其他值失败
  */
-int matrix_storage_read(uint32_t id, Matrix *mat)
-{
+int matrix_storage_read(uint32_t id, Matrix *mat) {
     if (!mat || !mat->pData || mat->numRows == 0 || mat->numCols == 0)
         return -EINVAL;
 
@@ -181,8 +169,7 @@ int matrix_storage_read(uint32_t id, Matrix *mat)
     k_mutex_lock(&zms_lock, K_FOREVER);
 
     int rc = zms_init();
-    if (rc)
-    {
+    if (rc) {
         k_mutex_unlock(&zms_lock);
         return rc;
     }
@@ -190,13 +177,11 @@ int matrix_storage_read(uint32_t id, Matrix *mat)
     // 先读 4 字节头，获取存储的尺寸
     uint8_t header[4];
     ssize_t n = zms_read(&fs, id, header, sizeof(header));
-    if (n < 0)
-    {
+    if (n < 0) {
         k_mutex_unlock(&zms_lock);
         return (int)n;
     }
-    if (n < 4)
-    {
+    if (n < 4) {
         k_mutex_unlock(&zms_lock);
         return -ENODATA;
     }
@@ -205,8 +190,7 @@ int matrix_storage_read(uint32_t id, Matrix *mat)
     memcpy(&stored_cols, header + 2, 2);
 
     // 校验尺寸是否匹配
-    if (stored_rows != mat->numRows || stored_cols != mat->numCols)
-    {
+    if (stored_rows != mat->numRows || stored_cols != mat->numCols) {
         k_mutex_unlock(&zms_lock);
         return -EINVAL;
     }
@@ -217,13 +201,11 @@ int matrix_storage_read(uint32_t id, Matrix *mat)
     uint8_t buf[total];
 
     n = zms_read(&fs, id, buf, total);
-    if (n < 0)
-    {
+    if (n < 0) {
         k_mutex_unlock(&zms_lock);
         return (int)n;
     }
-    if (n < total)
-    {
+    if (n < total) {
         k_mutex_unlock(&zms_lock);
         return -ENODATA;
     }
@@ -239,13 +221,11 @@ int matrix_storage_read(uint32_t id, Matrix *mat)
  * @param id 矩阵 ID
  * @return true 存在，false 不存在
  */
-bool matrix_storage_exists(uint32_t id)
-{
+bool matrix_storage_exists(uint32_t id) {
     k_mutex_lock(&zms_lock, K_FOREVER);
 
     int rc = zms_init();
-    if (rc)
-    {
+    if (rc) {
         k_mutex_unlock(&zms_lock);
         return false;
     }
@@ -261,13 +241,11 @@ bool matrix_storage_exists(uint32_t id)
  * @param id 矩阵 ID
  * @return 0 成功，其他值失败
  */
-int matrix_storage_delete(uint32_t id)
-{
+int matrix_storage_delete(uint32_t id) {
     k_mutex_lock(&zms_lock, K_FOREVER);
 
     int rc = zms_init();
-    if (rc)
-    {
+    if (rc) {
         k_mutex_unlock(&zms_lock);
         return rc;
     }

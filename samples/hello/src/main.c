@@ -6,8 +6,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
-int main(void)
-{
+int main(void) {
 	printk("Hello, Skywalker!\n");
 	printk("Board: %s\n", CONFIG_BOARD);
 

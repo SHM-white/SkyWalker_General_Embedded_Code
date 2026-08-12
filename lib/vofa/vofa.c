@@ -7,8 +7,7 @@
  * 不支持科学计数法，覆盖 PID 调参场景已足够。
  * 写入时才链接，不依赖 libc。
  */
-static float parse_float(const char *s)
-{
+static float parse_float(const char *s) {
     float result = 0.0f;
     float sign   = 1.0f;
 
@@ -42,8 +41,7 @@ static float parse_float(const char *s)
  *
  * 原地将 '=' 替换为 '\0'，左侧作为 key、右侧转为 float。
  */
-static void process_line(Vofa *vofa, char *line, size_t len)
-{
+static void process_line(Vofa *vofa, char *line, size_t len) {
     // ─── 查找 '=' ───
     char *eq = NULL;
     for (size_t i = 0; i < len; i++) {
@@ -69,8 +67,7 @@ static void process_line(Vofa *vofa, char *line, size_t len)
  * 在 BUF_RELEASED / DISABLED 时自动 re-enable，调用者无需处理。
  */
 void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
-                  void *user_data)
-{
+                  void *user_data) {
     Vofa *vofa = user_data;
 
     switch (evt->type) {
@@ -110,8 +107,7 @@ void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
  * @param vofa VOFA 实例指针
  * @param uart Zephyr UART 设备（如 DEVICE_DT_GET(DT_NODELABEL(usart10))）
  */
-void vofa_init(Vofa *vofa, const struct device *uart)
-{
+void vofa_init(Vofa *vofa, const struct device *uart) {
     vofa->uart = uart;
 }
 
@@ -124,8 +120,7 @@ void vofa_init(Vofa *vofa, const struct device *uart)
  * @param data float 数组首地址
  * @param num  float 个数
  */
-void vofa_send(Vofa *vofa, const float *data, uint8_t num)
-{
+void vofa_send(Vofa *vofa, const float *data, uint8_t num) {
     // JustFloat 帧尾：0x7F800000 = +inf (小端)
     static const uint8_t tail[4] = {0x00, 0x00, 0x80, 0x7F};
 
@@ -146,8 +141,7 @@ void vofa_send(Vofa *vofa, const float *data, uint8_t num)
  * @param on_cmd       命令回调
  */
 void vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size,
-                      vofa_cmd_handler on_cmd)
-{
+                      vofa_cmd_handler on_cmd) {
     vofa->rx_buf      = rx_buf;
     vofa->rx_buf_size = rx_buf_size;
     vofa->on_cmd      = on_cmd;
