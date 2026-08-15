@@ -185,6 +185,16 @@
 	};
 };
 
+&usart1 {
+	status = "okay";
+	pinctrl-0 = <&usart1_rx_pa10 &usart1_tx_pa9>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	dmas = <&dmamux1 3 42 STM32_DMA_PERIPH_TX>,
+	       <&dmamux1 4 41 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
+};
+
 &usart2 {
 	// RS485
 	status = "okay";

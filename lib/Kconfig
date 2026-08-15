@@ -4,12 +4,19 @@ config SKYWALKER_LIB_MATRIX
     bool "Matrix"
     select CMSIS_DSP
     select CMSIS_DSP_MATRIX
+    help
+        Enable the Matrix library for matrix operations.
+
+config SKYWALKER_LIB_MATRIX_STORAGE
+    bool "Matrix flash storage"
+    depends on SKYWALKER_LIB_MATRIX
     select FILE_SYSTEM
     select ZMS
     select FLASH_PAGE_LAYOUT
     select FLASH_MAP
     help
-        Enable the Matrix library for matrix operations.
+        Enable flash storage of matrices (matrix_storage_save/read...).
+        Requires a flash driver on the board.
 
 config SKYWALKER_LIB_VOFA
     bool "vofa"

@@ -5,57 +5,23 @@
 
 #define DT_DRV_COMPAT skywalker_pid
 
-/**
- * @brief 简易 atof，解析 DTS 字符串为 float
- *
- * 不支持科学计数法，覆盖 PID 参数的字符串格式已足够。
- */
-static float parse_float(const char *s) {
-    float result = 0.0f;
-    float sign   = 1.0f;
-
-    if (*s == '-') {
-        sign = -1.0f;
-        s++;
-    }
-
-    // ─── 整数部分 ───
-    while (*s >= '0' && *s <= '9') {
-        result = result * 10.0f + (*s - '0');
-        s++;
-    }
-
-    // ─── 小数部分 ───
-    if (*s == '.') {
-        s++;
-        float frac = 0.1f;
-        while (*s >= '0' && *s <= '9') {
-            result += (*s - '0') * frac;
-            frac *= 0.1f;
-            s++;
-        }
-    }
-
-    return result * sign;
-}
-
 // ─── 从 DTS 提取 pid_config（ROM） ───
-// DTS 不支持 float，所有属性为 string 类型，用 parse_float 转换。
-// DTS 属性名 k-p / i-max 等在宏中为 k_p / i_max（横线→下划线）。
+// DTS 不支持 float，所有属性用 string 存数值；DT_STRING_UNQUOTED 去掉引号得到
+// 数值字面量（编译期常量），再 (float) 强转。属性名 k-p / i-max 在宏中为 k_p / i_max。
 #define PID_CONFIG_DEFINE(inst)                                      \
     static const pid_config pid_config_##inst = {                    \
-        .Kp        = parse_float(DT_STRING_UNQUOTED(                 \
-                          DT_DRV_INST(inst), k_p)),                  \
-        .Ki        = parse_float(DT_STRING_UNQUOTED(                 \
-                          DT_DRV_INST(inst), k_i)),                  \
-        .Kd        = parse_float(DT_STRING_UNQUOTED(                 \
-                          DT_DRV_INST(inst), k_d)),                  \
-        .max_i_out = parse_float(DT_STRING_UNQUOTED(                 \
-                          DT_DRV_INST(inst), i_max)),                \
-        .max_out   = parse_float(DT_STRING_UNQUOTED(                 \
-                          DT_DRV_INST(inst), out_max)),              \
-        .deadband  = parse_float(DT_STRING_UNQUOTED(                 \
-                          DT_DRV_INST(inst), deadband)),             \
+        .Kp        = (float)DT_STRING_UNQUOTED(                      \
+                          DT_DRV_INST(inst), k_p),                   \
+        .Ki        = (float)DT_STRING_UNQUOTED(                      \
+                          DT_DRV_INST(inst), k_i),                   \
+        .Kd        = (float)DT_STRING_UNQUOTED(                      \
+                          DT_DRV_INST(inst), k_d),                   \
+        .max_i_out = (float)DT_STRING_UNQUOTED(                      \
+                          DT_DRV_INST(inst), i_max),                 \
+        .max_out   = (float)DT_STRING_UNQUOTED(                      \
+                          DT_DRV_INST(inst), out_max),               \
+        .deadband  = (float)DT_STRING_UNQUOTED(                      \
+                          DT_DRV_INST(inst), deadband),              \
     };
 
 /**

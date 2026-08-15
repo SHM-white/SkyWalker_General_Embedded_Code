@@ -1,7 +1,8 @@
 zephyr_library()
 
-file(GLOB MATRIX_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
-zephyr_library_sources(${MATRIX_SOURCES})
+if(CONFIG_SKYWALKER_LIB_MATRIX_STORAGE)
+  zephyr_library_sources(matrix.c)
+endif()
 
 zephyr_library_compile_options(
   -O3

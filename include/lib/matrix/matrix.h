@@ -27,6 +27,7 @@ static inline void Matrix_SetDiag(Matrix *mat, float val) {
 }
 
 // 保存任意尺寸矩阵到 flash（按 ID 区分）
+#ifdef CONFIG_SKYWALKER_LIB_MATRIX_STORAGE
 int matrix_storage_save(uint32_t id, const float *data, uint16_t rows, uint16_t cols);
 
 // 查询 flash 中矩阵的尺寸（只读 4 字节头，不读数据）
@@ -40,5 +41,6 @@ bool matrix_storage_exists(uint32_t id);
 
 // 删除指定 ID
 int matrix_storage_delete(uint32_t id);
+#endif
 
 #endif

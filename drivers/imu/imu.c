@@ -1,6 +1,5 @@
 #include "drivers/imu/imu.h"
 
-#include <math.h>
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -10,6 +9,8 @@
 #include "drivers/pid/pid.h"
 
 #define DT_DRV_COMPAT skywalker_imu
+
+static const struct imu_filter_api *imu_get_api(const char *estimator);
 
 // ─── 从 DTS 提取 imu_config（ROM） ───
 // accel-dev / gyro-dev / heat-dev / filter-dev 为 phandle。
@@ -78,7 +79,7 @@ static int skywalker_imu_init(const struct device *dev) {
                      &imu_data_##inst,                                     \
                      &imu_config_##inst,                                   \
                      POST_KERNEL,                                          \
-                     50,                                                   \
+                     91,                                                   \
                      NULL);
 
 // ─── 展开所有 status = "okay" 的 DT 实例 ───
@@ -118,13 +119,6 @@ void imu_fetch(const struct device *dev) {
     data->temp = sensor_value_to_float(&temp);
 }
 
-// ─── 解算方法查找 ───
-static const struct imu_filter_api *imu_get_api(const char *estimator) {
-    if (strcmp(estimator, imu_estimator_ekf.name) == 0) return &imu_estimator_ekf.api;
-    /* 后续新增算法在此添加 else if */
-    return NULL;
-}
-
 // ─── 姿态解算调度 ───
 /**
  * @brief 姿态解算入口
@@ -158,20 +152,24 @@ void imu_estimate(const struct device *dev, float dt) {
  * @param target_temp 目标温度 (°C)
  * @param dt          距上次调用时间（秒）
  */
+// 对标 mambo：维持 50°C 的基础加热量（单位 ns），作为 PID 前馈
+#define HEAT_OFFSET_NS 6750000.0f
+
 void imu_heat_control(const struct device *dev, float target_temp, float dt) {
     const imu_config *cfg = dev->config;
     imu_data *data = dev->data;
 
-    // PID 计算：setpoint=target, measurement=current，无前馈
+    // PID 计算：setpoint=target, measurement=current，offset 作为前馈（对标 mambo）
     float output = pid_update(cfg->pid_dev->data, cfg->pid_dev->config,
-                              target_temp, data->temp, dt, 0.0f);
+                              target_temp, data->temp, dt, HEAT_OFFSET_NS);
 
     // 负值截断（加热器不能制冷）
     if (output < 0.0f) output = 0.0f;
 
-    // PWM 输出，周期 = 1/128 s ≈ 7.8 ms
-    uint32_t period = PWM_SEC(1U) / 128U;
-    pwm_set(cfg->heat_dev, 0, period, (uint32_t)output, PWM_POLARITY_NORMAL);
+    // PWM 输出：周期 20 ms（50 Hz，对标 mambo），output 单位 ns
+    // 通道 4 对应 overlay 里 &timers3 的 pinctrl tim3_ch4_pb1（STM32 PWM 通道从 1 起）
+    uint32_t period = PWM_MSEC(20);
+    pwm_set(cfg->heat_dev, 4, period, (uint32_t)output, PWM_POLARITY_NORMAL);
 }
 
 
@@ -346,7 +344,7 @@ static void imu_ekf_correct(const struct device *dev, const float accel[3]) {
 
     Matrix z;
     Matrix_Init(&z, 3, 1, z_buf);
-    KalmanFilter_Update(kf, &z);
+    KalmanFilter_Correct(kf, &z);
 
     float n = inv_sqrt(kf->X.pData[0] * kf->X.pData[0] + kf->X.pData[1] * kf->X.pData[1] +
                        kf->X.pData[2] * kf->X.pData[2] + kf->X.pData[3] * kf->X.pData[3]);
@@ -371,9 +369,9 @@ static void imu_ekf_get_angle(const struct device *dev, float angle[3]) {
     arm_atan2_f32(2.0f * (q0 * q3 + q1 * q2), 2.0f * (q0 * q0 + q1 * q1) - 1.0f, &yaw);
 
     // Yaw 跨圈累计
-    if (yaw - ekf.YawPrev > M_PI)       ekf.YawRoundCount--;
-    else if (yaw - ekf.YawPrev < -M_PI) ekf.YawRoundCount++;
-    ekf.YawTotal = 2.0f * M_PI * ekf.YawRoundCount + yaw;
+    if (yaw - ekf.YawPrev > PI)       ekf.YawRoundCount--;
+    else if (yaw - ekf.YawPrev < -PI) ekf.YawRoundCount++;
+    ekf.YawTotal = 2.0f * PI * ekf.YawRoundCount + yaw;
     ekf.YawPrev  = yaw;
 
     angle[0] = roll;
@@ -383,7 +381,7 @@ static void imu_ekf_get_angle(const struct device *dev, float angle[3]) {
 
 // ─── 解算方法注册 ───
 // 每种算法声明一个 imu_estimator，命名规则：imu_estimator_<算法名>。
-// 新增算法：实现 init/predict/correct/get_angle → 声明 imu_estimator_xxx → imu_get_api 加一行。
+// 新增算法：实现 init/predict/correct/get_angle → 声明 imu_estimator_xxx → 在 imu_estimators[] 里加一行。
 static const imu_estimator imu_estimator_ekf = {
     .name = "ekf",
     .api  = {
@@ -395,3 +393,19 @@ static const imu_estimator imu_estimator_ekf = {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+
+// ─── 算法注册表 ───
+// imu_get_api 遍历此表按 name 匹配，新增解算方法只需在此加一行。
+static const imu_estimator *const imu_estimators[] = {
+    &imu_estimator_ekf,
+};
+
+// ─── 解算方法查找 ───
+static const struct imu_filter_api *imu_get_api(const char *estimator) {
+    for (size_t i = 0; i < ARRAY_SIZE(imu_estimators); i++) {
+        if (strcmp(estimator, imu_estimators[i]->name) == 0) {
+            return &imu_estimators[i]->api;
+        }
+    }
+    return NULL;
+}

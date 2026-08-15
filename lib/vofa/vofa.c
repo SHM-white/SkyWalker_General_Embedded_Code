@@ -1,5 +1,7 @@
 #include "lib/vofa/vofa.h"
 
+#define VOFA_MAX_FLOATS 16  /* 单帧最多发送的 float 个数 */
+
 
 /**
  * @brief 简易 atof，解析 "1.5" / "-0.01" / "100" 格式的字符串为 float
@@ -109,24 +111,33 @@ void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
  */
 void vofa_init(Vofa *vofa, const struct device *uart) {
     vofa->uart = uart;
+    uart_callback_set(uart, vofa_uart_cb, vofa);
 }
 
 /**
- * @brief 以 VOFA+ JustFloat 格式发送 float 数组（阻塞）
+ * @brief 以 VOFA+ JustFloat 格式发送 float 数组（异步 DMA）
  *
- * 写入 @p num 个 float 的原始小端字节，后跟帧尾标记 0x7F800000 (+inf)。
+ * 将 @p num 个 float 与帧尾 0x7F800000 (+inf) 拼进 static buffer，
+ * 用一次 uart_tx 交给 DMA 异步发送，函数立即返回。
  *
- * @param vofa VOFA 实例指针
+ * @param vofa VOFA  实例指针
  * @param data float 数组首地址
- * @param num  float 个数
+ * @param num  uint8 个数
  */
 void vofa_send(Vofa *vofa, const float *data, uint8_t num) {
-    // JustFloat 帧尾：0x7F800000 = +inf (小端)
-    static const uint8_t tail[4] = {0x00, 0x00, 0x80, 0x7F};
+    static __nocache uint8_t buf[VOFA_MAX_FLOATS * sizeof(float) + 4];
+    size_t n = num * sizeof(float);
+    const uint8_t *src = (const uint8_t *)data;
 
-    uart_tx(vofa->uart, (const uint8_t *)data, num * sizeof(float),
-            SYS_FOREVER_US);
-    uart_tx(vofa->uart, tail, sizeof(tail), SYS_FOREVER_US);
+    for (size_t i = 0; i < n; i++) {   // 手动拷贝，避免依赖 memcpy
+        buf[i] = src[i];
+    }
+    buf[n + 0] = 0x00;                 // 帧尾 0x7F800000（小端）
+    buf[n + 1] = 0x00;
+    buf[n + 2] = 0x80;
+    buf[n + 3] = 0x7F;
+
+    uart_tx(vofa->uart, buf, n + 4, SYS_FOREVER_US);
 }
 
 /**

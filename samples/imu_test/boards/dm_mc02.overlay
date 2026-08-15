@@ -1,0 +1,38 @@
+/ {
+	imu: imu {
+		compatible = "skywalker,imu";
+		accel-dev = <&bmi08x_accel>;
+		gyro-dev = <&bmi08x_gyro>;
+		heat-dev = <&pwm_heat>;
+		filter-dev = <&ekf_filter>;
+		pid-dev = <&temp_pid>;
+		estimator = "ekf";
+	};
+
+	ekf_filter: ekf_filter {
+		compatible = "skywalker,kalman_filter";
+		state-dim = <4>;
+		measure-dim = <3>;
+	};
+
+	temp_pid: temp_pid {
+		compatible = "skywalker,pid";
+		k-p      = "6000000";
+		k-i      = "0";
+		k-d      = "0.02";
+		i-max    = "0";
+		out-max  = "20000000";
+		deadband = "0";
+	};
+};
+
+&timers3 {
+	status = "okay";
+	st,prescaler = <99>;
+
+	pwm_heat: pwm {
+		status = "okay";
+		pinctrl-names = "default";
+		pinctrl-0 = <&tim3_ch4_pb1>;
+	};
+};
