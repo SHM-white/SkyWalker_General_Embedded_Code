@@ -55,9 +55,12 @@ int main()
     can_frame frame;
 
     while (true) {
-        k_sleep(K_SECONDS(1));
+        k_sleep(K_MSEC(20));
         skywalker::motor::dji::buildGroupCurrentFrame(frame, 0x200, current);
-        
+        int ret = can_send(can, &frame, K_MSEC(1), nullptr, nullptr);
+        if (ret != 0) {
+            LOG_ERR("Can send failed: %d", ret);
+        }
     }
 
     return 0;
