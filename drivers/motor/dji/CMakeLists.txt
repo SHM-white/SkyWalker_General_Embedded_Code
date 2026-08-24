@@ -1,7 +1,7 @@
 zephyr_library()
 
 zephyr_library_sources(
-    # dji_tx_group.cpp
+    dji_tx_group.cpp
     dji_protocol.cpp
     dji_m3508.cpp
 )
