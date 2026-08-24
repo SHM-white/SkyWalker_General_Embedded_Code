@@ -1,0 +1,8 @@
+menu "Skywalker Device Drivers"
+
+config CONFIG_MOTOR_HEARTBEAT_TIMEOUT_MS
+    uint64_t "Motor Timeout Ms"
+    help
+        Set motor timeout ms.
+
+endmenu

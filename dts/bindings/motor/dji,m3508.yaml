@@ -1,0 +1,26 @@
+description: DJI M3508 motor with CAN ESC
+
+compatible: "dji,m3508"
+
+include: base.yaml
+
+properties:
+  can-bus:
+    type: phandle
+    required: true
+
+  feedback-id:
+    type: int
+    required: true
+
+  command-id:
+    type: int
+    required: true
+
+  command-slot:
+    type: int
+    required: true
+
+  gear-ratio:
+    type: int
+    required: true
