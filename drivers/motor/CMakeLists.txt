@@ -1,3 +1,3 @@
 add_subdirectory_ifdef(CONFIG_SKYWALKER_MOTOR_DJI dji)
-add_subdirectory_ifdef(CONFIG_SKYWALKER_MOTOR_DM dm)
-add_subdirectory_ifdef(CONFIG_SKYWALKER_MOTOR_LK lk)
+# add_subdirectory_ifdef(CONFIG_SKYWALKER_MOTOR_DM dm)
+# add_subdirectory_ifdef(CONFIG_SKYWALKER_MOTOR_LK lk)

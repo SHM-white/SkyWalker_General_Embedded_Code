@@ -17,4 +17,16 @@ config SKYWALKER_DRIVER_IMU
           Enable the IMU attitude estimation driver.
           Select estimation method via DT property "estimator".   
 
+config SKYWALKER_DRIVER_MOTOR
+    bool "Skywalker Motor Subsystem"
+    depends on CAN
+    help
+        Enable Skywalker motor drivers.
+        
+if SKYWALKER_DRIVER_MOTOR
+
+rsource "motor/Kconfig"
+
+endif
+
 endmenu

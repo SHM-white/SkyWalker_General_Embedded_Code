@@ -1,4 +1,4 @@
-#include "dji_protocol.hpp"
+#include <drivers/motor/dji_protocol.hpp>
 
 namespace skywalker::motor::dji {
 

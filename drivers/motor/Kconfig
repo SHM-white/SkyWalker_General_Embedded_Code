@@ -1,8 +1,15 @@
-menu "Skywalker Device Drivers"
-
-config CONFIG_MOTOR_HEARTBEAT_TIMEOUT_MS
-    uint64_t "Motor Timeout Ms"
+config SKYWALKER_MOTOR_DJI
+    bool "DJI CAN motors"
+    default y
     help
-        Set motor timeout ms.
+        Enable DJI CAN motor drivers such as M3508/C620.
 
-endmenu
+config SKYWALKER_MOTOR_INIT_PRIORITY
+    int "Motor driver init priority"
+    default 90
+    range 0 99
+
+config SKYWALKER_MOTOR_HEARTBEAT_TIMEOUT_MS
+    int "Motor feedback timeout in milliseconds"
+    default 100
+    range 10 5000

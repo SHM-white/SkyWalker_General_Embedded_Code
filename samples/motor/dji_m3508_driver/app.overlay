@@ -1,0 +1,18 @@
+/ {
+	aliases {
+		motor0 = &m3508_1;
+	};
+
+	m3508_1: motor-1 {
+		compatible = "dji,m3508";
+		status = "okay";
+
+		can-bus = <&can1>;
+
+		feedback-id = <0x201>;
+		command-id = <0x200>;
+		command-slot = <0>;
+
+		gear-ratio = <19>;
+	};
+};

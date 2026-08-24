@@ -47,4 +47,41 @@ namespace skywalker::motor
         }
         return api->set_torque(dev, torque_nm);
     }
+    inline int enable(const struct device *dev){
+        if (dev == nullptr || dev->api == nullptr) return -EINVAL;
+
+        const auto *api = static_cast<const Api *>(dev->api);
+        if (api->enable == nullptr){
+            return -ENOSYS;
+        }
+        return api->enable(dev);
+    }
+    inline int disable(const struct device *dev){
+        if (dev == nullptr || dev->api == nullptr) return -EINVAL;
+
+        const auto *api = static_cast<const Api *>(dev->api);
+        if (api->enable == nullptr){
+            return -ENOSYS;
+        }
+        return api->disable(dev);
+    }
+    inline int readFeedback(const struct device *dev, Feedback &out){
+        if (dev == nullptr || dev->api == nullptr) return -EINVAL;
+
+        const auto *api = static_cast<const Api *>(dev->api);
+        if (api->enable == nullptr){
+            return -ENOSYS;
+        }
+        return api->read_feedback(dev, &out);
+    }
+    inline State getState(const struct device *dev){
+        if (dev == nullptr || dev->api == nullptr) return State::Offline;
+
+        const auto *api = static_cast<const Api *>(dev->api);
+        if (api->enable == nullptr){
+            return State::Offline;
+        }
+        return api->get_state(dev);
+    }
+
 } // namespace skywalker::motor
