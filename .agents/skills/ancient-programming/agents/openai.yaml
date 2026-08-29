@@ -1,0 +1,7 @@
+interface:
+  display_name: "古法编程模式"
+  short_description: "只读检查项目源码，只在根目录输出手把手实施指南，禁止直接改代码"
+  default_prompt: "Use $ancient-programming to inspect this repository read-only and write a step-by-step implementation guide."
+
+policy:
+  allow_implicit_invocation: true

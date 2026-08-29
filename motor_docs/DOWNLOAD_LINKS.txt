@@ -1,0 +1,37 @@
+已下载到本压缩包：
+
+1. M3508 User Guide V1.0
+https://cdn-hz.robomaster.com/robomasters/public/document/RoboMaster%20M3508%20P19%20Brushless%20DC%20Gear%20Motor%20V1.0.pdf
+
+2. M3508 Mix Control
+https://cdn-hz.robomaster.com/robomasters/public/document/RoboMaster%20M3508%20DC%20Brushless%20Gear%20Motor%20Mix%20Control.pdf
+
+3. C620 User Guide V1.01
+https://rm-static.djicdn.com/tem/17348/RoboMaster%20C620%20Brushless%20DC%20Motor%20Speed%20Controller%20V1.01.pdf
+
+4. M2006 P36 User Guide
+https://cdn-hz.robomaster.com/tem/RM%20M2006%20P36%E7%9B%B4%E6%B5%81%E6%97%A0%E5%88%B7%E5%87%8F%E9%80%9F%E7%94%B5%E6%9C%BA%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E%20%E5%8F%91%E5%B8%83%E7%89%88.pdf
+
+5. M2006 DEMO Guide
+https://cdn-hz.robomaster.com/tem/RoboMaster%20M2006%20%E5%8A%A8%E5%8A%9B%E7%B3%BB%E7%BB%9F%20DEMO%20%E7%A4%BA%E4%BE%8B%E7%A8%8B%E5%BA%8F.pdf
+
+6. C610 User Guide
+https://cdn-hz.robomaster.com/tem/RM%20C610%E6%97%A0%E5%88%B7%E7%94%B5%E6%9C%BA%E8%B0%83%E9%80%9F%E5%99%A8%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E%20%E5%8F%91%E5%B8%83%E7%89%88.pdf
+
+7. GM6020 User Guide
+https://rm-static.djicdn.com/tem/17348/RoboMaster%20GM6020%20Brushless%20DC%20Motor%20User%20Guide.pdf
+
+8. DM-J4310-2EC V1.1 User Manual
+https://files.seeedstudio.com/products/Damiao/DM-J4310-en.pdf
+
+未找到稳定可直接下载的直链（请从页面下载）：
+- M3508 STEP / M3508 Accessories Kit：
+  https://www.robomaster.com/en-US/products/components/general/M3508
+- M2006 STEP / C610 STEP / M2006 DEMO 源码.7z：
+  https://www.robomaster.com/zh-CN/products/components/general/M2006
+- GM6020 STEP：
+  https://www.robomaster.com/en-US/products/components/general/GM6020
+- DM-J4310 V1.2 网页版手册：
+  https://wiki.aifitlab.com/damiao-docs/dm-j4310-2ec-v12-motor-instruction-manual
+- DM-J8009-2EC 网页版手册：
+  https://wiki.aifitlab.com/damiao-docs/dm-j8009-2ec-motor-instruction-manual
