@@ -245,7 +245,7 @@ void buildGroupCommandFrame(
 为什么叫 `buildGroupCommandFrame()`：
 
 - M3508/M2006 的四个槽位是电流。
-- GM6020 的四个槽位是电压给定。
+- GM6020 默认四个槽位是电流给定；可选电压模式的字节打包形状相同，但命令 ID、量程和物理语义不同。
 - 打包算法完全相同，物理含义不同。
 
 ### 6.2 保持 M3508 暂时兼容
@@ -329,7 +329,7 @@ int makeGroupCommandSource(
 }
 ```
 
-M2006 的实现只是把自己的 `can`、`command_id`、`command_slot`、`getCurrentRaw` 和 `setCurrentRaw` 填进去。GM6020 填 `getVoltageRaw` 和 `setVoltageRaw`。
+M2006 的实现只是把自己的 `can`、`command_id`、`command_slot`、`getCurrentRaw` 和 `setCurrentRaw` 填进去。GM6020 默认也填 `getCurrentRaw` 和 `setCurrentRaw`；如果以后真的启用电压模式，再提供明确分开的 `getVoltageRaw` 和 `setVoltageRaw`，不能在运行中偷偷混用。
 
 这比让 `TxGroup` 判断 device 到底是哪种电机安全得多。
 
@@ -617,7 +617,7 @@ properties:
 7. 立即回 0。
 8. 最后再做速度 PID；raw 电流不是目标转速。
 
-## 9. GM6020：复用框架，但物理语义不同
+## 9. GM6020：默认电流控制，电压模式可选
 
 ### 9.1 公共接口
 
@@ -626,13 +626,17 @@ properties:
 ```cpp
 namespace skywalker::motor::dji::gm6020
 {
-int setVoltageRaw(
+int setCurrentRaw(
     const struct device *dev,
-    std::int16_t voltage_raw);
+    std::int16_t current_raw);
 
-int getVoltageRaw(
+int getCurrentRaw(
     const struct device *dev,
     std::int16_t &out);
+
+int setCurrentAmps(
+    const struct device *dev,
+    float current_a);
 
 int readRawFeedback(
     const struct device *dev,
@@ -644,7 +648,9 @@ int makeGroupCommandSource(
 }
 ```
 
-不要为了统一名字把它叫 `setCurrentRaw()`。名字写错后，上层很容易套用 M3508/C620 的电流常量。
+不要因为 M3508 和 GM6020 都用 `setCurrentRaw()`，就共用同一个 raw/安培换算常量。GM6020 电流模式的 `±16384` 对应约 `±3 A`，M3508 的同名 raw 量程具有不同物理比例。
+
+若确实需要兼容电压模式，另加 `setVoltageRaw()`/`getVoltageRaw()`，并让实例配置在初始化时固定模式。不要提供一个含糊的 `setRaw()` 让调用方猜单位。
 
 ### 9.2 Config/Data
 
@@ -664,7 +670,7 @@ Data 可复用：
 
 - 公共 `Feedback`。
 - `DjiFeedbackRaw`。
-- `voltage_raw`。
+- `current_raw`；若支持双模式则改为中性的 `command_raw`，并同时保存只读 `command_mode`。
 - `last_rx_ms`。
 - 多圈 encoder 字段。
 - spinlock。
@@ -676,17 +682,17 @@ GM6020 是直驱，位置和速度不用除以减速比。
 
 初始化时严格检查：
 
-| 电机 ID | feedback ID | command ID | slot |
-| ------: | ----------: | ---------: | ---: |
-|       1 |   `0x205` |  `0x1FF` |    0 |
-|       2 |   `0x206` |  `0x1FF` |    1 |
-|       3 |   `0x207` |  `0x1FF` |    2 |
-|       4 |   `0x208` |  `0x1FF` |    3 |
-|       5 |   `0x209` |  `0x2FF` |    0 |
-|       6 |   `0x20A` |  `0x2FF` |    1 |
-|       7 |   `0x20B` |  `0x2FF` |    2 |
+| 电机 ID | feedback ID | 电流 command ID | 电压 command ID | slot |
+| ------: | ----------: | ----------------: | ----------------: | ---: |
+|       1 |     `0x205` |           `0x1FE` |           `0x1FF` |    0 |
+|       2 |     `0x206` |           `0x1FE` |           `0x1FF` |    1 |
+|       3 |     `0x207` |           `0x1FE` |           `0x1FF` |    2 |
+|       4 |     `0x208` |           `0x1FE` |           `0x1FF` |    3 |
+|       5 |     `0x209` |           `0x2FE` |           `0x2FF` |    0 |
+|       6 |     `0x20A` |           `0x2FE` |           `0x2FF` |    1 |
+|       7 |     `0x20B` |           `0x2FE` |           `0x2FF` |    2 |
 
-`0x2FF` 的第 4 个槽位必须保持 0。
+`0x2FE`/`0x2FF` 的第 4 个槽位必须保持 0。
 
 ### 9.4 RX 与统一反馈
 
@@ -704,15 +710,21 @@ GM6020 是直驱，位置和速度不用除以减速比。
 - 暂时不设置 torque valid。
 - error/过温状态目前不能仅凭此反馈帧完整判断；心跳在线时先返回 Ready。
 
-### 9.5 setVoltageRaw()
+### 9.5 setCurrentRaw() 与安培换算
 
 ```cpp
-if (voltage_raw < -30000 || voltage_raw > 30000) {
+if (current_raw < -16384 || current_raw > 16384) {
     return -ERANGE;
 }
 ```
 
-`motor::setTorque()` 第一版返回 `-ENOSYS`。电压给定不是力矩给定；想提供 N·m 接口，需要你在上层实现闭环并决定电流/温度/电压保护。
+协议满量程换算为：
+
+```text
+current_raw = round(current_a / 3.0 A * 16384)
+```
+
+先按机构安全需求把 `current_a` 限到远小于 3 A 的范围，再转换 raw。`motor::setTorque()` 第一版仍返回 `-ENOSYS`；电流与输出力矩近似相关，但在没有明确力矩常数、方向、温升和机构限幅契约前，不能冒充精确 N·m 接口。
 
 ### 9.6 binding 与 overlay
 
@@ -724,17 +736,20 @@ gm6020_1: motor-1 {
     status = "okay";
     can-bus = <&can1>;
     feedback-id = <0x205>;
-    command-id = <0x1FF>;
+    command-id = <0x1FE>;
     command-slot = <0>;
+    control-mode = "current";
 };
 ```
+
+如果 binding 暂时不加入 `control-mode`，那就至少在 GM6020 驱动注释和 sample 名称中写清“该实例固定为 current mode”，并在初始化时校验 `command-id` 必须是 `0x1FE` 或 `0x2FE`。
 
 ### 9.7 GM6020 最小验证顺序
 
 1. 拨码确认 ID 和终端电阻。
 2. 只接收 `0x204 + ID`，不发送非零值。
 3. 周期发送全 0 分组。
-4. 先试 `100..300`，不要一上来试 30000。
+4. 先试 `100..300` raw，不要一上来试 16384。
 5. 架空机构并准备物理断电。
 6. 验证正负方向。
 7. 验证停止时调用 `clearAndSend()`，总线上确实出现全 0。
@@ -1307,7 +1322,7 @@ west build \
 
 ### 电机只有最大速度，没有“按 raw 值调速”
 
-DJI 的 raw 指令是电流/电压，不是目标 rpm。空载时很小的持续转矩也可能让电机加速到很高转速。要调速，必须在应用层做：
+DJI 的 raw 指令是电流，或 GM6020 明确选择的电压模式；它不是目标 rpm。空载时很小的持续转矩也可能让电机加速到很高转速。要调速，必须在应用层做：
 
 ```text
 目标速度 - 反馈速度
@@ -1316,7 +1331,7 @@ DJI 的 raw 指令是电流/电压，不是目标 rpm。空载时很小的持续
       PID
         │
         ▼
-raw current / raw voltage
+raw current / 可选 raw voltage
 ```
 
 ### encoder 在 8191 到 0 处位置跳变
@@ -1481,7 +1496,7 @@ motor-id
        型号命令适配器
        ├─ M3508: current_raw
        ├─ M2006: current_raw
-       ├─ GM6020: voltage_raw
+       ├─ GM6020: 默认 current_raw；可选 voltage_raw
        └─ DM4310: torque_nm / MIT
                ▼
           CAN 发送层
@@ -2042,7 +2057,7 @@ D = Kd * (gamma * dr/dt - filtered(dy/dt))
       │ 输出速度目标 v_cmd
       ▼
 速度内环 PI/PID
-      │ 输出 raw current / raw voltage
+      │ 输出默认 raw current；GM6020 可选 raw voltage
       ▼
 电机
 ```
@@ -2125,7 +2140,7 @@ DM-J4310-2EC V1.1 是输出轴单圈绝对位置。是否 wrap 由机构需求�
 | ---------- | ----------------------------------------------- | -------------------- | -------------------------------------------------------------- | -------------------------------------: |
 | M3508/C620 | `velocity_rad_s`，位置环再用 `position_rad` | raw current float    | 四舍五入后`m3508::setCurrentRaw()`，最后 `TxGroup::send()` |     协议 ±16384，初测另设更小安全限幅 |
 | M2006/C610 | 同上                                            | raw current float    | `m2006::setCurrentRaw()` + group send                        |     协议 ±10000，初测另设更小安全限幅 |
-| GM6020     | 同上                                            | raw voltage float    | `gm6020::setVoltageRaw()` + group send                       |     协议 ±30000，初测另设更小安全限幅 |
+| GM6020     | 同上                                            | 默认 raw current float | `gm6020::setCurrentRaw()` + group send                     | 电流模式 ±16384≈±3 A，初测另设更小安全限幅；电压模式另走 ±30000 API |
 | DM-J4310   | position/velocity/torque                        | N·m 或直接 MIT 参数 | `setMitCommand()`                                            | 协议 T_MAX 与硬件/机构安全上限取更小值 |
 
 ### 29.1 float 转 raw
@@ -2685,7 +2700,7 @@ reset 后：
 - [ ] 速度统一 rad/s。
 - [ ] dt 统一 s。
 - [ ] M3508/M2006 输出明确为 raw current。
-- [ ] GM6020 输出明确为 raw voltage。
+- [ ] GM6020 实例明确固定为 current 或 voltage；本项目默认 raw current，命令 ID 为 `0x1FE`/`0x2FE`。
 - [ ] DM4310 输出明确为 N·m 或 MIT 参数。
 - [ ] 协议硬限幅与机构安全限幅分开。
 

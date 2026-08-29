@@ -60,7 +60,7 @@ namespace skywalker::motor
         if (dev == nullptr || dev->api == nullptr) return -EINVAL;
 
         const auto *api = static_cast<const Api *>(dev->api);
-        if (api->enable == nullptr){
+        if (api->disable == nullptr){
             return -ENOSYS;
         }
         return api->disable(dev);
@@ -69,7 +69,7 @@ namespace skywalker::motor
         if (dev == nullptr || dev->api == nullptr) return -EINVAL;
 
         const auto *api = static_cast<const Api *>(dev->api);
-        if (api->enable == nullptr){
+        if (api->read_feedback == nullptr){
             return -ENOSYS;
         }
         return api->read_feedback(dev, &out);
@@ -78,7 +78,7 @@ namespace skywalker::motor
         if (dev == nullptr || dev->api == nullptr) return State::Offline;
 
         const auto *api = static_cast<const Api *>(dev->api);
-        if (api->enable == nullptr){
+        if (api->get_state == nullptr){
             return State::Offline;
         }
         return api->get_state(dev);
