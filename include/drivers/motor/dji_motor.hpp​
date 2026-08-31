@@ -1,0 +1,10 @@
+#pragma once
+
+#include <cstdint>
+#include <zephyr/drivers/can.h>
+
+
+namespace skywalker::motor::dji
+{
+
+}
