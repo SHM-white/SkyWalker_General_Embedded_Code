@@ -2152,15 +2152,15 @@ west build -b dm_mc02/stm32h723xx \
 
 不要一看到编译报错就继续写 application。按第一条错误定位：
 
-| 第一条错误 | 先检查 |
-|---|---|
-| 找不到 `drivers/motor/dji_motor.hpp` | 施工 0 的零宽字符是否真的去掉 |
-| CMake 找不到 `dji_m3508.cpp` | 施工 11 是否整文件替换 DJI CMake |
-| 找不到 `dji_m3508.hpp` | `dji_tx_group.cpp` 是否仍在树中或 CMake 中 |
-| `CONFIG_SKYWALKER_DJI_*` 未定义 | `drivers/motor/Kconfig` 是否整文件替换，sample 是否打开 motor 配置 |
-| devicetree 报旧 `dji,m3508` | overlay 是否改成 `dji,m3508-c620`，旧 binding/overlay 是否仍残留 |
-| undefined reference: `decodeFeedback` | `dji_protocol.cpp` 是否在 DJI CMake 中 |
-| device not ready | 先看 build 生成的 `zephyr.dts` 和 `.config`，不要改 CAN 字节 |
+| 第一条错误                             | 先检查                                                               |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| 找不到`drivers/motor/dji_motor.hpp`  | 施工 0 的零宽字符是否真的去掉                                        |
+| CMake 找不到`dji_m3508.cpp`          | 施工 11 是否整文件替换 DJI CMake                                     |
+| 找不到`dji_m3508.hpp`                | `dji_tx_group.cpp` 是否仍在树中或 CMake 中                         |
+| `CONFIG_SKYWALKER_DJI_*` 未定义      | `drivers/motor/Kconfig` 是否整文件替换，sample 是否打开 motor 配置 |
+| devicetree 报旧`dji,m3508`           | overlay 是否改成`dji,m3508-c620`，旧 binding/overlay 是否仍残留    |
+| undefined reference:`decodeFeedback` | `dji_protocol.cpp` 是否在 DJI CMake 中                             |
+| device not ready                       | 先看 build 生成的`zephyr.dts` 和 `.config`，不要改 CAN 字节      |
 
 ### 第一次上硬件只做这五件事
 
