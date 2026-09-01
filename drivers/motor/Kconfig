@@ -1,15 +1,29 @@
 config SKYWALKER_MOTOR_DJI
-    bool "DJI CAN motors"
+    bool "Unified DJI CAN motor family"
     default y
-    help
-        Enable DJI CAN motor drivers such as M3508/C620.
+    depends on CAN
 
 config SKYWALKER_MOTOR_INIT_PRIORITY
     int "Motor driver init priority"
     default 90
     range 0 99
 
-config SKYWALKER_MOTOR_HEARTBEAT_TIMEOUT_MS
-    int "Motor feedback timeout in milliseconds"
-    default 100
-    range 10 5000
+config SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS
+    int "DJI feedback freshness timeout"
+    default 20
+    range 2 1000
+
+config SKYWALKER_DJI_COMMAND_TIMEOUT_MS
+    int "DJI command cache timeout"
+    default 10
+    range 1 1000
+
+config SKYWALKER_DJI_MAX_MOTORS_PER_BUS
+    int "Maximum DJI motors owned by one Bus"
+    default 12
+    range 1 32
+
+config SKYWALKER_DJI_MAX_BUSES
+    int "Maximum physical CAN buses with a DJI Bus owner"
+    default 3
+    range 1 8
