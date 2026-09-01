@@ -71,28 +71,17 @@ extern const Profile kM2006C610Profile;
 extern const Profile kGM6020CurrentProfile;
 extern const skywalker::motor::Api dji_motor_api;
 
-int resolveEndpoint(const Profile &profile,
-                    std::uint8_t motor_id,
-                    Endpoint &out);
-int currentToRaw(const Profile &profile,
-                 float current_a,
-                 std::int16_t &out);
-int rawToCurrent(const Profile &profile,
-                 std::int16_t raw,
-                 float &out);
+int resolveEndpoint(const Profile &profile, std::uint8_t motor_id, Endpoint &out);
+int currentToRaw(const Profile &profile, float current_a, std::int16_t &out);
+int rawToCurrent(const Profile &profile, std::int16_t raw, float &out);
 
 int djiMotorInit(const struct device *dev);
 bool isDjiMotor(const struct device *dev);
 bool feedbackReady(const struct device *dev);
-int armMotor(const struct device *dev,
-             std::uint64_t epoch,
-             std::uint64_t now_ms);
+int armMotor(const struct device *dev, std::uint64_t epoch, std::uint64_t now_ms);
 void prepareMotorStop(const struct device *dev, bool latch_fault);
 void clearMotorFault(const struct device *dev);
-int snapshotCommand(const struct device *dev,
-                    std::uint64_t expected_epoch,
-                    std::uint64_t now_ms,
-                    CommandSnapshot &out);
+int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std::uint64_t now_ms, CommandSnapshot &out);
 
 } // namespace skywalker::motor::dji::internal
 

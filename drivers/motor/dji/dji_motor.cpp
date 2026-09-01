@@ -19,16 +19,12 @@ namespace
 
     DjiData *dataOf(const struct device *dev)
     {
-        return dev == nullptr
-                   ? nullptr
-                   : static_cast<DjiData *>(dev->data);
+        return dev == nullptr ? nullptr : static_cast<DjiData *>(dev->data);
     }
 
     const DjiConfig *configOf(const struct device *dev)
     {
-        return dev == nullptr
-                   ? nullptr
-                   : static_cast<const DjiConfig *>(dev->config);
+        return dev == nullptr ? nullptr : static_cast<const DjiConfig *>(dev->config);
     }
 
     std::uint32_t getCapabilities(const struct device *dev)
@@ -37,11 +33,7 @@ namespace
         if (cfg == nullptr || cfg->profile == nullptr)
             return 0u;
 
-        std::uint32_t caps =
-            CommandCurrent |
-            FeedbackPosition |
-            FeedbackVelocity |
-            FeedbackCurrent;
+        std::uint32_t caps = CommandCurrent | FeedbackPosition | FeedbackVelocity | FeedbackCurrent;
         if (cfg->profile->temperature_valid)
         {
             caps |= FeedbackTemperature;
@@ -67,11 +59,8 @@ namespace
         if (last_rx_ms == 0u)
             return State::Offline;
 
-        const std::uint64_t now_ms =
-            static_cast<std::uint64_t>(k_uptime_get());
-        if (now_ms < last_rx_ms ||
-            now_ms - last_rx_ms >
-                CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS)
+        const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
+        if (now_ms < last_rx_ms || now_ms - last_rx_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS)
         {
             return State::Offline;
         }
@@ -104,11 +93,9 @@ namespace
         if (convert_ret < 0)
             return convert_ret;
 
-        const std::uint64_t now_ms =
-            static_cast<std::uint64_t>(k_uptime_get());
+        const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
         const k_spinlock_key_t key = k_spin_lock(&data->lock);
-        if (!data->armed || data->fault_latched ||
-            data->active_epoch == 0u)
+        if (!data->armed || data->fault_latched || data->active_epoch == 0u)
         {
             k_spin_unlock(&data->lock, key);
             return -EACCES;
@@ -134,16 +121,12 @@ namespace
         return 0;
     }
 
-    void rxCallback(const struct device *,
-                    struct can_frame *frame,
-                    void *user_data)
+    void rxCallback(const struct device *, struct can_frame *frame, void *user_data)
     {
-        const struct device *dev =
-            static_cast<const struct device *>(user_data);
+        const struct device *dev = static_cast<const struct device *>(user_data);
         DjiData *data = dataOf(dev);
         const DjiConfig *cfg = configOf(dev);
-        if (dev == nullptr || data == nullptr ||
-            cfg == nullptr || cfg->profile == nullptr ||
+        if (dev == nullptr || data == nullptr || cfg == nullptr || cfg->profile == nullptr ||
             frame == nullptr)
         {
             return;
@@ -153,8 +136,7 @@ namespace
         if (!decodeFeedback(*frame, raw))
             return;
 
-        const std::uint64_t now_ms =
-            static_cast<std::uint64_t>(k_uptime_get());
+        const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
         raw.timestamp_ms = now_ms;
 
         const k_spinlock_key_t key = k_spin_lock(&data->lock);
@@ -167,9 +149,7 @@ namespace
         }
         else
         {
-            std::int32_t delta =
-                static_cast<std::int32_t>(raw.encoder) -
-                static_cast<std::int32_t>(data->last_encoder);
+            std::int32_t delta = static_cast<std::int32_t>(raw.encoder) - static_cast<std::int32_t>(data->last_encoder);
             if (delta > 4096)
                 delta -= 8192;
             if (delta < -4096)
@@ -179,22 +159,14 @@ namespace
         }
 
         Feedback next{};
-        next.position_rad =
-            static_cast<float>(data->total_encoder_ticks) *
-            (kTwoPi / kEncoderTicksPerTurn) /
-            data->gear_ratio;
+        next.position_rad = static_cast<float>(data->total_encoder_ticks) * (kTwoPi / kEncoderTicksPerTurn) / data->gear_ratio;
         next.valid |= FeedbackPosition;
 
-        next.velocity_rad_s =
-            static_cast<float>(raw.speed_rpm) *
-            (kTwoPi / 60.0f) /
-            data->gear_ratio;
+        next.velocity_rad_s = static_cast<float>(raw.speed_rpm) * (kTwoPi / 60.0f) / data->gear_ratio;
         next.valid |= FeedbackVelocity;
 
         float feedback_current_a = 0.0f;
-        if (rawToCurrent(*cfg->profile,
-                         raw.current_raw,
-                         feedback_current_a) == 0)
+        if (rawToCurrent(*cfg->profile, raw.current_raw, feedback_current_a) == 0)
         {
             next.current_a = feedback_current_a;
             next.valid |= FeedbackCurrent;
@@ -202,8 +174,7 @@ namespace
 
         if (cfg->profile->temperature_valid)
         {
-            next.temperature_c =
-                static_cast<float>(raw.temperature_raw);
+            next.temperature_c = static_cast<float>(raw.temperature_raw);
             next.valid |= FeedbackTemperature;
         }
 
@@ -229,17 +200,13 @@ int djiMotorInit(const struct device *dev)
 {
     DjiData *data = dataOf(dev);
     const DjiConfig *cfg = configOf(dev);
-    if (dev == nullptr || data == nullptr ||
-        cfg == nullptr || cfg->can == nullptr ||
-        cfg->profile == nullptr)
+    if (dev == nullptr || data == nullptr || cfg == nullptr || cfg->can == nullptr || cfg->profile == nullptr)
     {
         return -EINVAL;
     }
     if (!device_is_ready(cfg->can))
         return -ENODEV;
-    if (cfg->motor_id == 0u ||
-        cfg->motor_id > cfg->profile->max_motor_id ||
-        cfg->motor_id > 255u)
+    if (cfg->motor_id == 0u || cfg->motor_id > cfg->profile->max_motor_id || cfg->motor_id > 255u)
     {
         return -ERANGE;
     }
@@ -249,29 +216,19 @@ int djiMotorInit(const struct device *dev)
         return -EINVAL;
     }
 
-    const float current_limit_a =
-        static_cast<float>(cfg->current_limit_ma) / 1000.0f;
-    const float gear_ratio =
-        static_cast<float>(cfg->gear_ratio_num) /
-        static_cast<float>(cfg->gear_ratio_den);
-    if (!std::isfinite(current_limit_a) ||
-        current_limit_a < 0.0f ||
-        current_limit_a >
-            cfg->profile->protocol_current_max_a)
+    const float current_limit_a = static_cast<float>(cfg->current_limit_ma) / 1000.0f;
+    const float gear_ratio = static_cast<float>(cfg->gear_ratio_num) / static_cast<float>(cfg->gear_ratio_den);
+    if (!std::isfinite(current_limit_a) || current_limit_a < 0.0f || current_limit_a > cfg->profile->protocol_current_max_a)
     {
         return -ERANGE;
     }
-    if (!std::isfinite(gear_ratio) ||
-        gear_ratio <= 0.0f)
+    if (!std::isfinite(gear_ratio) || gear_ratio <= 0.0f)
     {
         return -ERANGE;
     }
 
     Endpoint endpoint{};
-    const int endpoint_ret =
-        resolveEndpoint(*cfg->profile,
-                        static_cast<std::uint8_t>(cfg->motor_id),
-                        endpoint);
+    const int endpoint_ret = resolveEndpoint(*cfg->profile, static_cast<std::uint8_t>(cfg->motor_id), endpoint);
     if (endpoint_ret < 0)
         return endpoint_ret;
 
@@ -298,11 +255,7 @@ int djiMotorInit(const struct device *dev)
     filter.mask = CAN_STD_ID_MASK;
     filter.flags = 0u;
 
-    const int filter_id =
-        can_add_rx_filter(cfg->can,
-                          rxCallback,
-                          const_cast<struct device *>(dev),
-                          &filter);
+    const int filter_id = can_add_rx_filter(cfg->can, rxCallback, const_cast<struct device *>(dev), &filter);
     if (filter_id < 0)
         return filter_id;
     data->rx_filter_id = filter_id;
@@ -311,8 +264,7 @@ int djiMotorInit(const struct device *dev)
 
 bool isDjiMotor(const struct device *dev)
 {
-    return dev != nullptr &&
-           dev->api == &dji_motor_api;
+    return dev != nullptr && dev->api == &dji_motor_api;
 }
 
 bool feedbackReady(const struct device *dev)
@@ -320,9 +272,7 @@ bool feedbackReady(const struct device *dev)
     return getStateImpl(dev) == State::Ready;
 }
 
-int armMotor(const struct device *dev,
-             std::uint64_t epoch,
-             std::uint64_t now_ms)
+int armMotor(const struct device *dev, std::uint64_t epoch, std::uint64_t now_ms)
 {
     DjiData *data = dataOf(dev);
     if (data == nullptr || epoch == 0u)
@@ -370,10 +320,7 @@ void clearMotorFault(const struct device *dev)
     k_spin_unlock(&data->lock, key);
 }
 
-int snapshotCommand(const struct device *dev,
-                    std::uint64_t expected_epoch,
-                    std::uint64_t now_ms,
-                    CommandSnapshot &out)
+int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std::uint64_t now_ms, CommandSnapshot &out)
 {
     DjiData *data = dataOf(dev);
     if (data == nullptr || expected_epoch == 0u)
@@ -389,22 +336,15 @@ int snapshotCommand(const struct device *dev,
     {
         ret = -EACCES;
     }
-    else if (data->active_epoch != expected_epoch ||
-             data->command_epoch != expected_epoch)
+    else if (data->active_epoch != expected_epoch || data->command_epoch != expected_epoch)
     {
         ret = -ESTALE;
     }
-    else if (data->last_rx_ms == 0u ||
-             now_ms < data->last_rx_ms ||
-             now_ms - data->last_rx_ms >
-                 CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS)
+    else if (data->last_rx_ms == 0u || now_ms < data->last_rx_ms || now_ms - data->last_rx_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS)
     {
         ret = -EHOSTDOWN;
     }
-    else if (data->command_stamp_ms == 0u ||
-             now_ms < data->command_stamp_ms ||
-             now_ms - data->command_stamp_ms >
-                 CONFIG_SKYWALKER_DJI_COMMAND_TIMEOUT_MS)
+    else if (data->command_stamp_ms == 0u || now_ms < data->command_stamp_ms || now_ms - data->command_stamp_ms > CONFIG_SKYWALKER_DJI_COMMAND_TIMEOUT_MS)
     {
         ret = -ESTALE;
     }
@@ -428,12 +368,9 @@ int describe(const struct device *dev, Descriptor &out)
 {
     if (!internal::isDjiMotor(dev))
         return -ENOTSUP;
-    const internal::DjiConfig *cfg =
-        static_cast<const internal::DjiConfig *>(dev->config);
-    internal::DjiData *data =
-        static_cast<internal::DjiData *>(dev->data);
-    if (cfg == nullptr || cfg->profile == nullptr ||
-        data == nullptr)
+    const internal::DjiConfig *cfg = static_cast<const internal::DjiConfig *>(dev->config);
+    internal::DjiData *data = static_cast<internal::DjiData *>(dev->data);
+    if (cfg == nullptr || cfg->profile == nullptr || data == nullptr)
     {
         return -EINVAL;
     }
@@ -441,18 +378,14 @@ int describe(const struct device *dev, Descriptor &out)
     Descriptor next{};
     next.model = cfg->profile->model;
     next.can = cfg->can;
-    next.motor_id =
-        static_cast<std::uint8_t>(cfg->motor_id);
+    next.motor_id = static_cast<std::uint8_t>(cfg->motor_id);
     next.feedback_id = data->endpoint.feedback_id;
     next.command_id = data->endpoint.command_id;
     next.command_slot = data->endpoint.command_slot;
-    next.protocol_current_max_a =
-        cfg->profile->protocol_current_max_a;
-    next.configured_current_limit_a =
-        data->current_limit_a;
+    next.protocol_current_max_a = cfg->profile->protocol_current_max_a;
+    next.configured_current_limit_a = data->current_limit_a;
     next.gear_ratio = data->gear_ratio;
-    next.temperature_valid =
-        cfg->profile->temperature_valid;
+    next.temperature_valid = cfg->profile->temperature_valid;
     out = next;
     return 0;
 }
@@ -461,8 +394,7 @@ int readRawFeedback(const struct device *dev, RawFeedback &out)
 {
     if (!internal::isDjiMotor(dev))
         return -ENOTSUP;
-    internal::DjiData *data =
-        static_cast<internal::DjiData *>(dev->data);
+    internal::DjiData *data = static_cast<internal::DjiData *>(dev->data);
     if (data == nullptr)
         return -EINVAL;
 
