@@ -8,9 +8,7 @@ namespace {
 
 std::uint16_t readBe16(const std::uint8_t *p)
 {
-    return static_cast<std::uint16_t>(
-        (static_cast<std::uint16_t>(p[0]) << 8) |
-        static_cast<std::uint16_t>(p[1]));
+    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(p[0]) << 8) | static_cast<std::uint16_t>(p[1]));
 }
 
 std::int16_t signedFromBits(std::uint16_t bits)
@@ -25,8 +23,8 @@ std::int16_t signedFromBits(std::uint16_t bits)
 bool decodeFeedback(const struct can_frame &frame, RawFeedback &out)
 {
     if (frame.dlc != 8u) return false;
-    if ((frame.flags &
-         (CAN_FRAME_IDE | CAN_FRAME_RTR | CAN_FRAME_FDF)) != 0u) {
+    if ((frame.flags & (CAN_FRAME_IDE | CAN_FRAME_RTR | CAN_FRAME_FDF)) != 0u)
+    {
         return false;
     }
 
@@ -39,9 +37,7 @@ bool decodeFeedback(const struct can_frame &frame, RawFeedback &out)
     return true;
 }
 
-int buildCommandFrame(struct can_frame &frame,
-                      std::uint16_t command_id,
-                      const std::int16_t command_raw[4])
+int buildCommandFrame(struct can_frame &frame, std::uint16_t command_id, const std::int16_t command_raw[4])
 {
     if (command_raw == nullptr) return -EINVAL;
     if (command_id > CAN_STD_ID_MASK) return -ERANGE;
@@ -52,12 +48,9 @@ int buildCommandFrame(struct can_frame &frame,
     next.dlc = 8u;
 
     for (std::size_t i = 0; i < 4u; ++i) {
-        const std::uint16_t bits =
-            static_cast<std::uint16_t>(command_raw[i]);
-        next.data[i * 2u] =
-            static_cast<std::uint8_t>((bits >> 8) & 0xFFu);
-        next.data[i * 2u + 1u] =
-            static_cast<std::uint8_t>(bits & 0xFFu);
+        const std::uint16_t bits = static_cast<std::uint16_t>(command_raw[i]);
+        next.data[i * 2u] = static_cast<std::uint8_t>((bits >> 8) & 0xFFu);
+        next.data[i * 2u + 1u] = static_cast<std::uint8_t>(bits & 0xFFu);
     }
 
     frame = next;

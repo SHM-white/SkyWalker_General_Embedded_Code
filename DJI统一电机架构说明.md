@@ -342,3 +342,172 @@ west build -p always -b dm_mc02/stm32h723xx \
 - [ ] 控制周期小于反馈和命令 timeout。
 - [ ] 同一个 Bus 的生命周期方法只由一个线程调用。
 - [ ] 任意失败均按整条 Bus 故障处理，并确认全零帧结果。
+
+## 13. 多线程并发：PID 在 flush 期间修改指令会怎样
+
+### 13.1 结论
+
+当前实现是“单电机读写安全”，不是“整批电机事务一致”。
+
+- 不会读取到半个 `int16_t`、半个时间戳或互相不匹配的单电机字段；`setCurrentImpl()` 和 `snapshotCommand()` 都使用同一台电机的 `DjiData::lock`。
+- 不会修改已经组装到 `commands[][]` 局部数组里的值。
+- 可能让同一次 `flush()` 混合不同 PID 周期的结果，因为 Bus 逐台加锁、逐台读取，没有覆盖全部电机的总锁或批次编号。
+- `Bus` 自身的 `state_`、motor/group 数组和生命周期没有公共互斥保护，因此 `flush()` 不能与 `arm()`、`stop()`、`recover()`、`attach()` 或另一个 `flush()` 并发。
+
+### 13.2 具体时序
+
+假设 Bus 按 motor1、motor2 的顺序取快照，两个 PID 线程正在生成第 101 轮指令：
+
+```text
+时间 --->
+
+PID1:  setCurrent(motor1, round101) ----------------------
+Bus:              snapshot(motor1) ---- snapshot(motor2) -- send
+PID2:                                  setCurrent(motor2, round101)
+```
+
+如果 PID2 的更新发生在 `snapshot(motor2)` 之前，本帧是：
+
+```text
+motor1 = round101
+motor2 = round101
+```
+
+如果 PID2 稍晚、发生在 `snapshot(motor2)` 之后，本帧可能是：
+
+```text
+motor1 = round101
+motor2 = round100
+```
+
+motor2 的 round101 会留在缓存里，通常在下一次 `flush()` 发出。这是完整的旧值，不是损坏的数据。
+
+如果某 PID 在 Bus 已经取完所有快照、正在 `can_send()` 时更新缓存：
+
+```text
+Bus 局部 commands[][]：保持不变，本帧继续发送旧快照
+电机 DjiData 缓存：保存新指令，供下一次 flush 使用
+```
+
+### 13.3 现有锁能保证什么
+
+`setCurrentImpl()` 在单电机自旋锁内一次性更新：
+
+```text
+command_raw
+command_stamp_ms
+command_generation
+command_epoch
+```
+
+`snapshotCommand()` 持有同一把锁检查状态并复制：
+
+```text
+armed / fault
+epoch
+反馈时间戳
+命令时间戳
+command_id / command_slot / command_raw
+```
+
+所以同一台电机的快照具有内部一致性。自旋锁持有时间很短，锁内不调用 `can_send()`，不会因为硬件发送等待而长期阻塞 PID 线程。
+
+但每台电机各有一把锁：
+
+```text
+lock(motor1) -> copy -> unlock
+lock(motor2) -> copy -> unlock
+lock(motor3) -> copy -> unlock
+```
+
+不存在下面这种整批锁：
+
+```text
+lock(all motors) -> copy all -> unlock(all motors)
+```
+
+因此无法保证所有电机来自同一个逻辑控制周期。
+
+### 13.4 推荐方案：单一控制线程拥有 setCurrent + flush
+
+最简单、最稳妥的模型是让一个控制线程完成整个周期：
+
+```cpp
+for (;;) {
+    // 先取得同一轮传感器/目标快照
+    const float i1 = pid1.update(...);
+    const float i2 = pid2.update(...);
+    const float i3 = pid3.update(...);
+
+    // 再顺序写入所有电机缓存
+    int ret = setCurrent(motor1, i1);
+    if (ret < 0) { /* 统一故障处理 */ }
+    ret = setCurrent(motor2, i2);
+    if (ret < 0) { /* 统一故障处理 */ }
+    ret = setCurrent(motor3, i3);
+    if (ret < 0) { /* 统一故障处理 */ }
+
+    // 全部写完后只提交一次
+    FlushReport report{};
+    ret = bus.flush(report);
+    if (ret < 0) { /* 统一故障处理 */ }
+
+    sleep_until_next_period();
+}
+```
+
+即使多个算法希望并行计算，也不要让每个 PID 线程直接调用 `setCurrent()`。推荐结构是：
+
+```text
+PID worker 1 --写结果--> 应用层目标缓冲区 --+
+PID worker 2 --写结果--> 应用层目标缓冲区 --+--> 控制线程取同一批结果
+PID worker 3 --写结果--> 应用层目标缓冲区 --+    -> setCurrent(all)
+                                                    -> flush(once)
+```
+
+这个“应用层目标缓冲区”应有批次/序列号或双缓冲语义。控制线程只有在一整批 PID 输出都就绪时才交换 active buffer；这样不会把 round100 和 round101 混合。
+
+### 13.5 如果必须由多个 PID 线程直接更新
+
+可以在应用层增加一个普通 mutex，覆盖“写入整批指令”和 `flush()` 的协调，但不要把可能阻塞的 `can_send()` 放进 Zephyr 自旋锁，也不要试图从外部获取每个 `DjiData::lock`。
+
+最低限度规则：
+
+```text
+1. Bus 生命周期方法只有 Bus owner 线程能调用。
+2. PID 线程只发布计算结果，不调用 Bus 方法。
+3. owner 线程在明确的周期边界消费结果、调用所有 setCurrent，再 flush。
+4. stop/fault 请求通过消息或事件通知 owner 线程，不从其他线程直接 bus.stop()。
+```
+
+单纯在每个 PID 线程外分别加 mutex 仍不够；如果每个线程独立获取/释放同一 mutex 后调用一次 `setCurrent()`，Bus 仍可能在两次更新之间获取 mutex 并 flush。锁必须保护“整批更新 + flush”的事务边界，或使用双缓冲加批次提交。
+
+### 13.6 是否应该给 Bus 内部加锁
+
+仅给 `Bus::flush()` 加 mutex 可以防止两个 Bus 方法互相踩状态，但不能自动解决 PID 批次一致性，因为 PID 修改的是各电机缓存，不是 Bus 自己的成员。
+
+若未来扩展公共 API，更合适的方向是批量提交接口，例如概念上的：
+
+```cpp
+struct CurrentCommand {
+    const struct device *motor;
+    float current_a;
+};
+
+int Bus::commitCurrents(const CurrentCommand *commands,
+                        std::size_t count,
+                        FlushReport &report);
+```
+
+该接口需要在一次调用内完成全部校验、换算、批次标记、组帧和发送，并清晰定义“任何一个命令失败时整批不发送、转 Fault 并归零”。在当前 API 下不要假装一次 `flush()` 已具有这种强事务语义。
+
+### 13.7 并发自检清单
+
+- [ ] 同一个 Bus 只有一个 owner 线程调用生命周期方法。
+- [ ] 不会并发执行两个 `flush()`。
+- [ ] `flush()` 不会与 `stop()/recover()/arm()/attach()` 并发。
+- [ ] PID worker 不直接操作 Bus。
+- [ ] 若要求多轴同周期一致，使用批次号或双缓冲发布全部 PID 输出。
+- [ ] 控制线程按“读取整批结果 → 所有 setCurrent → 一次 flush”执行。
+- [ ] 控制周期和最坏线程调度延迟均小于 command timeout。
+- [ ] 不在自旋锁内执行 PID、日志、sleep 或 `can_send()`。
