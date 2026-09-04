@@ -1,0 +1,19 @@
+/ {
+    aliases {
+        motor0 = &m3508_1;
+    };
+
+    m3508_1: motor-1 {
+        compatible = "dji,m3508-c620";
+        status = "okay";
+        can-bus = <&can1>;
+        motor-id = <1>;
+
+        /* Bench-only limit: confirm the mechanism is suspended before arming. */
+        current-limit-ma = <300>;
+
+        /* M3508 gearbox ratio; confirm it against the actual drivetrain. */
+        gear-ratio-num = <3591>;
+        gear-ratio-den = <187>;
+    };
+};

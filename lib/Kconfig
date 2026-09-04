@@ -24,4 +24,9 @@ config SKYWALKER_LIB_VOFA
     help
         Enable the VOFA library for debug
 
+config SKYWALKER_LIB_CONTROL
+    bool "Pure control algorithms"
+    help
+        Enable allocation-free PID, feedforward and reference helpers.
+        
 endmenu
