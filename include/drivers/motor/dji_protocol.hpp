@@ -3,23 +3,20 @@
 #include <cstdint>
 #include <zephyr/drivers/can.h>
 
-namespace skywalker::motor::dji
-{
-    struct M3508Feedback
-    {
-        std::uint16_t encoder = 0;
-        std::int16_t rpm = 0;
-        std::int16_t current_raw = 0;
-        std::uint8_t temperature = 0;
-    };
-    using DjiFeedbackRaw = M3508Feedback;
+namespace skywalker::motor::dji {
 
-    bool decodeM3508Feedback(const struct can_frame &frame, M3508Feedback &out);
-    void buildGroupCurrentFrame(struct can_frame &frame, std::uint16_t command_id, const std::int16_t current[4]);
-    void buildGroupCommandFrame(struct can_frame &frame, std::uint16_t command_id, const std::int16_t current[4]){
-        return buildGroupCurrentFrame(frame, command_id, current);
-    }
-    bool decodeFeedback(const struct can_frame &frame, DjiFeedbackRaw &out){
-        return decodeM3508Feedback(frame, out);
-    }
-}
+struct RawFeedback {
+    std::uint16_t encoder = 0;
+    std::int16_t speed_rpm = 0;
+    std::int16_t current_raw = 0;
+    std::uint8_t temperature_raw = 0;
+    std::uint64_t timestamp_ms = 0;
+};
+
+bool decodeFeedback(const struct can_frame &frame, RawFeedback &out);
+
+int buildCommandFrame(struct can_frame &frame,
+                      std::uint16_t command_id,
+                      const std::int16_t command_raw[4]);
+
+} // namespace skywalker::motor::dji

@@ -1,0 +1,22 @@
+description: DJI GM6020 with current loop explicitly enabled
+
+compatible: "dji,gm6020-current"
+
+include: dji-motor-base.yaml
+
+properties:
+  motor-id:
+    type: int
+    required: true
+    min: 1
+    max: 7
+
+  current-limit-ma:
+    type: int
+    required: true
+    min: 0
+    max: 3000
+
+  current-loop-confirmed:
+    type: boolean
+    required: true

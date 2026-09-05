@@ -1,0 +1,30 @@
+description: Common properties for a DJI CAN motor
+
+include: base.yaml
+
+properties:
+  can-bus:
+    type: phandle
+    required: true
+
+  motor-id:
+    type: int
+    required: true
+    min: 1
+
+  current-limit-ma:
+    type: int
+    required: true
+    min: 0
+
+  # 减速比 分子
+  gear-ratio-num:
+    type: int
+    required: true
+    min: 1
+
+  # 减速比 分母
+  gear-ratio-den:
+    type: int
+    required: true
+    min: 1
