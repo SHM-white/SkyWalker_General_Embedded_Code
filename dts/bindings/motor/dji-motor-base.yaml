@@ -17,11 +17,13 @@ properties:
     required: true
     min: 0
 
+  # 减速比 分子
   gear-ratio-num:
     type: int
     required: true
     min: 1
 
+  # 减速比 分母
   gear-ratio-den:
     type: int
     required: true

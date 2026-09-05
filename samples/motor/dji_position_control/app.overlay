@@ -1,19 +1,21 @@
 / {
     aliases {
-        motor0 = &m3508_1;
+        motor0 = &gm6020_7;
     };
 
-    m3508_1: motor-1 {
-        compatible = "dji,m3508-c620";
+    gm6020_7: motor-7 {
+        compatible = "dji,gm6020-current";
         status = "okay";
         can-bus = <&can1>;
-        motor-id = <1>;
+        motor-id = <7>;
 
         /* Bench-only limit: confirm the mechanism is suspended before arming. */
-        current-limit-ma = <300>;
+        current-limit-ma = <1500>;
 
         /* M3508 gearbox ratio; confirm it against the actual drivetrain. */
-        gear-ratio-num = <3591>;
-        gear-ratio-den = <187>;
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+
+        current-loop-confirmed;
     };
 };

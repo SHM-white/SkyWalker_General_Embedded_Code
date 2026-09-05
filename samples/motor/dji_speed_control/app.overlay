@@ -11,7 +11,7 @@
 
         /*
          * Same bench GM6020 as samples/motor/dji_unified.  The software
-         * current clamp in main.cpp is +/- 300 mA; keep the device boundary
+         * current clamp in main.cpp is +/- 3000 mA; keep the device boundary
          * equal so the closed loop is never rejected by setCurrent().
          */
         current-limit-ma = <3000>;

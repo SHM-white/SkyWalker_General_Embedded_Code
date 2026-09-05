@@ -2,7 +2,6 @@
 #include <cmath>
 #include <cstdint>
 
-#include <zephyr/console/console.h>
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -21,10 +20,48 @@ LOG_MODULE_REGISTER(dji_position_control, LOG_LEVEL_INF);
 namespace {
 
 constexpr std::int64_t kControlPeriodMs = 5;
-constexpr std::int64_t kRunDurationMs = 8000;
 constexpr float kTargetOffsetRad = 0.25f;
-constexpr float kVelocityAbsMaxRadS = 1.0f;
-constexpr float kSoftwareCurrentAbsMaxA = 0.30f;
+
+/* Outer position loop: position error (rad) -> velocity request (rad/s). */
+constexpr float kPositionKp = 0.06f;
+/* Ignore sub-~1 encoder tick jitter at the target so the shaft sits still. */
+constexpr float kPositionDeadbandRad = 0.002f;
+
+/* How fast the outer position loop may ask the shaft to move. */
+constexpr float kVelocityAbsMaxRadS = 5.0f;
+
+/*
+ * Torque authority for the bench GM6020 (current loop). app.overlay allows
+ * +/-3.0 A (current-limit-ma = 3000), but this bench motor is (near)
+ * unloaded: dji_unified spins it with a mere 0.05 A, so any current larger
+ * than ~0.2 A accelerates the shaft by a huge amount within one 5 ms tick.
+ *
+ * The clamp therefore sets the acceleration limit. With +/-0.6..0.8 A the
+ * velocity loop spent nearly every cycle saturated (bang-bang switching)
+ * and flung the motor to +/-16 rad/s. Keep the clamp just above what static
+ * friction needs (~0.05 A), so the loop operates in its linear range.
+ */
+constexpr float kSoftwareCurrentAbsMaxA = 0.2f;
+
+/*
+ * Inner velocity loop: velocity error (rad/s) -> current (A).
+ *
+ * The loop is stable only while it stays LINEAR, i.e. while
+ * kInnerKp * |velocity error| stays below kSoftwareCurrentAbsMaxA.
+ * The largest normal error is the outer-loop request cap
+ * kVelocityAbsMaxRadS = 0.5 rad/s, so kInnerKp <= 0.2/0.5 = 0.4 keeps even
+ * the worst case inside the linear range.
+ *
+ * Do NOT raise kInnerKp to "get more damping": with the 0.2 A clamp a gain
+ * above ~0.4 just makes the inner loop saturate on any error and turn into
+ * the bang-bang limiter that caused the limit cycle.
+ */
+constexpr float kInnerKp = 0.1f;        /* A per (rad/s) */
+constexpr float kInnerKi = 0.0f;        /* disabled: see comment above */
+constexpr float kInnerIntegralMaxA = 0.0001f;
+
+/* Smoothing applied to the position PID output (velocity request path). */
+constexpr float kVelocityRampRateRadS2 = 2.0f;
 
 struct PositionController {
     control_pid_config position_config{};
@@ -62,32 +99,36 @@ PositionController makePositionController()
 
     /* Position error (rad) -> velocity request (rad/s). */
     controller.position_config = {
-        .kp = 1.0f,
-        .ki = 0.0f,
+        .kp = kPositionKp,
+        .ki = 0.1f,
         .kd = 0.0f,
         .derivative_tau_s = 0.0f,
         .integral_min = 0.0f,
         .integral_max = 0.0f,
         .output_min = -kVelocityAbsMaxRadS,
         .output_max = kVelocityAbsMaxRadS,
-        .deadband = 0.0f,
+        .deadband = kPositionDeadbandRad,
         .dt_min_s = 0.001f,
         .dt_max_s = 0.020f,
     };
 
     controller.velocity_reference_config = {
-        .rising_rate_per_s = 0.5f,
-        .falling_rate_per_s = 0.5f,
+        .rising_rate_per_s = kVelocityRampRateRadS2,
+        .falling_rate_per_s = kVelocityRampRateRadS2,
     };
 
     /* Velocity error (rad/s) -> current command (A). */
     controller.velocity_config.feedback = {
-        .kp = 0.05f,
-        .ki = 0.0f,
+        /*
+         * Pure-P inner loop: acts as a damper, no wind-up on the unloaded
+         * motor. See the kInner* constants above for the rationale.
+         */
+        .kp = kInnerKp,
+        .ki = kInnerKi,
         .kd = 0.0f,
         .derivative_tau_s = 0.0f,
-        .integral_min = 0.0f,
-        .integral_max = 0.0f,
+        .integral_min = -kInnerIntegralMaxA,
+        .integral_max = kInnerIntegralMaxA,
         .output_min = -kSoftwareCurrentAbsMaxA,
         .output_max = kSoftwareCurrentAbsMaxA,
         .deadband = 0.0f,
@@ -168,26 +209,6 @@ int readFreshPositionFeedback(
         return -ESTALE;
     }
     return 0;
-}
-
-int waitForManualArmToken()
-{
-    int ret = console_init();
-    if (ret < 0) {
-        return ret;
-    }
-
-    printk("Suspend the motor and prepare a physical power cut.\n");
-    printk("Press 'a' to move +250 mrad from the current output position.\n");
-    for (;;) {
-        const int ch = console_getchar();
-        if (ch < 0) {
-            return ch;
-        }
-        if (ch == 'a' || ch == 'A') {
-            return 0;
-        }
-    }
 }
 
 int resetController(PositionController &controller,
@@ -304,6 +325,22 @@ int stopAfterFailure(int original_error)
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
+/*
+ * Position trajectory (rad). Returns where the output shaft should be at
+ * elapsed_ms. Edit this function to change the motion profile without
+ * touching the control loop: 0.5 s settle at the start position, then a
+ * step to the final target held forever.
+ */
+float requestedPositionRad(std::int64_t elapsed_ms,
+                           float initial_position_rad,
+                           float final_target_rad)
+{
+    if (elapsed_ms < 5000) {
+        return initial_position_rad;
+    }
+    return final_target_rad;
+}
+
 } // namespace
 
 int main()
@@ -344,11 +381,10 @@ int main()
         LOG_ERR("no fresh feedback before arm: %d", ret);
         return ret;
     }
-    ret = waitForManualArmToken();
-    if (ret < 0) {
-        LOG_ERR("manual arm input failed: %d", ret);
-        return ret;
-    }
+
+    LOG_INF("feedback ready: arming now; keep the GM6020 output "
+            "suspended and hold a power cut");
+
     ret = waitForFreshFeedback(motor);
     if (ret < 0) {
         LOG_ERR("feedback lost before arm: %d", ret);
@@ -390,7 +426,8 @@ int main()
     std::int64_t previous_cycle_ms = run_start_ms;
     std::uint32_t telemetry_divider = 0;
 
-    while (k_uptime_get() - run_start_ms < kRunDurationMs) {
+    /* Run forever; pull power or reset to stop. */
+    for (;;) {
         k_sleep(K_MSEC(kControlPeriodMs));
 
         const std::int64_t now_signed_ms = k_uptime_get();
@@ -409,10 +446,10 @@ int main()
             return stopAfterFailure(ret);
         }
 
-        const float target_rad =
-            now_signed_ms - run_start_ms < 500
-                ? initial_position_rad
-                : final_target_rad;
+        const float target_rad = requestedPositionRad(
+            now_signed_ms - run_start_ms,
+            initial_position_rad,
+            final_target_rad);
 
         PositionControlOutput output{};
         ret = calculatePositionCurrent(controller,
@@ -454,26 +491,6 @@ int main()
         }
     }
 
-    ret = skywalker::motor::setCurrent(motor, 0.0f);
-    if (ret < 0) {
-        return stopAfterFailure(ret);
-    }
-    skywalker::motor::dji::FlushReport final_flush_report{};
-    ret = dji_bus.flush(final_flush_report);
-    if (ret < 0) {
-        return stopAfterFailure(ret);
-    }
-
-    skywalker::motor::dji::FlushReport stop_report{};
-    ret = dji_bus.stop(stop_report);
-    if (ret < 0 || !stop_report.zero_sent) {
-        LOG_ERR("normal stop failed: ret=%d zero=%d zero_err=%d",
-                ret,
-                stop_report.zero_sent ? 1 : 0,
-                stop_report.zero_tx_error);
-        return ret < 0 ? ret : -EIO;
-    }
-
-    LOG_INF("timed position-control test completed and motor stopped");
+    /* Unreachable: the loop above never exits. */
     return 0;
 }

@@ -1,0 +1,23 @@
+/ {
+    aliases {
+        motor0 = &gm6020_7;
+    };
+
+    gm6020_7: motor-7 {
+        compatible = "dji,m2006-c610";
+        status = "okay";
+        can-bus = <&can1>;
+        motor-id = <4>;
+
+        /*
+         * Same bench M2006 as samples/motor/dji_unified.  The software
+         * current clamp in main.cpp is +/- 3000 mA; keep the device boundary
+         * equal so the closed loop is never rejected by setCurrent().
+         */
+        current-limit-ma = <10000>;
+
+        gear-ratio-num = <36>;
+        gear-ratio-den = <1>;
+
+    };
+};
