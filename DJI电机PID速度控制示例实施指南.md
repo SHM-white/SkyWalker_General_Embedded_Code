@@ -8,6 +8,19 @@
 >
 > 重要：本文给出应由你亲手创建的 sample；当前业务源码没有被本文自动修改。
 
+> ## 2026-09-05 修订（当前仓库代码状态）
+>
+> `samples/motor/dji_speed_control/` 现面向台架现有的 GM6020（ID=7、电流环，
+> 与 `samples/motor/dji_unified` 同一颗电机）：
+>
+> - `app.overlay` 使用 `dji,gm6020-current`，`current-limit-ma = <300>`，
+>   `gear-ratio-num/den = 1/1`。
+> - `src/main.cpp` 已去掉 `console_getchar()` 人工 arm 依赖：反馈就绪后打印
+>   3 s 倒计时自动开始，跑 6 s 速度轨迹，结束后显式 0 A + `Bus::stop()`。
+>
+> 本文其余段落仍以 M3508 + C620 / 人工 `a` arm 为叙述对象，作为通用流程与
+> 其他硬件的参考；调用链、安全顺序和错误码表格均不变。
+
 ## 1. 这份示例解决什么问题
 
 本示例建立下面这条完整链路：

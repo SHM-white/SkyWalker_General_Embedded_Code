@@ -1,19 +1,26 @@
 / {
     aliases {
-        motor0 = &m3508_1;
+        motor0 = &gm6020_7;
     };
 
-    m3508_1: motor-1 {
-        compatible = "dji,m3508-c620";
+    gm6020_7: motor-7 {
+        compatible = "dji,gm6020-current";
         status = "okay";
         can-bus = <&can1>;
-        motor-id = <1>;
+        motor-id = <7>;
 
-        /* Bench-only limit: confirm the mechanism is suspended before arming. */
-        current-limit-ma = <300>;
+        /*
+         * Same bench GM6020 as samples/motor/dji_unified.  The software
+         * current clamp in main.cpp is +/- 300 mA; keep the device boundary
+         * equal so the closed loop is never rejected by setCurrent().
+         */
+        current-limit-ma = <3000>;
 
-        /* M3508 gearbox ratio; confirm it against the actual drivetrain. */
-        gear-ratio-num = <3591>;
-        gear-ratio-den = <187>;
+        /* GM6020 on this bench is direct drive: no gearbox. */
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+
+        /* Requires firmware >=1.0.11.2 with the current loop enabled. */
+        current-loop-confirmed;
     };
 };

@@ -2,7 +2,6 @@
 #include <cmath>
 #include <cstdint>
 
-#include <zephyr/console/console.h>
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -19,11 +18,46 @@ LOG_MODULE_REGISTER(dji_speed_control, LOG_LEVEL_INF);
 
 namespace {
 
+/*
+ * Bench setup: the same GM6020 (ID 7, current loop) as
+ * samples/motor/dji_unified, gear ratio 1.
+ *
+ * No console arm token: once fresh feedback is present the loop arms
+ * automatically after a printed countdown, runs the short velocity profile,
+ * then sends 0 A and stops.
+ */
 constexpr std::int64_t kControlPeriodMs = 5;
-constexpr std::int64_t kRunDurationMs = 6000;
-constexpr float kRequestedVelocityRadS = 1.0f;
-constexpr float kRequestedVelocityAbsMaxRadS = 2.0f;
-constexpr float kSoftwareCurrentAbsMaxA = 0.30f;
+constexpr std::int64_t kRunDurationMs = 300000;
+
+/*
+ * Negative because dji_unified drives this bench GM6020 with -0.05 A
+ * (that is the verified direction on this bench).  Requesting +1 rad/s
+ * makes the P controller push positive current into the opposite way,
+ * which stalls the motor as "jitter without turning".
+ * If the bench direction is actually swapped, flip the sign below.
+ */
+constexpr float kRequestedVelocityRadS = 20.0f;
+constexpr float kRequestedVelocityAbsMaxRadS = 20.0f;
+
+/*
+ * dji_unified rotates this suspended GM6020 with only 0.05 A, so a small
+ * gain keeps the *running* torque tiny and smooth.  The current limit is
+ * what the loop can push when the motor is disturbed (e.g. by hand):
+ * a large hand-induced error saturates at this stronger counter-torque.
+ * 0.25 A stays under the 0.30 A device-tree boundary in app.overlay.
+ */
+constexpr float kSoftwareCurrentAbsMaxA = 3.0f;
+
+/*
+ * Anti-chatter without an input low-pass filter:
+ *  - deadband absorbs the small +/- velocity ripple during steady run,
+ *    so the P term no longer amplifies it into a limit cycle;
+ *  - the D term adds damping (A per rad/s^2), but its rate estimate is
+ *    smoothed by derivative_tau_s so 1 rpm feedback steps do not turn
+ *    into large current pulses.  A raw kd without derivative_tau_s is
+ *    exactly what made "bigger kd -> faster chatter -> cannot turn".
+ */
+constexpr float kDeadbandRadS = 0.20f;
 
 struct VelocityController {
     control_feedforward_pid_config config{};
@@ -57,11 +91,17 @@ VelocityController makeVelocityController()
     VelocityController loop{};
 
     loop.config.feedback = {
-        /* Small P-only value for a suspended, low-current direction check. */
-        .kp = 0.05f,
-        .ki = 0.0f,
-        .kd = 0.0f,
-        .derivative_tau_s = 0.0f,
+        /*
+         * Moderate P on the raw velocity: steady-run ripple falls inside
+         * deadband, while a hand-induced error of ~0.5 rad/s already gives
+         * 0.05 A and a large error saturates at the 0.25 A clamp.  The D
+         * term is small and smoothed by derivative_tau_s; it damps real
+         * acceleration without amplifying 1 rpm feedback steps.
+         */
+        .kp = 0.04f,
+        .ki = 0.1f,
+        .kd = 0.0f,     /* A / (rad/s^2) */
+        .derivative_tau_s = 0.0f,    /* smooths the D rate */
         .integral_min = 0.0f,
         .integral_max = 0.0f,
         .output_min = -kSoftwareCurrentAbsMaxA,
@@ -84,8 +124,8 @@ VelocityController makeVelocityController()
     };
 
     loop.reference_config = {
-        .rising_rate_per_s = 0.5f,
-        .falling_rate_per_s = 0.5f,
+        .rising_rate_per_s = 100.0f,
+        .falling_rate_per_s = 100.0f,
     };
     return loop;
 }
@@ -102,10 +142,17 @@ int validateController(const VelocityController &loop)
 int waitForFreshFeedback(const struct device *motor)
 {
     const std::int64_t deadline_ms = k_uptime_get() + 2000;
+    std::int64_t next_log_ms = k_uptime_get();
 
     while (skywalker::motor::getState(motor) !=
            skywalker::motor::State::Ready) {
-        if (k_uptime_get() >= deadline_ms) {
+        const std::int64_t now_ms = k_uptime_get();
+        if (now_ms >= next_log_ms) {
+            LOG_WRN("still waiting for fresh motor feedback "
+                    "(check power, CAN wiring and motor ID)");
+            next_log_ms = now_ms + 1000;
+        }
+        if (now_ms >= deadline_ms) {
             return -ETIMEDOUT;
         }
         k_sleep(K_MSEC(5));
@@ -139,26 +186,6 @@ int readFreshVelocityFeedback(
         return -ESTALE;
     }
     return 0;
-}
-
-int waitForManualArmToken()
-{
-    int ret = console_init();
-    if (ret < 0) {
-        return ret;
-    }
-
-    printk("Suspend the motor and prepare a physical power cut.\n");
-    printk("Press 'a' to arm the six-second speed-control test.\n");
-    for (;;) {
-        const int ch = console_getchar();
-        if (ch < 0) {
-            return ch;
-        }
-        if (ch == 'a' || ch == 'A') {
-            return 0;
-        }
-    }
 }
 
 int resetController(VelocityController &loop,
@@ -258,11 +285,12 @@ int stopAfterFailure(int original_error)
 
 float requestedVelocityForTime(std::int64_t elapsed_ms)
 {
+    /* 0.5 s settle, hold the target, then ramp back to 0. */
     if (elapsed_ms < 500) {
         return 0.0f;
     }
-    if (elapsed_ms < 3000) {
-        return kRequestedVelocityRadS;
+    if (elapsed_ms < kRunDurationMs) {
+        return kRequestedVelocityRadS * std::sinf((float)elapsed_ms / 1000.0f);
     }
     return 0.0f;
 }
@@ -284,6 +312,14 @@ int main()
         LOG_ERR("describe/CAN failed: %d", ret);
         return ret < 0 ? ret : -ENODEV;
     }
+    LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u "
+            "gear=%.3f limit=%.0f mA",
+            descriptor.motor_id,
+            descriptor.feedback_id,
+            descriptor.command_id,
+            descriptor.command_slot,
+            descriptor.gear_ratio,
+            descriptor.configured_current_limit_a * 1000.0f);
 
     VelocityController loop = makeVelocityController();
     ret = validateController(loop);
@@ -307,11 +343,11 @@ int main()
         LOG_ERR("no fresh feedback before arm: %d", ret);
         return ret;
     }
-    ret = waitForManualArmToken();
-    if (ret < 0) {
-        LOG_ERR("manual arm input failed: %d", ret);
-        return ret;
-    }
+
+    LOG_INF("feedback ready: arming now; keep the GM6020 output "
+            "suspended and hold a power cut");
+
+    /* Re-check so a stale reading is not used as the reset baseline. */
     ret = waitForFreshFeedback(motor);
     if (ret < 0) {
         LOG_ERR("feedback lost before arm: %d", ret);
@@ -343,6 +379,12 @@ int main()
                 arm_report.zero_tx_error);
         return ret < 0 ? ret : -EIO;
     }
+
+    LOG_INF("speed-control test running: target=%.0f mrad/s, "
+            "software current clamp=%.0f mA, duration=%lld ms",
+            kRequestedVelocityRadS * 1000.0f,
+            kSoftwareCurrentAbsMaxA * 1000.0f,
+            static_cast<long long>(kRunDurationMs));
 
     const std::int64_t run_start_ms = k_uptime_get();
     std::int64_t previous_cycle_ms = run_start_ms;

@@ -17,7 +17,7 @@ static skywalker::motor::dji::Bus dji_bus;
 
 namespace {
 
-constexpr float kCurrentCommandA = 0.05f;
+constexpr float kCurrentCommandA = -0.05f;
 constexpr std::int16_t kSpeedCutoffRpm = 330;
 constexpr float kTemperatureCutoffC = 70.0f;
 constexpr std::int64_t kControlPeriodMs = 5;
