@@ -23,45 +23,38 @@ constexpr std::int64_t kControlPeriodMs = 5;
 constexpr float kTargetOffsetRad = 0.25f;
 
 /* Outer position loop: position error (rad) -> velocity request (rad/s). */
-constexpr float kPositionKp = 0.06f;
-/* Ignore sub-~1 encoder tick jitter at the target so the shaft sits still. */
+constexpr float kPositionKp = 1.0f;
+/* Ignore the last ~2.6 encoder ticks so the shaft can settle. */
 constexpr float kPositionDeadbandRad = 0.002f;
 
 /* How fast the outer position loop may ask the shaft to move. */
-constexpr float kVelocityAbsMaxRadS = 5.0f;
+constexpr float kVelocityAbsMaxRadS = 0.3f;
 
 /*
- * Torque authority for the bench GM6020 (current loop). app.overlay allows
- * +/-3.0 A (current-limit-ma = 3000), but this bench motor is (near)
- * unloaded: dji_unified spins it with a mere 0.05 A, so any current larger
- * than ~0.2 A accelerates the shaft by a huge amount within one 5 ms tick.
- *
- * The clamp therefore sets the acceleration limit. With +/-0.6..0.8 A the
- * velocity loop spent nearly every cycle saturated (bang-bang switching)
- * and flung the motor to +/-16 rad/s. Keep the clamp just above what static
- * friction needs (~0.05 A), so the loop operates in its linear range.
+ * The device-tree boundary is +/-1.5 A, but this nearly unloaded GM6020
+ * starts moving at about 0.05 A. The previous +/-0.2 A clamp made a hand
+ * disturbance cross zero speed in only a few 5 ms cycles and produced a
+ * full-scale limit cycle. Keep only a small margin above breakaway current.
  */
-constexpr float kSoftwareCurrentAbsMaxA = 0.2f;
+constexpr float kSoftwareCurrentAbsMaxA = 0.06f;
 
 /*
  * Inner velocity loop: velocity error (rad/s) -> current (A).
  *
- * The loop is stable only while it stays LINEAR, i.e. while
- * kInnerKp * |velocity error| stays below kSoftwareCurrentAbsMaxA.
- * The largest normal error is the outer-loop request cap
- * kVelocityAbsMaxRadS = 0.5 rad/s, so kInnerKp <= 0.2/0.5 = 0.4 keeps even
- * the worst case inside the linear range.
- *
- * Do NOT raise kInnerKp to "get more damping": with the 0.2 A clamp a gain
- * above ~0.4 just makes the inner loop saturate on any error and turn into
- * the bang-bang limiter that caused the limit cycle.
+ * Reuse the 0.04 A/(rad/s) proportional gain already exercised by the
+ * standalone speed-control sample. At one RPM of feedback quantization it
+ * changes the command by about 4.2 mA instead of the previous 10.5 mA.
  */
-constexpr float kInnerKp = 0.1f;        /* A per (rad/s) */
-constexpr float kInnerKi = 0.0f;        /* disabled: see comment above */
-constexpr float kInnerIntegralMaxA = 0.0001f;
+constexpr float kInnerKp = 0.04f;       /* A per (rad/s) */
+constexpr float kInnerKi = 0.0f;
+constexpr float kInnerIntegralMaxA = 0.0f;
+
+/* Breakaway-current compensation; tune both directions on the real motor. */
+constexpr float kStaticFrictionCurrentA = 0.045f;
+constexpr float kStaticVelocityEpsilonRadS = 0.003f;
 
 /* Smoothing applied to the position PID output (velocity request path). */
-constexpr float kVelocityRampRateRadS2 = 2.0f;
+constexpr float kVelocityRampRateRadS2 = 0.5f;
 
 struct PositionController {
     control_pid_config position_config{};
@@ -100,7 +93,7 @@ PositionController makePositionController()
     /* Position error (rad) -> velocity request (rad/s). */
     controller.position_config = {
         .kp = kPositionKp,
-        .ki = 0.1f,
+        .ki = 0.0f,
         .kd = 0.0f,
         .derivative_tau_s = 0.0f,
         .integral_min = 0.0f,
@@ -137,12 +130,13 @@ PositionController makePositionController()
     };
     controller.velocity_config.feedforward = {
         .k_bias = 0.0f,
-        .k_static = 0.0f,
+        .k_static = kStaticFrictionCurrentA,
         .k_velocity = 0.0f,
         .k_acceleration = 0.0f,
         .k_gravity = 0.0f,
-        .velocity_epsilon = 0.0f,
-        .acceleration_epsilon = 0.0f,
+        .velocity_epsilon = kStaticVelocityEpsilonRadS,
+        /* Ignore ramp deceleration when choosing the friction direction. */
+        .acceleration_epsilon = 1.0f,
         .gravity_model = CONTROL_GRAVITY_NONE,
     };
 
