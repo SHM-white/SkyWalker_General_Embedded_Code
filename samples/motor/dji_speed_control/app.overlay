@@ -7,7 +7,7 @@
         compatible = "dji,gm6020-current";
         status = "okay";
         can-bus = <&can1>;
-        motor-id = <7>;
+        motor-id = <4>;
 
         /*
          * Same bench GM6020 as samples/motor/dji_unified.  The software

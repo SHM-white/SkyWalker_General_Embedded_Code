@@ -6,7 +6,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-#include <control/feedforward_pid.h>
 #include <control/pid.h>
 #include <control/slew_rate_limiter.h>
 #include <drivers/motor/dji_bus.hpp>
@@ -20,56 +19,65 @@ LOG_MODULE_REGISTER(dji_position_control, LOG_LEVEL_INF);
 namespace {
 
 constexpr std::int64_t kControlPeriodMs = 5;
-constexpr float kTargetOffsetRad = 0.25f;
+constexpr float kTargetOffsetRad = 1.0f;
 
 /* Outer position loop: position error (rad) -> velocity request (rad/s). */
-constexpr float kPositionKp = 1.0f;
-/* Ignore the last ~2.6 encoder ticks so the shaft can settle. */
-constexpr float kPositionDeadbandRad = 0.002f;
+constexpr float kPositionKp = 6.0f;
+/*
+ * Small integral that ramps vel_ref up while the shaft stalls just outside
+ * the deadband, so the velocity loop can smoothly exceed breakaway current
+ * (~45 mA) without any step-shaped static-friction pulse. The deadband then
+ * freezes and clears it, so it never drags the shaft past the target.
+ */
+constexpr float kPositionKi = 8.0f; /* 1/s */
+constexpr float kPositionIntegralMaxRadS = 0.30f;
+/* Ignore the last ~0.69 deg (about 16 encoder ticks) so the unloaded shaft
+ * can settle inside the +/-1 deg allowance instead of limit-cycling. */
+constexpr float kPositionDeadbandRad = 0.012f;
 
-/* How fast the outer position loop may ask the shaft to move. */
-constexpr float kVelocityAbsMaxRadS = 0.3f;
+/* True cruise speed of the position loop (not a torque knob). */
+constexpr float kVelocityAbsMaxRadS = 1.2f;
 
 /*
- * The device-tree boundary is +/-1.5 A, but this nearly unloaded GM6020
- * starts moving at about 0.05 A. The previous +/-0.2 A clamp made a hand
- * disturbance cross zero speed in only a few 5 ms cycles and produced a
- * full-scale limit cycle. Keep only a small margin above breakaway current.
+ * Software current clamp. Breakaway current on this unloaded GM6020 is about
+ * 0.05 A, so 0.1 A gives full authority with margin and stays within the
+ * bench-safety limit the user validated.
  */
-constexpr float kSoftwareCurrentAbsMaxA = 0.06f;
+constexpr float kSoftwareCurrentAbsMaxA = 0.1f;
 
 /*
  * Inner velocity loop: velocity error (rad/s) -> current (A).
  *
- * Reuse the 0.04 A/(rad/s) proportional gain already exercised by the
- * standalone speed-control sample. At one RPM of feedback quantization it
- * changes the command by about 4.2 mA instead of the previous 10.5 mA.
+ * Pure proportional damper. At one RPM of quantization the command moves by
+ * about 12.6 mA, keeping the loop smooth at low speed; it saturates at the
+ * 0.1 A clamp for ~0.8 rad/s of speed error so it can still brake hard.
  */
-constexpr float kInnerKp = 0.04f;       /* A per (rad/s) */
+constexpr float kInnerKp = 0.12f;      /* A per (rad/s) */
 constexpr float kInnerKi = 0.0f;
 constexpr float kInnerIntegralMaxA = 0.0f;
 
-/* Breakaway-current compensation; tune both directions on the real motor. */
-constexpr float kStaticFrictionCurrentA = 0.045f;
-constexpr float kStaticVelocityEpsilonRadS = 0.003f;
-
-/* Smoothing applied to the position PID output (velocity request path). */
-constexpr float kVelocityRampRateRadS2 = 0.5f;
+/*
+ * vel_ref shaping: gentle rise for a smooth launch, and a falling rate fast
+ * enough (>= Kp_pos * cruise) that the reference never lags the shrinking
+ * position error and drags the shaft past the target.
+ */
+constexpr float kVelocityRampRateRisingRadS2 = 2.5f;
+constexpr float kVelocityRampRateFallingRadS2 = 15.0f;
 
 struct PositionController {
     control_pid_config position_config{};
     control_pid_state position_state{};
     control_slew_rate_config velocity_reference_config{};
     control_slew_rate_state velocity_reference_state{};
-    control_feedforward_pid_config velocity_config{};
-    control_feedforward_pid_state velocity_state{};
+    control_pid_config velocity_config{};
+    control_pid_state velocity_state{};
 };
 
 struct PositionControlOutput {
     control_pid_result position{};
     float velocity_reference_rad_s = 0.0f;
     float acceleration_reference_rad_s2 = 0.0f;
-    control_feedforward_pid_result velocity{};
+    control_pid_result velocity{};
     float current_command_a = 0.0f;
 };
 
@@ -93,11 +101,11 @@ PositionController makePositionController()
     /* Position error (rad) -> velocity request (rad/s). */
     controller.position_config = {
         .kp = kPositionKp,
-        .ki = 0.0f,
+        .ki = kPositionKi,
         .kd = 0.0f,
         .derivative_tau_s = 0.0f,
-        .integral_min = 0.0f,
-        .integral_max = 0.0f,
+        .integral_min = -kPositionIntegralMaxRadS,
+        .integral_max = kPositionIntegralMaxRadS,
         .output_min = -kVelocityAbsMaxRadS,
         .output_max = kVelocityAbsMaxRadS,
         .deadband = kPositionDeadbandRad,
@@ -106,16 +114,12 @@ PositionController makePositionController()
     };
 
     controller.velocity_reference_config = {
-        .rising_rate_per_s = kVelocityRampRateRadS2,
-        .falling_rate_per_s = kVelocityRampRateRadS2,
+        .rising_rate_per_s = kVelocityRampRateRisingRadS2,
+        .falling_rate_per_s = kVelocityRampRateFallingRadS2,
     };
 
-    /* Velocity error (rad/s) -> current command (A). */
-    controller.velocity_config.feedback = {
-        /*
-         * Pure-P inner loop: acts as a damper, no wind-up on the unloaded
-         * motor. See the kInner* constants above for the rationale.
-         */
+    /* Velocity error (rad/s) -> current command (A). Pure-P damper. */
+    controller.velocity_config = {
         .kp = kInnerKp,
         .ki = kInnerKi,
         .kd = 0.0f,
@@ -127,17 +131,6 @@ PositionController makePositionController()
         .deadband = 0.0f,
         .dt_min_s = 0.001f,
         .dt_max_s = 0.020f,
-    };
-    controller.velocity_config.feedforward = {
-        .k_bias = 0.0f,
-        .k_static = kStaticFrictionCurrentA,
-        .k_velocity = 0.0f,
-        .k_acceleration = 0.0f,
-        .k_gravity = 0.0f,
-        .velocity_epsilon = kStaticVelocityEpsilonRadS,
-        /* Ignore ramp deceleration when choosing the friction direction. */
-        .acceleration_epsilon = 1.0f,
-        .gravity_model = CONTROL_GRAVITY_NONE,
     };
 
     return controller;
@@ -154,8 +147,7 @@ int validateController(const PositionController &controller)
     if (ret < 0) {
         return ret;
     }
-    return control_feedforward_pid_validate(
-        &controller.velocity_config);
+    return control_pid_validate(&controller.velocity_config);
 }
 
 int waitForFreshFeedback(const struct device *motor)
@@ -219,9 +211,8 @@ int resetController(PositionController &controller,
     if (ret < 0) {
         return ret;
     }
-    return control_feedforward_pid_reset(
-        &controller.velocity_state,
-        feedback.velocity_rad_s);
+    return control_pid_reset(&controller.velocity_state,
+                             feedback.velocity_rad_s);
 }
 
 int calculatePositionCurrent(
@@ -240,15 +231,20 @@ int calculatePositionCurrent(
         controller.position_state;
     control_slew_rate_state next_reference_state =
         controller.velocity_reference_state;
-    control_feedforward_pid_state next_velocity_state =
+    control_pid_state next_velocity_state =
         controller.velocity_state;
     PositionControlOutput next_output{};
+
+    const float position_error =
+        position_target_rad - feedback.position_rad;
+    const bool inside_deadband =
+        std::fabs(position_error) <= kPositionDeadbandRad;
 
     const control_pid_input position_input = {
         .setpoint = position_target_rad,
         .measurement = feedback.position_rad,
         .dt_s = dt_s,
-        .freeze_integrator = false,
+        .freeze_integrator = inside_deadband,
     };
     int ret = control_pid_step(&next_position_state,
                                &controller.position_config,
@@ -256,6 +252,10 @@ int calculatePositionCurrent(
                                &next_output.position);
     if (ret < 0) {
         return ret;
+    }
+    if (inside_deadband) {
+        /* Do not carry breakaway-fighting integral into the settled band. */
+        next_position_state.integral_output = 0.0f;
     }
 
     ret = control_slew_rate_step(
@@ -269,29 +269,26 @@ int calculatePositionCurrent(
         return ret;
     }
 
-    const control_feedforward_pid_input velocity_input = {
-        .feedback = {
-            .setpoint = next_output.velocity_reference_rad_s,
-            .measurement = feedback.velocity_rad_s,
-            .dt_s = dt_s,
-            .freeze_integrator = false,
-        },
-        .reference = {
-            .position_ref_rad = position_target_rad,
-            .velocity_ref = next_output.velocity_reference_rad_s,
-            .acceleration_ref =
-                next_output.acceleration_reference_rad_s2,
-        },
+    const control_pid_input velocity_input = {
+        .setpoint = next_output.velocity_reference_rad_s,
+        .measurement = feedback.velocity_rad_s,
+        .dt_s = dt_s,
+        .freeze_integrator = false,
     };
-    ret = control_feedforward_pid_step(
-        &next_velocity_state,
-        &controller.velocity_config,
-        &velocity_input,
-        &next_output.velocity);
+    ret = control_pid_step(&next_velocity_state,
+                           &controller.velocity_config,
+                           &velocity_input,
+                           &next_output.velocity);
     if (ret < 0) {
         return ret;
     }
 
+    /*
+     * No static-friction pulse here: the position integral (kPositionKi)
+     * already ramps vel_ref smoothly past breakaway current while the shaft
+     * stalls outside the deadband, so adding a step kick would only re-start
+     * the low-speed chattering seen earlier.
+     */
     next_output.current_command_a = clampFloat(
         next_output.velocity.output,
         -kSoftwareCurrentAbsMaxA,
@@ -468,18 +465,20 @@ int main()
             return stopAfterFailure(ret);
         }
 
-        if (++telemetry_divider >= 40U) {
+        if (++telemetry_divider >= 5U) {
             telemetry_divider = 0U;
-            printk("target=%d pos=%d pos_err=%d vel_ref=%d "
-                   "vel=%d current=%d mA sat=%d age=%llu ms\n",
+            printk("target=%d, pos=%d, pos_err=%d, pos_i=%d, "
+                   "vel_ref=%d, vel=%d, current=%d mA, sat=%d, "
+                   "age=%llu ms\n",
                    static_cast<int>(target_rad * 1000.0f),
                    static_cast<int>(feedback.position_rad * 1000.0f),
                    static_cast<int>(output.position.error * 1000.0f),
+                   static_cast<int>(output.position.i * 1000.0f),
                    static_cast<int>(
                        output.velocity_reference_rad_s * 1000.0f),
                    static_cast<int>(feedback.velocity_rad_s * 1000.0f),
                    static_cast<int>(output.current_command_a * 1000.0f),
-                   output.velocity.feedback.saturated ? 1 : 0,
+                   output.velocity.saturated ? 1 : 0,
                    static_cast<unsigned long long>(
                        now_ms - feedback.timestamp_ms));
         }

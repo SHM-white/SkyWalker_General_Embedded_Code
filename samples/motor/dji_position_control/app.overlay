@@ -7,7 +7,7 @@
         compatible = "dji,gm6020-current";
         status = "okay";
         can-bus = <&can1>;
-        motor-id = <7>;
+        motor-id = <4>;
 
         /* Bench-only limit: confirm the mechanism is suspended before arming. */
         current-limit-ma = <1500>;
