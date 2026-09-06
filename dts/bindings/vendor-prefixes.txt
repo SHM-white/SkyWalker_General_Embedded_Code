@@ -1,0 +1,3 @@
+# Device tree binding vendor prefix registry additions for this module.
+
+dm	Shenzhen Damiao Technology Co., Ltd.

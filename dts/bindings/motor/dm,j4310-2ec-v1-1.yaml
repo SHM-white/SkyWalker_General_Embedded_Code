@@ -1,0 +1,5 @@
+description: Damiao DM-J4310-2EC V1.1 integrated CAN motor
+
+compatible: "dm,j4310-2ec-v1-1"
+
+include: dm-motor-base.yaml

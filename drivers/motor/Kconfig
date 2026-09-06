@@ -3,6 +3,10 @@ config SKYWALKER_MOTOR_DJI
     default y
     depends on CAN
 
+config SKYWALKER_MOTOR_DM
+    bool "Damiao CAN motor family"
+    depends on CAN
+
 config SKYWALKER_MOTOR_INIT_PRIORITY
     int "Motor driver init priority"
     default 90
@@ -27,3 +31,27 @@ config SKYWALKER_DJI_MAX_BUSES
     int "Maximum physical CAN buses with a DJI Bus owner"
     default 3
     range 1 8
+
+if SKYWALKER_MOTOR_DM
+
+config SKYWALKER_DM_FEEDBACK_TIMEOUT_MS
+    int "Damiao feedback freshness timeout"
+    default 50
+    range 2 1000
+
+config SKYWALKER_DM_COMMAND_TIMEOUT_MS
+    int "Damiao command cache timeout"
+    default 20
+    range 1 1000
+
+config SKYWALKER_DM_MAX_MOTORS_PER_BUS
+    int "Maximum Damiao motors owned by one Bus"
+    default 8
+    range 1 15
+
+config SKYWALKER_DM_MAX_MASTER_IDS_PER_BUS
+    int "Maximum distinct Damiao Master IDs per bus"
+    default 4
+    range 1 15
+
+endif

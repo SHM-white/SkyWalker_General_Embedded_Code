@@ -1,0 +1,48 @@
+description: Common properties for a Damiao CAN motor
+
+include: base.yaml
+
+properties:
+  can-bus:
+    type: phandle
+    required: true
+
+  motor-id:
+    type: int
+    required: true
+    min: 1
+    max: 15
+
+  master-id:
+    type: int
+    required: true
+    min: 0
+    max: 2047
+
+  control-mode:
+    type: string
+    required: true
+    enum:
+      - "mit"
+      - "position-velocity"
+      - "velocity"
+
+  p-max-millirad:
+    type: int
+    required: true
+    min: 1
+
+  v-max-millirad-s:
+    type: int
+    required: true
+    min: 1
+
+  t-max-millinewton-meter:
+    type: int
+    required: true
+    min: 1
+
+  torque-limit-millinewton-meter:
+    type: int
+    required: true
+    min: 1
