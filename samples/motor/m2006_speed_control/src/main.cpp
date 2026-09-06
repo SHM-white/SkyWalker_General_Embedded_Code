@@ -36,7 +36,7 @@ constexpr std::int64_t kRunDurationMs = 300000000;
  * which stalls the motor as "jitter without turning".
  * If the bench direction is actually swapped, flip the sign below.
  */
-constexpr float kRequestedVelocityRadS = 10.0f;
+constexpr float kRequestedVelocityRadS = 18.0f;
 constexpr float kRequestedVelocityAbsMaxRadS = 100.0f;
 
 /*
@@ -98,12 +98,12 @@ VelocityController makeVelocityController()
          * term is small and smoothed by derivative_tau_s; it damps real
          * acceleration without amplifying 1 rpm feedback steps.
          */
-        .kp = 0.6f,
-        .ki = 0.1f,
-        .kd = 0.0f,     /* A / (rad/s^2) */
+        .kp = 0.1f,
+        .ki = 0.2f,
+        .kd = 0.01f,     /* A / (rad/s^2) */
         .derivative_tau_s = 0.0f,    /* smooths the D rate */
-        .integral_min = 0.0f,
-        .integral_max = 0.0f,
+        .integral_min = -3.0f,
+        .integral_max = 3.0f,
         .output_min = -kSoftwareCurrentAbsMaxA,
         .output_max = kSoftwareCurrentAbsMaxA,
         .deadband = 0.0f,
