@@ -8,6 +8,7 @@
 #include <drivers/motor/dji_bus.hpp>
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/motor.hpp>
+#include <lib/vofa/vofa.h>
 
 LOG_MODULE_REGISTER(dji_unified, LOG_LEVEL_INF);
 
@@ -21,6 +22,8 @@ constexpr float kCurrentCommandA = -0.05f;
 constexpr std::int16_t kSpeedCutoffRpm = 330;
 constexpr float kTemperatureCutoffC = 70.0f;
 constexpr std::int64_t kControlPeriodMs = 5;
+/* One telemetry frame per control cycle: 200 Hz. */
+constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 
 static int waitForFreshFeedback(const struct device *motor)
 {
@@ -55,10 +58,18 @@ static int stopAfterFailure(int original_error)
 int main()
 {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
     }
+    if (!device_is_ready(vofa_uart)) {
+        LOG_ERR("VOFA UART device not ready");
+        return -ENODEV;
+    }
+
+    Vofa vofa{};
+    vofa_init(&vofa, vofa_uart);
 
     skywalker::motor::dji::Descriptor descriptor{};
     int ret =
@@ -147,19 +158,21 @@ int main()
             return stopAfterFailure(ret);
         }
 
-        if (++print_divider >= 100u) {
+        if (++print_divider >= kTelemetryPeriodCycles) {
             print_divider = 0;
-            printk("state=%d command_ma=%d encoder=%u rpm=%d "
-                   "current_raw=%d temp=%dC ts=%llu\n",
-                   static_cast<int>(
-                       skywalker::motor::getState(motor)),
-                   static_cast<int>(kCurrentCommandA * 1000.0f),
-                   raw.encoder,
-                   raw.speed_rpm,
-                   raw.current_raw,
-                   static_cast<int>(feedback.temperature_c),
-                   static_cast<unsigned long long>(
-                       feedback.timestamp_ms));
+            /* JustFloat channels: state, command_a, encoder, speed_rpm,
+             * current_raw, temperature_c, timestamp_ms.
+             */
+            const float channels[7] = {
+                static_cast<float>(skywalker::motor::getState(motor)),
+                kCurrentCommandA,
+                static_cast<float>(raw.encoder),
+                static_cast<float>(raw.speed_rpm),
+                static_cast<float>(raw.current_raw),
+                feedback.temperature_c,
+                static_cast<float>(feedback.timestamp_ms),
+            };
+            vofa_send(&vofa, channels, 7);
         }
 
         k_sleep(K_MSEC(kControlPeriodMs));

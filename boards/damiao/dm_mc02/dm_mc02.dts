@@ -12,8 +12,8 @@
 	compatible = "damiao,mc02";
 
 	chosen {
-		zephyr,console = &usart10;
-		zephyr,shell-uart = &usart10;
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
 		zephyr,sram = &sram0;
 		zephyr,button = &user_button;
 		zephyr,flash = &flash0;

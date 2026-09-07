@@ -4,6 +4,8 @@
 #include "drivers/imu/imu.h"
 #include "lib/vofa/vofa.h"
 
+#define VOFA_SEND_PERIOD_MS 5U
+
 int main(void) {
 	const struct device *imu_dev = DEVICE_DT_GET(DT_NODELABEL(imu));
 	const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(usart1));
@@ -37,7 +39,7 @@ int main(void) {
 			t_heat = now;
 		}
 
-		if (now - t_send >= 10) {
+		if (now - t_send >= VOFA_SEND_PERIOD_MS) {
 			float out[3] = { data->angle[0], data->angle[1], data->angle[2] };
 			vofa_send(&vofa, out, 3);
 			t_send = now;

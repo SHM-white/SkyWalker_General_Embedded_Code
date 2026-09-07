@@ -9,6 +9,7 @@
 #include <drivers/motor/dm_bus.hpp>
 #include <drivers/motor/dm_motor.hpp>
 #include <drivers/motor/motor.hpp>
+#include <lib/vofa/vofa.h>
 
 LOG_MODULE_REGISTER(dm_mit_control, LOG_LEVEL_INF);
 
@@ -19,6 +20,8 @@ namespace {
 skywalker::motor::dm::Bus dm_bus;
 
 constexpr std::int64_t kControlPeriodMs = 5;
+/* One telemetry frame per control cycle: 200 Hz. */
+constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 constexpr float kCommandTorqueNm = 0.0f;
 constexpr float kSpeedCutoffRadS = 1.0f;
 constexpr float kTemperatureCutoffC = 60.0f;
@@ -63,10 +66,18 @@ int waitForDisabled(const struct device *motor)
 int main()
 {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
     }
+    if (!device_is_ready(vofa_uart)) {
+        LOG_ERR("VOFA UART device not ready");
+        return -ENODEV;
+    }
+
+    Vofa vofa{};
+    vofa_init(&vofa, vofa_uart);
 
     skywalker::motor::dm::Descriptor descriptor{};
     int ret = skywalker::motor::dm::describe(motor, descriptor);
@@ -148,16 +159,20 @@ int main()
             return stopAfterFailure(ret);
         }
 
-        if (++print_divider >= 40u) {
+        if (++print_divider >= kTelemetryPeriodCycles) {
             print_divider = 0u;
-            printk("status=%x pos=%d mrad vel=%d mrad/s "
-                   "torque=%d mNm mos=%uC rotor=%uC\n",
-                   static_cast<unsigned int>(raw.status),
-                   static_cast<int>(feedback.position_rad * 1000.0f),
-                   static_cast<int>(feedback.velocity_rad_s * 1000.0f),
-                   static_cast<int>(feedback.torque_nm * 1000.0f),
-                   raw.mos_temperature_c,
-                   raw.rotor_temperature_c);
+            /* JustFloat channels: status, position_rad, velocity_rad_s,
+             * torque_nm, mos_temperature_c, rotor_temperature_c.
+             */
+            const float channels[6] = {
+                static_cast<float>(raw.status),
+                feedback.position_rad,
+                feedback.velocity_rad_s,
+                feedback.torque_nm,
+                static_cast<float>(raw.mos_temperature_c),
+                static_cast<float>(raw.rotor_temperature_c),
+            };
+            vofa_send(&vofa, channels, 6);
         }
         k_sleep(K_MSEC(kControlPeriodMs));
     }

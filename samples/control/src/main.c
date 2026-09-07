@@ -1,11 +1,13 @@
 #include <errno.h>
 #include <math.h>
 
+#include <zephyr/device.h>
 #include <zephyr/sys/printk.h>
 
 #include <control/angle.h>
 #include <control/feedforward_pid.h>
 #include <control/slew_rate_limiter.h>
+#include <lib/vofa/vofa.h>
 
 #define SAMPLE_TOLERANCE 0.0001f
 
@@ -14,7 +16,7 @@ static bool float_near(float actual, float expected)
     return fabsf(actual - expected) <= SAMPLE_TOLERANCE;
 }
 
-static int run_feedforward_pid_sample(void)
+static int run_feedforward_pid_sample(Vofa *vofa)
 {
     const control_feedforward_pid_config config = {
         .feedback = {
@@ -73,13 +75,16 @@ static int run_feedforward_pid_sample(void)
         return -EIO;
     }
 
-    printk("feedforward PID: output=%d mU, saturated=%d\n",
-           (int)(result.output * 1000.0f),
-           result.feedback.saturated);
+    /* JustFloat channels: output, saturated. */
+    const float channels[2] = {
+        result.output,
+        result.feedback.saturated ? 1.0f : 0.0f,
+    };
+    vofa_send(vofa, channels, 2);
     return 0;
 }
 
-// static int run_reference_helpers_sample(void)
+static int run_reference_helpers_sample(Vofa *vofa)
 {
     const control_slew_rate_config slew_config = {
         .rising_rate_per_s = 2.0f,
@@ -117,22 +122,30 @@ static int run_feedforward_pid_sample(void)
         return -EIO;
     }
 
-    printk("helpers: slew=%d milli-units, rate=%d milli-units/s, angle=%d mrad\n",
-           (int)(value * 1000.0f),
-           (int)(rate * 1000.0f),
-           (int)(angle_error * 1000.0f));
+    /* JustFloat channels: slew_value, rate_per_s, angle_rad. */
+    const float channels[3] = {value, rate, angle_error};
+    vofa_send(vofa, channels, 3);
     return 0;
 }
 
 int main(void)
 {
-    int ret = run_feedforward_pid_sample();
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
+    if (!device_is_ready(vofa_uart)) {
+        printk("VOFA UART device not ready\n");
+        return -ENODEV;
+    }
+
+    Vofa vofa = {0};
+    vofa_init(&vofa, vofa_uart);
+
+    int ret = run_feedforward_pid_sample(&vofa);
     if (ret < 0) {
         printk("control sample failed in feedforward PID: %d\n", ret);
         return ret;
     }
 
-    // ret = run_reference_helpers_sample();
+    // ret = run_reference_helpers_sample(&vofa);
     // if (ret < 0) {
     //     printk("control sample failed in reference helpers: %d\n", ret);
     //     return ret;

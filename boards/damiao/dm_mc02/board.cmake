@@ -3,7 +3,7 @@
 # keep first — default runner
 board_runner_args(pyocd "--target=stm32h723vgtx")
 board_runner_args(stm32cubeprogrammer "--port=swd" "--reset-mode=sw")
-board_runner_args(openocd)
+board_runner_args(openocd "--config=${BOARD_DIR}/support/openocd.cfg")
 
 board_runner_args(stlink_gdbserver)
 board_runner_args(jlink "--device=STM32H723VG" "--speed=12000")

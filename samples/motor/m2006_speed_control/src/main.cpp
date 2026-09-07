@@ -11,6 +11,7 @@
 #include <drivers/motor/dji_bus.hpp>
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/motor.hpp>
+#include <lib/vofa/vofa.h>
 
 LOG_MODULE_REGISTER(dji_speed_control, LOG_LEVEL_INF);
 
@@ -27,6 +28,8 @@ namespace {
  * then sends 0 A and stops.
  */
 constexpr std::int64_t kControlPeriodMs = 5;
+/* One telemetry frame per control cycle: 200 Hz. */
+constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 constexpr std::int64_t kRunDurationMs = 300000000;
 
 /*
@@ -301,10 +304,18 @@ float requestedVelocityForTime(std::int64_t elapsed_ms)
 int main()
 {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
     }
+    if (!device_is_ready(vofa_uart)) {
+        LOG_ERR("VOFA UART device not ready");
+        return -ENODEV;
+    }
+
+    Vofa vofa{};
+    vofa_init(&vofa, vofa_uart);
 
     skywalker::motor::dji::Descriptor descriptor{};
     int ret = skywalker::motor::dji::describe(motor, descriptor);
@@ -435,25 +446,25 @@ int main()
             return stopAfterFailure(ret);
         }
 
-        if (++telemetry_divider >= 40U) {
+        if (++telemetry_divider >= kTelemetryPeriodCycles) {
             telemetry_divider = 0U;
-            printk("req=%d ref=%d vel=%d err=%d p=%d i=%d "
-                   "ff=%d out=%d sat=%d age=%llu ms\n",
-                   static_cast<int>(request * 1000.0f),
-                   static_cast<int>(
-                       output.velocity_reference_rad_s * 1000.0f),
-                   static_cast<int>(feedback.velocity_rad_s * 1000.0f),
-                   static_cast<int>(
-                       output.controller.feedback.error * 1000.0f),
-                   static_cast<int>(
-                       output.controller.feedback.p * 1000.0f),
-                   static_cast<int>(
-                       output.controller.feedback.i * 1000.0f),
-                   static_cast<int>(output.controller.feedforward * 1000.0f),
-                   static_cast<int>(output.current_command_a * 1000.0f),
-                   output.controller.feedback.saturated ? 1 : 0,
-                   static_cast<unsigned long long>(
-                       now_ms - feedback.timestamp_ms));
+            /* JustFloat channels: request_rad_s, reference_rad_s,
+             * velocity_rad_s, error_rad_s, p_a, i_a,
+             * feedforward_a, output_a, saturated, feedback_age_ms.
+             */
+            const float channels[10] = {
+                request,
+                output.velocity_reference_rad_s,
+                feedback.velocity_rad_s,
+                output.controller.feedback.error,
+                output.controller.feedback.p,
+                output.controller.feedback.i,
+                output.controller.feedforward,
+                output.current_command_a,
+                output.controller.feedback.saturated ? 1.0f : 0.0f,
+                static_cast<float>(now_ms - feedback.timestamp_ms),
+            };
+            vofa_send(&vofa, channels, 10);
         }
     }
 
