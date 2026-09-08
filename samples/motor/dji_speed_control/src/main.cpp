@@ -39,8 +39,8 @@ constexpr std::int64_t kRunDurationMs = 300000;
  * which stalls the motor as "jitter without turning".
  * If the bench direction is actually swapped, flip the sign below.
  */
-constexpr float kRequestedVelocityRadS = 18.0f;
-constexpr float kRequestedVelocityAbsMaxRadS = 20.0f;
+constexpr float kRequestedVelocityRadS = 20.0f;
+constexpr float kRequestedVelocityAbsMaxRadS = 50.0f;
 
 /*
  * dji_unified rotates this suspended GM6020 with only 0.05 A, so a small
@@ -101,12 +101,12 @@ VelocityController makeVelocityController()
          * term is small and smoothed by derivative_tau_s; it damps real
          * acceleration without amplifying 1 rpm feedback steps.
          */
-        .kp = 0.03f,
-        .ki = 0.3f,
-        .kd = 0.0001f,     /* A / (rad/s^2) */
-        .derivative_tau_s = 0.001f,    /* smooths the D rate */
-        .integral_min = 0.0f,
-        .integral_max = 0.0f,
+        .kp = 0.02f,
+        .ki = 0.02f,
+        .kd = 0.000002f,     /* A / (rad/s^2) */
+        .derivative_tau_s = 0.0f,    /* smooths the D rate */
+        .integral_min = -0.08f,
+        .integral_max = 0.08f,
         .output_min = -kSoftwareCurrentAbsMaxA,
         .output_max = kSoftwareCurrentAbsMaxA,
         .deadband = 0.0f,
@@ -293,7 +293,8 @@ float requestedVelocityForTime(std::int64_t elapsed_ms)
         return 0.0f;
     }
     if (elapsed_ms < kRunDurationMs) {
-        return kRequestedVelocityRadS * std::sinf((float)elapsed_ms / 1000.0f);
+        // return kRequestedVelocityRadS * std::sinf((float)elapsed_ms / 1000.0f);
+        return kRequestedVelocityRadS;
     }
     return 0.0f;
 }
