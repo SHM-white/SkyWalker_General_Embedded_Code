@@ -39,7 +39,7 @@ constexpr std::int64_t kRunDurationMs = 300000;
  * which stalls the motor as "jitter without turning".
  * If the bench direction is actually swapped, flip the sign below.
  */
-constexpr float kRequestedVelocityRadS = 20.0f;
+constexpr float kRequestedVelocityRadS = 18.0f;
 constexpr float kRequestedVelocityAbsMaxRadS = 20.0f;
 
 /*
@@ -49,7 +49,7 @@ constexpr float kRequestedVelocityAbsMaxRadS = 20.0f;
  * a large hand-induced error saturates at this stronger counter-torque.
  * 0.25 A stays under the 0.30 A device-tree boundary in app.overlay.
  */
-constexpr float kSoftwareCurrentAbsMaxA = 3.0f;
+constexpr float kSoftwareCurrentAbsMaxA = 0.8f;
 
 /*
  * Anti-chatter without an input low-pass filter:
@@ -101,10 +101,10 @@ VelocityController makeVelocityController()
          * term is small and smoothed by derivative_tau_s; it damps real
          * acceleration without amplifying 1 rpm feedback steps.
          */
-        .kp = 0.04f,
-        .ki = 0.1f,
-        .kd = 0.0f,     /* A / (rad/s^2) */
-        .derivative_tau_s = 0.0f,    /* smooths the D rate */
+        .kp = 0.03f,
+        .ki = 0.3f,
+        .kd = 0.0001f,     /* A / (rad/s^2) */
+        .derivative_tau_s = 0.001f,    /* smooths the D rate */
         .integral_min = 0.0f,
         .integral_max = 0.0f,
         .output_min = -kSoftwareCurrentAbsMaxA,
@@ -303,7 +303,7 @@ float requestedVelocityForTime(std::int64_t elapsed_ms)
 int main()
 {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;

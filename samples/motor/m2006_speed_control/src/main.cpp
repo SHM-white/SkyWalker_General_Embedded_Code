@@ -101,9 +101,9 @@ VelocityController makeVelocityController()
          * term is small and smoothed by derivative_tau_s; it damps real
          * acceleration without amplifying 1 rpm feedback steps.
          */
-        .kp = 0.1f,
-        .ki = 0.2f,
-        .kd = 0.01f,     /* A / (rad/s^2) */
+        .kp = 0.32f,
+        .ki = 0.3f,
+        .kd = 0.008f,     /* A / (rad/s^2) */
         .derivative_tau_s = 0.0f,    /* smooths the D rate */
         .integral_min = -3.0f,
         .integral_max = 3.0f,
@@ -304,7 +304,7 @@ float requestedVelocityForTime(std::int64_t elapsed_ms)
 int main()
 {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;

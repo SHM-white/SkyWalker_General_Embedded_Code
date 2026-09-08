@@ -22,50 +22,22 @@ namespace {
 constexpr std::int64_t kControlPeriodMs = 5;
 /* One telemetry frame per control cycle: 200 Hz. */
 constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
-constexpr float kTargetOffsetRad = 1.0f;
+constexpr float kTargetOffsetRad = 3.0f;
 
-/* Outer position loop: position error (rad) -> velocity request (rad/s). */
-constexpr float kPositionKp = 6.0f;
-/*
- * Small integral that ramps vel_ref up while the shaft stalls just outside
- * the deadband, so the velocity loop can smoothly exceed breakaway current
- * (~45 mA) without any step-shaped static-friction pulse. The deadband then
- * freezes and clears it, so it never drags the shaft past the target.
- */
-constexpr float kPositionKi = 8.0f; /* 1/s */
-constexpr float kPositionIntegralMaxRadS = 0.30f;
-/* Ignore the last ~0.69 deg (about 16 encoder ticks) so the unloaded shaft
- * can settle inside the +/-1 deg allowance instead of limit-cycling. */
+constexpr float kPositionKp = 3.0f;
+constexpr float kPositionKi = 0.0f;
+constexpr float kPositionIntegralMaxRadS = 0.0f;
 constexpr float kPositionDeadbandRad = 0.012f;
 
-/* True cruise speed of the position loop (not a torque knob). */
-constexpr float kVelocityAbsMaxRadS = 1.2f;
+constexpr float kVelocityAbsMaxRadS = 0.60f;
+constexpr float kSoftwareCurrentAbsMaxA = 0.5f;
 
-/*
- * Software current clamp. Breakaway current on this unloaded GM6020 is about
- * 0.05 A, so 0.1 A gives full authority with margin and stays within the
- * bench-safety limit the user validated.
- */
-constexpr float kSoftwareCurrentAbsMaxA = 0.1f;
-
-/*
- * Inner velocity loop: velocity error (rad/s) -> current (A).
- *
- * Pure proportional damper. At one RPM of quantization the command moves by
- * about 12.6 mA, keeping the loop smooth at low speed; it saturates at the
- * 0.1 A clamp for ~0.8 rad/s of speed error so it can still brake hard.
- */
-constexpr float kInnerKp = 0.12f;      /* A per (rad/s) */
+constexpr float kInnerKp = 0.02f;
 constexpr float kInnerKi = 0.0f;
 constexpr float kInnerIntegralMaxA = 0.0f;
 
-/*
- * vel_ref shaping: gentle rise for a smooth launch, and a falling rate fast
- * enough (>= Kp_pos * cruise) that the reference never lags the shrinking
- * position error and drags the shaft past the target.
- */
-constexpr float kVelocityRampRateRisingRadS2 = 2.5f;
-constexpr float kVelocityRampRateFallingRadS2 = 15.0f;
+constexpr float kVelocityRampRateRisingRadS2 = 4.0f;
+constexpr float kVelocityRampRateFallingRadS2 = 4.0f;
 
 struct PositionController {
     control_pid_config position_config{};
@@ -340,7 +312,7 @@ float requestedPositionRad(std::int64_t elapsed_ms,
 int main()
 {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
