@@ -19,9 +19,9 @@ LOG_MODULE_REGISTER(dji_position_control, LOG_LEVEL_INF);
 
 namespace {
 
-constexpr std::int64_t kControlPeriodMs = 5;
-/* One telemetry frame per control cycle: 200 Hz. */
-constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
+constexpr std::int64_t kControlPeriodMs = 1;
+/* One telemetry frame per five control cycles: 200 Hz. */
+constexpr std::uint32_t kTelemetryPeriodCycles = 5U;
 constexpr float kTargetOffsetRad = 3.0f;
 
 constexpr float kPositionKp = 3.0f;
@@ -29,12 +29,20 @@ constexpr float kPositionKi = 0.0f;
 constexpr float kPositionIntegralMaxRadS = 0.0f;
 constexpr float kPositionDeadbandRad = 0.012f;
 
-constexpr float kVelocityAbsMaxRadS = 0.60f;
-constexpr float kSoftwareCurrentAbsMaxA = 0.5f;
+constexpr float kVelocityAbsMaxRadS = 0.30f;
+constexpr float kMeasuredVelocitySafetyMaxRadS = 1.0f;
+constexpr float kSoftwareCurrentAbsMaxA = 0.10f;
 
 constexpr float kInnerKp = 0.02f;
 constexpr float kInnerKi = 0.0f;
 constexpr float kInnerIntegralMaxA = 0.0f;
+constexpr float kRunningFrictionCurrentA = 0.005f;
+constexpr float kRunningFrictionBlendVelocityRadS = 0.10f;
+constexpr float kBreakawayCurrentA = 0.08f;
+constexpr float kBreakawayRequestFullRadS = 0.05f;
+constexpr float kBreakawayFadeVelocityRadS = 0.20f;
+constexpr float kOverspeedMarginRadS = 0.20f;
+constexpr float kOverspeedDampingAperRadS = 0.15f;
 
 constexpr float kVelocityRampRateRisingRadS2 = 4.0f;
 constexpr float kVelocityRampRateFallingRadS2 = 4.0f;
@@ -53,10 +61,13 @@ struct PositionControlOutput {
     float velocity_reference_rad_s = 0.0f;
     float acceleration_reference_rad_s2 = 0.0f;
     control_pid_result velocity{};
+    float friction_feedforward_a = 0.0f;
+    float overspeed_damping_a = 0.0f;
     float current_command_a = 0.0f;
 };
 
 skywalker::motor::dji::Bus dji_bus;
+volatile std::int32_t runtime_diagnostic = 0;
 
 float clampFloat(float value, float minimum, float maximum)
 {
@@ -67,6 +78,49 @@ float clampFloat(float value, float minimum, float maximum)
         return maximum;
     }
     return value;
+}
+
+float calculateFrictionFeedforward(float velocity_reference_rad_s,
+                                   float velocity_rad_s)
+{
+    const float running_blend = clampFloat(
+        velocity_reference_rad_s /
+            kRunningFrictionBlendVelocityRadS,
+        -1.0f,
+        1.0f);
+    const float direction = velocity_reference_rad_s > 0.0f ? 1.0f :
+                            velocity_reference_rad_s < 0.0f ? -1.0f :
+                            0.0f;
+    const float request_blend = clampFloat(
+        std::fabs(velocity_reference_rad_s) /
+            kBreakawayRequestFullRadS,
+        0.0f,
+        1.0f);
+    const float stall_blend = clampFloat(
+        1.0f - std::fabs(velocity_rad_s) /
+                   kBreakawayFadeVelocityRadS,
+        0.0f,
+        1.0f);
+
+    return kRunningFrictionCurrentA * running_blend +
+           kBreakawayCurrentA * direction *
+               request_blend * stall_blend;
+}
+
+float calculateOverspeedDamping(float velocity_reference_rad_s,
+                                float velocity_rad_s)
+{
+    const float allowed_magnitude =
+        std::fabs(velocity_reference_rad_s) +
+        kOverspeedMarginRadS;
+    const float excess =
+        std::fabs(velocity_rad_s) - allowed_magnitude;
+    if (excess <= 0.0f) {
+        return 0.0f;
+    }
+    return -std::copysign(
+        kOverspeedDampingAperRadS * excess,
+        velocity_rad_s);
 }
 
 PositionController makePositionController()
@@ -93,7 +147,7 @@ PositionController makePositionController()
         .falling_rate_per_s = kVelocityRampRateFallingRadS2,
     };
 
-    /* Velocity error (rad/s) -> current command (A). Pure-P damper. */
+    /* Velocity error (rad/s) -> current correction (A). */
     controller.velocity_config = {
         .kp = kInnerKp,
         .ki = kInnerKi,
@@ -258,14 +312,18 @@ int calculatePositionCurrent(
         return ret;
     }
 
-    /*
-     * No static-friction pulse here: the position integral (kPositionKi)
-     * already ramps vel_ref smoothly past breakaway current while the shaft
-     * stalls outside the deadband, so adding a step kick would only re-start
-     * the low-speed chattering seen earlier.
-     */
+    next_output.friction_feedforward_a =
+        calculateFrictionFeedforward(
+            next_output.velocity_reference_rad_s,
+            feedback.velocity_rad_s);
+    next_output.overspeed_damping_a =
+        calculateOverspeedDamping(
+            next_output.velocity_reference_rad_s,
+            feedback.velocity_rad_s);
     next_output.current_command_a = clampFloat(
-        next_output.velocity.output,
+        next_output.velocity.output +
+            next_output.friction_feedforward_a +
+            next_output.overspeed_damping_a,
         -kSoftwareCurrentAbsMaxA,
         kSoftwareCurrentAbsMaxA);
     if (!std::isfinite(next_output.current_command_a)) {
@@ -281,6 +339,7 @@ int calculatePositionCurrent(
 
 int stopAfterFailure(int original_error)
 {
+    runtime_diagnostic = original_error;
     skywalker::motor::dji::FlushReport report{};
     const int stop_ret = dji_bus.stop(report);
     LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d",
@@ -311,6 +370,7 @@ float requestedPositionRad(std::int64_t elapsed_ms,
 
 int main()
 {
+    runtime_diagnostic = 1;
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
     const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
     if (!device_is_ready(motor)) {
@@ -332,6 +392,7 @@ int main()
         LOG_ERR("describe/CAN failed: %d", ret);
         return ret < 0 ? ret : -ENODEV;
     }
+    runtime_diagnostic = 10;
 
     PositionController controller = makePositionController();
     ret = validateController(controller);
@@ -339,22 +400,26 @@ int main()
         LOG_ERR("controller config invalid: %d", ret);
         return ret;
     }
+    runtime_diagnostic = 11;
 
     ret = dji_bus.init(descriptor.can);
     if (ret < 0) {
         LOG_ERR("Bus init failed: %d", ret);
         return ret;
     }
+    runtime_diagnostic = 12;
     ret = dji_bus.attach(motor);
     if (ret < 0) {
         LOG_ERR("Bus attach failed: %d", ret);
         return ret;
     }
+    runtime_diagnostic = 13;
     ret = waitForFreshFeedback(motor);
     if (ret < 0) {
         LOG_ERR("no fresh feedback before arm: %d", ret);
         return ret;
     }
+    runtime_diagnostic = 2;
 
     LOG_INF("feedback ready: arming now; keep the GM6020 output "
             "suspended and hold a power cut");
@@ -395,6 +460,7 @@ int main()
                 arm_report.zero_tx_error);
         return ret < 0 ? ret : -EIO;
     }
+    runtime_diagnostic = 3;
 
     const std::int64_t run_start_ms = k_uptime_get();
     std::int64_t previous_cycle_ms = run_start_ms;
@@ -402,6 +468,7 @@ int main()
 
     /* Run forever; pull power or reset to stop. */
     for (;;) {
+        runtime_diagnostic = 100;
         k_sleep(K_MSEC(kControlPeriodMs));
 
         const std::int64_t now_signed_ms = k_uptime_get();
@@ -418,6 +485,10 @@ int main()
         ret = readFreshPositionFeedback(motor, now_ms, feedback);
         if (ret < 0) {
             return stopAfterFailure(ret);
+        }
+        if (std::fabs(feedback.velocity_rad_s) >
+            kMeasuredVelocitySafetyMaxRadS) {
+            return stopAfterFailure(-ERANGE);
         }
 
         const float target_rad = requestedPositionRad(
@@ -450,23 +521,25 @@ int main()
 
         if (++telemetry_divider >= kTelemetryPeriodCycles) {
             telemetry_divider = 0U;
-            /* JustFloat channels: target_rad, position_rad,
-             * position_error_rad, position_i_rad_s,
-             * velocity_reference_rad_s, velocity_rad_s, current_a,
-             * saturated, feedback_age_ms.
+            /* JustFloat channels, grouped for tuning:
+             * position target/measurement/error,
+             * velocity reference/measurement/P/I,
+             * friction/overspeed compensation, current and feedback age.
              */
-            const float channels[9] = {
+            const float channels[11] = {
                 target_rad,
                 feedback.position_rad,
                 output.position.error,
-                output.position.i,
                 output.velocity_reference_rad_s,
                 feedback.velocity_rad_s,
+                output.velocity.p,
+                output.velocity.i,
+                output.friction_feedforward_a,
+                output.overspeed_damping_a,
                 output.current_command_a,
-                output.velocity.saturated ? 1.0f : 0.0f,
                 static_cast<float>(now_ms - feedback.timestamp_ms),
             };
-            vofa_send(&vofa, channels, 9);
+            vofa_send(&vofa, channels, 11);
         }
     }
 
