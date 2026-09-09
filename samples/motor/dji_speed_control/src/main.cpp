@@ -52,26 +52,30 @@ constexpr float kRequestedVelocityAbsMaxRadS = 50.0f;
 constexpr float kSoftwareCurrentAbsMaxA = 0.8f;
 
 /*
- * Anti-chatter without an input low-pass filter:
- *  - deadband absorbs the small +/- velocity ripple during steady run,
- *    so the P term no longer amplifies it into a limit cycle;
- *  - the D term adds damping (A per rad/s^2), but its rate estimate is
- *    smoothed by derivative_tau_s so 1 rpm feedback steps do not turn
- *    into large current pulses.  A raw kd without derivative_tau_s is
- *    exactly what made "bigger kd -> faster chatter -> cannot turn".
+ * Anti-chatter for the integer-rpm DJI velocity feedback:
+ *  - a first-order low-pass suppresses the periodic high-frequency ripple
+ *    before it reaches the PI controller;
+ *  - deadband prevents the remaining small error from moving the output;
+ *  - D is disabled because differentiating rpm steps creates current pulses.
  */
 constexpr float kDeadbandRadS = 0.20f;
+/* First-order low-pass time constant for the velocity used by the PID. */
+constexpr float kVelocityFilterTauS = 0.025f;
 
 struct VelocityController {
     control_feedforward_pid_config config{};
     control_slew_rate_config reference_config{};
     control_feedforward_pid_state controller_state{};
     control_slew_rate_state reference_state{};
+    float filtered_velocity_rad_s = 0.0f;
+    bool velocity_filter_initialized = false;
 };
 
 struct VelocityControlOutput {
     float velocity_reference_rad_s = 0.0f;
     float acceleration_reference_rad_s2 = 0.0f;
+    float filtered_velocity_rad_s = 0.0f;
+    float velocity_error_rad_s = 0.0f;
     float current_command_a = 0.0f;
     control_feedforward_pid_result controller{};
 };
@@ -89,26 +93,34 @@ float clampFloat(float value, float minimum, float maximum)
     return value;
 }
 
+float applySoftDeadband(float value, float deadband)
+{
+    const float magnitude = std::fabs(value);
+    if (magnitude <= deadband) {
+        return 0.0f;
+    }
+    return std::copysign(magnitude - deadband, value);
+}
+
 VelocityController makeVelocityController()
 {
     VelocityController loop{};
 
     loop.config.feedback = {
         /*
-         * Moderate P on the raw velocity: steady-run ripple falls inside
-         * deadband, while a hand-induced error of ~0.5 rad/s already gives
-         * 0.05 A and a large error saturates at the 0.25 A clamp.  The D
-         * term is small and smoothed by derivative_tau_s; it damps real
-         * acceleration without amplifying 1 rpm feedback steps.
+         * Moderate P on the filtered velocity: steady-run ripple falls
+         * inside deadband, while a larger disturbance still produces
+         * proportional counter-torque.  D remains disabled.
          */
         .kp = 0.02f,
-        .ki = 0.02f,
-        .kd = 0.000002f,     /* A / (rad/s^2) */
-        .derivative_tau_s = 0.0f,    /* smooths the D rate */
-        .integral_min = -0.08f,
-        .integral_max = 0.08f,
+        .ki = 0.05f,
+        .kd = 0.0f,
+        .derivative_tau_s = 0.0f,
+        .integral_min = -0.1f,
+        .integral_max = 0.1f,
         .output_min = -kSoftwareCurrentAbsMaxA,
         .output_max = kSoftwareCurrentAbsMaxA,
+        /* A continuous deadband is applied before entering the PID. */
         .deadband = 0.0f,
         .dt_min_s = 0.001f,
         .dt_max_s = 0.020f,
@@ -117,7 +129,7 @@ VelocityController makeVelocityController()
     /* Zero feedforward makes this first pass a classic feedback controller. */
     loop.config.feedforward = {
         .k_bias = 0.0f,
-        .k_static = 0.0f,
+        .k_static = 0.005f,
         .k_velocity = 0.0f,
         .k_acceleration = 0.0f,
         .k_gravity = 0.0f,
@@ -198,9 +210,16 @@ int resetController(VelocityController &loop,
     if (ret < 0) {
         return ret;
     }
-    return control_feedforward_pid_reset(
+    ret = control_feedforward_pid_reset(
         &loop.controller_state,
         first_velocity_rad_s);
+    if (ret < 0) {
+        return ret;
+    }
+
+    loop.filtered_velocity_rad_s = first_velocity_rad_s;
+    loop.velocity_filter_initialized = true;
+    return 0;
 }
 
 int calculateVelocityCurrent(
@@ -223,7 +242,21 @@ int calculateVelocityCurrent(
         loop.reference_state;
     control_feedforward_pid_state next_controller_state =
         loop.controller_state;
+    float next_filtered_velocity_rad_s = feedback.velocity_rad_s;
     VelocityControlOutput next_output{};
+
+    if (loop.velocity_filter_initialized) {
+        const float alpha = dt_s / (kVelocityFilterTauS + dt_s);
+        next_filtered_velocity_rad_s =
+            loop.filtered_velocity_rad_s +
+            alpha * (feedback.velocity_rad_s -
+                     loop.filtered_velocity_rad_s);
+    }
+    if (!std::isfinite(next_filtered_velocity_rad_s)) {
+        return -ERANGE;
+    }
+    next_output.filtered_velocity_rad_s =
+        next_filtered_velocity_rad_s;
 
     int ret = control_slew_rate_step(
         &next_reference_state,
@@ -236,10 +269,20 @@ int calculateVelocityCurrent(
         return ret;
     }
 
+    next_output.velocity_error_rad_s =
+        next_output.velocity_reference_rad_s -
+        next_output.filtered_velocity_rad_s;
+    const float effective_velocity_error_rad_s = applySoftDeadband(
+        next_output.velocity_error_rad_s,
+        kDeadbandRadS);
+    const float controller_measurement_rad_s =
+        next_output.velocity_reference_rad_s -
+        effective_velocity_error_rad_s;
+
     const control_feedforward_pid_input input = {
         .feedback = {
             .setpoint = next_output.velocity_reference_rad_s,
-            .measurement = feedback.velocity_rad_s,
+            .measurement = controller_measurement_rad_s,
             .dt_s = dt_s,
             .freeze_integrator = false,
         },
@@ -270,6 +313,8 @@ int calculateVelocityCurrent(
 
     loop.reference_state = next_reference_state;
     loop.controller_state = next_controller_state;
+    loop.filtered_velocity_rad_s = next_filtered_velocity_rad_s;
+    loop.velocity_filter_initialized = true;
     output = next_output;
     return 0;
 }
@@ -293,8 +338,8 @@ float requestedVelocityForTime(std::int64_t elapsed_ms)
         return 0.0f;
     }
     if (elapsed_ms < kRunDurationMs) {
-        // return kRequestedVelocityRadS * std::sinf((float)elapsed_ms / 1000.0f);
-        return kRequestedVelocityRadS;
+        return kRequestedVelocityRadS * std::sinf((float)elapsed_ms / 1000.0f);
+        // return kRequestedVelocityRadS;
     }
     return 0.0f;
 }
@@ -449,17 +494,18 @@ int main()
         if (++telemetry_divider >= kTelemetryPeriodCycles) {
             telemetry_divider = 0U;
             /* JustFloat channels: request_rad_s, reference_rad_s,
-             * velocity_rad_s, error_rad_s, p_a, i_a,
-             * feedforward_a, output_a, saturated, feedback_age_ms.
+             * raw_velocity_rad_s, filtered_error_rad_s, p_a, i_a,
+             * filtered_velocity_rad_s, output_a, saturated,
+             * feedback_age_ms.
              */
             const float channels[10] = {
                 request,
                 output.velocity_reference_rad_s,
                 feedback.velocity_rad_s,
-                output.controller.feedback.error,
+                output.velocity_error_rad_s,
                 output.controller.feedback.p,
                 output.controller.feedback.i,
-                output.controller.feedforward,
+                output.filtered_velocity_rad_s,
                 output.current_command_a,
                 output.controller.feedback.saturated ? 1.0f : 0.0f,
                 static_cast<float>(now_ms - feedback.timestamp_ms),
