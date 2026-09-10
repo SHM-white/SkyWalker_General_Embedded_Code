@@ -1,0 +1,61 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Prefer horizontal readability. Only wrap code when it exceeds this limit.
+ColumnLimit: 160
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# Match the repository's existing brace style: function braces on the next
+# line, while namespaces, types, and control statements keep attached braces.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+SpaceBeforeParens: ControlStatements
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+# Keep short declarations, definitions, calls, and assignments on one line.
+# If wrapping is necessary, place as many parameters as fit on each line.
+BinPackArguments: true
+BinPackParameters: true
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+PenaltyBreakBeforeFirstCallParameter: 100000
+PenaltyBreakAssignment: 100000
+PenaltyReturnTypeOnItsOwnLine: 1000000
+
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBinaryOperators: None
+BreakStringLiterals: false
+
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+
+# Avoid unrelated include and comment churn when formatting existing files.
+SortIncludes: false
+IncludeBlocks: Preserve
+ReflowComments: false
+FixNamespaceComments: false
+...

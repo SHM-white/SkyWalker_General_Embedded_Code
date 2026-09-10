@@ -19,7 +19,7 @@ LOG_MODULE_REGISTER(dji_position_control, LOG_LEVEL_INF);
 
 namespace {
 
-constexpr std::int64_t kControlPeriodMs = 1;
+constexpr std::int64_t kControlPeriodMs = 5;
 /* One telemetry frame per five control cycles: 200 Hz. */
 constexpr std::uint32_t kTelemetryPeriodCycles = 5U;
 constexpr float kTargetOffsetRad = 3.0f;
@@ -80,47 +80,24 @@ float clampFloat(float value, float minimum, float maximum)
     return value;
 }
 
-float calculateFrictionFeedforward(float velocity_reference_rad_s,
-                                   float velocity_rad_s)
+float calculateFrictionFeedforward(float velocity_reference_rad_s, float velocity_rad_s)
 {
-    const float running_blend = clampFloat(
-        velocity_reference_rad_s /
-            kRunningFrictionBlendVelocityRadS,
-        -1.0f,
-        1.0f);
-    const float direction = velocity_reference_rad_s > 0.0f ? 1.0f :
-                            velocity_reference_rad_s < 0.0f ? -1.0f :
-                            0.0f;
-    const float request_blend = clampFloat(
-        std::fabs(velocity_reference_rad_s) /
-            kBreakawayRequestFullRadS,
-        0.0f,
-        1.0f);
-    const float stall_blend = clampFloat(
-        1.0f - std::fabs(velocity_rad_s) /
-                   kBreakawayFadeVelocityRadS,
-        0.0f,
-        1.0f);
+    const float running_blend = clampFloat(velocity_reference_rad_s / kRunningFrictionBlendVelocityRadS, -1.0f, 1.0f);
+    const float direction = velocity_reference_rad_s > 0.0f ? 1.0f : velocity_reference_rad_s < 0.0f ? -1.0f : 0.0f;
+    const float request_blend = clampFloat(std::fabs(velocity_reference_rad_s) / kBreakawayRequestFullRadS, 0.0f, 1.0f);
+    const float stall_blend = clampFloat(1.0f - std::fabs(velocity_rad_s) / kBreakawayFadeVelocityRadS, 0.0f, 1.0f);
 
-    return kRunningFrictionCurrentA * running_blend +
-           kBreakawayCurrentA * direction *
-               request_blend * stall_blend;
+    return kRunningFrictionCurrentA * running_blend + kBreakawayCurrentA * direction * request_blend * stall_blend;
 }
 
-float calculateOverspeedDamping(float velocity_reference_rad_s,
-                                float velocity_rad_s)
+float calculateOverspeedDamping(float velocity_reference_rad_s, float velocity_rad_s)
 {
-    const float allowed_magnitude =
-        std::fabs(velocity_reference_rad_s) +
-        kOverspeedMarginRadS;
-    const float excess =
-        std::fabs(velocity_rad_s) - allowed_magnitude;
+    const float allowed_magnitude = std::fabs(velocity_reference_rad_s) + kOverspeedMarginRadS;
+    const float excess = std::fabs(velocity_rad_s) - allowed_magnitude;
     if (excess <= 0.0f) {
         return 0.0f;
     }
-    return -std::copysign(
-        kOverspeedDampingAperRadS * excess,
-        velocity_rad_s);
+    return -std::copysign(kOverspeedDampingAperRadS * excess, velocity_rad_s);
 }
 
 PositionController makePositionController()
@@ -171,8 +148,7 @@ int validateController(const PositionController &controller)
     if (ret < 0) {
         return ret;
     }
-    ret = control_slew_rate_validate(
-        &controller.velocity_reference_config);
+    ret = control_slew_rate_validate(&controller.velocity_reference_config);
     if (ret < 0) {
         return ret;
     }
@@ -183,8 +159,7 @@ int waitForFreshFeedback(const struct device *motor)
 {
     const std::int64_t deadline_ms = k_uptime_get() + 2000;
 
-    while (skywalker::motor::getState(motor) !=
-           skywalker::motor::State::Ready) {
+    while (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
         if (k_uptime_get() >= deadline_ms) {
             return -ETIMEDOUT;
         }
@@ -193,81 +168,56 @@ int waitForFreshFeedback(const struct device *motor)
     return 0;
 }
 
-int readFreshPositionFeedback(
-    const struct device *motor,
-    std::uint64_t now_ms,
-    skywalker::motor::Feedback &feedback)
+int readFreshPositionFeedback(const struct device *motor, std::uint64_t now_ms, skywalker::motor::Feedback &feedback)
 {
     int ret = skywalker::motor::readFeedback(motor, feedback);
     if (ret < 0) {
         return ret;
     }
-    if (skywalker::motor::getState(motor) !=
-        skywalker::motor::State::Ready) {
+    if (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
         return -EHOSTDOWN;
     }
 
-    constexpr std::uint32_t required =
-        skywalker::motor::FeedbackPosition |
-        skywalker::motor::FeedbackVelocity;
+    constexpr std::uint32_t required = skywalker::motor::FeedbackPosition | skywalker::motor::FeedbackVelocity;
     if ((feedback.valid & required) != required) {
         return -ENODATA;
     }
-    if (!std::isfinite(feedback.position_rad) ||
-        !std::isfinite(feedback.velocity_rad_s)) {
+    if (!std::isfinite(feedback.position_rad) || !std::isfinite(feedback.velocity_rad_s)) {
         return -EINVAL;
     }
-    if (feedback.timestamp_ms == 0U ||
-        now_ms < feedback.timestamp_ms ||
-        now_ms - feedback.timestamp_ms >
-            CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
+    if (feedback.timestamp_ms == 0U || now_ms < feedback.timestamp_ms || now_ms - feedback.timestamp_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
         return -ESTALE;
     }
     return 0;
 }
 
-int resetController(PositionController &controller,
-                    const skywalker::motor::Feedback &feedback)
+int resetController(PositionController &controller, const skywalker::motor::Feedback &feedback)
 {
-    int ret = control_pid_reset(&controller.position_state,
-                                feedback.position_rad);
+    int ret = control_pid_reset(&controller.position_state, feedback.position_rad);
     if (ret < 0) {
         return ret;
     }
-    ret = control_slew_rate_reset(
-        &controller.velocity_reference_state,
-        0.0f);
+    ret = control_slew_rate_reset(&controller.velocity_reference_state, 0.0f);
     if (ret < 0) {
         return ret;
     }
-    return control_pid_reset(&controller.velocity_state,
-                             feedback.velocity_rad_s);
+    return control_pid_reset(&controller.velocity_state, feedback.velocity_rad_s);
 }
 
-int calculatePositionCurrent(
-    PositionController &controller,
-    const skywalker::motor::Feedback &feedback,
-    float position_target_rad,
-    float dt_s,
-    PositionControlOutput &output)
+int calculatePositionCurrent(PositionController &controller, const skywalker::motor::Feedback &feedback, float position_target_rad, float dt_s,
+                             PositionControlOutput &output)
 {
-    if (!std::isfinite(position_target_rad) ||
-        !std::isfinite(dt_s)) {
+    if (!std::isfinite(position_target_rad) || !std::isfinite(dt_s)) {
         return -EINVAL;
     }
 
-    control_pid_state next_position_state =
-        controller.position_state;
-    control_slew_rate_state next_reference_state =
-        controller.velocity_reference_state;
-    control_pid_state next_velocity_state =
-        controller.velocity_state;
+    control_pid_state next_position_state = controller.position_state;
+    control_slew_rate_state next_reference_state = controller.velocity_reference_state;
+    control_pid_state next_velocity_state = controller.velocity_state;
     PositionControlOutput next_output{};
 
-    const float position_error =
-        position_target_rad - feedback.position_rad;
-    const bool inside_deadband =
-        std::fabs(position_error) <= kPositionDeadbandRad;
+    const float position_error = position_target_rad - feedback.position_rad;
+    const bool inside_deadband = std::fabs(position_error) <= kPositionDeadbandRad;
 
     const control_pid_input position_input = {
         .setpoint = position_target_rad,
@@ -275,10 +225,7 @@ int calculatePositionCurrent(
         .dt_s = dt_s,
         .freeze_integrator = inside_deadband,
     };
-    int ret = control_pid_step(&next_position_state,
-                               &controller.position_config,
-                               &position_input,
-                               &next_output.position);
+    int ret = control_pid_step(&next_position_state, &controller.position_config, &position_input, &next_output.position);
     if (ret < 0) {
         return ret;
     }
@@ -287,13 +234,8 @@ int calculatePositionCurrent(
         next_position_state.integral_output = 0.0f;
     }
 
-    ret = control_slew_rate_step(
-        &next_reference_state,
-        &controller.velocity_reference_config,
-        next_output.position.output,
-        dt_s,
-        &next_output.velocity_reference_rad_s,
-        &next_output.acceleration_reference_rad_s2);
+    ret = control_slew_rate_step(&next_reference_state, &controller.velocity_reference_config, next_output.position.output, dt_s,
+                                 &next_output.velocity_reference_rad_s, &next_output.acceleration_reference_rad_s2);
     if (ret < 0) {
         return ret;
     }
@@ -304,28 +246,15 @@ int calculatePositionCurrent(
         .dt_s = dt_s,
         .freeze_integrator = false,
     };
-    ret = control_pid_step(&next_velocity_state,
-                           &controller.velocity_config,
-                           &velocity_input,
-                           &next_output.velocity);
+    ret = control_pid_step(&next_velocity_state, &controller.velocity_config, &velocity_input, &next_output.velocity);
     if (ret < 0) {
         return ret;
     }
 
-    next_output.friction_feedforward_a =
-        calculateFrictionFeedforward(
-            next_output.velocity_reference_rad_s,
-            feedback.velocity_rad_s);
-    next_output.overspeed_damping_a =
-        calculateOverspeedDamping(
-            next_output.velocity_reference_rad_s,
-            feedback.velocity_rad_s);
-    next_output.current_command_a = clampFloat(
-        next_output.velocity.output +
-            next_output.friction_feedforward_a +
-            next_output.overspeed_damping_a,
-        -kSoftwareCurrentAbsMaxA,
-        kSoftwareCurrentAbsMaxA);
+    next_output.friction_feedforward_a = calculateFrictionFeedforward(next_output.velocity_reference_rad_s, feedback.velocity_rad_s);
+    next_output.overspeed_damping_a = calculateOverspeedDamping(next_output.velocity_reference_rad_s, feedback.velocity_rad_s);
+    next_output.current_command_a = clampFloat(next_output.velocity.output + next_output.friction_feedforward_a + next_output.overspeed_damping_a,
+                                               -kSoftwareCurrentAbsMaxA, kSoftwareCurrentAbsMaxA);
     if (!std::isfinite(next_output.current_command_a)) {
         return -ERANGE;
     }
@@ -342,11 +271,7 @@ int stopAfterFailure(int original_error)
     runtime_diagnostic = original_error;
     skywalker::motor::dji::FlushReport report{};
     const int stop_ret = dji_bus.stop(report);
-    LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d",
-            original_error,
-            stop_ret,
-            report.zero_sent ? 1 : 0,
-            report.zero_tx_error);
+    LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, report.zero_sent ? 1 : 0, report.zero_tx_error);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
@@ -356,9 +281,7 @@ int stopAfterFailure(int original_error)
  * touching the control loop: 0.5 s settle at the start position, then a
  * step to the final target held forever.
  */
-float requestedPositionRad(std::int64_t elapsed_ms,
-                           float initial_position_rad,
-                           float final_target_rad)
+float requestedPositionRad(std::int64_t elapsed_ms, float initial_position_rad, float final_target_rad)
 {
     if (elapsed_ms < 5000) {
         return initial_position_rad;
@@ -387,8 +310,7 @@ int main()
 
     skywalker::motor::dji::Descriptor descriptor{};
     int ret = skywalker::motor::dji::describe(motor, descriptor);
-    if (ret < 0 || descriptor.can == nullptr ||
-        !device_is_ready(descriptor.can)) {
+    if (ret < 0 || descriptor.can == nullptr || !device_is_ready(descriptor.can)) {
         LOG_ERR("describe/CAN failed: %d", ret);
         return ret < 0 ? ret : -ENODEV;
     }
@@ -431,11 +353,8 @@ int main()
     }
 
     skywalker::motor::Feedback first_feedback{};
-    const std::uint64_t reset_time_ms =
-        static_cast<std::uint64_t>(k_uptime_get());
-    ret = readFreshPositionFeedback(motor,
-                                    reset_time_ms,
-                                    first_feedback);
+    const std::uint64_t reset_time_ms = static_cast<std::uint64_t>(k_uptime_get());
+    ret = readFreshPositionFeedback(motor, reset_time_ms, first_feedback);
     if (ret < 0) {
         LOG_ERR("initial feedback invalid: %d", ret);
         return ret;
@@ -448,16 +367,12 @@ int main()
 
     /* Feedback position is continuous; this sample commands a relative move. */
     const float initial_position_rad = first_feedback.position_rad;
-    const float final_target_rad =
-        initial_position_rad + kTargetOffsetRad;
+    const float final_target_rad = initial_position_rad + kTargetOffsetRad;
 
     skywalker::motor::dji::FlushReport arm_report{};
     ret = dji_bus.arm(arm_report);
     if (ret < 0 || !arm_report.zero_sent) {
-        LOG_ERR("arm/zero failed: ret=%d zero=%d zero_err=%d",
-                ret,
-                arm_report.zero_sent ? 1 : 0,
-                arm_report.zero_tx_error);
+        LOG_ERR("arm/zero failed: ret=%d zero=%d zero_err=%d", ret, arm_report.zero_sent ? 1 : 0, arm_report.zero_tx_error);
         return ret < 0 ? ret : -EIO;
     }
     runtime_diagnostic = 3;
@@ -475,40 +390,28 @@ int main()
         if (now_signed_ms <= previous_cycle_ms) {
             return stopAfterFailure(-ERANGE);
         }
-        const float dt_s = static_cast<float>(
-            now_signed_ms - previous_cycle_ms) / 1000.0f;
+        const float dt_s = static_cast<float>(now_signed_ms - previous_cycle_ms) / 1000.0f;
         previous_cycle_ms = now_signed_ms;
-        const std::uint64_t now_ms =
-            static_cast<std::uint64_t>(now_signed_ms);
+        const std::uint64_t now_ms = static_cast<std::uint64_t>(now_signed_ms);
 
         skywalker::motor::Feedback feedback{};
         ret = readFreshPositionFeedback(motor, now_ms, feedback);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
-        if (std::fabs(feedback.velocity_rad_s) >
-            kMeasuredVelocitySafetyMaxRadS) {
+        if (std::fabs(feedback.velocity_rad_s) > kMeasuredVelocitySafetyMaxRadS) {
             return stopAfterFailure(-ERANGE);
         }
 
-        const float target_rad = requestedPositionRad(
-            now_signed_ms - run_start_ms,
-            initial_position_rad,
-            final_target_rad);
+        const float target_rad = requestedPositionRad(now_signed_ms - run_start_ms, initial_position_rad, final_target_rad);
 
         PositionControlOutput output{};
-        ret = calculatePositionCurrent(controller,
-                                       feedback,
-                                       target_rad,
-                                       dt_s,
-                                       output);
+        ret = calculatePositionCurrent(controller, feedback, target_rad, dt_s, output);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
 
-        ret = skywalker::motor::setCurrent(
-            motor,
-            output.current_command_a);
+        ret = skywalker::motor::setCurrent(motor, output.current_command_a);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }

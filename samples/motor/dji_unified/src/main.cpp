@@ -29,8 +29,7 @@ static int waitForFreshFeedback(const struct device *motor)
 {
     std::int64_t next_log_ms = 0;
 
-    while (skywalker::motor::getState(motor) !=
-           skywalker::motor::State::Ready) {
+    while (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
         const std::int64_t now_ms = k_uptime_get();
         if (now_ms >= next_log_ms) {
             LOG_WRN("waiting for GM6020 ID 7 feedback on CAN1 (0x20B)");
@@ -45,11 +44,7 @@ static int stopAfterFailure(int original_error)
 {
     skywalker::motor::dji::FlushReport stop_report{};
     const int stop_ret = dji_bus.stop(stop_report);
-    LOG_ERR("stopped: cause=%d stop=%d zero=%d zero_err=%d",
-            original_error,
-            stop_ret,
-            stop_report.zero_sent ? 1 : 0,
-            stop_report.zero_tx_error);
+    LOG_ERR("stopped: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, stop_report.zero_sent ? 1 : 0, stop_report.zero_tx_error);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
@@ -72,18 +67,12 @@ int main()
     vofa_init(&vofa, vofa_uart);
 
     skywalker::motor::dji::Descriptor descriptor{};
-    int ret =
-        skywalker::motor::dji::describe(motor, descriptor);
-    if (ret < 0 || descriptor.can == nullptr ||
-        !device_is_ready(descriptor.can)) {
+    int ret = skywalker::motor::dji::describe(motor, descriptor);
+    if (ret < 0 || descriptor.can == nullptr || !device_is_ready(descriptor.can)) {
         LOG_ERR("describe/CAN failed: %d", ret);
         return ret < 0 ? ret : -ENODEV;
     }
-    LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u",
-            descriptor.motor_id,
-            descriptor.feedback_id,
-            descriptor.command_id,
-            descriptor.command_slot);
+    LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u", descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot);
 
     ret = dji_bus.init(descriptor.can);
     if (ret < 0) {
@@ -106,14 +95,11 @@ int main()
     skywalker::motor::dji::FlushReport arm_report{};
     ret = dji_bus.arm(arm_report);
     if (ret < 0 || !arm_report.zero_sent) {
-        LOG_ERR("Arm/zero failed: ret=%d zero=%d",
-                ret,
-                arm_report.zero_sent ? 1 : 0);
+        LOG_ERR("Arm/zero failed: ret=%d zero=%d", ret, arm_report.zero_sent ? 1 : 0);
         return ret < 0 ? ret : -EIO;
     }
 
-    LOG_INF("continuous open-loop current test started: %d mA",
-            static_cast<int>(kCurrentCommandA * 1000.0f));
+    LOG_INF("continuous open-loop current test started: %d mA", static_cast<int>(kCurrentCommandA * 1000.0f));
 
     std::uint32_t print_divider = 0;
     for (;;) {
@@ -127,21 +113,15 @@ int main()
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
-        if (skywalker::motor::getState(motor) !=
-            skywalker::motor::State::Ready) {
+        if (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
             return stopAfterFailure(-EHOSTDOWN);
         }
-        if ((feedback.valid &
-             skywalker::motor::FeedbackTemperature) != 0u &&
-            feedback.temperature_c >= kTemperatureCutoffC) {
-            LOG_ERR("temperature cutoff: %d C",
-                    static_cast<int>(feedback.temperature_c));
+        if ((feedback.valid & skywalker::motor::FeedbackTemperature) != 0u && feedback.temperature_c >= kTemperatureCutoffC) {
+            LOG_ERR("temperature cutoff: %d C", static_cast<int>(feedback.temperature_c));
             return stopAfterFailure(-EOVERFLOW);
         }
 
-        const std::int32_t speed_abs_rpm = raw.speed_rpm < 0
-            ? -static_cast<std::int32_t>(raw.speed_rpm)
-            : static_cast<std::int32_t>(raw.speed_rpm);
+        const std::int32_t speed_abs_rpm = raw.speed_rpm < 0 ? -static_cast<std::int32_t>(raw.speed_rpm) : static_cast<std::int32_t>(raw.speed_rpm);
         if (speed_abs_rpm > kSpeedCutoffRpm) {
             LOG_ERR("speed cutoff: %d rpm", raw.speed_rpm);
             return stopAfterFailure(-ERANGE);
