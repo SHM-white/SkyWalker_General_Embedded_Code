@@ -1,13 +1,13 @@
 / {
     aliases {
-        motor0 = &gm6020_7;
+        motor0 = &gm6020_1;
     };
 
-    gm6020_7: motor-7 {
+    gm6020_1: motor-1 {
         compatible = "dji,gm6020-current";
         status = "okay";
         can-bus = <&can1>;
-        motor-id = <7>;
+        motor-id = <4>;
 
         /* The demo commands 50 mA; the device boundary remains 100 mA. */
         current-limit-ma = <100>;

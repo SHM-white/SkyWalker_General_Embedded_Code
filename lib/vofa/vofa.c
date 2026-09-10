@@ -1,7 +1,10 @@
 #include "lib/vofa/vofa.h"
 
+#include <zephyr/sys/atomic.h>
+
 #define VOFA_MAX_FLOATS 16  /* 单帧最多发送的 float 个数 */
 
+static atomic_t tx_busy;
 
 /**
  * @brief 简易 atof，解析 "1.5" / "-0.01" / "100" 格式的字符串为 float
@@ -53,7 +56,7 @@ static void process_line(Vofa *vofa, char *line, size_t len) {
         }
     }
 
-    if (eq) {
+    if (eq && vofa->on_cmd != NULL) {
         *eq = '\0';                     // 切断 key/value
         vofa->on_cmd(line, parse_float(eq + 1));
     }
@@ -92,7 +95,15 @@ void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
     // ─── DMA 缓冲区耗尽或超时停用，重新使能 ───
     case UART_RX_BUF_RELEASED:
     case UART_RX_DISABLED:
-        uart_rx_enable(dev, vofa->rx_buf, vofa->rx_buf_size, SYS_FOREVER_US);
+        if (vofa->rx_buf != NULL && vofa->rx_buf_size > 0) {
+            uart_rx_enable(dev, vofa->rx_buf, vofa->rx_buf_size,
+                           SYS_FOREVER_US);
+        }
+        break;
+
+    case UART_TX_DONE:
+    case UART_TX_ABORTED:
+        atomic_clear(&tx_busy);
         break;
 
     default:
@@ -111,6 +122,10 @@ void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
  */
 void vofa_init(Vofa *vofa, const struct device *uart) {
     vofa->uart = uart;
+    vofa->rx_buf = NULL;
+    vofa->rx_buf_size = 0;
+    vofa->on_cmd = NULL;
+    atomic_clear(&tx_busy);
     uart_callback_set(uart, vofa_uart_cb, vofa);
 }
 
@@ -119,6 +134,7 @@ void vofa_init(Vofa *vofa, const struct device *uart) {
  *
  * 将 @p num 个 float 与帧尾 0x7F800000 (+inf) 拼进 static buffer，
  * 用一次 uart_tx 交给 DMA 异步发送，函数立即返回。
+ * 若上一帧仍在发送，当前帧会被丢弃，以免覆盖 DMA 正在读取的缓冲区。
  *
  * @param vofa VOFA  实例指针
  * @param data float 数组首地址
@@ -126,6 +142,12 @@ void vofa_init(Vofa *vofa, const struct device *uart) {
  */
 void vofa_send(Vofa *vofa, const float *data, uint8_t num) {
     static __nocache uint8_t buf[VOFA_MAX_FLOATS * sizeof(float) + 4];
+
+    if (num == 0 || num > VOFA_MAX_FLOATS ||
+        !atomic_cas(&tx_busy, 0, 1)) {
+        return;
+    }
+
     size_t n = num * sizeof(float);
     const uint8_t *src = (const uint8_t *)data;
 
@@ -137,7 +159,9 @@ void vofa_send(Vofa *vofa, const float *data, uint8_t num) {
     buf[n + 2] = 0x80;
     buf[n + 3] = 0x7F;
 
-    uart_tx(vofa->uart, buf, n + 4, SYS_FOREVER_US);
+    if (uart_tx(vofa->uart, buf, n + 4, SYS_FOREVER_US) < 0) {
+        atomic_clear(&tx_busy);
+    }
 }
 
 /**

@@ -3,23 +3,39 @@
 #include <zephyr/drivers/can.h>
 #include <zephyr/logging/log.h>
 
+#include <lib/vofa/vofa.h>
+
 LOG_MODULE_REGISTER(can_smoke, LOG_LEVEL_INF);
+
+static Vofa vofa{};
 
 static void rxCallback(const struct device* dev, struct can_frame* frame, void* user_data){
     ARG_UNUSED(dev);
     ARG_UNUSED(user_data);
 
-    printk("RX id=0x%03x dlc=%d\n", frame->id, frame->dlc);
+    /* JustFloat channels: can_id, data_length. */
+    const float channels[2] = {
+        static_cast<float>(frame->id),
+        static_cast<float>(frame->dlc),
+    };
+    vofa_send(&vofa, channels, 2);
 }
 
 int main()
 {
     const struct device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
 
     if (!device_is_ready(can)) {
         LOG_ERR("CAN device not ready");
         return -ENODEV;
     }
+    if (!device_is_ready(vofa_uart)) {
+        LOG_ERR("VOFA UART device not ready");
+        return -ENODEV;
+    }
+
+    vofa_init(&vofa, vofa_uart);
 
     int ret = can_start(can);
 

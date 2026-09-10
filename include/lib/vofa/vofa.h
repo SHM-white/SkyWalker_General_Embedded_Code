@@ -5,6 +5,10 @@
 #include <zephyr/drivers/uart.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief 文本命令回调 — 每收到一行完整 key=value 命令时调用
  *
@@ -39,5 +43,9 @@ void vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size,
 
 void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
                   void *user_data);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // VOFA_H
