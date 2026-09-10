@@ -56,10 +56,10 @@ constexpr float kTargetOffsetRad = 3.0f;
  * 当前数值保留自工作区原调参结果；它们只是起点，不代表已在实物上
  * 验证稳定。尤其是 5 rad/s 和 25 rad/s^2，带载测试前必须确认安全。
  */
-constexpr float kPositionKp = 10.0f;
-constexpr float kVelocityKp = 0.04f;
-constexpr float kVelocityKi = 0.0f;
-constexpr float kVelocityRampRateRadS2 = 25.0f;
+constexpr float kPositionKp = 6.0f;
+constexpr float kVelocityKp = 0.03f;
+constexpr float kVelocityKi = 0.5f;
+constexpr float kVelocityRampRateRadS2 = 40.0f;
 
 /*
  * ======================== 边界与安全参数 ========================
@@ -83,8 +83,8 @@ constexpr float kVelocityRampRateRadS2 = 25.0f;
  * 实测超速阈值由最大命令速度自动取 1.5 倍，不再单独调参。若实测速度
  * 超过它，说明方向、负载、速度环或反馈可能异常，程序立即停机。
  */
-constexpr float kVelocityAbsMaxRadS = 5.0f;
-constexpr float kSoftwareCurrentAbsMaxA = 0.10f;
+constexpr float kVelocityAbsMaxRadS = 30.0f;
+constexpr float kSoftwareCurrentAbsMaxA = 0.80f;
 constexpr float kPositionDeadbandRad = 0.012f;
 constexpr float kMeasuredVelocitySafetyMaxRadS = 1.5f * kVelocityAbsMaxRadS;
 
@@ -114,11 +114,11 @@ PositionController makePositionController() {
     /* Position error (rad) -> velocity request (rad/s). */
     controller.position_config = {
         .kp = kPositionKp,
-        .ki = 0.01f,
-        .kd = 0.0f,
+        .ki = 1.5f,
+        .kd = 0.8f,
         .derivative_tau_s = 0.0f,
-        .integral_min = 0.8f,
-        .integral_max = 0.8f,
+        .integral_min = -8.0f,
+        .integral_max = 8.0f,
         .output_min = -kVelocityAbsMaxRadS,
         .output_max = kVelocityAbsMaxRadS,
         .deadband = kPositionDeadbandRad,
@@ -139,7 +139,7 @@ PositionController makePositionController() {
     controller.velocity_config = {
         .kp = kVelocityKp,
         .ki = kVelocityKi,
-        .kd = 0.0f,
+        .kd = 0.00005f,
         .derivative_tau_s = 0.0f,
         .integral_min = -kSoftwareCurrentAbsMaxA,
         .integral_max = kSoftwareCurrentAbsMaxA,
@@ -279,18 +279,15 @@ int stopAfterFailure(int original_error) {
  * step to the final target held forever.
  */
 float requestedPositionRad(std::int64_t elapsed_ms, float initial_position_rad, float final_target_rad) {
-    if (elapsed_ms < 5000) {
-        return initial_position_rad;
-    }
-    int modded_ms = elapsed_ms % 40000;
-    if (modded_ms < 10000) {
-        return final_target_rad;
-    } else if (modded_ms < 20000) {
+    int modded_ms = elapsed_ms % 10000;
+    if (modded_ms < 2500) {
+        return final_target_rad * 0;
+    } else if (modded_ms < 5000) {
+        return final_target_rad * 1;
+    } else if (modded_ms < 7500) {
         return final_target_rad * 2;
-    } else if (modded_ms < 30000) {
-        return final_target_rad * 3;
     } else
-        return final_target_rad * 4;
+        return final_target_rad * 3;
 }
 
 } // namespace
