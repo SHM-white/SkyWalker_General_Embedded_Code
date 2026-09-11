@@ -35,7 +35,12 @@ int main(void) {
         imu_estimate(imu_dev, dt);
 
         if (now - t_heat >= 100) {
-            imu_heat_control(imu_dev, 50.0f, (now - t_heat) / 1000.0f);
+            int ret = imu_heat_control(
+                imu_dev, 50.0f, (now - t_heat) / 1000.0f);
+            if (ret < 0) {
+                printk("IMU heat control failed: %d\n", ret);
+                return ret;
+            }
             t_heat = now;
         }
 

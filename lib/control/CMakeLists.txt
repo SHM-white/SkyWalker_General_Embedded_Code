@@ -6,4 +6,6 @@ zephyr_library_sources(
     feedforward_pid.c
     slew_rate_limiter.c
     angle.c
+    motor_velocity.c
+    motor_position.c
 )

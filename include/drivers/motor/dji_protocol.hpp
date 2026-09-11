@@ -15,8 +15,6 @@ struct RawFeedback {
 
 bool decodeFeedback(const struct can_frame &frame, RawFeedback &out);
 
-int buildCommandFrame(struct can_frame &frame,
-                      std::uint16_t command_id,
-                      const std::int16_t command_raw[4]);
+int buildCommandFrame(struct can_frame &frame, std::uint16_t command_id, const std::int16_t command_raw[4]);
 
 } // namespace skywalker::motor::dji

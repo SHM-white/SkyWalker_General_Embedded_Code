@@ -6,8 +6,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-#include <control/feedforward_pid.h>
-#include <control/slew_rate_limiter.h>
+#include <control/velocity_controller.hpp>
 #include <drivers/motor/dji_bus.hpp>
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/motor.hpp>
@@ -16,102 +15,29 @@
 LOG_MODULE_REGISTER(dji_speed_control, LOG_LEVEL_INF);
 
 #define MOTOR0_NODE DT_ALIAS(motor0)
+#define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
+
+#if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
+#error "A ready telemetry-uart alias is required for VOFA"
+#endif
 
 namespace {
 
-/*
- * Bench setup: the same GM6020 (ID 7, current loop) as
- * samples/motor/dji_unified, gear ratio 1.
- *
- * No console arm token: once fresh feedback is present the loop arms
- * automatically after a printed countdown, runs the short velocity profile,
- * then sends 0 A and stops.
- */
 constexpr std::int64_t kControlPeriodMs = 5;
-/* One telemetry frame per control cycle: 200 Hz. */
 constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 constexpr std::int64_t kRunDurationMs = 300000;
 
-/*
- * Negative because dji_unified drives this bench GM6020 with -0.05 A
- * (that is the verified direction on this bench).  Requesting +1 rad/s
- * makes the P controller push positive current into the opposite way,
- * which stalls the motor as "jitter without turning".
- * If the bench direction is actually swapped, flip the sign below.
- */
 constexpr float kRequestedVelocityRadS = 20.0f;
 constexpr float kRequestedVelocityAbsMaxRadS = 50.0f;
-
-/*
- * dji_unified rotates this suspended GM6020 with only 0.05 A, so a small
- * gain keeps the *running* torque tiny and smooth.  The current limit is
- * what the loop can push when the motor is disturbed (e.g. by hand):
- * a large hand-induced error saturates at this stronger counter-torque.
- * 0.25 A stays under the 0.30 A device-tree boundary in app.overlay.
- */
 constexpr float kSoftwareCurrentAbsMaxA = 0.8f;
-
-/*
- * Anti-chatter for the integer-rpm DJI velocity feedback:
- *  - a first-order low-pass suppresses the periodic high-frequency ripple
- *    before it reaches the PI controller;
- *  - deadband prevents the remaining small error from moving the output;
- *  - D is disabled because differentiating rpm steps creates current pulses.
- */
 constexpr float kDeadbandRadS = 0.20f;
-/* First-order low-pass time constant for the velocity used by the PID. */
 constexpr float kVelocityFilterTauS = 0.025f;
-
-struct VelocityController {
-    control_feedforward_pid_config config{};
-    control_slew_rate_config reference_config{};
-    control_feedforward_pid_state controller_state{};
-    control_slew_rate_state reference_state{};
-    float filtered_velocity_rad_s = 0.0f;
-    bool velocity_filter_initialized = false;
-};
-
-struct VelocityControlOutput {
-    float velocity_reference_rad_s = 0.0f;
-    float acceleration_reference_rad_s2 = 0.0f;
-    float filtered_velocity_rad_s = 0.0f;
-    float velocity_error_rad_s = 0.0f;
-    float current_command_a = 0.0f;
-    control_feedforward_pid_result controller{};
-};
 
 skywalker::motor::dji::Bus dji_bus;
 
-float clampFloat(float value, float minimum, float maximum)
-{
-    if (value < minimum) {
-        return minimum;
-    }
-    if (value > maximum) {
-        return maximum;
-    }
-    return value;
-}
-
-float applySoftDeadband(float value, float deadband)
-{
-    const float magnitude = std::fabs(value);
-    if (magnitude <= deadband) {
-        return 0.0f;
-    }
-    return std::copysign(magnitude - deadband, value);
-}
-
-VelocityController makeVelocityController()
-{
-    VelocityController loop{};
-
-    loop.config.feedback = {
-        /*
-         * Moderate P on the filtered velocity: steady-run ripple falls
-         * inside deadband, while a larger disturbance still produces
-         * proportional counter-torque.  D remains disabled.
-         */
+skywalker::control::VelocityController::Config makeVelocityControllerConfig() {
+    skywalker::control::VelocityController::Config config{};
+    config.regulator.feedback = {
         .kp = 0.02f,
         .ki = 0.05f,
         .kd = 0.0f,
@@ -120,14 +46,11 @@ VelocityController makeVelocityController()
         .integral_max = 0.1f,
         .output_min = -kSoftwareCurrentAbsMaxA,
         .output_max = kSoftwareCurrentAbsMaxA,
-        /* A continuous deadband is applied before entering the PID. */
         .deadband = 0.0f,
         .dt_min_s = 0.001f,
         .dt_max_s = 0.020f,
     };
-
-    /* Zero feedforward makes this first pass a classic feedback controller. */
-    loop.config.feedforward = {
+    config.regulator.feedforward = {
         .k_bias = 0.0f,
         .k_static = 0.005f,
         .k_velocity = 0.0f,
@@ -137,25 +60,24 @@ VelocityController makeVelocityController()
         .acceleration_epsilon = 0.0f,
         .gravity_model = CONTROL_GRAVITY_NONE,
     };
-
-    loop.reference_config = {
+    config.reference_slew = {
         .rising_rate_per_s = 100.0f,
         .falling_rate_per_s = 100.0f,
     };
-    return loop;
+    config.measurement_filter_tau_s = kVelocityFilterTauS;
+    config.soft_deadband_rad_s = kDeadbandRadS;
+    config.requested_velocity_abs_max_rad_s = kRequestedVelocityAbsMaxRadS;
+    config.current_abs_max_a = kSoftwareCurrentAbsMaxA;
+    return config;
 }
 
-int validateController(const VelocityController &loop)
-{
-    int ret = control_feedforward_pid_validate(&loop.config);
-    if (ret < 0) {
-        return ret;
-    }
-    return control_slew_rate_validate(&loop.reference_config);
+int requireMotorCapabilities(const struct device *motor) {
+    constexpr std::uint32_t required = skywalker::motor::CommandCurrent | skywalker::motor::FeedbackVelocity;
+    const std::uint32_t available = skywalker::motor::capabilities(motor);
+    return (available & required) == required ? 0 : -ENOTSUP;
 }
 
-int waitForFreshFeedback(const struct device *motor)
-{
+int waitForFreshFeedback(const struct device *motor) {
     const std::int64_t deadline_ms = k_uptime_get() + 2000;
     std::int64_t next_log_ms = k_uptime_get();
 
@@ -174,8 +96,7 @@ int waitForFreshFeedback(const struct device *motor)
     return 0;
 }
 
-int readFreshVelocityFeedback(const struct device *motor, std::uint64_t now_ms, skywalker::motor::Feedback &feedback)
-{
+int readFreshVelocityFeedback(const struct device *motor, std::uint64_t now_ms, skywalker::motor::Feedback &feedback) {
     int ret = skywalker::motor::readFeedback(motor, feedback);
     if (ret < 0) {
         return ret;
@@ -195,117 +116,28 @@ int readFreshVelocityFeedback(const struct device *motor, std::uint64_t now_ms, 
     return 0;
 }
 
-int resetController(VelocityController &loop, float first_velocity_rad_s)
-{
-    int ret = control_slew_rate_reset(&loop.reference_state, 0.0f);
-    if (ret < 0) {
-        return ret;
-    }
-    ret = control_feedforward_pid_reset(&loop.controller_state, first_velocity_rad_s);
-    if (ret < 0) {
-        return ret;
-    }
-
-    loop.filtered_velocity_rad_s = first_velocity_rad_s;
-    loop.velocity_filter_initialized = true;
-    return 0;
-}
-
-int calculateVelocityCurrent(VelocityController &loop, const skywalker::motor::Feedback &feedback, float requested_velocity_rad_s, float dt_s,
-                             VelocityControlOutput &output)
-{
-    if (!std::isfinite(requested_velocity_rad_s) || !std::isfinite(dt_s)) {
-        return -EINVAL;
-    }
-    if (std::fabs(requested_velocity_rad_s) > kRequestedVelocityAbsMaxRadS) {
-        return -ERANGE;
-    }
-
-    control_slew_rate_state next_reference_state = loop.reference_state;
-    control_feedforward_pid_state next_controller_state = loop.controller_state;
-    float next_filtered_velocity_rad_s = feedback.velocity_rad_s;
-    VelocityControlOutput next_output{};
-
-    if (loop.velocity_filter_initialized) {
-        const float alpha = dt_s / (kVelocityFilterTauS + dt_s);
-        next_filtered_velocity_rad_s = loop.filtered_velocity_rad_s + alpha * (feedback.velocity_rad_s - loop.filtered_velocity_rad_s);
-    }
-    if (!std::isfinite(next_filtered_velocity_rad_s)) {
-        return -ERANGE;
-    }
-    next_output.filtered_velocity_rad_s = next_filtered_velocity_rad_s;
-
-    int ret = control_slew_rate_step(&next_reference_state, &loop.reference_config, requested_velocity_rad_s, dt_s, &next_output.velocity_reference_rad_s,
-                                     &next_output.acceleration_reference_rad_s2);
-    if (ret < 0) {
-        return ret;
-    }
-
-    next_output.velocity_error_rad_s = next_output.velocity_reference_rad_s - next_output.filtered_velocity_rad_s;
-    const float effective_velocity_error_rad_s = applySoftDeadband(next_output.velocity_error_rad_s, kDeadbandRadS);
-    const float controller_measurement_rad_s = next_output.velocity_reference_rad_s - effective_velocity_error_rad_s;
-
-    const control_feedforward_pid_input input = {
-        .feedback =
-            {
-                .setpoint = next_output.velocity_reference_rad_s,
-                .measurement = controller_measurement_rad_s,
-                .dt_s = dt_s,
-                .freeze_integrator = false,
-            },
-        .reference =
-            {
-                .position_ref_rad = 0.0f,
-                .velocity_ref = next_output.velocity_reference_rad_s,
-                .acceleration_ref = next_output.acceleration_reference_rad_s2,
-            },
-    };
-
-    ret = control_feedforward_pid_step(&next_controller_state, &loop.config, &input, &next_output.controller);
-    if (ret < 0) {
-        return ret;
-    }
-
-    next_output.current_command_a = clampFloat(next_output.controller.output, -kSoftwareCurrentAbsMaxA, kSoftwareCurrentAbsMaxA);
-    if (!std::isfinite(next_output.current_command_a)) {
-        return -ERANGE;
-    }
-
-    loop.reference_state = next_reference_state;
-    loop.controller_state = next_controller_state;
-    loop.filtered_velocity_rad_s = next_filtered_velocity_rad_s;
-    loop.velocity_filter_initialized = true;
-    output = next_output;
-    return 0;
-}
-
-int stopAfterFailure(int original_error)
-{
+int stopAfterFailure(int original_error) {
     skywalker::motor::dji::FlushReport report{};
     const int stop_ret = dji_bus.stop(report);
     LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, report.zero_sent ? 1 : 0, report.zero_tx_error);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
-float requestedVelocityForTime(std::int64_t elapsed_ms)
-{
-    /* 0.5 s settle, hold the target, then ramp back to 0. */
+float requestedVelocityForTime(std::int64_t elapsed_ms) {
     if (elapsed_ms < 500) {
         return 0.0f;
     }
     if (elapsed_ms < kRunDurationMs) {
-        return kRequestedVelocityRadS * std::sinf((float)elapsed_ms / 1000.0f);
-        // return kRequestedVelocityRadS;
+        return kRequestedVelocityRadS * std::sinf(static_cast<float>(elapsed_ms) / 1000.0f);
     }
     return 0.0f;
 }
 
 } // namespace
 
-int main()
-{
+int main() {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
+    const struct device *vofa_uart = DEVICE_DT_GET(VOFA_UART_NODE);
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
@@ -315,27 +147,34 @@ int main()
         return -ENODEV;
     }
 
+    int ret = requireMotorCapabilities(motor);
+    if (ret < 0) {
+        LOG_ERR("motor lacks current-command or velocity-feedback capability");
+        return ret;
+    }
+
     Vofa vofa{};
     vofa_init(&vofa, vofa_uart);
 
     skywalker::motor::dji::Descriptor descriptor{};
-    int ret = skywalker::motor::dji::describe(motor, descriptor);
+    ret = skywalker::motor::dji::describe(motor, descriptor);
     if (ret < 0 || descriptor.can == nullptr || !device_is_ready(descriptor.can)) {
         LOG_ERR("describe/CAN failed: %d", ret);
         return ret < 0 ? ret : -ENODEV;
     }
     LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u "
             "gear=%.3f limit=%.0f mA",
-            descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot, descriptor.gear_ratio,
-            descriptor.configured_current_limit_a * 1000.0f);
+            descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot,
+            static_cast<double>(descriptor.gear_ratio),
+            static_cast<double>(descriptor.configured_current_limit_a * 1000.0f));
 
-    VelocityController loop = makeVelocityController();
-    ret = validateController(loop);
+    skywalker::control::VelocityController controller{
+        makeVelocityControllerConfig()};
+    ret = controller.validate();
     if (ret < 0) {
         LOG_ERR("controller config invalid: %d", ret);
         return ret;
     }
-
     ret = dji_bus.init(descriptor.can);
     if (ret < 0) {
         LOG_ERR("Bus init failed: %d", ret);
@@ -355,7 +194,6 @@ int main()
     LOG_INF("feedback ready: arming now; keep the GM6020 output "
             "suspended and hold a power cut");
 
-    /* Re-check so a stale reading is not used as the reset baseline. */
     ret = waitForFreshFeedback(motor);
     if (ret < 0) {
         LOG_ERR("feedback lost before arm: %d", ret);
@@ -369,7 +207,7 @@ int main()
         LOG_ERR("initial feedback invalid: %d", ret);
         return ret;
     }
-    ret = resetController(loop, first_feedback.velocity_rad_s);
+    ret = controller.reset(first_feedback.velocity_rad_s);
     if (ret < 0) {
         LOG_ERR("controller reset failed: %d", ret);
         return ret;
@@ -384,7 +222,9 @@ int main()
 
     LOG_INF("speed-control test running: target=%.0f mrad/s, "
             "software current clamp=%.0f mA, duration=%lld ms",
-            kRequestedVelocityRadS * 1000.0f, kSoftwareCurrentAbsMaxA * 1000.0f, static_cast<long long>(kRunDurationMs));
+            static_cast<double>(kRequestedVelocityRadS * 1000.0f),
+            static_cast<double>(kSoftwareCurrentAbsMaxA * 1000.0f),
+            static_cast<long long>(kRunDurationMs));
 
     const std::int64_t run_start_ms = k_uptime_get();
     std::int64_t previous_cycle_ms = run_start_ms;
@@ -408,8 +248,9 @@ int main()
         }
 
         const float request = requestedVelocityForTime(now_signed_ms - run_start_ms);
-        VelocityControlOutput output{};
-        ret = calculateVelocityCurrent(loop, feedback, request, dt_s, output);
+        skywalker::control::VelocityController::Output output{};
+        ret = controller.step(
+            request, feedback.velocity_rad_s, dt_s, output);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
@@ -427,24 +268,24 @@ int main()
 
         if (++telemetry_divider >= kTelemetryPeriodCycles) {
             telemetry_divider = 0U;
-            /* JustFloat channels: request_rad_s, reference_rad_s,
-             * raw_velocity_rad_s, filtered_error_rad_s, p_a, i_a,
-             * filtered_velocity_rad_s, output_a, saturated,
-             * feedback_age_ms.
+            /* JustFloat: request, reference, raw/filtered velocity, error,
+             * P, I, D, feedforward, current, saturated, feedback age ms.
              */
-            const float channels[10] = {
+            const float channels[12] = {
                 request,
                 output.velocity_reference_rad_s,
                 feedback.velocity_rad_s,
-                output.velocity_error_rad_s,
-                output.controller.feedback.p,
-                output.controller.feedback.i,
                 output.filtered_velocity_rad_s,
+                output.velocity_error_rad_s,
+                output.regulator.feedback.p,
+                output.regulator.feedback.i,
+                output.regulator.feedback.d,
+                output.regulator.feedforward,
                 output.current_command_a,
-                output.controller.feedback.saturated ? 1.0f : 0.0f,
+                output.regulator.feedback.saturated ? 1.0f : 0.0f,
                 static_cast<float>(now_ms - feedback.timestamp_ms),
             };
-            vofa_send(&vofa, channels, 10);
+            vofa_send(&vofa, channels, 12);
         }
     }
 

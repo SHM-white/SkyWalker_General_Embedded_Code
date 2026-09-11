@@ -6,42 +6,42 @@
 
 #define DT_DRV_COMPAT skywalker_kalman_filter
 
-#define KALMAN_FILTER_CONFIG_DEFINE(inst)                                    \
-    static const kalmanfilter_config kalmanfilter_config_##inst = {          \
-        .state_dim   = DT_INST_PROP(inst, state_dim),                        \
-        .measure_dim = DT_INST_PROP(inst, measure_dim),                      \
+#define KALMAN_FILTER_CONFIG_DEFINE(inst)                                                                                                                                                              \
+    static const kalmanfilter_config kalmanfilter_config_##inst = {                                                                                                                                    \
+        .state_dim = DT_INST_PROP(inst, state_dim),                                                                                                                                                    \
+        .measure_dim = DT_INST_PROP(inst, measure_dim),                                                                                                                                                \
     }
 
 #define KF_N(inst) DT_INST_PROP(inst, state_dim)
 #define KF_M(inst) DT_INST_PROP(inst, measure_dim)
 
-#define KALMAN_FILTER_DATA_DEFINE(inst)                                      \
-    static struct {                                                          \
-        KalmanFilter kf;                                                     \
-        float F_buf[KF_N(inst) * KF_N(inst)];                                \
-        float H_buf[KF_M(inst) * KF_N(inst)];                                \
-        float R_buf[KF_M(inst) * KF_M(inst)];                                \
-        float X_buf[KF_N(inst)];                                             \
-        float P_buf[KF_N(inst) * KF_N(inst)];                                \
-        float Q_buf[KF_N(inst) * KF_N(inst)];                                \
-        float K_buf[KF_N(inst) * KF_M(inst)];                                \
+#define KALMAN_FILTER_DATA_DEFINE(inst)                                                                                                                                                                \
+    static struct {                                                                                                                                                                                    \
+        KalmanFilter kf;                                                                                                                                                                               \
+        float F_buf[KF_N(inst) * KF_N(inst)];                                                                                                                                                          \
+        float H_buf[KF_M(inst) * KF_N(inst)];                                                                                                                                                          \
+        float R_buf[KF_M(inst) * KF_M(inst)];                                                                                                                                                          \
+        float X_buf[KF_N(inst)];                                                                                                                                                                       \
+        float P_buf[KF_N(inst) * KF_N(inst)];                                                                                                                                                          \
+        float Q_buf[KF_N(inst) * KF_N(inst)];                                                                                                                                                          \
+        float K_buf[KF_N(inst) * KF_M(inst)];                                                                                                                                                          \
     } kalman_filter_data_##inst
 
 static int skywalker_kalman_filter_init(const struct device *dev) {
     const kalmanfilter_config *cfg = dev->config;
-    KalmanFilter              *kf  = dev->data;
+    KalmanFilter *kf = dev->data;
     uint16_t n = cfg->state_dim;
     uint16_t m = cfg->measure_dim;
 
     /* 指针偏移定位 data 内部各 buffer */
-    uint8_t *base  = (uint8_t *)dev->data;
-    float   *F_buf = (float *)(base + sizeof(KalmanFilter));
-    float   *H_buf = F_buf + n * n;
-    float   *R_buf = H_buf + m * n;
-    float   *X_buf = R_buf + m * m;
-    float   *P_buf = X_buf + n;
-    float   *Q_buf = P_buf + n * n;
-    float   *K_buf = Q_buf + n * n;
+    uint8_t *base = (uint8_t *)dev->data;
+    float *F_buf = (float *)(base + sizeof(KalmanFilter));
+    float *H_buf = F_buf + n * n;
+    float *R_buf = H_buf + m * n;
+    float *X_buf = R_buf + m * m;
+    float *P_buf = X_buf + n;
+    float *Q_buf = P_buf + n * n;
+    float *K_buf = Q_buf + n * n;
 
     /* 绑定矩阵 */
     Matrix_Init(&kf->F, n, n, F_buf);
@@ -53,29 +53,22 @@ static int skywalker_kalman_filter_init(const struct device *dev) {
     Matrix_Init(&kf->K, n, m, K_buf);
 
     /* 设置初始值 */
-    Matrix_SetDiag(&kf->F, 1.0f);        /* F = I */
-    Matrix_SetDiag(&kf->P, 1000.0f);     /* 高初始不确定度 */
-    Matrix_SetDiag(&kf->Q, 0.001f);      /* 过程噪声 */
-    Matrix_SetDiag(&kf->R, 1.0f);        /* 测量噪声 */
+    Matrix_SetDiag(&kf->F, 1.0f);    /* F = I */
+    Matrix_SetDiag(&kf->P, 1000.0f); /* 高初始不确定度 */
+    Matrix_SetDiag(&kf->Q, 0.001f);  /* 过程噪声 */
+    Matrix_SetDiag(&kf->R, 1.0f);    /* 测量噪声 */
     Matrix_Zero(&kf->H);
     for (uint16_t i = 0; i < m && i < n; i++)
-        kf->H.pData[i * n + i] = 1.0f;   /* H = I 的前 m 行 */
-    Matrix_Zero(&kf->X);                 /* X = 0 */
+        kf->H.pData[i * n + i] = 1.0f; /* H = I 的前 m 行 */
+    Matrix_Zero(&kf->X);               /* X = 0 */
 
     return 0;
 }
 
-#define KALMAN_FILTER_INST(inst)                                             \
-    KALMAN_FILTER_CONFIG_DEFINE(inst);                                       \
-    KALMAN_FILTER_DATA_DEFINE(inst);                                         \
-    DEVICE_DT_DEFINE(DT_DRV_INST(inst),                                      \
-                     skywalker_kalman_filter_init,                           \
-                     NULL,                                                   \
-                     &kalman_filter_data_##inst,                             \
-                     &kalmanfilter_config_##inst,                            \
-                     POST_KERNEL,                                            \
-                     50,                                                     \
-                     NULL);
+#define KALMAN_FILTER_INST(inst)                                                                                                                                                                       \
+    KALMAN_FILTER_CONFIG_DEFINE(inst);                                                                                                                                                                 \
+    KALMAN_FILTER_DATA_DEFINE(inst);                                                                                                                                                                   \
+    DEVICE_DT_DEFINE(DT_DRV_INST(inst), skywalker_kalman_filter_init, NULL, &kalman_filter_data_##inst, &kalmanfilter_config_##inst, POST_KERNEL, 50, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(KALMAN_FILTER_INST)
 

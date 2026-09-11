@@ -1,6 +1,7 @@
 #ifndef IMU_H
 #define IMU_H
 
+#include <control/feedforward_pid.h>
 #include <zephyr/device.h>
 
 /**
@@ -12,11 +13,11 @@
  */
 struct imu_filter_api {
     /** @brief 初始化滤波器状态 */
-    void (*init)     (const struct device *dev);
+    void (*init)(const struct device *dev);
     /** @brief 预测（陀螺仪积分 + 协方差传播） */
-    void (*predict)  (const struct device *dev, const float gyro[3], float dt, float angle[3]);
+    void (*predict)(const struct device *dev, const float gyro[3], float dt, float angle[3]);
     /** @brief 修正（加速度计重力观测更新） */
-    void (*correct)  (const struct device *dev, const float accel[3]);
+    void (*correct)(const struct device *dev, const float accel[3]);
     /** @brief 读取姿态角 (rad), [roll, pitch, yaw] */
     void (*get_angle)(const struct device *dev, float angle[3]);
 };
@@ -29,20 +30,21 @@ typedef struct {
 
 /** @brief IMU 配置（ROM，由 DT 填充） */
 typedef struct {
-    const struct device *accel_dev;  /* 加速度计设备 */
-    const struct device *gyro_dev;   /* 陀螺仪设备 */
-    const struct device *heat_dev;   /* PWM 加热设备 */
-    const struct device *filter_dev; /* 解算滤波器设备 */
-    const struct device *pid_dev;     /* 温度 PID 设备 */
-    const char *estimator;           /* 解算方法，如 "ekf" */
+    const struct device *accel_dev;                 /* 加速度计设备 */
+    const struct device *gyro_dev;                  /* 陀螺仪设备 */
+    const struct device *heat_dev;                  /* PWM 加热设备 */
+    const struct device *filter_dev;                /* 解算滤波器设备 */
+    control_feedforward_pid_config heat_controller; /* 温控器参数 */
+    const char *estimator;                          /* 解算方法，如 "ekf" */
 } imu_config;
 
 /** @brief IMU 运行时数据 */
 typedef struct {
-    float accel[3];  /* 加速度 (m/s²), x/y/z */
-    float gyro[3];   /* 角速度   (rad/s), x/y/z */
-    float temp;      /* 温度     (°C) */
-    float angle[3];  /* 姿态角   (rad), roll/pitch/yaw */
+    float accel[3];                                      /* 加速度 (m/s²), x/y/z */
+    float gyro[3];                                       /* 角速度   (rad/s), x/y/z */
+    float temp;                                          /* 温度     (°C) */
+    float angle[3];                                      /* 姿态角   (rad), roll/pitch/yaw */
+    control_feedforward_pid_state heat_controller_state; /* 温控器状态 */
 } imu_data;
 
 /**
@@ -61,12 +63,12 @@ void imu_estimate(const struct device *dev, float dt);
 /**
  * @brief PID 温度控制
  *
- * 低频调用（~10 Hz），通过 pid_dev 计算 PWM 脉宽并写入 heat_dev。
+ * 低频调用（~10 Hz），通过 control PID 计算 PWM 脉宽并写入 heat_dev。
  *
  * @param dev         IMU 设备指针
  * @param target_temp 目标温度 (°C)
  * @param dt          距上次调用时间（秒）
  */
-void imu_heat_control(const struct device *dev, float target_temp, float dt);
+int imu_heat_control(const struct device *dev, float target_temp, float dt);
 
 #endif // IMU_H

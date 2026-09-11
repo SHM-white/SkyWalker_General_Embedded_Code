@@ -8,8 +8,8 @@
         status = "okay";
         can-bus = <&can1>;
         motor-id = <1>;
-        master-id = <0>;
-        control-mode = "mit";
+        master-id = <0x11>;
+        control-mode = "velocity";
 
         /* Must match PMAX/VMAX/TMAX read from Damiao Assistant. */
         p-max-millirad = <12500>;

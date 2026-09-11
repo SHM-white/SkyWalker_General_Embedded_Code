@@ -1,10 +1,10 @@
 #ifndef KALMAN_FILTER_H
 #define KALMAN_FILTER_H
 
-#include "lib/matrix/matrix.h"               // Matrix_Init 宏 + Matrix 类型
+#include "lib/matrix/matrix.h" // Matrix_Init 宏 + Matrix 类型
 
 typedef struct {
-    uint16_t state_dim;      // 状态向量维度 n
+    uint16_t state_dim;   // 状态向量维度 n
     uint16_t measure_dim; // 观测向量维度 m
 } kalmanfilter_config;
 
@@ -23,10 +23,10 @@ typedef struct {
  *   K(n×m)  卡尔曼增益（内部计算，只读）
  */
 typedef struct {
-    Matrix  F;         // 状态转移矩阵
-    Matrix  H, R;     // 观测矩阵, 测量噪声协方差
-    Matrix  X, P, Q;  // 状态估计, 误差协方差, 过程噪声协方差
-    Matrix  K;        // 卡尔曼增益
+    Matrix F;       // 状态转移矩阵
+    Matrix H, R;    // 观测矩阵, 测量噪声协方差
+    Matrix X, P, Q; // 状态估计, 误差协方差, 过程噪声协方差
+    Matrix K;       // 卡尔曼增益
 } KalmanFilter;
 
 void KalmanFilter_Predict(KalmanFilter *kf);

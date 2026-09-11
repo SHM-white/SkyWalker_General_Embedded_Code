@@ -4,8 +4,7 @@
 
 #include <control/slew_rate_limiter.h>
 
-static float clampf(float value, float minimum, float maximum)
-{
+static float clampf(float value, float minimum, float maximum) {
     if (value < minimum) {
         return minimum;
     }
@@ -15,24 +14,17 @@ static float clampf(float value, float minimum, float maximum)
     return value;
 }
 
-int control_slew_rate_validate(
-    const control_slew_rate_config *config)
-{
+int control_slew_rate_validate(const control_slew_rate_config *config) {
     if (config == NULL) {
         return -EINVAL;
     }
-    if (!isfinite(config->rising_rate_per_s) ||
-        !isfinite(config->falling_rate_per_s) ||
-        config->rising_rate_per_s < 0.0f ||
-        config->falling_rate_per_s < 0.0f) {
+    if (!isfinite(config->rising_rate_per_s) || !isfinite(config->falling_rate_per_s) || config->rising_rate_per_s < 0.0f || config->falling_rate_per_s < 0.0f) {
         return -EINVAL;
     }
     return 0;
 }
 
-int control_slew_rate_reset(control_slew_rate_state *state,
-                            float current_value)
-{
+int control_slew_rate_reset(control_slew_rate_state *state, float current_value) {
     if (state == NULL || !isfinite(current_value)) {
         return -EINVAL;
     }
@@ -45,16 +37,8 @@ int control_slew_rate_reset(control_slew_rate_state *state,
     return 0;
 }
 
-int control_slew_rate_step(control_slew_rate_state *state,
-                           const control_slew_rate_config *config,
-                           float requested_value,
-                           float dt_s,
-                           float *limited_value,
-                           float *limited_rate)
-{
-    if (state == NULL ||
-        limited_value == NULL ||
-        limited_rate == NULL) {
+int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config, float requested_value, float dt_s, float *limited_value, float *limited_rate) {
+    if (state == NULL || limited_value == NULL || limited_rate == NULL) {
         return -EINVAL;
     }
 
@@ -81,16 +65,13 @@ int control_slew_rate_step(control_slew_rate_state *state,
         return -ERANGE;
     }
 
-    const float rate_limit = delta >= 0.0f
-                           ? config->rising_rate_per_s
-                           : config->falling_rate_per_s;
+    const float rate_limit = delta >= 0.0f ? config->rising_rate_per_s : config->falling_rate_per_s;
     const float maximum_delta = rate_limit * dt_s;
     if (!isfinite(maximum_delta)) {
         return -ERANGE;
     }
 
-    const float applied_delta =
-        clampf(delta, -maximum_delta, maximum_delta);
+    const float applied_delta = clampf(delta, -maximum_delta, maximum_delta);
     const float next_value = state->value + applied_delta;
     const float next_rate = applied_delta / dt_s;
     if (!isfinite(next_value) || !isfinite(next_rate)) {

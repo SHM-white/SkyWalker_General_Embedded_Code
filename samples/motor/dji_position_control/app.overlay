@@ -16,6 +16,9 @@
         gear-ratio-num = <1>;
         gear-ratio-den = <1>;
 
+        /* Replace after reading raw.encoder at the mechanism's zero pose. */
+        encoder-zero-ticks = <0>;
+
         current-loop-confirmed;
     };
 };

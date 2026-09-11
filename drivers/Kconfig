@@ -1,10 +1,5 @@
 menu "Skywalker Device Drivers"
 
-config SKYWALKER_DRIVER_PID
-    bool "Skywalker PID Controller"
-    help
-        Enable the PID Controller driver.
-
 config SKYWALKER_DRIVER_KALMAN_FILTER
     bool "Skywalker Kalman Filter"
     help
@@ -13,6 +8,7 @@ config SKYWALKER_DRIVER_KALMAN_FILTER
 config SKYWALKER_DRIVER_IMU
       bool "Skywalker IMU Driver"
       select CMSIS_DSP_FASTMATH
+      select SKYWALKER_LIB_CONTROL
       help
           Enable the IMU attitude estimation driver.
           Select estimation method via DT property "estimator".   

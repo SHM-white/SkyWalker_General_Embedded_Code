@@ -66,32 +66,16 @@ struct DecodedFeedback {
 
 bool isFaultStatus(DriveStatus status);
 
-int controlFrameId(ControlMode mode,
-                   std::uint16_t motor_id,
-                   std::uint16_t &out);
+int controlFrameId(ControlMode mode, std::uint16_t motor_id, std::uint16_t &out);
 
-int buildMitFrame(std::uint16_t motor_id,
-                  const Limits &limits,
-                  const MitCommand &command,
-                  struct can_frame &out);
+int buildMitFrame(std::uint16_t motor_id, const Limits &limits, const MitCommand &command, struct can_frame &out);
 
-int buildPositionVelocityFrame(std::uint16_t motor_id,
-                               float position_rad,
-                               float velocity_rad_s,
-                               struct can_frame &out);
+int buildPositionVelocityFrame(std::uint16_t motor_id, float position_rad, float velocity_rad_s, struct can_frame &out);
 
-int buildVelocityFrame(std::uint16_t motor_id,
-                       float velocity_rad_s,
-                       struct can_frame &out);
+int buildVelocityFrame(std::uint16_t motor_id, float velocity_rad_s, struct can_frame &out);
 
-int buildSpecialFrame(ControlMode mode,
-                      std::uint16_t motor_id,
-                      SpecialCommand command,
-                      struct can_frame &out);
+int buildSpecialFrame(ControlMode mode, std::uint16_t motor_id, SpecialCommand command, struct can_frame &out);
 
-int decodeFeedback(const struct can_frame &frame,
-                   std::uint8_t expected_motor_id,
-                   const Limits &limits,
-                   DecodedFeedback &out);
+int decodeFeedback(const struct can_frame &frame, std::uint8_t expected_motor_id, const Limits &limits, DecodedFeedback &out);
 
 } // namespace skywalker::motor::dm

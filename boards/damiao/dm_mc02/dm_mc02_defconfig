@@ -31,3 +31,6 @@ CONFIG_BMI08X=y
 # Board status LED uses scheduler runtime stats to show CPU load.
 CONFIG_THREAD_RUNTIME_STATS=y
 CONFIG_SCHED_THREAD_USAGE_ALL=y
+
+# Enable NOCACHE_MEMORY to avoid cache issues with DMA and other peripherals.
+CONFIG_NOCACHE_MEMORY=y
