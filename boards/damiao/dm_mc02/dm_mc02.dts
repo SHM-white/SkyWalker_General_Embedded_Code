@@ -12,8 +12,8 @@
 	compatible = "damiao,mc02";
 
 	chosen {
-		zephyr,console = &usart1;
-		zephyr,shell-uart = &usart1;
+		zephyr,console = &usart10;
+		zephyr,shell-uart = &usart10;
 		zephyr,sram = &sram0;
 		zephyr,button = &user_button;
 		zephyr,flash = &flash0;
@@ -35,6 +35,7 @@
 	aliases {
 		sw0 = &user_button;
 		led-strip = &rgb_led;
+		telemetry-uart = &usart1;
 	};
 
 	power_en {

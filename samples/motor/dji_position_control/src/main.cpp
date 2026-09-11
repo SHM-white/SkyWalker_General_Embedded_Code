@@ -16,12 +16,18 @@
 LOG_MODULE_REGISTER(dji_position_control, LOG_LEVEL_INF);
 
 #define MOTOR0_NODE DT_ALIAS(motor0)
+#define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
+
+#if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
+#error "A ready telemetry-uart alias is required for VOFA"
+#endif
 
 namespace {
 
 constexpr std::int64_t kControlPeriodMs = 5;
 constexpr std::uint32_t kTelemetryPeriodCycles = 5U;
 constexpr float kTargetOffsetRad = 3.0f;
+constexpr std::int64_t kAbsoluteTargetHoldMs = 5000;
 
 constexpr float kPositionKp = 6.0f;
 constexpr float kVelocityKp = 0.03f;
@@ -40,7 +46,7 @@ enum class PositionTargetMode {
 };
 
 /* Keep relative mode for the first post-refactor hardware comparison. */
-constexpr PositionTargetMode kPositionTargetMode = PositionTargetMode::ContinuousRelative;
+constexpr PositionTargetMode kPositionTargetMode = PositionTargetMode::FixedZeroAbsolute;
 
 skywalker::motor::dji::Bus dji_bus;
 volatile std::int32_t runtime_diagnostic = 0;
@@ -98,7 +104,8 @@ skywalker::control::PositionController::Config makePositionControllerConfig() {
 }
 
 std::uint32_t requiredMotorCapabilities() {
-    std::uint32_t required = skywalker::motor::CommandCurrent | skywalker::motor::FeedbackPosition | skywalker::motor::FeedbackVelocity;
+    std::uint32_t required = skywalker::motor::CommandCurrent | skywalker::motor::FeedbackPosition |
+                             skywalker::motor::FeedbackVelocity;
     if (kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute) {
         required |= skywalker::motor::FeedbackAbsolutePosition;
     }
@@ -138,10 +145,12 @@ int readFreshPositionFeedback(const struct device *motor, std::uint64_t now_ms, 
     if (!std::isfinite(feedback.position_rad) || !std::isfinite(feedback.velocity_rad_s)) {
         return -EINVAL;
     }
-    if (kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute && !std::isfinite(feedback.absolute_position_rad)) {
+    if (kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute &&
+        !std::isfinite(feedback.absolute_position_rad)) {
         return -EINVAL;
     }
-    if (feedback.timestamp_ms == 0U || now_ms < feedback.timestamp_ms || now_ms - feedback.timestamp_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
+    if (feedback.timestamp_ms == 0U || now_ms < feedback.timestamp_ms ||
+        now_ms - feedback.timestamp_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
         return -ESTALE;
     }
     return 0;
@@ -151,7 +160,8 @@ int stopAfterFailure(int original_error) {
     runtime_diagnostic = original_error;
     skywalker::motor::dji::FlushReport report{};
     const int stop_ret = dji_bus.stop(report);
-    LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, report.zero_sent ? 1 : 0, report.zero_tx_error);
+    LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, report.zero_sent ? 1 : 0,
+            report.zero_tx_error);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
@@ -169,21 +179,18 @@ float requestedRelativePositionRad(std::int64_t elapsed_ms, float /* initial_pos
     return final_target_rad * 3.0f;
 }
 
-float requestedAbsolutePositionRad(std::int64_t elapsed_ms, float initial_absolute_rad) {
-    const std::int64_t phase_ms = elapsed_ms % 15000;
-    if (phase_ms < 3000) {
-        return initial_absolute_rad;
+float requestedAbsolutePositionRad(std::int64_t elapsed_ms) {
+    const std::int64_t phase_ms = elapsed_ms % (4 * kAbsoluteTargetHoldMs);
+    if (phase_ms < kAbsoluteTargetHoldMs) {
+        return 0.0f;
     }
-    if (phase_ms < 6000) {
-        return 20.0f * kPi / 180.0f;
+    if (phase_ms < 2 * kAbsoluteTargetHoldMs) {
+        return 90.0f * kPi / 180.0f;
     }
-    if (phase_ms < 9000) {
-        return -20.0f * kPi / 180.0f;
+    if (phase_ms < 3 * kAbsoluteTargetHoldMs) {
+        return 180.0f * kPi / 180.0f;
     }
-    if (phase_ms < 12000) {
-        return 170.0f * kPi / 180.0f;
-    }
-    return -170.0f * kPi / 180.0f;
+    return 270.0f * kPi / 180.0f;
 }
 
 } // namespace
@@ -191,7 +198,7 @@ float requestedAbsolutePositionRad(std::int64_t elapsed_ms, float initial_absolu
 int main() {
     runtime_diagnostic = 1;
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart10));
+    const struct device *vofa_uart = DEVICE_DT_GET(VOFA_UART_NODE);
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
@@ -203,7 +210,8 @@ int main() {
 
     int ret = requireMotorCapabilities(motor);
     if (ret < 0) {
-        LOG_ERR("motor capability mismatch: required=0x%08x available=0x%08x", requiredMotorCapabilities(), skywalker::motor::capabilities(motor));
+        LOG_ERR("motor capability mismatch: required=0x%08x available=0x%08x", requiredMotorCapabilities(),
+                skywalker::motor::capabilities(motor));
         return ret;
     }
 
@@ -218,8 +226,7 @@ int main() {
     }
     runtime_diagnostic = 10;
 
-    skywalker::control::PositionController controller{
-        makePositionControllerConfig()};
+    skywalker::control::PositionController controller{makePositionControllerConfig()};
     ret = controller.validate();
     if (ret < 0) {
         LOG_ERR("controller config invalid: %d", ret);
@@ -265,8 +272,7 @@ int main() {
         LOG_ERR("initial feedback invalid: %d", ret);
         return ret;
     }
-    ret = controller.reset(
-        first_feedback.position_rad, first_feedback.velocity_rad_s);
+    ret = controller.reset(first_feedback.position_rad, first_feedback.velocity_rad_s);
     if (ret < 0) {
         LOG_ERR("controller reset failed: %d", ret);
         return ret;
@@ -274,12 +280,11 @@ int main() {
 
     const float initial_position_rad = first_feedback.position_rad;
     const float final_target_rad = initial_position_rad + kTargetOffsetRad;
-    const float initial_absolute_rad = first_feedback.absolute_position_rad;
-
     skywalker::motor::dji::FlushReport arm_report{};
     ret = dji_bus.arm(arm_report);
     if (ret < 0 || !arm_report.zero_sent) {
-        LOG_ERR("arm/zero failed: ret=%d zero=%d zero_err=%d", ret, arm_report.zero_sent ? 1 : 0, arm_report.zero_tx_error);
+        LOG_ERR("arm/zero failed: ret=%d zero=%d zero_err=%d", ret, arm_report.zero_sent ? 1 : 0,
+                arm_report.zero_tx_error);
         return ret < 0 ? ret : -EIO;
     }
     runtime_diagnostic = 3;
@@ -318,19 +323,16 @@ int main() {
             requested_target_rad = requestedRelativePositionRad(elapsed_ms, initial_position_rad, final_target_rad);
             continuous_target_rad = requested_target_rad;
         } else {
-            requested_target_rad = requestedAbsolutePositionRad(elapsed_ms, initial_absolute_rad);
-            ret = control_angle_nearest_continuous_target(requested_target_rad, feedback.absolute_position_rad, feedback.position_rad, &continuous_target_rad);
+            requested_target_rad = requestedAbsolutePositionRad(elapsed_ms);
+            ret = control_angle_nearest_continuous_target(requested_target_rad, feedback.absolute_position_rad,
+                                                          feedback.position_rad, &continuous_target_rad);
             if (ret < 0) {
                 return stopAfterFailure(ret);
             }
         }
 
         skywalker::control::PositionController::Output output{};
-        ret = controller.step(continuous_target_rad,
-                              feedback.position_rad,
-                              feedback.velocity_rad_s,
-                              dt_s,
-                              output);
+        ret = controller.step(continuous_target_rad, feedback.position_rad, feedback.velocity_rad_s, dt_s, output);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
@@ -353,7 +355,9 @@ int main() {
              * position output, velocity reference/raw/error/P/I, current,
              * dt ms, age ms.
              */
-            const float absolute_position_rad = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute ? feedback.absolute_position_rad : 0.0f;
+            const float absolute_position_rad = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
+                                                    ? feedback.absolute_position_rad
+                                                    : 0.0f;
             const float channels[14] = {
                 requested_target_rad,
                 continuous_target_rad,

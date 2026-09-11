@@ -82,6 +82,7 @@
         die-temp0 = &die_temp;
         usart1 = &usart6;
         usart2 = &usart1;
+        telemetry-uart = &usart6;
         pwm-led0 = &red_pwm_led;
         pwm-led1 = &green_pwm_led;
         pwm-led2 = &blue_pwm_led;
@@ -301,4 +302,3 @@ zephyr_udc0: &usbotg_fs {
         fifo-watermark = <16>;
     };
 };
-

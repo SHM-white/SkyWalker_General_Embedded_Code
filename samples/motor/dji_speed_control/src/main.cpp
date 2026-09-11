@@ -15,6 +15,11 @@
 LOG_MODULE_REGISTER(dji_speed_control, LOG_LEVEL_INF);
 
 #define MOTOR0_NODE DT_ALIAS(motor0)
+#define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
+
+#if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
+#error "A ready telemetry-uart alias is required for VOFA"
+#endif
 
 namespace {
 
@@ -132,7 +137,7 @@ float requestedVelocityForTime(std::int64_t elapsed_ms) {
 
 int main() {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart10));
+    const struct device *vofa_uart = DEVICE_DT_GET(VOFA_UART_NODE);
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
@@ -159,7 +164,9 @@ int main() {
     }
     LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u "
             "gear=%.3f limit=%.0f mA",
-            descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot, descriptor.gear_ratio, descriptor.configured_current_limit_a * 1000.0f);
+            descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot,
+            static_cast<double>(descriptor.gear_ratio),
+            static_cast<double>(descriptor.configured_current_limit_a * 1000.0f));
 
     skywalker::control::VelocityController controller{
         makeVelocityControllerConfig()};
@@ -215,7 +222,9 @@ int main() {
 
     LOG_INF("speed-control test running: target=%.0f mrad/s, "
             "software current clamp=%.0f mA, duration=%lld ms",
-            kRequestedVelocityRadS * 1000.0f, kSoftwareCurrentAbsMaxA * 1000.0f, static_cast<long long>(kRunDurationMs));
+            static_cast<double>(kRequestedVelocityRadS * 1000.0f),
+            static_cast<double>(kSoftwareCurrentAbsMaxA * 1000.0f),
+            static_cast<long long>(kRunDurationMs));
 
     const std::int64_t run_start_ms = k_uptime_get();
     std::int64_t previous_cycle_ms = run_start_ms;

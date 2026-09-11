@@ -39,7 +39,7 @@ constexpr std::int64_t kRunDurationMs = 300000000;
  * which stalls the motor as "jitter without turning".
  * If the bench direction is actually swapped, flip the sign below.
  */
-constexpr float kRequestedVelocityRadS = 18.0f;
+constexpr float kRequestedVelocityRadS = 5.0f;
 constexpr float kRequestedVelocityAbsMaxRadS = 100.0f;
 
 /*
