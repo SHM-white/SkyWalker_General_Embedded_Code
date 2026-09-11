@@ -72,15 +72,14 @@ skywalker_code/                 # west module（module.yml：kconfig/cmake/board
 - **manifest**：`west.yml` 只导入 `cmsis / cmsis-dsp / hal_st / hal_stm32 / mcuboot / segger` 等白名单子项目，Zephyr 版本以 `6085aade…` revision 锁定。
 - **module**：`zephyr/module.yml` 声明 `board_root: .` 与 `dts_root: .`，因此 `boards/` 与 `dts/bindings/` 自动进入 Zephyr 的板卡/binding 搜索路径。
 - **编译单元**：根 `CMakeLists.txt` 固定 C11/C++20，`zephyr_include_directories(include)`；`drivers/` 与 `lib/` 下每个子目录用**无参 `zephyr_library()`** 打包，是否参与构建由 `CONFIG_SKYWALKER_*` 门控（`add_subdirectory_ifdef`）。
-- **Kconfig**：`drivers/Kconfig`（`SKYWALKER_DRIVER_PID / KALMAN_FILTER / IMU / MOTOR`）与 `lib/Kconfig`（`SKYWALKER_LIB_MATRIX / VOFA / CONTROL`）。公共前缀均为 `SKYWALKER_`。
+- **Kconfig**：`drivers/Kconfig`（`SKYWALKER_DRIVER_KALMAN_FILTER / IMU / MOTOR`）与 `lib/Kconfig`（`SKYWALKER_LIB_MATRIX / VOFA / CONTROL`）。公共前缀均为 `SKYWALKER_`。
 
 ### 设备驱动（drivers/）
 
 | 驱动 | compatible | 头文件 | 说明 |
 |---|---|---|---|
-| IMU | `skywalker,imu` | `drivers/imu/imu.h` | 通用解算器接口（`imu_fetch / imu_estimate / imu_heat_control`），内置 `"ekf"` 四元数解算器；通过 phandle 组合任意 accel/gyro/温控设备 |
+| IMU | `skywalker,imu` | `drivers/imu/imu.h` | 通用解算器接口（`imu_fetch / imu_estimate / imu_heat_control`），内置 `"ekf"` 四元数解算器；通过 phandle 组合 accel/gyro/PWM/filter，并使用 `lib/control` 完成温控 |
 | Kalman 滤波 | `skywalker,kalman_filter` | `drivers/kalman_filter/kalman_filter.h` | 通用 `F/H/R/X/P/Q/K` 滤波设备，CMSIS-DSP 实现，被 IMU-EKF 复用 |
-| PID（设备） | `skywalker,pid` | `drivers/pid/pid.h` | 设备树实例化的控制器设备（数值以 string 属性存储，规避 DTS 无 float 的限制），用于 IMU 温控等场景 |
 | DJI 电机 | `dji,gm6020-current` / `dji,m3508-c620` / `dji,m2006-c610` | `drivers/motor/*.hpp`（C++） | 见下文 |
 
 ### DJI 电机驱动（C++，`skywalker::motor::dji`）
@@ -187,7 +186,7 @@ west flash                # dm_mc02 默认 pyocd；rm_typec 用 openocd
 
 ## 常见坑位与约定
 
-1. **两个 PID 同名不同物**：`drivers/pid`（设备树实例化的“控制器设备”，供 IMU 温控等）≠ `lib/control/pid`（纯算法 PID，供控制环调用）。引用算法请用 `control_pid_*` 与 `include/control/pid.h`。
+1. **PID 属于 control 层**：PID 是纯数值算法，不注册 Zephyr device；引用算法请使用 `control_pid_*` / `control_feedforward_pid_*` 与 `include/control/` 下的头文件。
 2. **GM6020 电流环**需电机固件 ≥1.0.11.2，且设备树节点必须声明 `current-loop-confirmed;`，`current-limit-ma` 上限 3000 mA。
 3. **当前仅电流模式**：`setTorque` 未实现；开环测试请用 `setCurrent`。
 4. **C++ 栈**：C++ 样例建议调大 `CONFIG_MAIN_STACK_SIZE`（如 8192）。

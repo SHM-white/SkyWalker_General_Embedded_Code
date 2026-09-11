@@ -23,10 +23,36 @@ properties:
     type: phandle
     required: true
     description: 解算滤波器设备节点（kalman_filter 等）
-  pid-dev:
-    type: phandle
+  heat-kp:
+    type: string
     required: true
-    description: 温度控制 PID 设备节点
+  heat-ki:
+    type: string
+    required: true
+  heat-kd:
+    type: string
+    required: true
+  heat-integral-max:
+    type: string
+    required: true
+  heat-output-max:
+    type: string
+    required: true
+  heat-deadband:
+    type: string
+    required: true
+  heat-derivative-tau-s:
+    type: string
+    required: true
+  heat-dt-min-s:
+    type: string
+    required: true
+  heat-dt-max-s:
+    type: string
+    required: true
+  heat-feedforward-ns:
+    type: string
+    required: true
   estimator:
     type: string
     required: true
