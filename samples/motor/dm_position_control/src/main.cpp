@@ -14,7 +14,7 @@
 #include <drivers/motor/motor.hpp>
 #include <lib/vofa/vofa.h>
 
-LOG_MODULE_REGISTER(dm_velocity_control, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(dm_position_control, LOG_LEVEL_INF);
 
 #define MOTOR0_NODE DT_ALIAS(motor0)
 #define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
@@ -25,9 +25,7 @@ LOG_MODULE_REGISTER(dm_velocity_control, LOG_LEVEL_INF);
 
 #if defined(CONFIG_BOARD_DM_MC02)
 #define XT30_1_NODE DT_NODELABEL(power1)
-#define XT30_2_NODE DT_NODELABEL(power2)
 static const struct device *const xt30_1 = DEVICE_DT_GET(XT30_1_NODE);
-[[maybe_unused]] static const struct device *const xt30_2 = DEVICE_DT_GET(XT30_2_NODE);
 
 static int xt30_enable(const struct device *dev) {
     if (!device_is_ready(dev)) {
@@ -48,13 +46,19 @@ constexpr std::int64_t kMotorPowerOnDelayMs = 1500;
 constexpr std::int64_t kDisableRetryPeriodMs = 100;
 constexpr std::int64_t kDisabledHandshakeTimeoutMs = 3000;
 constexpr std::int64_t kControlPeriodMs = 5;
-/* One telemetry frame per control cycle: 200 Hz. */
+constexpr std::int64_t kPositionStepPeriodMs = 6000;
 constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
-constexpr float kSpeedSafetyMarginRadS = 1.0f;
+constexpr float kSpeedSafetyMarginRadS = 10.0f;
 constexpr float kTemperatureCutoffC = 60.0f;
+constexpr float kPi = 3.14159265358979323846f;
 
-float targetVelocityRadS() {
-    /* Positive values rotate forward; negative values rotate in reverse. */
+float targetPositionFromSavedZeroRad(bool at_ninety_degrees) {
+    /* Alternate between the persistent zero and +90 degrees. */
+    constexpr float step_degrees = 90.0f;
+    return at_ninety_degrees ? step_degrees * kPi / 180.0f : 0.0f;
+}
+
+float positionVelocityLimitRadS() {
     return 0.5f;
 }
 
@@ -141,12 +145,27 @@ int main() {
         return ret < 0 ? ret : -ENODEV;
     }
 
-    LOG_INF("DM-J4310 id=%u master=0x%03x command=0x%03x "
-            "P/V/T=%d/%d/%d",
+    const float zero_position_rad = targetPositionFromSavedZeroRad(false);
+    const float ninety_degree_position_rad = targetPositionFromSavedZeroRad(true);
+    const float velocity_limit_rad_s = positionVelocityLimitRadS();
+    if (!std::isfinite(zero_position_rad) || !std::isfinite(ninety_degree_position_rad) ||
+        std::fabs(zero_position_rad) > descriptor.limits.position_max_rad ||
+        std::fabs(ninety_degree_position_rad) > descriptor.limits.position_max_rad) {
+        LOG_ERR("Invalid position step: zero=%d mrad ninety=%d mrad", static_cast<int>(zero_position_rad * 1000.0f),
+                static_cast<int>(ninety_degree_position_rad * 1000.0f));
+        return -ERANGE;
+    }
+    if (!std::isfinite(velocity_limit_rad_s) || velocity_limit_rad_s < 0.0f ||
+        velocity_limit_rad_s > descriptor.limits.velocity_max_rad_s) {
+        LOG_ERR("Invalid velocity limit: %d mrad/s", static_cast<int>(velocity_limit_rad_s * 1000.0f));
+        return -ERANGE;
+    }
+    const float speed_cutoff_rad_s = velocity_limit_rad_s + kSpeedSafetyMarginRadS;
+
+    LOG_INF("DM-J4310 id=%u master=0x%03x command=0x%03x step_mrad=%d period_ms=%lld velocity_limit_mrad_s=%d",
             descriptor.motor_id, descriptor.master_id, descriptor.control_id,
-            static_cast<int>(descriptor.limits.position_max_rad * 1000.0f),
-            static_cast<int>(descriptor.limits.velocity_max_rad_s * 1000.0f),
-            static_cast<int>(descriptor.limits.torque_max_nm * 1000.0f));
+            static_cast<int>(ninety_degree_position_rad * 1000.0f), kPositionStepPeriodMs,
+            static_cast<int>(velocity_limit_rad_s * 1000.0f));
 
     ret = dm_bus.init(descriptor.can);
     if (ret < 0) {
@@ -164,14 +183,6 @@ int main() {
         return ret;
     }
 
-    const float target_velocity_rad_s = targetVelocityRadS();
-    if (!std::isfinite(target_velocity_rad_s) ||
-        std::fabs(target_velocity_rad_s) > descriptor.limits.velocity_max_rad_s) {
-        LOG_ERR("Invalid target velocity: %d mrad/s", static_cast<int>(target_velocity_rad_s * 1000.0f));
-        return -ERANGE;
-    }
-    const float speed_cutoff_rad_s = std::fabs(target_velocity_rad_s) + kSpeedSafetyMarginRadS;
-
     skywalker::motor::dm::TxReport arm_report{};
     ret = dm_bus.arm(arm_report);
     if (ret < 0) {
@@ -179,9 +190,10 @@ int main() {
         return ret;
     }
 
-    LOG_INF("constant velocity started: target_mrad_s=%d cutoff_mrad_s=%d",
-            static_cast<int>(target_velocity_rad_s * 1000.0f),
-            static_cast<int>(speed_cutoff_rad_s * 1000.0f));
+    bool at_ninety_degrees = false;
+    float target_position_rad = zero_position_rad;
+    std::int64_t next_position_step_ms = k_uptime_get() + kPositionStepPeriodMs;
+    LOG_INF("position stepping started at saved zero; first +90 degree step in %lld ms", kPositionStepPeriodMs);
     std::uint32_t print_divider = 0u;
     for (;;) {
         skywalker::motor::Feedback feedback{};
@@ -197,13 +209,20 @@ int main() {
         if (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
             return stopAfterFailure(-EHOSTDOWN);
         }
-        if (std::fabs(feedback.velocity_rad_s) > speed_cutoff_rad_s ||
-            feedback.temperature_c >= kTemperatureCutoffC ||
+        if (std::fabs(feedback.velocity_rad_s) > speed_cutoff_rad_s || feedback.temperature_c >= kTemperatureCutoffC ||
             static_cast<float>(raw.mos_temperature_c) >= kTemperatureCutoffC) {
             return stopAfterFailure(-ERANGE);
         }
 
-        ret = skywalker::motor::dm::setVelocity(motor, target_velocity_rad_s);
+        const std::int64_t now_ms = k_uptime_get();
+        if (now_ms >= next_position_step_ms) {
+            at_ninety_degrees = !at_ninety_degrees;
+            target_position_rad = targetPositionFromSavedZeroRad(at_ninety_degrees);
+            next_position_step_ms = now_ms + kPositionStepPeriodMs;
+            LOG_INF("new saved-zero-relative target: %d mdeg", static_cast<int>(target_position_rad * 180000.0f / kPi));
+        }
+
+        ret = skywalker::motor::dm::setPositionVelocity(motor, target_position_rad, velocity_limit_rad_s);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
@@ -215,9 +234,6 @@ int main() {
 
         if (++print_divider >= kTelemetryPeriodCycles) {
             print_divider = 0u;
-            /* JustFloat channels: status, position_rad, velocity_rad_s,
-             * torque_nm, mos_temperature_c, rotor_temperature_c.
-             */
             const float channels[6] = {
                 static_cast<float>(raw.status),
                 feedback.position_rad,

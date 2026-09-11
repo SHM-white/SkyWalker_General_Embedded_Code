@@ -9,14 +9,14 @@
         can-bus = <&can1>;
         motor-id = <1>;
         master-id = <0x11>;
-        control-mode = "velocity";
+        control-mode = "position-velocity";
 
         /* Must match PMAX/VMAX/TMAX read from Damiao Assistant. */
         p-max-millirad = <12500>;
         v-max-millirad-s = <45000>;
         t-max-millinewton-meter = <18000>;
 
-        /* Keep first powered test at or below 0.05 Nm. */
+        /* Required device boundary; MIT torque control is not used here. */
         torque-limit-millinewton-meter = <50>;
     };
 };
