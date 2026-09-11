@@ -3,7 +3,7 @@ Language: Cpp
 BasedOnStyle: LLVM
 
 # Prefer horizontal readability. Only wrap code when it exceeds this limit.
-ColumnLimit: 160
+ColumnLimit: 200
 IndentWidth: 4
 ContinuationIndentWidth: 4
 TabWidth: 4
