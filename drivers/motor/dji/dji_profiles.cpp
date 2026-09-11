@@ -15,6 +15,8 @@ namespace skywalker::motor::dji::internal
         16384,
         20.0f,
         true,
+        PositionSensorType::RelativeOnly,
+        8192u,
     };
 
     const Profile kM2006C610Profile = {
@@ -26,6 +28,8 @@ namespace skywalker::motor::dji::internal
         10000,
         10.0f,
         false,
+        PositionSensorType::RelativeOnly,
+        8192u,
     };
 
     const Profile kGM6020CurrentProfile = {
@@ -37,6 +41,8 @@ namespace skywalker::motor::dji::internal
         16384,
         3.0f,
         true,
+        PositionSensorType::FixedZeroSingleTurn,
+        8192u,
     };
 
     int resolveEndpoint(const Profile &profile, std::uint8_t motor_id, Endpoint &out)

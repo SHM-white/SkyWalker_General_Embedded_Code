@@ -25,8 +25,7 @@ constexpr std::int64_t kControlPeriodMs = 5;
 /* One telemetry frame per control cycle: 200 Hz. */
 constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 
-static int waitForFreshFeedback(const struct device *motor)
-{
+static int waitForFreshFeedback(const struct device *motor) {
     std::int64_t next_log_ms = 0;
 
     while (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
@@ -40,8 +39,7 @@ static int waitForFreshFeedback(const struct device *motor)
     return 0;
 }
 
-static int stopAfterFailure(int original_error)
-{
+static int stopAfterFailure(int original_error) {
     skywalker::motor::dji::FlushReport stop_report{};
     const int stop_ret = dji_bus.stop(stop_report);
     LOG_ERR("stopped: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, stop_report.zero_sent ? 1 : 0, stop_report.zero_tx_error);
@@ -50,8 +48,7 @@ static int stopAfterFailure(int original_error)
 
 } // namespace
 
-int main()
-{
+int main() {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
     const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
     if (!device_is_ready(motor)) {

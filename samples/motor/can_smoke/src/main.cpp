@@ -9,7 +9,7 @@ LOG_MODULE_REGISTER(can_smoke, LOG_LEVEL_INF);
 
 static Vofa vofa{};
 
-static void rxCallback(const struct device* dev, struct can_frame* frame, void* user_data){
+static void rxCallback(const struct device *dev, struct can_frame *frame, void *user_data) {
     ARG_UNUSED(dev);
     ARG_UNUSED(user_data);
 
@@ -21,8 +21,7 @@ static void rxCallback(const struct device* dev, struct can_frame* frame, void* 
     vofa_send(&vofa, channels, 2);
 }
 
-int main()
-{
+int main() {
     const struct device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
     const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
 

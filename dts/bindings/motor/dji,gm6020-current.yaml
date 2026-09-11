@@ -20,3 +20,10 @@ properties:
   current-loop-confirmed:
     type: boolean
     required: true
+
+  encoder-zero-ticks:
+    type: int
+    required: true
+    min: 0
+    max: 8191
+    description: Encoder tick corresponding to the mechanism's zero angle.

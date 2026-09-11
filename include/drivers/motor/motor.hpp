@@ -20,10 +20,17 @@ enum Capability : std::uint32_t {
     FeedbackCurrent     = 1u << 10,
     FeedbackTorque      = 1u << 11,
     FeedbackTemperature = 1u << 12,
+    FeedbackAbsolutePosition = 1u << 13,
 };
 
 struct Feedback {
+    /* Continuous output-shaft position; the first received frame is 0 rad. */
     float position_rad = 0.0f;
+    /*
+     * Fixed-zero, single-turn output-shaft position in [-pi, pi). Valid only
+     * when FeedbackAbsolutePosition is set in both capabilities and valid.
+     */
+    float absolute_position_rad = 0.0f;
     float velocity_rad_s = 0.0f;
     float current_a = 0.0f;
     float torque_nm = 0.0f;

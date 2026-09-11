@@ -15,8 +15,6 @@ namespace
 {
 
     constexpr float kTwoPi = 6.28318530717958647692f;
-    constexpr float kEncoderTicksPerTurn = 8192.0f;
-
     DjiData *dataOf(const struct device *dev)
     {
         return dev == nullptr ? nullptr : static_cast<DjiData *>(dev->data);
@@ -37,6 +35,12 @@ namespace
         if (cfg->profile->temperature_valid)
         {
             caps |= FeedbackTemperature;
+        }
+        /* A rotor single-turn angle maps uniquely to the output only at 1:1. */
+        if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn &&
+            cfg->gear_ratio_num == cfg->gear_ratio_den)
+        {
+            caps |= FeedbackAbsolutePosition;
         }
         return caps;
     }
@@ -135,6 +139,10 @@ namespace
         RawFeedback raw{};
         if (!decodeFeedback(*frame, raw))
             return;
+        const std::int32_t ticks_per_turn =
+            static_cast<std::int32_t>(cfg->profile->encoder_ticks_per_turn);
+        if (ticks_per_turn <= 0 || raw.encoder >= ticks_per_turn)
+            return;
 
         const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
         raw.timestamp_ms = now_ms;
@@ -150,17 +158,38 @@ namespace
         else
         {
             std::int32_t delta = static_cast<std::int32_t>(raw.encoder) - static_cast<std::int32_t>(data->last_encoder);
-            if (delta > 4096)
-                delta -= 8192;
-            if (delta < -4096)
-                delta += 8192;
+            const std::int32_t half_turn = ticks_per_turn / 2;
+            if (delta > half_turn)
+                delta -= ticks_per_turn;
+            if (delta < -half_turn)
+                delta += ticks_per_turn;
             data->total_encoder_ticks += delta;
             data->last_encoder = raw.encoder;
         }
 
         Feedback next{};
-        next.position_rad = static_cast<float>(data->total_encoder_ticks) * (kTwoPi / kEncoderTicksPerTurn) / data->gear_ratio;
+        next.position_rad = static_cast<float>(data->total_encoder_ticks) *
+                            (kTwoPi / static_cast<float>(ticks_per_turn)) /
+                            data->gear_ratio;
         next.valid |= FeedbackPosition;
+
+        if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn &&
+            cfg->gear_ratio_num == cfg->gear_ratio_den)
+        {
+            std::int32_t relative_ticks =
+                static_cast<std::int32_t>(raw.encoder) -
+                static_cast<std::int32_t>(cfg->encoder_zero_ticks);
+            const std::int32_t half_turn = ticks_per_turn / 2;
+            if (relative_ticks >= half_turn)
+                relative_ticks -= ticks_per_turn;
+            if (relative_ticks < -half_turn)
+                relative_ticks += ticks_per_turn;
+
+            next.absolute_position_rad =
+                static_cast<float>(relative_ticks) *
+                (kTwoPi / static_cast<float>(ticks_per_turn));
+            next.valid |= FeedbackAbsolutePosition;
+        }
 
         next.velocity_rad_s = static_cast<float>(raw.speed_rpm) * (kTwoPi / 60.0f) / data->gear_ratio;
         next.valid |= FeedbackVelocity;
@@ -214,6 +243,16 @@ int djiMotorInit(const struct device *dev)
         cfg->gear_ratio_den == 0u)
     {
         return -EINVAL;
+    }
+    if (cfg->profile->encoder_ticks_per_turn == 0u ||
+        (cfg->profile->encoder_ticks_per_turn % 2u) != 0u)
+    {
+        return -EINVAL;
+    }
+    if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn &&
+        cfg->encoder_zero_ticks >= cfg->profile->encoder_ticks_per_turn)
+    {
+        return -ERANGE;
     }
 
     const float current_limit_a = static_cast<float>(cfg->current_limit_ma) / 1000.0f;

@@ -10,6 +10,11 @@
 
 namespace skywalker::motor::dji::internal {
 
+enum class PositionSensorType : std::uint8_t {
+    RelativeOnly = 0,
+    FixedZeroSingleTurn,
+};
+
 struct Profile {
     Model model;
     std::uint8_t max_motor_id;
@@ -19,6 +24,8 @@ struct Profile {
     std::int16_t command_raw_max;
     float protocol_current_max_a;
     bool temperature_valid;
+    PositionSensorType position_sensor;
+    std::uint16_t encoder_ticks_per_turn;
 };
 
 struct Endpoint {
@@ -40,6 +47,7 @@ struct DjiConfig {
     std::uint32_t current_limit_ma;
     std::uint32_t gear_ratio_num;
     std::uint32_t gear_ratio_den;
+    std::uint32_t encoder_zero_ticks;
 };
 
 struct DjiData {
@@ -96,6 +104,7 @@ int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std:
             DT_INST_PROP(inst, current_limit_ma),                           \
             DT_INST_PROP(inst, gear_ratio_num),                             \
             DT_INST_PROP(inst, gear_ratio_den),                             \
+            DT_INST_PROP_OR(inst, encoder_zero_ticks, 0),                   \
         };                                                                  \
     DEVICE_DT_INST_DEFINE(                                                  \
         inst,                                                               \

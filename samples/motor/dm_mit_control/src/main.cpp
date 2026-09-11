@@ -26,29 +26,19 @@ constexpr float kCommandTorqueNm = 0.0f;
 constexpr float kSpeedCutoffRadS = 1.0f;
 constexpr float kTemperatureCutoffC = 60.0f;
 
-int stopAfterFailure(int original_error)
-{
+int stopAfterFailure(int original_error) {
     skywalker::motor::dm::TxReport report{};
     const int stop_ret = dm_bus.stop(report);
-    LOG_ERR("motor disabled: cause=%d stop=%d tx=%d failed_id=%u",
-            original_error,
-            stop_ret,
-            report.tx_error,
-            report.failed_motor_id);
+    LOG_ERR("motor disabled: cause=%d stop=%d tx=%d failed_id=%u", original_error, stop_ret, report.tx_error, report.failed_motor_id);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
-int waitForDisabled(const struct device *motor)
-{
+int waitForDisabled(const struct device *motor) {
     std::int64_t next_log_ms = 0;
     for (;;) {
         skywalker::motor::dm::DriveStatus status{};
-        const int status_ret =
-            skywalker::motor::dm::getDriveStatus(motor, status);
-        if (status_ret == 0 &&
-            status == skywalker::motor::dm::DriveStatus::Disabled &&
-            skywalker::motor::getState(motor) ==
-                skywalker::motor::State::Ready) {
+        const int status_ret = skywalker::motor::dm::getDriveStatus(motor, status);
+        if (status_ret == 0 && status == skywalker::motor::dm::DriveStatus::Disabled && skywalker::motor::getState(motor) == skywalker::motor::State::Ready) {
             return 0;
         }
 
@@ -63,8 +53,7 @@ int waitForDisabled(const struct device *motor)
 
 } // namespace
 
-int main()
-{
+int main() {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
     const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart1));
     if (!device_is_ready(motor)) {
@@ -81,20 +70,15 @@ int main()
 
     skywalker::motor::dm::Descriptor descriptor{};
     int ret = skywalker::motor::dm::describe(motor, descriptor);
-    if (ret < 0 || descriptor.can == nullptr ||
-        !device_is_ready(descriptor.can)) {
+    if (ret < 0 || descriptor.can == nullptr || !device_is_ready(descriptor.can)) {
         LOG_ERR("describe/CAN failed: %d", ret);
         return ret < 0 ? ret : -ENODEV;
     }
 
     LOG_INF("DM-J4310 id=%u master=0x%03x command=0x%03x "
             "P/V/T=%d/%d/%d",
-            descriptor.motor_id,
-            descriptor.master_id,
-            descriptor.control_id,
-            static_cast<int>(descriptor.limits.position_max_rad * 1000.0f),
-            static_cast<int>(descriptor.limits.velocity_max_rad_s * 1000.0f),
-            static_cast<int>(descriptor.limits.torque_max_nm * 1000.0f));
+            descriptor.motor_id, descriptor.master_id, descriptor.control_id, static_cast<int>(descriptor.limits.position_max_rad * 1000.0f),
+            static_cast<int>(descriptor.limits.velocity_max_rad_s * 1000.0f), static_cast<int>(descriptor.limits.torque_max_nm * 1000.0f));
 
     ret = dm_bus.init(descriptor.can);
     if (ret < 0) {
@@ -138,14 +122,10 @@ int main()
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
-        if (skywalker::motor::getState(motor) !=
-            skywalker::motor::State::Ready) {
+        if (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
             return stopAfterFailure(-EHOSTDOWN);
         }
-        if (std::fabs(feedback.velocity_rad_s) > kSpeedCutoffRadS ||
-            feedback.temperature_c >= kTemperatureCutoffC ||
-            static_cast<float>(raw.mos_temperature_c) >=
-                kTemperatureCutoffC) {
+        if (std::fabs(feedback.velocity_rad_s) > kSpeedCutoffRadS || feedback.temperature_c >= kTemperatureCutoffC || static_cast<float>(raw.mos_temperature_c) >= kTemperatureCutoffC) {
             return stopAfterFailure(-ERANGE);
         }
 

@@ -84,3 +84,30 @@ int control_shortest_angle_error(float target_rad, float measurement_rad, float 
     *error_rad = local_error;
     return 0;
 }
+
+int control_angle_nearest_continuous_target(
+    float requested_absolute_rad,
+    float measured_absolute_rad,
+    float measured_continuous_rad,
+    float *continuous_target_rad)
+{
+    if (continuous_target_rad == NULL ||
+        !isfinite(measured_continuous_rad)) {
+        return -EINVAL;
+    }
+
+    float error_rad = 0.0f;
+    int ret = control_shortest_angle_error(
+        requested_absolute_rad, measured_absolute_rad, &error_rad);
+    if (ret < 0) {
+        return ret;
+    }
+
+    const float local_target = measured_continuous_rad + error_rad;
+    if (!isfinite(local_target)) {
+        return -ERANGE;
+    }
+
+    *continuous_target_rad = local_target;
+    return 0;
+}
