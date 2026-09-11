@@ -7,7 +7,7 @@
 #include <zephyr/logging/log.h>
 
 #include <control/angle.h>
-#include <control/motor_position.h>
+#include <control/position_controller.hpp>
 #include <drivers/motor/dji_bus.hpp>
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/motor.hpp>
@@ -45,8 +45,8 @@ constexpr PositionTargetMode kPositionTargetMode = PositionTargetMode::Continuou
 skywalker::motor::dji::Bus dji_bus;
 volatile std::int32_t runtime_diagnostic = 0;
 
-control_motor_position_config makePositionControllerConfig() {
-    control_motor_position_config config{};
+skywalker::control::PositionController::Config makePositionControllerConfig() {
+    skywalker::control::PositionController::Config config{};
 
     config.position = {
         .kp = kPositionKp,
@@ -191,7 +191,7 @@ float requestedAbsolutePositionRad(std::int64_t elapsed_ms, float initial_absolu
 int main() {
     runtime_diagnostic = 1;
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart10));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
@@ -218,13 +218,13 @@ int main() {
     }
     runtime_diagnostic = 10;
 
-    const control_motor_position_config controller_config = makePositionControllerConfig();
-    ret = control_motor_position_validate(&controller_config);
+    skywalker::control::PositionController controller{
+        makePositionControllerConfig()};
+    ret = controller.validate();
     if (ret < 0) {
         LOG_ERR("controller config invalid: %d", ret);
         return ret;
     }
-    control_motor_position_state controller_state{};
     runtime_diagnostic = 11;
 
     ret = dji_bus.init(descriptor.can);
@@ -265,7 +265,8 @@ int main() {
         LOG_ERR("initial feedback invalid: %d", ret);
         return ret;
     }
-    ret = control_motor_position_reset(&controller_state, &controller_config, first_feedback.position_rad, first_feedback.velocity_rad_s);
+    ret = controller.reset(
+        first_feedback.position_rad, first_feedback.velocity_rad_s);
     if (ret < 0) {
         LOG_ERR("controller reset failed: %d", ret);
         return ret;
@@ -324,14 +325,12 @@ int main() {
             }
         }
 
-        const control_motor_position_input input = {
-            .continuous_target_rad = continuous_target_rad,
-            .continuous_position_rad = feedback.position_rad,
-            .measured_velocity_rad_s = feedback.velocity_rad_s,
-            .dt_s = dt_s,
-        };
-        control_motor_position_output output{};
-        ret = control_motor_position_step(&controller_state, &controller_config, &input, &output);
+        skywalker::control::PositionController::Output output{};
+        ret = controller.step(continuous_target_rad,
+                              feedback.position_rad,
+                              feedback.velocity_rad_s,
+                              dt_s,
+                              output);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
@@ -351,15 +350,17 @@ int main() {
             telemetry_divider = 0U;
             /* JustFloat: requested target, continuous target/position,
              * absolute position (zero in relative mode), position error,
-             * velocity reference/raw/error/P/I, current, dt ms, age ms.
+             * position output, velocity reference/raw/error/P/I, current,
+             * dt ms, age ms.
              */
             const float absolute_position_rad = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute ? feedback.absolute_position_rad : 0.0f;
-            const float channels[13] = {
+            const float channels[14] = {
                 requested_target_rad,
                 continuous_target_rad,
                 feedback.position_rad,
                 absolute_position_rad,
                 output.position.error,
+                output.position.output,
                 output.velocity.velocity_reference_rad_s,
                 feedback.velocity_rad_s,
                 output.velocity.velocity_error_rad_s,
@@ -369,7 +370,7 @@ int main() {
                 dt_s * 1000.0f,
                 static_cast<float>(now_ms - feedback.timestamp_ms),
             };
-            vofa_send(&vofa, channels, 13);
+            vofa_send(&vofa, channels, 14);
         }
     }
 }

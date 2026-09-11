@@ -21,8 +21,7 @@ struct OwnerEntry {
 OwnerEntry owner_registry[CONFIG_SKYWALKER_DJI_MAX_BUSES]{};
 struct k_spinlock owner_registry_lock{};
 
-int claimCan(const struct device *can, Bus *owner)
-{
+int claimCan(const struct device *can, Bus *owner) {
     const k_spinlock_key_t key = k_spin_lock(&owner_registry_lock);
     int empty_index = -1;
 
@@ -48,8 +47,7 @@ int claimCan(const struct device *can, Bus *owner)
     return 0;
 }
 
-void releaseCan(const struct device *can, Bus *owner)
-{
+void releaseCan(const struct device *can, Bus *owner) {
     const k_spinlock_key_t key = k_spin_lock(&owner_registry_lock);
     for (std::size_t i = 0; i < CONFIG_SKYWALKER_DJI_MAX_BUSES; ++i) {
         if (owner_registry[i].can == can && owner_registry[i].owner == owner) {
@@ -60,8 +58,7 @@ void releaseCan(const struct device *can, Bus *owner)
     k_spin_unlock(&owner_registry_lock, key);
 }
 
-int reportError(const FlushReport &report)
-{
+int reportError(const FlushReport &report) {
     if (report.zero_tx_error < 0) {
         return report.zero_tx_error;
     }
@@ -73,8 +70,7 @@ int reportError(const FlushReport &report)
 
 } // namespace
 
-int Bus::init(const struct device *can)
-{
+int Bus::init(const struct device *can) {
     if (can == nullptr)
         return -EINVAL;
     if (state_ != BusState::Uninitialized)
@@ -97,8 +93,7 @@ int Bus::init(const struct device *can)
     return 0;
 }
 
-int Bus::groupIndex(std::uint16_t command_id) const
-{
+int Bus::groupIndex(std::uint16_t command_id) const {
     for (std::size_t i = 0; i < group_count_; ++i) {
         if (group_ids_[i] == command_id) {
             return static_cast<int>(i);
@@ -107,8 +102,7 @@ int Bus::groupIndex(std::uint16_t command_id) const
     return -1;
 }
 
-int Bus::attach(const struct device *motor)
-{
+int Bus::attach(const struct device *motor) {
     if (state_ != BusState::Safe)
         return -EACCES;
     if (!internal::isDjiMotor(motor))
@@ -148,8 +142,7 @@ int Bus::attach(const struct device *motor)
     return 0;
 }
 
-int Bus::sendZeros(FlushReport &report)
-{
+int Bus::sendZeros(FlushReport &report) {
     report.zero_tx_error = 0;
     report.zero_failed_command_id = 0;
     report.zero_groups_expected = static_cast<std::uint8_t>(group_count_);
@@ -180,8 +173,7 @@ int Bus::sendZeros(FlushReport &report)
     return report.zero_tx_error;
 }
 
-int Bus::enterFaultAndZero(FlushReport &report)
-{
+int Bus::enterFaultAndZero(FlushReport &report) {
     for (std::size_t i = 0; i < motor_count_; ++i) {
         internal::prepareMotorStop(motors_[i], true);
     }
@@ -190,8 +182,7 @@ int Bus::enterFaultAndZero(FlushReport &report)
     return reportError(report);
 }
 
-int Bus::arm(FlushReport &report)
-{
+int Bus::arm(FlushReport &report) {
     report = {};
     if (state_ != BusState::Safe) {
         report.preparation_error = -EACCES;
@@ -240,8 +231,7 @@ int Bus::arm(FlushReport &report)
     return 0;
 }
 
-int Bus::flush(FlushReport &report)
-{
+int Bus::flush(FlushReport &report) {
     report = {};
     if (state_ != BusState::Armed) {
         report.preparation_error = -EACCES;
@@ -287,8 +277,7 @@ int Bus::flush(FlushReport &report)
     return 0;
 }
 
-int Bus::stop(FlushReport &report)
-{
+int Bus::stop(FlushReport &report) {
     report = {};
     if (state_ == BusState::Uninitialized) {
         report.preparation_error = -EACCES;
@@ -319,8 +308,7 @@ int Bus::stop(FlushReport &report)
     return 0;
 }
 
-int Bus::recover(FlushReport &report)
-{
+int Bus::recover(FlushReport &report) {
     report = {};
     if (state_ != BusState::Fault) {
         report.preparation_error = -EACCES;
@@ -342,8 +330,7 @@ int Bus::recover(FlushReport &report)
     return 0;
 }
 
-BusState Bus::state() const
-{
+BusState Bus::state() const {
     return state_;
 }
 

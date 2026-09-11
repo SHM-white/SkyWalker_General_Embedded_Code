@@ -3,11 +3,13 @@ Language: Cpp
 BasedOnStyle: LLVM
 
 # Prefer horizontal readability. Only wrap code when it exceeds this limit.
-ColumnLimit: 200
+ColumnLimit: 120
 IndentWidth: 4
 ContinuationIndentWidth: 4
 TabWidth: 4
 UseTab: Never
+IndentAccessModifiers: false
+AccessModifierOffset: -4
 
 # Match the repository's existing brace style: function braces on the next
 # line, while namespaces, types, and control statements keep attached braces.

@@ -31,24 +31,15 @@ typedef struct {
     float current_command_a;
 } control_motor_position_output;
 
-int control_motor_position_validate(
-    const control_motor_position_config *config);
+int control_motor_position_validate(const control_motor_position_config *config);
 
-int control_motor_position_reset(
-    control_motor_position_state *state,
-    const control_motor_position_config *config,
-    float measured_position_rad,
-    float measured_velocity_rad_s);
+int control_motor_position_reset(control_motor_position_state *state, const control_motor_position_config *config, float measured_position_rad, float measured_velocity_rad_s);
 
 /*
  * On failure neither the outer position state, the nested velocity state,
  * nor output is modified. reset() must be called before the first step().
  */
-int control_motor_position_step(
-    control_motor_position_state *state,
-    const control_motor_position_config *config,
-    const control_motor_position_input *input,
-    control_motor_position_output *output);
+int control_motor_position_step(control_motor_position_state *state, const control_motor_position_config *config, const control_motor_position_input *input, control_motor_position_output *output);
 
 #ifdef __cplusplus
 }

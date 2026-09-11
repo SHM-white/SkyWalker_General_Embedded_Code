@@ -45,23 +45,15 @@ typedef struct {
     float current_command_a;
 } control_motor_velocity_output;
 
-int control_motor_velocity_validate(
-    const control_motor_velocity_config *config);
+int control_motor_velocity_validate(const control_motor_velocity_config *config);
 
-int control_motor_velocity_reset(
-    control_motor_velocity_state *state,
-    float measured_velocity_rad_s,
-    float initial_reference_rad_s);
+int control_motor_velocity_reset(control_motor_velocity_state *state, float measured_velocity_rad_s, float initial_reference_rad_s);
 
 /*
  * On failure neither state nor output is modified. reset() must be called
  * before the first step().
  */
-int control_motor_velocity_step(
-    control_motor_velocity_state *state,
-    const control_motor_velocity_config *config,
-    const control_motor_velocity_input *input,
-    control_motor_velocity_output *output);
+int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config, const control_motor_velocity_input *input, control_motor_velocity_output *output);
 
 #ifdef __cplusplus
 }

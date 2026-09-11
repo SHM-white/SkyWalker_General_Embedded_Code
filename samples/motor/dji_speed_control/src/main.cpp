@@ -6,7 +6,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-#include <control/motor_velocity.h>
+#include <control/velocity_controller.hpp>
 #include <drivers/motor/dji_bus.hpp>
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/motor.hpp>
@@ -30,8 +30,8 @@ constexpr float kVelocityFilterTauS = 0.025f;
 
 skywalker::motor::dji::Bus dji_bus;
 
-control_motor_velocity_config makeVelocityControllerConfig() {
-    control_motor_velocity_config config{};
+skywalker::control::VelocityController::Config makeVelocityControllerConfig() {
+    skywalker::control::VelocityController::Config config{};
     config.regulator.feedback = {
         .kp = 0.02f,
         .ki = 0.05f,
@@ -132,7 +132,7 @@ float requestedVelocityForTime(std::int64_t elapsed_ms) {
 
 int main() {
     const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
-    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart6));
+    const struct device *vofa_uart = DEVICE_DT_GET(DT_NODELABEL(usart10));
     if (!device_is_ready(motor)) {
         LOG_ERR("motor device not ready");
         return -ENODEV;
@@ -161,14 +161,13 @@ int main() {
             "gear=%.3f limit=%.0f mA",
             descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot, descriptor.gear_ratio, descriptor.configured_current_limit_a * 1000.0f);
 
-    const control_motor_velocity_config controller_config = makeVelocityControllerConfig();
-    ret = control_motor_velocity_validate(&controller_config);
+    skywalker::control::VelocityController controller{
+        makeVelocityControllerConfig()};
+    ret = controller.validate();
     if (ret < 0) {
         LOG_ERR("controller config invalid: %d", ret);
         return ret;
     }
-    control_motor_velocity_state controller_state{};
-
     ret = dji_bus.init(descriptor.can);
     if (ret < 0) {
         LOG_ERR("Bus init failed: %d", ret);
@@ -201,7 +200,7 @@ int main() {
         LOG_ERR("initial feedback invalid: %d", ret);
         return ret;
     }
-    ret = control_motor_velocity_reset(&controller_state, first_feedback.velocity_rad_s, 0.0f);
+    ret = controller.reset(first_feedback.velocity_rad_s);
     if (ret < 0) {
         LOG_ERR("controller reset failed: %d", ret);
         return ret;
@@ -240,15 +239,9 @@ int main() {
         }
 
         const float request = requestedVelocityForTime(now_signed_ms - run_start_ms);
-        const control_motor_velocity_input input = {
-            .requested_velocity_rad_s = request,
-            .measured_velocity_rad_s = feedback.velocity_rad_s,
-            .position_reference_rad = 0.0f,
-            .dt_s = dt_s,
-            .freeze_integrator = false,
-        };
-        control_motor_velocity_output output{};
-        ret = control_motor_velocity_step(&controller_state, &controller_config, &input, &output);
+        skywalker::control::VelocityController::Output output{};
+        ret = controller.step(
+            request, feedback.velocity_rad_s, dt_s, output);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
@@ -266,22 +259,24 @@ int main() {
 
         if (++telemetry_divider >= kTelemetryPeriodCycles) {
             telemetry_divider = 0U;
-            /* JustFloat: request, reference, raw velocity, error, P, I,
-             * filtered velocity, current, saturated, feedback age ms.
+            /* JustFloat: request, reference, raw/filtered velocity, error,
+             * P, I, D, feedforward, current, saturated, feedback age ms.
              */
-            const float channels[10] = {
+            const float channels[12] = {
                 request,
                 output.velocity_reference_rad_s,
                 feedback.velocity_rad_s,
+                output.filtered_velocity_rad_s,
                 output.velocity_error_rad_s,
                 output.regulator.feedback.p,
                 output.regulator.feedback.i,
-                output.filtered_velocity_rad_s,
+                output.regulator.feedback.d,
+                output.regulator.feedforward,
                 output.current_command_a,
                 output.regulator.feedback.saturated ? 1.0f : 0.0f,
                 static_cast<float>(now_ms - feedback.timestamp_ms),
             };
-            vofa_send(&vofa, channels, 10);
+            vofa_send(&vofa, channels, 12);
         }
     }
 

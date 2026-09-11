@@ -25,20 +25,14 @@ struct Descriptor {
 
 int describe(const struct device *dev, Descriptor &out);
 
-int setMitCommand(const struct device *dev,
-                  const MitCommand &command);
+int setMitCommand(const struct device *dev, const MitCommand &command);
 
-int setPositionVelocity(const struct device *dev,
-                        float position_rad,
-                        float velocity_limit_rad_s);
+int setPositionVelocity(const struct device *dev, float position_rad, float velocity_limit_rad_s);
 
-int setVelocity(const struct device *dev,
-                float velocity_rad_s);
+int setVelocity(const struct device *dev, float velocity_rad_s);
 
-int readRawFeedback(const struct device *dev,
-                    RawFeedback &out);
+int readRawFeedback(const struct device *dev, RawFeedback &out);
 
-int getDriveStatus(const struct device *dev,
-                   DriveStatus &out);
+int getDriveStatus(const struct device *dev, DriveStatus &out);
 
 } // namespace skywalker::motor::dm

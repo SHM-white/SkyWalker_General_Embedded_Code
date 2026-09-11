@@ -50,12 +50,9 @@ private:
     int enterFaultAndZero(FlushReport &report);
 
     const struct device *can_ = nullptr;
-    const struct device *
-        motors_[CONFIG_SKYWALKER_DJI_MAX_MOTORS_PER_BUS]{};
-    Descriptor
-        descriptors_[CONFIG_SKYWALKER_DJI_MAX_MOTORS_PER_BUS]{};
-    std::uint16_t
-        group_ids_[CONFIG_SKYWALKER_DJI_MAX_MOTORS_PER_BUS]{};
+    const struct device *motors_[CONFIG_SKYWALKER_DJI_MAX_MOTORS_PER_BUS]{};
+    Descriptor descriptors_[CONFIG_SKYWALKER_DJI_MAX_MOTORS_PER_BUS]{};
+    std::uint16_t group_ids_[CONFIG_SKYWALKER_DJI_MAX_MOTORS_PER_BUS]{};
     std::size_t motor_count_ = 0;
     std::size_t group_count_ = 0;
     std::uint64_t lifecycle_epoch_ = 0;

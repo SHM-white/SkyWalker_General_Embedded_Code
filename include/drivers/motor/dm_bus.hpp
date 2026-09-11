@@ -49,24 +49,17 @@ private:
         int filter_id = -1;
     };
 
-    static void rxCallback(const struct device *can,
-                           struct can_frame *frame,
-                           void *user_data);
+    static void rxCallback(const struct device *can, struct can_frame *frame, void *user_data);
     void dispatchFeedback(const struct can_frame &frame);
     int routeIndex(std::uint16_t master_id) const;
-    int sendFrame(const struct can_frame &frame,
-                  std::uint16_t motor_id,
-                  TxReport &report);
+    int sendFrame(const struct can_frame &frame, std::uint16_t motor_id, TxReport &report);
     int disableAll(TxReport &report, bool latch_fault);
     int enterFaultAndDisable(TxReport &report);
 
     const struct device *can_ = nullptr;
-    const struct device *
-        motors_[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
-    Descriptor
-        descriptors_[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
-    FeedbackRoute
-        routes_[CONFIG_SKYWALKER_DM_MAX_MASTER_IDS_PER_BUS]{};
+    const struct device *motors_[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
+    Descriptor descriptors_[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
+    FeedbackRoute routes_[CONFIG_SKYWALKER_DM_MAX_MASTER_IDS_PER_BUS]{};
     std::size_t motor_count_ = 0;
     std::size_t route_count_ = 0;
     std::uint64_t lifecycle_epoch_ = 0;

@@ -172,7 +172,8 @@ int readFreshVelocityFeedback(const struct device *motor, std::uint64_t now_ms, 
     if (!std::isfinite(feedback.velocity_rad_s)) {
         return -EINVAL;
     }
-    if (feedback.timestamp_ms == 0U || now_ms < feedback.timestamp_ms || now_ms - feedback.timestamp_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
+    if (feedback.timestamp_ms == 0U || now_ms < feedback.timestamp_ms ||
+        now_ms - feedback.timestamp_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
         return -ESTALE;
     }
     return 0;
@@ -186,7 +187,8 @@ int resetController(VelocityController &loop, float first_velocity_rad_s) {
     return control_feedforward_pid_reset(&loop.controller_state, first_velocity_rad_s);
 }
 
-int calculateVelocityCurrent(VelocityController &loop, const skywalker::motor::Feedback &feedback, float requested_velocity_rad_s, float dt_s, VelocityControlOutput &output) {
+int calculateVelocityCurrent(VelocityController &loop, const skywalker::motor::Feedback &feedback,
+                             float requested_velocity_rad_s, float dt_s, VelocityControlOutput &output) {
     if (!std::isfinite(requested_velocity_rad_s) || !std::isfinite(dt_s)) {
         return -EINVAL;
     }
@@ -198,7 +200,8 @@ int calculateVelocityCurrent(VelocityController &loop, const skywalker::motor::F
     control_feedforward_pid_state next_controller_state = loop.controller_state;
     VelocityControlOutput next_output{};
 
-    int ret = control_slew_rate_step(&next_reference_state, &loop.reference_config, requested_velocity_rad_s, dt_s, &next_output.velocity_reference_rad_s, &next_output.acceleration_reference_rad_s2);
+    int ret = control_slew_rate_step(&next_reference_state, &loop.reference_config, requested_velocity_rad_s, dt_s,
+                                     &next_output.velocity_reference_rad_s, &next_output.acceleration_reference_rad_s2);
     if (ret < 0) {
         return ret;
     }
@@ -224,7 +227,8 @@ int calculateVelocityCurrent(VelocityController &loop, const skywalker::motor::F
         return ret;
     }
 
-    next_output.current_command_a = clampFloat(next_output.controller.output, -kSoftwareCurrentAbsMaxA, kSoftwareCurrentAbsMaxA);
+    next_output.current_command_a = clampFloat(next_output.controller.output, -kSoftwareCurrentAbsMaxA,
+                                               kSoftwareCurrentAbsMaxA);
     if (!std::isfinite(next_output.current_command_a)) {
         return -ERANGE;
     }
@@ -238,7 +242,8 @@ int calculateVelocityCurrent(VelocityController &loop, const skywalker::motor::F
 int stopAfterFailure(int original_error) {
     skywalker::motor::dji::FlushReport report{};
     const int stop_ret = dji_bus.stop(report);
-    LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, report.zero_sent ? 1 : 0, report.zero_tx_error);
+    LOG_ERR("control failed: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, report.zero_sent ? 1 : 0,
+            report.zero_tx_error);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
@@ -279,7 +284,8 @@ int main() {
     }
     LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u "
             "gear=%.3f limit=%.0f mA",
-            descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot, descriptor.gear_ratio, descriptor.configured_current_limit_a * 1000.0f);
+            descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot,
+            descriptor.gear_ratio, descriptor.configured_current_limit_a * 1000.0f);
 
     VelocityController loop = makeVelocityController();
     ret = validateController(loop);
@@ -330,13 +336,15 @@ int main() {
     skywalker::motor::dji::FlushReport arm_report{};
     ret = dji_bus.arm(arm_report);
     if (ret < 0 || !arm_report.zero_sent) {
-        LOG_ERR("arm/zero failed: ret=%d zero=%d zero_err=%d", ret, arm_report.zero_sent ? 1 : 0, arm_report.zero_tx_error);
+        LOG_ERR("arm/zero failed: ret=%d zero=%d zero_err=%d", ret, arm_report.zero_sent ? 1 : 0,
+                arm_report.zero_tx_error);
         return ret < 0 ? ret : -EIO;
     }
 
     LOG_INF("speed-control test running: target=%.0f mrad/s, "
             "software current clamp=%.0f mA, duration=%lld ms",
-            kRequestedVelocityRadS * 1000.0f, kSoftwareCurrentAbsMaxA * 1000.0f, static_cast<long long>(kRunDurationMs));
+            kRequestedVelocityRadS * 1000.0f, kSoftwareCurrentAbsMaxA * 1000.0f,
+            static_cast<long long>(kRunDurationMs));
 
     const std::int64_t run_start_ms = k_uptime_get();
     std::int64_t previous_cycle_ms = run_start_ms;
@@ -412,7 +420,8 @@ int main() {
     skywalker::motor::dji::FlushReport stop_report{};
     ret = dji_bus.stop(stop_report);
     if (ret < 0 || !stop_report.zero_sent) {
-        LOG_ERR("normal stop failed: ret=%d zero=%d zero_err=%d", ret, stop_report.zero_sent ? 1 : 0, stop_report.zero_tx_error);
+        LOG_ERR("normal stop failed: ret=%d zero=%d zero_err=%d", ret, stop_report.zero_sent ? 1 : 0,
+                stop_report.zero_tx_error);
         return ret < 0 ? ret : -EIO;
     }
 

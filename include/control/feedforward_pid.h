@@ -28,18 +28,12 @@ typedef struct {
     float output;
 } control_feedforward_pid_result;
 
-int control_feedforward_pid_validate(
-    const control_feedforward_pid_config *config);
+int control_feedforward_pid_validate(const control_feedforward_pid_config *config);
 
-int control_feedforward_pid_reset(
-    control_feedforward_pid_state *state,
-    float current_measurement);
+int control_feedforward_pid_reset(control_feedforward_pid_state *state, float current_measurement);
 
-int control_feedforward_pid_step(
-    control_feedforward_pid_state *state,
-    const control_feedforward_pid_config *config,
-    const control_feedforward_pid_input *input,
-    control_feedforward_pid_result *result);
+int control_feedforward_pid_step(control_feedforward_pid_state *state, const control_feedforward_pid_config *config, const control_feedforward_pid_input *input,
+                                 control_feedforward_pid_result *result);
 
 #ifdef __cplusplus
 }

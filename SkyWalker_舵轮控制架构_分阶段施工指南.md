@@ -6,7 +6,7 @@
 >
 > 本文定位：给 Codex / 人工开发者直接执行的分阶段施工规格。
 >
-> 核心原则：**Motor → Controller → Module → Chassis → Application**。  
+> 核心原则：**Motor → Controller → Module → Chassis → Application**。
 > 任何阶段都不要跨层“顺手重构”下一层；每完成一层先编译、自检、必要时上硬件验证，再继续下一层。
 
 ---
@@ -1080,10 +1080,9 @@ feat(control): add nearest continuous angle target conversion
 
 ---
 
-
 # 6. 阶段五：两个控制 sample 回接公共控制器，并人工调试恢复原有效果
 
-> 这一阶段放在“绝对角 → 最近连续目标”完成之后、`SwerveModule` 之前。  
+> 这一阶段放在“绝对角 → 最近连续目标”完成之后、`SwerveModule` 之前。
 > 目的不是新增舵轮功能，而是先证明前四阶段抽出来的公共控制链路可以完整替代 sample 里原先直接拼接 PID / slew / feedforward 等底层模块的做法。
 
 ## 6.1 目标
@@ -2671,15 +2670,15 @@ samples/
 
 # 12. 各层职责总表
 
-| 层 | 可以做 | 不可以做 |
-|---|---|---|
-| Motor Driver | 编码器解析、连续位置、固定零点单圈角、电流命令编码 | PID、舵轮最短路径 |
-| `control/angle` | wrap、unwrap、shortest error、nearest continuous target | 操作电机 |
-| Motor Velocity | 速度闭环、电流命令 | CAN、device |
-| Motor Position | 位置→速度→公共速度环 | 复制速度 PI |
-| SwerveModule | 舵角优化、角度目标转换、轮速单位转换、组合控制器 | CAN flush、DTS |
-| SwerveChassis | vx/vy/wz→4 模块目标、速度统一缩放 | PID、电流、型号 |
-| Application | 设备绑定、反馈新鲜度、arm、setCurrent、flush、故障停机 | 重写底层控制算法 |
+| 层                | 可以做                                                  | 不可以做          |
+| ----------------- | ------------------------------------------------------- | ----------------- |
+| Motor Driver      | 编码器解析、连续位置、固定零点单圈角、电流命令编码      | PID、舵轮最短路径 |
+| `control/angle` | wrap、unwrap、shortest error、nearest continuous target | 操作电机          |
+| Motor Velocity    | 速度闭环、电流命令                                      | CAN、device       |
+| Motor Position    | 位置→速度→公共速度环                                  | 复制速度 PI       |
+| SwerveModule      | 舵角优化、角度目标转换、轮速单位转换、组合控制器        | CAN flush、DTS    |
+| SwerveChassis     | vx/vy/wz→4 模块目标、速度统一缩放                      | PID、电流、型号   |
+| Application       | 设备绑定、反馈新鲜度、arm、setCurrent、flush、故障停机  | 重写底层控制算法  |
 
 ---
 

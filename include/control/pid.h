@@ -56,13 +56,9 @@ typedef struct {
 
 int control_pid_validate(const control_pid_config *config);
 
-int control_pid_reset(control_pid_state *state,
-                      float current_measurement);
+int control_pid_reset(control_pid_state *state, float current_measurement);
 
-int control_pid_step(control_pid_state *state,
-                     const control_pid_config *config,
-                     const control_pid_input *input,
-                     control_pid_result *result);
+int control_pid_step(control_pid_state *state, const control_pid_config *config, const control_pid_input *input, control_pid_result *result);
 
 #ifdef __cplusplus
 }

@@ -26,23 +26,21 @@ typedef void (*vofa_cmd_handler)(const char *key, float val);
  * RX: DMA + IDLE 检测，文本行命令
  */
 typedef struct {
-    const struct device *uart;  // 绑定的 UART 设备
+    const struct device *uart; // 绑定的 UART 设备
 
     // ─── RX ───
-    uint8_t          *rx_buf;       // DMA 缓冲区（调用者分配）
-    size_t            rx_buf_size;  // 缓冲区大小
-    vofa_cmd_handler  on_cmd;       // 收到完整行时的回调
+    uint8_t *rx_buf;         // DMA 缓冲区（调用者分配）
+    size_t rx_buf_size;      // 缓冲区大小
+    vofa_cmd_handler on_cmd; // 收到完整行时的回调
 } Vofa;
 
 void vofa_init(Vofa *vofa, const struct device *uart);
 
 void vofa_send(Vofa *vofa, const float *data, uint8_t num);
 
-void vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size,
-                      vofa_cmd_handler on_cmd);
+void vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size, vofa_cmd_handler on_cmd);
 
-void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
-                  void *user_data);
+void vofa_uart_cb(const struct device *dev, struct uart_event *evt, void *user_data);
 
 #ifdef __cplusplus
 }

@@ -13,12 +13,12 @@ enum class State : std::uint8_t {
 };
 
 enum Capability : std::uint32_t {
-    CommandCurrent      = 1u << 0,
-    CommandTorque       = 1u << 1,
-    FeedbackPosition    = 1u << 8,
-    FeedbackVelocity    = 1u << 9,
-    FeedbackCurrent     = 1u << 10,
-    FeedbackTorque      = 1u << 11,
+    CommandCurrent = 1u << 0,
+    CommandTorque = 1u << 1,
+    FeedbackPosition = 1u << 8,
+    FeedbackVelocity = 1u << 9,
+    FeedbackCurrent = 1u << 10,
+    FeedbackTorque = 1u << 11,
     FeedbackTemperature = 1u << 12,
     FeedbackAbsolutePosition = 1u << 13,
 };
@@ -47,52 +47,47 @@ struct Api {
     State (*get_state)(const struct device *dev);
 };
 
-inline std::uint32_t capabilities(const struct device *dev)
-{
-    if (dev == nullptr || dev->api == nullptr) return 0u;
+inline std::uint32_t capabilities(const struct device *dev) {
+    if (dev == nullptr || dev->api == nullptr)
+        return 0u;
     const Api *api = static_cast<const Api *>(dev->api);
-    return api->get_capabilities == nullptr
-        ? 0u
-        : api->get_capabilities(dev);
+    return api->get_capabilities == nullptr ? 0u : api->get_capabilities(dev);
 }
 
-inline int setCurrent(const struct device *dev, float current_a)
-{
-    if (dev == nullptr || dev->api == nullptr) return -EINVAL;
+inline int setCurrent(const struct device *dev, float current_a) {
+    if (dev == nullptr || dev->api == nullptr)
+        return -EINVAL;
     const Api *api = static_cast<const Api *>(dev->api);
-    if ((capabilities(dev) & CommandCurrent) == 0u ||
-        api->set_current == nullptr) {
+    if ((capabilities(dev) & CommandCurrent) == 0u || api->set_current == nullptr) {
         return -ENOTSUP;
     }
     return api->set_current(dev, current_a);
 }
 
-inline int setTorque(const struct device *dev, float torque_nm)
-{
-    if (dev == nullptr || dev->api == nullptr) return -EINVAL;
+inline int setTorque(const struct device *dev, float torque_nm) {
+    if (dev == nullptr || dev->api == nullptr)
+        return -EINVAL;
     const Api *api = static_cast<const Api *>(dev->api);
-    if ((capabilities(dev) & CommandTorque) == 0u ||
-        api->set_torque == nullptr) {
+    if ((capabilities(dev) & CommandTorque) == 0u || api->set_torque == nullptr) {
         return -ENOTSUP;
     }
     return api->set_torque(dev, torque_nm);
 }
 
-inline int readFeedback(const struct device *dev, Feedback &out)
-{
-    if (dev == nullptr || dev->api == nullptr) return -EINVAL;
+inline int readFeedback(const struct device *dev, Feedback &out) {
+    if (dev == nullptr || dev->api == nullptr)
+        return -EINVAL;
     const Api *api = static_cast<const Api *>(dev->api);
-    if (api->read_feedback == nullptr) return -ENOTSUP;
+    if (api->read_feedback == nullptr)
+        return -ENOTSUP;
     return api->read_feedback(dev, &out);
 }
 
-inline State getState(const struct device *dev)
-{
-    if (dev == nullptr || dev->api == nullptr) return State::Offline;
+inline State getState(const struct device *dev) {
+    if (dev == nullptr || dev->api == nullptr)
+        return State::Offline;
     const Api *api = static_cast<const Api *>(dev->api);
-    return api->get_state == nullptr
-        ? State::Offline
-        : api->get_state(dev);
+    return api->get_state == nullptr ? State::Offline : api->get_state(dev);
 }
 
 } // namespace skywalker::motor

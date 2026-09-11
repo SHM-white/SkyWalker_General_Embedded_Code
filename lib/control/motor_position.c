@@ -4,9 +4,7 @@
 
 #include <control/motor_position.h>
 
-int control_motor_position_validate(
-    const control_motor_position_config *config)
-{
+int control_motor_position_validate(const control_motor_position_config *config) {
     if (config == NULL) {
         return -EINVAL;
     }
@@ -20,24 +18,14 @@ int control_motor_position_validate(
         return ret;
     }
 
-    if (config->position.output_min <
-            -config->velocity.requested_velocity_abs_max_rad_s ||
-        config->position.output_max >
-            config->velocity.requested_velocity_abs_max_rad_s) {
+    if (config->position.output_min < -config->velocity.requested_velocity_abs_max_rad_s || config->position.output_max > config->velocity.requested_velocity_abs_max_rad_s) {
         return -ERANGE;
     }
     return 0;
 }
 
-int control_motor_position_reset(
-    control_motor_position_state *state,
-    const control_motor_position_config *config,
-    float measured_position_rad,
-    float measured_velocity_rad_s)
-{
-    if (state == NULL ||
-        !isfinite(measured_position_rad) ||
-        !isfinite(measured_velocity_rad_s)) {
+int control_motor_position_reset(control_motor_position_state *state, const control_motor_position_config *config, float measured_position_rad, float measured_velocity_rad_s) {
+    if (state == NULL || !isfinite(measured_position_rad) || !isfinite(measured_velocity_rad_s)) {
         return -EINVAL;
     }
 
@@ -51,8 +39,7 @@ int control_motor_position_reset(
     if (ret < 0) {
         return ret;
     }
-    ret = control_motor_velocity_reset(
-        &next.velocity, measured_velocity_rad_s, 0.0f);
+    ret = control_motor_velocity_reset(&next.velocity, measured_velocity_rad_s, 0.0f);
     if (ret < 0) {
         return ret;
     }
@@ -61,12 +48,7 @@ int control_motor_position_reset(
     return 0;
 }
 
-int control_motor_position_step(
-    control_motor_position_state *state,
-    const control_motor_position_config *config,
-    const control_motor_position_input *input,
-    control_motor_position_output *output)
-{
+int control_motor_position_step(control_motor_position_state *state, const control_motor_position_config *config, const control_motor_position_input *input, control_motor_position_output *output) {
     if (state == NULL || input == NULL || output == NULL) {
         return -EINVAL;
     }
@@ -75,10 +57,7 @@ int control_motor_position_step(
     if (ret < 0) {
         return ret;
     }
-    if (!isfinite(input->continuous_target_rad) ||
-        !isfinite(input->continuous_position_rad) ||
-        !isfinite(input->measured_velocity_rad_s) ||
-        !isfinite(input->dt_s)) {
+    if (!isfinite(input->continuous_target_rad) || !isfinite(input->continuous_position_rad) || !isfinite(input->measured_velocity_rad_s) || !isfinite(input->dt_s)) {
         return -EINVAL;
     }
 
@@ -92,11 +71,7 @@ int control_motor_position_step(
         /* Preserve the existing sample: I is configured but frozen. */
         .freeze_integrator = true,
     };
-    ret = control_pid_step(
-        &next.position,
-        &config->position,
-        &position_input,
-        &local.position);
+    ret = control_pid_step(&next.position, &config->position, &position_input, &local.position);
     if (ret < 0) {
         return ret;
     }
@@ -108,11 +83,7 @@ int control_motor_position_step(
         .dt_s = input->dt_s,
         .freeze_integrator = false,
     };
-    ret = control_motor_velocity_step(
-        &next.velocity,
-        &config->velocity,
-        &velocity_input,
-        &local.velocity);
+    ret = control_motor_velocity_step(&next.velocity, &config->velocity, &velocity_input, &local.velocity);
     if (ret < 0) {
         return ret;
     }

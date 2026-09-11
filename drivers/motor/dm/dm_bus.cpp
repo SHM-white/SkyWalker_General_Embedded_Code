@@ -10,8 +10,7 @@
 
 namespace skywalker::motor::dm {
 
-int Bus::init(const struct device *can)
-{
+int Bus::init(const struct device *can) {
     if (can == nullptr) {
         return -EINVAL;
     }
@@ -32,8 +31,7 @@ int Bus::init(const struct device *can)
     return 0;
 }
 
-int Bus::routeIndex(std::uint16_t master_id) const
-{
+int Bus::routeIndex(std::uint16_t master_id) const {
     for (std::size_t i = 0; i < route_count_; ++i) {
         if (routes_[i].master_id == master_id) {
             return static_cast<int>(i);
@@ -42,8 +40,7 @@ int Bus::routeIndex(std::uint16_t master_id) const
     return -1;
 }
 
-int Bus::attach(const struct device *motor)
-{
+int Bus::attach(const struct device *motor) {
     if (state_ != BusState::Safe) {
         return -EACCES;
     }
@@ -67,8 +64,7 @@ int Bus::attach(const struct device *motor)
         if (motors_[i] == motor) {
             return -EALREADY;
         }
-        if (descriptors_[i].master_id == descriptor.master_id &&
-            descriptors_[i].motor_id == descriptor.motor_id) {
+        if (descriptors_[i].master_id == descriptor.master_id && descriptors_[i].motor_id == descriptor.motor_id) {
             return -EADDRINUSE;
         }
         if (descriptors_[i].control_id == descriptor.control_id) {
@@ -77,8 +73,7 @@ int Bus::attach(const struct device *motor)
     }
 
     const bool needs_route = routeIndex(descriptor.master_id) < 0;
-    if (needs_route &&
-        route_count_ >= CONFIG_SKYWALKER_DM_MAX_MASTER_IDS_PER_BUS) {
+    if (needs_route && route_count_ >= CONFIG_SKYWALKER_DM_MAX_MASTER_IDS_PER_BUS) {
         return -ENOSPC;
     }
 
@@ -93,11 +88,7 @@ int Bus::attach(const struct device *motor)
         filter.id = descriptor.master_id;
         filter.mask = CAN_STD_ID_MASK;
         filter.flags = 0u;
-        filter_id = can_add_rx_filter(
-            can_,
-            Bus::rxCallback,
-            this,
-            &filter);
+        filter_id = can_add_rx_filter(can_, Bus::rxCallback, this, &filter);
         if (filter_id < 0) {
             internal::releaseMotor(motor, this);
             return filter_id;
@@ -117,10 +108,7 @@ int Bus::attach(const struct device *motor)
     return 0;
 }
 
-void Bus::rxCallback(const struct device *,
-                     struct can_frame *frame,
-                     void *user_data)
-{
+void Bus::rxCallback(const struct device *, struct can_frame *frame, void *user_data) {
     Bus *bus = static_cast<Bus *>(user_data);
     if (bus == nullptr || frame == nullptr) {
         return;
@@ -128,11 +116,8 @@ void Bus::rxCallback(const struct device *,
     bus->dispatchFeedback(*frame);
 }
 
-void Bus::dispatchFeedback(const struct can_frame &frame)
-{
-    if (frame.dlc != 8u ||
-        (frame.flags &
-         (CAN_FRAME_IDE | CAN_FRAME_RTR | CAN_FRAME_FDF)) != 0u) {
+void Bus::dispatchFeedback(const struct can_frame &frame) {
+    if (frame.dlc != 8u || (frame.flags & (CAN_FRAME_IDE | CAN_FRAME_RTR | CAN_FRAME_FDF)) != 0u) {
         return;
     }
 
@@ -140,8 +125,7 @@ void Bus::dispatchFeedback(const struct can_frame &frame)
     const struct device *target = nullptr;
     const k_spinlock_key_t key = k_spin_lock(&route_lock_);
     for (std::size_t i = 0; i < motor_count_; ++i) {
-        if (descriptors_[i].master_id == frame.id &&
-            descriptors_[i].motor_id == motor_id) {
+        if (descriptors_[i].master_id == frame.id && descriptors_[i].motor_id == motor_id) {
             target = motors_[i];
             break;
         }
@@ -149,18 +133,14 @@ void Bus::dispatchFeedback(const struct can_frame &frame)
     k_spin_unlock(&route_lock_, key);
 
     if (target != nullptr) {
-        const std::uint64_t now_ms =
-            static_cast<std::uint64_t>(k_uptime_get());
+        const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
         if (now_ms != 0u) {
             (void)internal::acceptFeedback(target, frame, now_ms);
         }
     }
 }
 
-int Bus::sendFrame(const struct can_frame &frame,
-                   std::uint16_t motor_id,
-                   TxReport &report)
-{
+int Bus::sendFrame(const struct can_frame &frame, std::uint16_t motor_id, TxReport &report) {
     const int ret = can_send(can_, &frame, K_MSEC(2), nullptr, nullptr);
     if (ret < 0) {
         if (report.tx_error == 0) {
@@ -175,27 +155,18 @@ int Bus::sendFrame(const struct can_frame &frame,
     return 0;
 }
 
-int Bus::disableAll(TxReport &report, bool latch_fault)
-{
+int Bus::disableAll(TxReport &report, bool latch_fault) {
     for (std::size_t i = 0; i < motor_count_; ++i) {
         internal::prepareMotorStop(motors_[i], latch_fault);
     }
 
-    const std::size_t expected =
-        static_cast<std::size_t>(report.frames_expected) + motor_count_;
-    report.frames_expected = static_cast<std::uint8_t>(
-        expected > std::numeric_limits<std::uint8_t>::max()
-            ? std::numeric_limits<std::uint8_t>::max()
-            : expected);
+    const std::size_t expected = static_cast<std::size_t>(report.frames_expected) + motor_count_;
+    report.frames_expected = static_cast<std::uint8_t>(expected > std::numeric_limits<std::uint8_t>::max() ? std::numeric_limits<std::uint8_t>::max() : expected);
 
     int first_error = 0;
     for (std::size_t i = 0; i < motor_count_; ++i) {
         struct can_frame frame{};
-        int ret = buildSpecialFrame(
-            descriptors_[i].mode,
-            descriptors_[i].motor_id,
-            SpecialCommand::Disable,
-            frame);
+        int ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Disable, frame);
         if (ret == 0) {
             ret = sendFrame(frame, descriptors_[i].motor_id, report);
         }
@@ -210,11 +181,8 @@ int Bus::disableAll(TxReport &report, bool latch_fault)
     return first_error;
 }
 
-int Bus::enterFaultAndDisable(TxReport &report)
-{
-    const int original_error = report.tx_error < 0
-        ? report.tx_error
-        : report.preparation_error;
+int Bus::enterFaultAndDisable(TxReport &report) {
+    const int original_error = report.tx_error < 0 ? report.tx_error : report.preparation_error;
     (void)disableAll(report, true);
     recovery_started_ms_ = 0u;
     state_ = BusState::Fault;
@@ -227,8 +195,7 @@ int Bus::enterFaultAndDisable(TxReport &report)
     return -EIO;
 }
 
-int Bus::arm(TxReport &report)
-{
+int Bus::arm(TxReport &report) {
     report = {};
     if (state_ != BusState::Safe) {
         report.preparation_error = -EACCES;
@@ -243,14 +210,11 @@ int Bus::arm(TxReport &report)
         return report.preparation_error;
     }
 
-    struct can_frame
-        neutral_frames[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
+    struct can_frame neutral_frames[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
     for (std::size_t i = 0; i < motor_count_; ++i) {
         int ret = internal::preflightArm(motors_[i]);
         if (ret == 0) {
-            ret = internal::buildNeutralFrame(
-                motors_[i],
-                neutral_frames[i]);
+            ret = internal::buildNeutralFrame(motors_[i], neutral_frames[i]);
         }
         if (ret < 0) {
             report.preparation_error = ret;
@@ -263,27 +227,16 @@ int Bus::arm(TxReport &report)
     if (lifecycle_epoch_ == 0u) {
         ++lifecycle_epoch_;
     }
-    report.frames_expected =
-        static_cast<std::uint8_t>(motor_count_ * 2u);
+    report.frames_expected = static_cast<std::uint8_t>(motor_count_ * 2u);
 
     for (std::size_t i = 0; i < motor_count_; ++i) {
         struct can_frame enable_frame{};
-        int ret = buildSpecialFrame(
-            descriptors_[i].mode,
-            descriptors_[i].motor_id,
-            SpecialCommand::Enable,
-            enable_frame);
+        int ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Enable, enable_frame);
         if (ret == 0) {
-            ret = sendFrame(
-                enable_frame,
-                descriptors_[i].motor_id,
-                report);
+            ret = sendFrame(enable_frame, descriptors_[i].motor_id, report);
         }
         if (ret == 0) {
-            ret = sendFrame(
-                neutral_frames[i],
-                descriptors_[i].motor_id,
-                report);
+            ret = sendFrame(neutral_frames[i], descriptors_[i].motor_id, report);
         }
         if (ret < 0) {
             if (report.preparation_error == 0 && report.tx_error == 0) {
@@ -294,14 +247,9 @@ int Bus::arm(TxReport &report)
         }
     }
 
-    const std::uint64_t now_ms =
-        static_cast<std::uint64_t>(k_uptime_get());
+    const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
     for (std::size_t i = 0; i < motor_count_; ++i) {
-        const int ret = internal::armMotor(
-            motors_[i],
-            lifecycle_epoch_,
-            now_ms == 0u ? 1u : now_ms,
-            neutral_frames[i]);
+        const int ret = internal::armMotor(motors_[i], lifecycle_epoch_, now_ms == 0u ? 1u : now_ms, neutral_frames[i]);
         if (ret < 0) {
             report.preparation_error = ret;
             report.failed_motor_id = descriptors_[i].motor_id;
@@ -314,8 +262,7 @@ int Bus::arm(TxReport &report)
     return 0;
 }
 
-int Bus::flush(TxReport &report)
-{
+int Bus::flush(TxReport &report) {
     report = {};
     if (state_ != BusState::Armed) {
         report.preparation_error = -EACCES;
@@ -325,16 +272,10 @@ int Bus::flush(TxReport &report)
         return enterFaultAndDisable(report);
     }
 
-    internal::CommandSnapshot
-        snapshots[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
-    const std::uint64_t now_ms =
-        static_cast<std::uint64_t>(k_uptime_get());
+    internal::CommandSnapshot snapshots[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
+    const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
     for (std::size_t i = 0; i < motor_count_; ++i) {
-        const int ret = internal::snapshotCommand(
-            motors_[i],
-            lifecycle_epoch_,
-            now_ms,
-            snapshots[i]);
+        const int ret = internal::snapshotCommand(motors_[i], lifecycle_epoch_, now_ms, snapshots[i]);
         if (ret < 0) {
             report.preparation_error = ret;
             report.failed_motor_id = descriptors_[i].motor_id;
@@ -344,10 +285,7 @@ int Bus::flush(TxReport &report)
 
     report.frames_expected = static_cast<std::uint8_t>(motor_count_);
     for (std::size_t i = 0; i < motor_count_; ++i) {
-        const int ret = sendFrame(
-            snapshots[i].frame,
-            descriptors_[i].motor_id,
-            report);
+        const int ret = sendFrame(snapshots[i].frame, descriptors_[i].motor_id, report);
         if (ret < 0) {
             return enterFaultAndDisable(report);
         }
@@ -355,8 +293,7 @@ int Bus::flush(TxReport &report)
     return 0;
 }
 
-int Bus::stop(TxReport &report)
-{
+int Bus::stop(TxReport &report) {
     report = {};
     if (state_ == BusState::Uninitialized) {
         report.preparation_error = -EACCES;
@@ -378,8 +315,7 @@ int Bus::stop(TxReport &report)
     return 0;
 }
 
-int Bus::recover(TxReport &report)
-{
+int Bus::recover(TxReport &report) {
     report = {};
     if (state_ != BusState::Fault) {
         report.preparation_error = -EACCES;
@@ -391,10 +327,8 @@ int Bus::recover(TxReport &report)
             internal::prepareMotorStop(motors_[i], true);
         }
 
-        report.frames_expected =
-            static_cast<std::uint8_t>(motor_count_ * 2u);
-        std::uint64_t recovery_stamp =
-            static_cast<std::uint64_t>(k_uptime_get());
+        report.frames_expected = static_cast<std::uint8_t>(motor_count_ * 2u);
+        std::uint64_t recovery_stamp = static_cast<std::uint64_t>(k_uptime_get());
         if (recovery_stamp == 0u) {
             recovery_stamp = 1u;
         }
@@ -402,33 +336,18 @@ int Bus::recover(TxReport &report)
         for (std::size_t i = 0; i < motor_count_; ++i) {
             struct can_frame clear_frame{};
             struct can_frame disable_frame{};
-            int ret = buildSpecialFrame(
-                descriptors_[i].mode,
-                descriptors_[i].motor_id,
-                SpecialCommand::ClearError,
-                clear_frame);
+            int ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::ClearError, clear_frame);
             if (ret == 0) {
-                ret = buildSpecialFrame(
-                    descriptors_[i].mode,
-                    descriptors_[i].motor_id,
-                    SpecialCommand::Disable,
-                    disable_frame);
+                ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Disable, disable_frame);
             }
             if (ret == 0) {
-                ret = sendFrame(
-                    clear_frame,
-                    descriptors_[i].motor_id,
-                    report);
+                ret = sendFrame(clear_frame, descriptors_[i].motor_id, report);
             }
             if (ret == 0) {
-                ret = sendFrame(
-                    disable_frame,
-                    descriptors_[i].motor_id,
-                    report);
+                ret = sendFrame(disable_frame, descriptors_[i].motor_id, report);
             }
             if (ret < 0) {
-                if (report.preparation_error == 0 &&
-                    report.tx_error == 0) {
+                if (report.preparation_error == 0 && report.tx_error == 0) {
                     report.preparation_error = ret;
                     report.failed_motor_id = descriptors_[i].motor_id;
                 }
@@ -442,9 +361,7 @@ int Bus::recover(TxReport &report)
     }
 
     for (std::size_t i = 0; i < motor_count_; ++i) {
-        if (!internal::recoveryReady(
-                motors_[i],
-                recovery_started_ms_)) {
+        if (!internal::recoveryReady(motors_[i], recovery_started_ms_)) {
             report.preparation_error = -EAGAIN;
             report.failed_motor_id = descriptors_[i].motor_id;
             return report.preparation_error;
@@ -459,8 +376,7 @@ int Bus::recover(TxReport &report)
     return 0;
 }
 
-int Bus::savePositionZero(const struct device *motor, TxReport &report)
-{
+int Bus::savePositionZero(const struct device *motor, TxReport &report) {
     report = {};
     if (state_ != BusState::Safe) {
         report.preparation_error = -EACCES;
@@ -491,11 +407,7 @@ int Bus::savePositionZero(const struct device *motor, TxReport &report)
     }
 
     struct can_frame frame{};
-    const int build_ret = buildSpecialFrame(
-        descriptors_[motor_index].mode,
-        descriptors_[motor_index].motor_id,
-        SpecialCommand::SaveZero,
-        frame);
+    const int build_ret = buildSpecialFrame(descriptors_[motor_index].mode, descriptors_[motor_index].motor_id, SpecialCommand::SaveZero, frame);
     if (build_ret < 0) {
         report.preparation_error = build_ret;
         report.failed_motor_id = descriptors_[motor_index].motor_id;
@@ -503,14 +415,10 @@ int Bus::savePositionZero(const struct device *motor, TxReport &report)
     }
 
     report.frames_expected = 1u;
-    return sendFrame(
-        frame,
-        descriptors_[motor_index].motor_id,
-        report);
+    return sendFrame(frame, descriptors_[motor_index].motor_id, report);
 }
 
-BusState Bus::state() const
-{
+BusState Bus::state() const {
     return state_;
 }
 
