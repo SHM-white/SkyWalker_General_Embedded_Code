@@ -31,8 +31,17 @@ constexpr float kTemperatureCutoffC = 60.0f;
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kTwoPi = 2.0f * kPi;
 constexpr float kPositionStepRad = kPi / 2.0f;
-constexpr float kArrivalToleranceRad = 0.03f;
-constexpr float kArrivalVelocityRadS = 0.05f;
+constexpr float kZeroToleranceRad = 0.03f;
+
+// Pure time function: elapsed time since arm, in milliseconds.
+// [0,6s): 0; [6,12s): pi/2; [12,18s): pi; [18,24s): 3*pi/2.
+// At 24s the single-turn command wraps to zero (the next revolution).
+float targetPositionRad(std::int64_t elapsed_ms) {
+    if (elapsed_ms <= 0) {
+        return 0.0f;
+    }
+    return static_cast<float>((elapsed_ms / kPositionStepPeriodMs) % 4) * kPositionStepRad;
+}
 
 // 360 degrees and 0 degrees name the same encoder phase.
 float singleTurnRad(float position_rad) {
@@ -140,9 +149,9 @@ int main() {
     double continuous_position_rad = singleTurnRad(first_feedback.position_rad);
     // Start at the saved encoder zero, approaching it in the positive direction.
     // Treat quantization noise on either side of zero as already at zero.
-    double continuous_target_rad = continuous_position_rad <= static_cast<double>(kArrivalToleranceRad)
+    const double zero_target_rad = continuous_position_rad <= static_cast<double>(kZeroToleranceRad)
                                        ? 0.0 : static_cast<double>(kTwoPi);
-    ret = controller.reset(static_cast<float>(continuous_position_rad - continuous_target_rad),
+    ret = controller.reset(static_cast<float>(continuous_position_rad - zero_target_rad),
                            first_feedback.velocity_rad_s);
     if (ret < 0) {
         LOG_ERR("controller reset failed: %d", ret);
@@ -157,12 +166,10 @@ int main() {
         return ret;
     }
 
-    unsigned int target_quarter_turn = 0U;
-    float target_position_rad = 0.0f;
-    bool zero_reached = false;
-    std::int64_t next_position_step_ms = 0;
-    std::int64_t previous_cycle_ms = k_uptime_get();
-    LOG_INF("MIT position: approach saved zero, then +90 deg every %lld ms; command=[0,2pi), torque_limit=%d mNm",
+    const std::int64_t started_ms = k_uptime_get();
+    std::int64_t previous_cycle_ms = started_ms;
+    std::int64_t previous_step = 0;
+    LOG_INF("MIT position: time-based +90 deg every %lld ms from saved zero; command=[0,2pi), torque_limit=%d mNm",
             kPositionStepPeriodMs, static_cast<int>(kSoftwareTorqueAbsMaxNm * 1000.0f));
 
     for (;;) {
@@ -196,24 +203,16 @@ int main() {
         previous_feedback_position_rad = feedback.position_rad;
         continuous_position_rad += static_cast<double>(position_delta_rad);
 
-        const bool arrived = std::fabs(continuous_target_rad - continuous_position_rad) <=
-                                 static_cast<double>(kArrivalToleranceRad) &&
-                             std::fabs(feedback.velocity_rad_s) <= kArrivalVelocityRadS;
-        if (!zero_reached && arrived) {
-            zero_reached = true;
-            next_position_step_ms = now_ms + kPositionStepPeriodMs;
-            LOG_INF("encoder zero reached; starting positive quarter-turn sequence");
-        }
-        if (zero_reached && now_ms >= next_position_step_ms) {
-            if (arrived) {
-                target_quarter_turn = (target_quarter_turn + 1U) % 4U;
-                target_position_rad = target_quarter_turn * kPositionStepRad;
-                continuous_target_rad += static_cast<double>(kPositionStepRad);
-                LOG_INF("new encoder target: %u deg (+90 deg)", target_quarter_turn * 90U);
-            } else {
-                LOG_WRN("target not settled; holding this step");
-            }
-            next_position_step_ms = now_ms + kPositionStepPeriodMs;
+        const std::int64_t elapsed_ms = now_ms - started_ms;
+        const float target_position_rad = targetPositionRad(elapsed_ms);
+        // Retain the revolution from time so 270 -> 0 means +90, not -270.
+        const std::int64_t step = elapsed_ms / kPositionStepPeriodMs;
+        const double continuous_target_rad = zero_target_rad +
+            static_cast<double>(step / 4) * static_cast<double>(kTwoPi) +
+            static_cast<double>(target_position_rad);
+        if (step != previous_step) {
+            LOG_INF("time=%lld ms target=%u deg", elapsed_ms, static_cast<unsigned int>(step % 4) * 90U);
+            previous_step = step;
         }
 
         skywalker::control::PositionController::Output output{};
