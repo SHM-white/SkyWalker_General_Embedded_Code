@@ -233,7 +233,33 @@ int acceptFeedback(const struct device *dev, const struct can_frame &frame, std:
     return 0;
 }
 
-int preflightArm(const struct device *dev) {
+int preflightArm(const struct device *dev, bool &enable_required) {
+    DmData *data = dataOf(dev);
+    if (data == nullptr) {
+        return -EINVAL;
+    }
+
+    const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
+    const k_spinlock_key_t key = k_spin_lock(&data->lock);
+    bool next_enable_required = false;
+    int ret = 0;
+    if (data->fault_latched || isFaultStatus(data->drive_status)) {
+        ret = -EHOSTDOWN;
+    } else if (!feedbackFreshLocked(*data, now_ms)) {
+        ret = -EHOSTDOWN;
+    } else if (data->drive_status == DriveStatus::Disabled) {
+        next_enable_required = true;
+    } else if (data->drive_status != DriveStatus::Enabled) {
+        ret = -EHOSTDOWN;
+    }
+    k_spin_unlock(&data->lock, key);
+    if (ret == 0) {
+        enable_required = next_enable_required;
+    }
+    return ret;
+}
+
+int preflightDisabled(const struct device *dev) {
     DmData *data = dataOf(dev);
     if (data == nullptr) {
         return -EINVAL;

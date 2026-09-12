@@ -1,0 +1,20 @@
+/ {
+    aliases {
+        motor0 = &dm_j4310_1;
+    };
+
+    dm_j4310_1: motor-1 {
+        compatible = "dm,j4310-2ec-v1-1";
+        status = "okay";
+        can-bus = <&can1>;
+        motor-id = <1>;
+        master-id = <0x11>;
+        control-mode = "mit";
+
+        /* Must match PMAX/VMAX/TMAX read from Damiao Assistant. */
+        p-max-millirad = <12500>;
+        v-max-millirad-s = <30000>;
+        t-max-millinewton-meter = <10000>;
+        torque-limit-millinewton-meter = <1000>;
+    };
+};

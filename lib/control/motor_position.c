@@ -57,7 +57,8 @@ int control_motor_position_step(control_motor_position_state *state, const contr
     if (ret < 0) {
         return ret;
     }
-    if (!isfinite(input->continuous_target_rad) || !isfinite(input->continuous_position_rad) || !isfinite(input->measured_velocity_rad_s) || !isfinite(input->dt_s)) {
+    if (!isfinite(input->continuous_target_rad) || !isfinite(input->continuous_position_rad) || !isfinite(input->measured_velocity_rad_s) || !isfinite(input->dt_s) ||
+        (input->has_position_reference && !isfinite(input->position_reference_rad))) {
         return -EINVAL;
     }
 
@@ -79,7 +80,7 @@ int control_motor_position_step(control_motor_position_state *state, const contr
     const control_motor_velocity_input velocity_input = {
         .requested_velocity_rad_s = local.position.output,
         .measured_velocity_rad_s = input->measured_velocity_rad_s,
-        .position_reference_rad = input->continuous_target_rad,
+        .position_reference_rad = input->has_position_reference ? input->position_reference_rad : input->continuous_target_rad,
         .dt_s = input->dt_s,
         .freeze_integrator = false,
     };
@@ -88,8 +89,8 @@ int control_motor_position_step(control_motor_position_state *state, const contr
         return ret;
     }
 
-    local.current_command_a = local.velocity.current_command_a;
-    if (!isfinite(local.current_command_a)) {
+    local.effort_command = local.velocity.effort_command;
+    if (!isfinite(local.effort_command)) {
         return -ERANGE;
     }
 

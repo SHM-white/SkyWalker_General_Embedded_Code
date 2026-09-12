@@ -23,12 +23,16 @@ typedef struct {
     float continuous_position_rad;
     float measured_velocity_rad_s;
     float dt_s;
+    /* Optional physical target for feedforward when PID coordinates are rebased. */
+    float position_reference_rad;
+    bool has_position_reference;
 } control_motor_position_input;
 
 typedef struct {
     control_pid_result position;
     control_motor_velocity_output velocity;
-    float current_command_a;
+    /* Actuator effort: amperes for DJI, N*m for DM MIT mode. */
+    float effort_command;
 } control_motor_position_output;
 
 int control_motor_position_validate(const control_motor_position_config *config);

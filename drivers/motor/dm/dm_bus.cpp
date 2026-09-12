@@ -211,8 +211,10 @@ int Bus::arm(TxReport &report) {
     }
 
     struct can_frame neutral_frames[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
+    bool enable_required[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
+    std::size_t frames_expected = motor_count_;
     for (std::size_t i = 0; i < motor_count_; ++i) {
-        int ret = internal::preflightArm(motors_[i]);
+        int ret = internal::preflightArm(motors_[i], enable_required[i]);
         if (ret == 0) {
             ret = internal::buildNeutralFrame(motors_[i], neutral_frames[i]);
         }
@@ -221,19 +223,49 @@ int Bus::arm(TxReport &report) {
             report.failed_motor_id = descriptors_[i].motor_id;
             return ret;
         }
+        if (enable_required[i]) {
+            ++frames_expected;
+        }
     }
 
     ++lifecycle_epoch_;
     if (lifecycle_epoch_ == 0u) {
         ++lifecycle_epoch_;
     }
-    report.frames_expected = static_cast<std::uint8_t>(motor_count_ * 2u);
+    report.frames_expected = static_cast<std::uint8_t>(frames_expected);
 
     for (std::size_t i = 0; i < motor_count_; ++i) {
-        struct can_frame enable_frame{};
-        int ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Enable, enable_frame);
-        if (ret == 0) {
-            ret = sendFrame(enable_frame, descriptors_[i].motor_id, report);
+        int ret = 0;
+        if (enable_required[i]) {
+            struct can_frame enable_frame{};
+            ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Enable, enable_frame);
+            if (ret == 0) {
+                ret = sendFrame(enable_frame, descriptors_[i].motor_id, report);
+            }
+            if (ret == 0) {
+                // CAN transmission completion is not an Enable acknowledgement.
+                // Wait before sending the first control frame; some drives need
+                // time to leave Disabled after processing Enable.
+                const std::int64_t deadline_ms = k_uptime_get() + 100;
+                for (;;) {
+                    RawFeedback feedback{};
+                    const int feedback_ret = readRawFeedback(motors_[i], feedback);
+                    const State motor_state = skywalker::motor::getState(motors_[i]);
+                    if (feedback_ret == 0 && feedback.status == DriveStatus::Enabled &&
+                        motor_state == State::Ready) {
+                        break;
+                    }
+                    if (motor_state == State::Fault) {
+                        ret = -EHOSTDOWN;
+                        break;
+                    }
+                    if (k_uptime_get() >= deadline_ms) {
+                        ret = -ETIMEDOUT;
+                        break;
+                    }
+                    k_sleep(K_MSEC(1));
+                }
+            }
         }
         if (ret == 0) {
             ret = sendFrame(neutral_frames[i], descriptors_[i].motor_id, report);
@@ -399,7 +431,7 @@ int Bus::savePositionZero(const struct device *motor, TxReport &report) {
         return report.preparation_error;
     }
 
-    const int preflight_ret = internal::preflightArm(motor);
+    const int preflight_ret = internal::preflightDisabled(motor);
     if (preflight_ret < 0) {
         report.preparation_error = preflight_ret;
         report.failed_motor_id = descriptors_[motor_index].motor_id;

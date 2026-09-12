@@ -17,7 +17,8 @@ typedef struct {
     float measurement_filter_tau_s;
     float soft_deadband_rad_s;
     float requested_velocity_abs_max_rad_s;
-    float current_abs_max_a;
+    /* Actuator command limit: amperes for DJI, N*m for DM MIT mode. */
+    float effort_abs_max;
 } control_motor_velocity_config;
 
 typedef struct {
@@ -42,7 +43,8 @@ typedef struct {
     float filtered_velocity_rad_s;
     float velocity_error_rad_s;
     control_feedforward_pid_result regulator;
-    float current_command_a;
+    /* Actuator effort: amperes for DJI, N*m for DM MIT mode. */
+    float effort_command;
 } control_motor_velocity_output;
 
 int control_motor_velocity_validate(const control_motor_velocity_config *config);

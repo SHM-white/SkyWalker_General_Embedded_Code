@@ -36,10 +36,10 @@ int control_motor_velocity_validate(const control_motor_velocity_config *config)
         return ret;
     }
 
-    if (!isfinite(config->measurement_filter_tau_s) || !isfinite(config->soft_deadband_rad_s) || !isfinite(config->requested_velocity_abs_max_rad_s) || !isfinite(config->current_abs_max_a)) {
+    if (!isfinite(config->measurement_filter_tau_s) || !isfinite(config->soft_deadband_rad_s) || !isfinite(config->requested_velocity_abs_max_rad_s) || !isfinite(config->effort_abs_max)) {
         return -EINVAL;
     }
-    if (config->measurement_filter_tau_s < 0.0f || config->soft_deadband_rad_s < 0.0f || config->requested_velocity_abs_max_rad_s <= 0.0f || config->current_abs_max_a < 0.0f) {
+    if (config->measurement_filter_tau_s < 0.0f || config->soft_deadband_rad_s < 0.0f || config->requested_velocity_abs_max_rad_s <= 0.0f || config->effort_abs_max < 0.0f) {
         return -EINVAL;
     }
     return 0;
@@ -135,8 +135,8 @@ int control_motor_velocity_step(control_motor_velocity_state *state, const contr
         return ret;
     }
 
-    local.current_command_a = clampf(local.regulator.output, -config->current_abs_max_a, config->current_abs_max_a);
-    if (!isfinite(local.current_command_a)) {
+    local.effort_command = clampf(local.regulator.output, -config->effort_abs_max, config->effort_abs_max);
+    if (!isfinite(local.effort_command)) {
         return -ERANGE;
     }
 
