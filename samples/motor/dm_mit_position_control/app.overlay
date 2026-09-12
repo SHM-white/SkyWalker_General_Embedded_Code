@@ -15,8 +15,6 @@
         p-max-millirad = <12500>;
         v-max-millirad-s = <30000>;
         t-max-millinewton-meter = <10000>;
-
-        /* Hard software boundary for all MIT torque commands. */
-        torque-limit-millinewton-meter = <10000>;
+        torque-limit-millinewton-meter = <1000>;
     };
 };

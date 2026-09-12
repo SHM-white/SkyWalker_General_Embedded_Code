@@ -67,7 +67,7 @@ skywalker::control::VelocityController::Config makeVelocityControllerConfig() {
     config.measurement_filter_tau_s = kVelocityFilterTauS;
     config.soft_deadband_rad_s = kDeadbandRadS;
     config.requested_velocity_abs_max_rad_s = kRequestedVelocityAbsMaxRadS;
-    config.current_abs_max_a = kSoftwareCurrentAbsMaxA;
+    config.effort_abs_max = kSoftwareCurrentAbsMaxA;
     return config;
 }
 
@@ -255,7 +255,7 @@ int main() {
             return stopAfterFailure(ret);
         }
 
-        ret = skywalker::motor::setCurrent(motor, output.current_command_a);
+        ret = skywalker::motor::setCurrent(motor, output.effort_command);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
@@ -281,7 +281,7 @@ int main() {
                 output.regulator.feedback.i,
                 output.regulator.feedback.d,
                 output.regulator.feedforward,
-                output.current_command_a,
+                output.effort_command,
                 output.regulator.feedback.saturated ? 1.0f : 0.0f,
                 static_cast<float>(now_ms - feedback.timestamp_ms),
             };

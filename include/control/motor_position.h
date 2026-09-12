@@ -28,7 +28,8 @@ typedef struct {
 typedef struct {
     control_pid_result position;
     control_motor_velocity_output velocity;
-    float current_command_a;
+    /* Actuator effort: amperes for DJI, N*m for DM MIT mode. */
+    float effort_command;
 } control_motor_position_output;
 
 int control_motor_position_validate(const control_motor_position_config *config);

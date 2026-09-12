@@ -88,8 +88,8 @@ int control_motor_position_step(control_motor_position_state *state, const contr
         return ret;
     }
 
-    local.current_command_a = local.velocity.current_command_a;
-    if (!isfinite(local.current_command_a)) {
+    local.effort_command = local.velocity.effort_command;
+    if (!isfinite(local.effort_command)) {
         return -ERANGE;
     }
 

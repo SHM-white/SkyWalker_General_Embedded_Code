@@ -99,7 +99,7 @@ skywalker::control::PositionController::Config makePositionControllerConfig() {
     config.velocity.measurement_filter_tau_s = 0.0f;
     config.velocity.soft_deadband_rad_s = 0.0f;
     config.velocity.requested_velocity_abs_max_rad_s = kVelocityAbsMaxRadS;
-    config.velocity.current_abs_max_a = kSoftwareCurrentAbsMaxA;
+    config.velocity.effort_abs_max = kSoftwareCurrentAbsMaxA;
     return config;
 }
 
@@ -337,7 +337,7 @@ int main() {
             return stopAfterFailure(ret);
         }
 
-        ret = skywalker::motor::setCurrent(motor, output.current_command_a);
+        ret = skywalker::motor::setCurrent(motor, output.effort_command);
         if (ret < 0) {
             return stopAfterFailure(ret);
         }
@@ -370,7 +370,7 @@ int main() {
                 output.velocity.velocity_error_rad_s,
                 output.velocity.regulator.feedback.p,
                 output.velocity.regulator.feedback.i,
-                output.current_command_a,
+                output.effort_command,
                 dt_s * 1000.0f,
                 static_cast<float>(now_ms - feedback.timestamp_ms),
             };
