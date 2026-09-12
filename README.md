@@ -161,7 +161,7 @@ west flash                # dm_mc02 默认 pyocd；rm_typec 用 openocd
 
 2. `prj.conf` 打开对应开关：`CONFIG_SKYWALKER_DRIVER_MOTOR=y`、`CONFIG_SKYWALKER_MOTOR_DJI=y`。
 
-3. 主循环按 `Bus → attach → arm → (setCurrent + flush)@周期` 流程运行，参考 `samples/motor/dji_position_control/src/main.cpp`。
+3. 速度/位置闭环使用 `VelocityMotor` / `PositionMotor`，按 `begin → update(目标)@周期 → stop` 调用；配置 `CONFIG_SKYWALKER_LIB_MOTOR_CONTROL=y` 和 `CONFIG_STD_CPP20=y`。达妙 MIT 与 DJI 分别选择对应后端，详见 [统一速度与位置控制](samples/motor/MOTOR_CONTROL.md)。
 
 ---
 
@@ -175,8 +175,10 @@ west flash                # dm_mc02 默认 pyocd；rm_typec 用 openocd
 | `motor/can_smoke/` | CAN 收帧冒烟测试 |
 | `motor/dji_unified/` | GM6020 开环电流老炼/安全测试（限速限温保护停机） |
 | `motor/dji_speed_control/` | GM6020 速度环：复合前馈 PID + 斜坡限幅，正弦速度指令 |
-| `motor/dji_position_control/` | **推荐参考**：位置–速度串级闭环，位置外环 PID（含爬行积分与死区）→ 斜坡 → 纯 P 速度内环 → 软件电流钳 |
+| `motor/dji_position_control/` | **推荐参考**：`PositionMotor` 位置–速度串级闭环，支持固定零点最短路径和连续相对目标；位置积分保持冻结 |
 | `motor/m2006_speed_control/` | M2006 速度环派生样例（gear-ratio 36:1） |
+| `motor/dm_mit_velocity_control/` | `VelocityMotor` + DM 后端，软件速度环输出力矩 |
+| `motor/dm_mit_position_control/` | `PositionMotor` + DM 后端，连续正向 90° 位置序列 |
 | `motor_demo/` | 早期自包含综合 demo（自带电机封装与手写 PID），**非本框架驱动，仅留档参考** |
 | `motor_demos/` | 另一框架（Breeze API）的样例集合，与本仓库 `drivers/` 无代码复用，勿混用 |
 

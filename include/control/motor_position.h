@@ -23,6 +23,9 @@ typedef struct {
     float continuous_position_rad;
     float measured_velocity_rad_s;
     float dt_s;
+    /* Optional physical target for feedforward when PID coordinates are rebased. */
+    float position_reference_rad;
+    bool has_position_reference;
 } control_motor_position_input;
 
 typedef struct {

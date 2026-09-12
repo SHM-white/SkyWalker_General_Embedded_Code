@@ -8,6 +8,9 @@
 
 namespace skywalker::samples::dm {
 
+// Board power hook for DmMotorBackend; invoke after CAN/filter setup.
+int enableMotorPower();
+
 struct Session {
     skywalker::motor::dm::Bus bus{};
     const struct device *motor = nullptr;

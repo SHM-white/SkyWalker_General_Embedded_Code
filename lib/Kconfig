@@ -28,5 +28,14 @@ config SKYWALKER_LIB_CONTROL
     bool "Pure control algorithms"
     help
         Enable allocation-free PID, feedforward and reference helpers.
+
+config SKYWALKER_LIB_MOTOR_CONTROL
+    bool "C++ velocity and position motor control"
+    depends on CPP && SKYWALKER_DRIVER_MOTOR
+    depends on SKYWALKER_MOTOR_DJI || SKYWALKER_MOTOR_DM
+    select SKYWALKER_LIB_CONTROL
+    help
+        Enable VelocityMotor/PositionMotor and the enabled motor-family
+        backends. Includes feedback checks, timing and fault-stop handling.
         
 endmenu

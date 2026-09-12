@@ -26,7 +26,7 @@ constexpr std::int64_t kDisableRetryPeriodMs = 100;
 constexpr std::int64_t kInitialPassiveFeedbackWaitMs = 100;
 constexpr std::int64_t kStatusHandshakeTimeoutMs = 3000;
 
-int enableMotorPower() {
+int enableMotorPowerImpl() {
 #if defined(CONFIG_BOARD_DM_MC02)
     if (!device_is_ready(xt30_1)) {
         return -ENODEV;
@@ -100,6 +100,10 @@ int waitForOperationalStatus(Session &session) {
 }
 
 } // namespace
+
+int enableMotorPower() {
+    return enableMotorPowerImpl();
+}
 
 int prepare(Session &session, const struct device *motor) {
     if (motor == nullptr || !device_is_ready(motor)) {
