@@ -76,6 +76,7 @@ int buildVelocityFrame(std::uint16_t motor_id, float velocity_rad_s, struct can_
 
 int buildSpecialFrame(ControlMode mode, std::uint16_t motor_id, SpecialCommand command, struct can_frame &out);
 
-int decodeFeedback(const struct can_frame &frame, std::uint8_t expected_motor_id, const Limits &limits, DecodedFeedback &out);
+int decodeFeedback(const struct can_frame &frame, std::uint8_t expected_motor_id, const Limits &limits,
+                   DecodedFeedback &out);
 
 } // namespace skywalker::motor::dm

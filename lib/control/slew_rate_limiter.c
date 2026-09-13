@@ -18,7 +18,8 @@ int control_slew_rate_validate(const control_slew_rate_config *config) {
     if (config == NULL) {
         return -EINVAL;
     }
-    if (!isfinite(config->rising_rate_per_s) || !isfinite(config->falling_rate_per_s) || config->rising_rate_per_s < 0.0f || config->falling_rate_per_s < 0.0f) {
+    if (!isfinite(config->rising_rate_per_s) || !isfinite(config->falling_rate_per_s) ||
+        config->rising_rate_per_s < 0.0f || config->falling_rate_per_s < 0.0f) {
         return -EINVAL;
     }
     return 0;
@@ -37,7 +38,8 @@ int control_slew_rate_reset(control_slew_rate_state *state, float current_value)
     return 0;
 }
 
-int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config, float requested_value, float dt_s, float *limited_value, float *limited_rate) {
+int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config,
+                           float requested_value, float dt_s, float *limited_value, float *limited_rate) {
     if (state == NULL || limited_value == NULL || limited_rate == NULL) {
         return -EINVAL;
     }

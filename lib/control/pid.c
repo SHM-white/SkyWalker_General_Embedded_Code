@@ -18,8 +18,10 @@ static float clampf(float value, float minimum, float maximum) {
 }
 
 static bool pid_config_fields_are_finite(const control_pid_config *config) {
-    return isfinite(config->kp) && isfinite(config->ki) && isfinite(config->kd) && isfinite(config->derivative_tau_s) && isfinite(config->integral_min) && isfinite(config->integral_max) &&
-           isfinite(config->output_min) && isfinite(config->output_max) && isfinite(config->deadband) && isfinite(config->dt_min_s) && isfinite(config->dt_max_s);
+    return isfinite(config->kp) && isfinite(config->ki) && isfinite(config->kd) && isfinite(config->derivative_tau_s) &&
+           isfinite(config->integral_min) && isfinite(config->integral_max) && isfinite(config->output_min) &&
+           isfinite(config->output_max) && isfinite(config->deadband) && isfinite(config->dt_min_s) &&
+           isfinite(config->dt_max_s);
 }
 
 int control_pid_validate(const control_pid_config *config) {
@@ -29,7 +31,8 @@ int control_pid_validate(const control_pid_config *config) {
     if (!pid_config_fields_are_finite(config)) {
         return -EINVAL;
     }
-    if (config->kp < 0.0f || config->ki < 0.0f || config->kd < 0.0f || config->derivative_tau_s < 0.0f || config->deadband < 0.0f) {
+    if (config->kp < 0.0f || config->ki < 0.0f || config->kd < 0.0f || config->derivative_tau_s < 0.0f ||
+        config->deadband < 0.0f) {
         return -EINVAL;
     }
     if (config->integral_min > config->integral_max || config->output_min > config->output_max) {
@@ -57,7 +60,8 @@ int control_pid_reset(control_pid_state *state, float current_measurement) {
     return 0;
 }
 
-int control_pid_step_core(control_pid_state *state, const control_pid_config *config, const control_pid_input *input, float additive_output, control_pid_result *result) {
+int control_pid_step_core(control_pid_state *state, const control_pid_config *config, const control_pid_input *input,
+                          float additive_output, control_pid_result *result) {
     if (state == NULL || input == NULL || result == NULL) {
         return -EINVAL;
     }
@@ -67,17 +71,20 @@ int control_pid_step_core(control_pid_state *state, const control_pid_config *co
         return ret;
     }
 
-    if (!isfinite(input->setpoint) || !isfinite(input->measurement) || !isfinite(input->dt_s) || !isfinite(additive_output)) {
+    if (!isfinite(input->setpoint) || !isfinite(input->measurement) || !isfinite(input->dt_s) ||
+        !isfinite(additive_output)) {
         return -EINVAL;
     }
     if (input->dt_s < config->dt_min_s || input->dt_s > config->dt_max_s) {
         return -ERANGE;
     }
 
-    if (state->initialized && (!isfinite(state->integral_output) || !isfinite(state->previous_measurement) || !isfinite(state->filtered_measurement_rate))) {
+    if (state->initialized && (!isfinite(state->integral_output) || !isfinite(state->previous_measurement) ||
+                               !isfinite(state->filtered_measurement_rate))) {
         return -EINVAL;
     }
-    if (state->initialized && (state->integral_output < config->integral_min || state->integral_output > config->integral_max)) {
+    if (state->initialized &&
+        (state->integral_output < config->integral_min || state->integral_output > config->integral_max)) {
         return -ERANGE;
     }
 
@@ -171,6 +178,7 @@ int control_pid_step_core(control_pid_state *state, const control_pid_config *co
     return 0;
 }
 
-int control_pid_step(control_pid_state *state, const control_pid_config *config, const control_pid_input *input, control_pid_result *result) {
+int control_pid_step(control_pid_state *state, const control_pid_config *config, const control_pid_input *input,
+                     control_pid_result *result) {
     return control_pid_step_core(state, config, input, 0.0f, result);
 }

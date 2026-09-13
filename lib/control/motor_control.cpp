@@ -129,12 +129,12 @@ int MotorRuntime::poll(std::uint64_t now, MotorMeasurement &measurement) {
         status_.state = MotorRunState::Recovering;
         status_.last_recovery_error = ret;
         ++status_.recovery_attempts;
-        next_retry_ms_ = now + ((ret == -EAGAIN || ret == -EINPROGRESS) ? safety_.recovery_poll_ms : safety_.recovery_retry_ms);
+        next_retry_ms_ = now + ((ret == -EAGAIN || ret == -EINPROGRESS) ? safety_.recovery_poll_ms
+                                                                        : safety_.recovery_retry_ms);
         return ret;
     }
     next_retry_ms_ = 0;
-    if (!stable_started_ || now < stable_since_ms_ ||
-        next.feedback.timestamp_ms < last_feedback_ms_ ||
+    if (!stable_started_ || now < stable_since_ms_ || next.feedback.timestamp_ms < last_feedback_ms_ ||
         next.feedback.timestamp_ms - last_feedback_ms_ > info_.feedback_timeout_ms) {
         if (was_ready) {
             suspend(PauseReason::FeedbackTimeout);
@@ -144,7 +144,8 @@ int MotorRuntime::poll(std::uint64_t now, MotorMeasurement &measurement) {
         stable_started_ = true;
         stable_since_ms_ = now;
         last_feedback_ms_ = next.feedback.timestamp_ms;
-    } else if (next.feedback.timestamp_ms != last_feedback_ms_) {
+    }
+    else if (next.feedback.timestamp_ms != last_feedback_ms_) {
         last_feedback_ms_ = next.feedback.timestamp_ms;
         if (now - stable_since_ms_ >= safety_.recovery_stable_ms && !was_ready) {
             ++status_.resume_generation;

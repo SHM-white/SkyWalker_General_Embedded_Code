@@ -77,10 +77,10 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(uart)) return -ENODEV;
+    if (!device_is_ready(uart))
+        return -ENODEV;
     // Bus and UART callbacks retain these objects after an early return.
-    static skywalker::control::DjiMotorBackend backend{
-        DEVICE_DT_GET(MOTOR0_NODE)};
+    static skywalker::control::DjiMotorBackend backend{DEVICE_DT_GET(MOTOR0_NODE)};
     static skywalker::control::VelocityMotor motor{backend, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
@@ -101,15 +101,21 @@ int main() {
         const auto &feedback = data.measurement.feedback;
         const auto &output = data.output;
         const float channels[10] = {
-            target, output.velocity_reference_rad_s, feedback.velocity_rad_s,
-            output.regulator.feedback.error, output.regulator.feedback.p,
-            output.regulator.feedback.i, output.regulator.feedforward,
-            output.effort_command, output.regulator.feedback.saturated ? 1.0f : 0.0f,
+            target,
+            output.velocity_reference_rad_s,
+            feedback.velocity_rad_s,
+            output.regulator.feedback.error,
+            output.regulator.feedback.p,
+            output.regulator.feedback.i,
+            output.regulator.feedforward,
+            output.effort_command,
+            output.regulator.feedback.saturated ? 1.0f : 0.0f,
             static_cast<float>(k_uptime_get() - feedback.timestamp_ms),
         };
         vofa_send(&vofa, channels, 10);
     }
     ret = motor.stop();
-    if (ret < 0) LOG_ERR("stop failed: %d", ret);
+    if (ret < 0)
+        LOG_ERR("stop failed: %d", ret);
     return ret;
 }

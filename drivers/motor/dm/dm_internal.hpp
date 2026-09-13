@@ -61,7 +61,8 @@ int acceptFeedback(const struct device *dev, const struct can_frame &frame, std:
 int preflightArm(const struct device *dev, bool &enable_required);
 int preflightDisabled(const struct device *dev);
 int buildNeutralFrame(const struct device *dev, struct can_frame &out);
-int armMotor(const struct device *dev, std::uint64_t epoch, std::uint64_t now_ms, const struct can_frame &neutral_frame);
+int armMotor(const struct device *dev, std::uint64_t epoch, std::uint64_t now_ms,
+             const struct can_frame &neutral_frame);
 void prepareMotorStop(const struct device *dev, bool latch_fault);
 void clearMotorFault(const struct device *dev);
 bool recoveryReady(const struct device *dev, std::uint64_t recovery_started_ms);
@@ -70,18 +71,19 @@ int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std:
 } // namespace internal
 } // namespace skywalker::motor::dm
 
-#define DM_MOTOR_DEFINE(inst, model_value)                                                                                                                                                             \
-    static skywalker::motor::dm::internal::DmData dm_data_##inst;                                                                                                                                      \
-    static const skywalker::motor::dm::internal::DmConfig dm_config_##inst = {                                                                                                                         \
-        DEVICE_DT_GET(DT_INST_PHANDLE(inst, can_bus)),                                                                                                                                                 \
-        (model_value),                                                                                                                                                                                 \
-        DT_INST_PROP(inst, motor_id),                                                                                                                                                                  \
-        DT_INST_PROP(inst, master_id),                                                                                                                                                                 \
-        static_cast<skywalker::motor::dm::ControlMode>(DT_INST_ENUM_IDX(inst, control_mode)),                                                                                                          \
-        DT_INST_PROP(inst, p_max_millirad),                                                                                                                                                            \
-        DT_INST_PROP(inst, v_max_millirad_s),                                                                                                                                                          \
-        DT_INST_PROP(inst, t_max_millinewton_meter),                                                                                                                                                   \
-        DT_INST_PROP(inst, torque_limit_millinewton_meter),                                                                                                                                            \
-    };                                                                                                                                                                                                 \
-    DEVICE_DT_INST_DEFINE(inst, skywalker::motor::dm::internal::dmMotorInit, nullptr, &dm_data_##inst, &dm_config_##inst, POST_KERNEL, CONFIG_SKYWALKER_MOTOR_INIT_PRIORITY,                           \
+#define DM_MOTOR_DEFINE(inst, model_value)                                                                             \
+    static skywalker::motor::dm::internal::DmData dm_data_##inst;                                                      \
+    static const skywalker::motor::dm::internal::DmConfig dm_config_##inst = {                                         \
+        DEVICE_DT_GET(DT_INST_PHANDLE(inst, can_bus)),                                                                 \
+        (model_value),                                                                                                 \
+        DT_INST_PROP(inst, motor_id),                                                                                  \
+        DT_INST_PROP(inst, master_id),                                                                                 \
+        static_cast<skywalker::motor::dm::ControlMode>(DT_INST_ENUM_IDX(inst, control_mode)),                          \
+        DT_INST_PROP(inst, p_max_millirad),                                                                            \
+        DT_INST_PROP(inst, v_max_millirad_s),                                                                          \
+        DT_INST_PROP(inst, t_max_millinewton_meter),                                                                   \
+        DT_INST_PROP(inst, torque_limit_millinewton_meter),                                                            \
+    };                                                                                                                 \
+    DEVICE_DT_INST_DEFINE(inst, skywalker::motor::dm::internal::dmMotorInit, nullptr, &dm_data_##inst,                 \
+                          &dm_config_##inst, POST_KERNEL, CONFIG_SKYWALKER_MOTOR_INIT_PRIORITY,                        \
                           &skywalker::motor::dm::internal::dm_motor_api);

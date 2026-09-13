@@ -52,9 +52,8 @@ int waitForOperationalStatus(Session &session) {
         const int status_ret = skywalker::motor::dm::getDriveStatus(session.motor, status);
         const skywalker::motor::State state = skywalker::motor::getState(session.motor);
         if (status_ret == 0) {
-            if (state == skywalker::motor::State::Ready &&
-                (status == skywalker::motor::dm::DriveStatus::Disabled ||
-                 status == skywalker::motor::dm::DriveStatus::Enabled)) {
+            if (state == skywalker::motor::State::Ready && (status == skywalker::motor::dm::DriveStatus::Disabled ||
+                                                            status == skywalker::motor::dm::DriveStatus::Enabled)) {
                 LOG_INF("DM-J4310 startup status=%u; arm will %s", static_cast<unsigned int>(status),
                         status == skywalker::motor::dm::DriveStatus::Disabled ? "send Enable" : "keep enabled");
                 return 0;
@@ -151,7 +150,8 @@ int arm(Session &session) {
     if (ret < 0) {
         LOG_ERR("arm failed: ret=%d prep=%d tx=%d failed_id=%u", ret, report.preparation_error, report.tx_error,
                 report.failed_motor_id);
-    } else {
+    }
+    else {
         LOG_INF("motor armed: Enable acknowledged (or already enabled), neutral command sent");
     }
     return ret;
@@ -176,8 +176,7 @@ int readSafeFeedback(const Session &session, float velocity_abs_max_rad_s, float
     if (state != skywalker::motor::State::Ready) {
         LOG_ERR("feedback unavailable: state=%u drive_status=0x%x age=%lld ms (timeout=%d ms)",
                 static_cast<unsigned int>(state), static_cast<unsigned int>(raw.status),
-                k_uptime_get() - static_cast<std::int64_t>(raw.timestamp_ms),
-                CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS);
+                k_uptime_get() - static_cast<std::int64_t>(raw.timestamp_ms), CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS);
         return -EHOSTDOWN;
     }
     // Controllers seed their state from feedback before arm(). Disabled is
@@ -201,8 +200,7 @@ int readSafeFeedback(const Session &session, float velocity_abs_max_rad_s, float
     if (std::fabs(feedback.velocity_rad_s) > velocity_abs_max_rad_s || feedback.temperature_c >= temperature_max_c ||
         static_cast<float>(raw.mos_temperature_c) >= temperature_max_c) {
         LOG_ERR("safety cutoff: speed=%d limit=%d mrad/s MOS=%u rotor=%u limit=%d C",
-                static_cast<int>(feedback.velocity_rad_s * 1000.0f),
-                static_cast<int>(velocity_abs_max_rad_s * 1000.0f),
+                static_cast<int>(feedback.velocity_rad_s * 1000.0f), static_cast<int>(velocity_abs_max_rad_s * 1000.0f),
                 raw.mos_temperature_c, raw.rotor_temperature_c, static_cast<int>(temperature_max_c));
         return -ERANGE;
     }

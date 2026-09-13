@@ -30,7 +30,8 @@ std::uint32_t getCapabilities(const struct device *dev) {
         caps |= FeedbackTemperature;
     }
     /* A rotor single-turn angle maps uniquely to the output only at 1:1. */
-    if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn && cfg->gear_ratio_num == cfg->gear_ratio_den) {
+    if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn &&
+        cfg->gear_ratio_num == cfg->gear_ratio_den) {
         caps |= FeedbackAbsolutePosition;
     }
     return caps;
@@ -130,7 +131,8 @@ void rxCallback(const struct device *, struct can_frame *frame, void *user_data)
         data->last_encoder = raw.encoder;
         data->total_encoder_ticks = 0;
         data->has_encoder = true;
-    } else {
+    }
+    else {
         std::int32_t delta = static_cast<std::int32_t>(raw.encoder) - static_cast<std::int32_t>(data->last_encoder);
         const std::int32_t half_turn = ticks_per_turn / 2;
         if (delta > half_turn)
@@ -142,11 +144,14 @@ void rxCallback(const struct device *, struct can_frame *frame, void *user_data)
     }
 
     Feedback next{};
-    next.position_rad = static_cast<float>(data->total_encoder_ticks) * (kTwoPi / static_cast<float>(ticks_per_turn)) / data->gear_ratio;
+    next.position_rad = static_cast<float>(data->total_encoder_ticks) * (kTwoPi / static_cast<float>(ticks_per_turn)) /
+                        data->gear_ratio;
     next.valid |= FeedbackPosition;
 
-    if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn && cfg->gear_ratio_num == cfg->gear_ratio_den) {
-        std::int32_t relative_ticks = static_cast<std::int32_t>(raw.encoder) - static_cast<std::int32_t>(cfg->encoder_zero_ticks);
+    if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn &&
+        cfg->gear_ratio_num == cfg->gear_ratio_den) {
+        std::int32_t relative_ticks = static_cast<std::int32_t>(raw.encoder) -
+                                      static_cast<std::int32_t>(cfg->encoder_zero_ticks);
         const std::int32_t half_turn = ticks_per_turn / 2;
         if (relative_ticks >= half_turn)
             relative_ticks -= ticks_per_turn;
@@ -202,13 +207,15 @@ int djiMotorInit(const struct device *dev) {
     if (cfg->profile->encoder_ticks_per_turn == 0u || (cfg->profile->encoder_ticks_per_turn % 2u) != 0u) {
         return -EINVAL;
     }
-    if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn && cfg->encoder_zero_ticks >= cfg->profile->encoder_ticks_per_turn) {
+    if (cfg->profile->position_sensor == PositionSensorType::FixedZeroSingleTurn &&
+        cfg->encoder_zero_ticks >= cfg->profile->encoder_ticks_per_turn) {
         return -ERANGE;
     }
 
     const float current_limit_a = static_cast<float>(cfg->current_limit_ma) / 1000.0f;
     const float gear_ratio = static_cast<float>(cfg->gear_ratio_num) / static_cast<float>(cfg->gear_ratio_den);
-    if (!std::isfinite(current_limit_a) || current_limit_a < 0.0f || current_limit_a > cfg->profile->protocol_current_max_a) {
+    if (!std::isfinite(current_limit_a) || current_limit_a < 0.0f ||
+        current_limit_a > cfg->profile->protocol_current_max_a) {
         return -ERANGE;
     }
     if (!std::isfinite(gear_ratio) || gear_ratio <= 0.0f) {
@@ -303,7 +310,8 @@ void clearMotorFault(const struct device *dev) {
     k_spin_unlock(&data->lock, key);
 }
 
-int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std::uint64_t now_ms, CommandSnapshot &out) {
+int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std::uint64_t now_ms,
+                    CommandSnapshot &out) {
     DjiData *data = dataOf(dev);
     if (data == nullptr || expected_epoch == 0u) {
         return -EINVAL;
@@ -315,13 +323,19 @@ int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std:
 
     if (!data->armed || data->fault_latched) {
         ret = -EACCES;
-    } else if (data->active_epoch != expected_epoch || data->command_epoch != expected_epoch) {
+    }
+    else if (data->active_epoch != expected_epoch || data->command_epoch != expected_epoch) {
         ret = -ESTALE;
-    } else if (data->last_rx_ms == 0u || now_ms < data->last_rx_ms || now_ms - data->last_rx_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
+    }
+    else if (data->last_rx_ms == 0u || now_ms < data->last_rx_ms ||
+             now_ms - data->last_rx_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) {
         ret = -EHOSTDOWN;
-    } else if (data->command_stamp_ms == 0u || now_ms < data->command_stamp_ms || now_ms - data->command_stamp_ms > CONFIG_SKYWALKER_DJI_COMMAND_TIMEOUT_MS) {
+    }
+    else if (data->command_stamp_ms == 0u || now_ms < data->command_stamp_ms ||
+             now_ms - data->command_stamp_ms > CONFIG_SKYWALKER_DJI_COMMAND_TIMEOUT_MS) {
         ret = -ESTALE;
-    } else {
+    }
+    else {
         next.command_id = data->endpoint.command_id;
         next.command_slot = data->endpoint.command_slot;
         next.command_raw = data->command_raw;
@@ -361,26 +375,36 @@ int describe(const struct device *dev, Descriptor &out) {
 }
 
 int resetMeasurementReference(const struct device *dev) {
-    if (!internal::isDjiMotor(dev)) return -ENOTSUP;
-    auto *data=static_cast<internal::DjiData *>(dev->data);
-    const auto *cfg=static_cast<const internal::DjiConfig *>(dev->config);
-    const auto now=static_cast<std::uint64_t>(k_uptime_get());
-    const auto key=k_spin_lock(&data->lock);
-    int ret=0;
-    if (data->armed) ret=-EACCES;
-    else if (!data->last_rx_ms || now<data->last_rx_ms || now-data->last_rx_ms>CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) ret=-EAGAIN;
+    if (!internal::isDjiMotor(dev))
+        return -ENOTSUP;
+    auto *data = static_cast<internal::DjiData *>(dev->data);
+    const auto *cfg = static_cast<const internal::DjiConfig *>(dev->config);
+    const auto now = static_cast<std::uint64_t>(k_uptime_get());
+    const auto key = k_spin_lock(&data->lock);
+    int ret = 0;
+    if (data->armed)
+        ret = -EACCES;
+    else if (!data->last_rx_ms || now < data->last_rx_ms ||
+             now - data->last_rx_ms > CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS)
+        ret = -EAGAIN;
     else {
-        const auto ticks=static_cast<std::int32_t>(cfg->profile->encoder_ticks_per_turn);
-        std::int32_t seed=0;
+        const auto ticks = static_cast<std::int32_t>(cfg->profile->encoder_ticks_per_turn);
+        std::int32_t seed = 0;
         if (data->feedback.valid & FeedbackAbsolutePosition) {
-            seed=static_cast<std::int32_t>(data->raw_feedback.encoder)-static_cast<std::int32_t>(cfg->encoder_zero_ticks);
-            if (seed>=ticks/2) seed-=ticks;
-            if (seed< -ticks/2) seed+=ticks;
+            seed = static_cast<std::int32_t>(data->raw_feedback.encoder) -
+                   static_cast<std::int32_t>(cfg->encoder_zero_ticks);
+            if (seed >= ticks / 2)
+                seed -= ticks;
+            if (seed < -ticks / 2)
+                seed += ticks;
         }
-        data->last_encoder=data->raw_feedback.encoder; data->has_encoder=true; data->total_encoder_ticks=seed;
-        data->feedback.position_rad=static_cast<float>(seed)*(6.283185307179586f/ticks)/data->gear_ratio;
+        data->last_encoder = data->raw_feedback.encoder;
+        data->has_encoder = true;
+        data->total_encoder_ticks = seed;
+        data->feedback.position_rad = static_cast<float>(seed) * (6.283185307179586f / ticks) / data->gear_ratio;
     }
-    k_spin_unlock(&data->lock,key); return ret;
+    k_spin_unlock(&data->lock, key);
+    return ret;
 }
 
 int readRawFeedback(const struct device *dev, RawFeedback &out) {

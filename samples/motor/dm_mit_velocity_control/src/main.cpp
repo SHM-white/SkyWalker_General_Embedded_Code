@@ -29,7 +29,6 @@ constexpr float kTemperatureCutoffC = 60.0f;
 static_assert(kRequestedVelocityAbsMaxRadS > 0.0f && kRequestedVelocityAbsMaxRadS < kVelocityCutoffRadS,
               "Velocity command limit must be positive and below the safety cutoff");
 
-
 float targetVelocityRadS() {
     return 2.0f;
 }
@@ -82,10 +81,11 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(uart)) return -ENODEV;
+    if (!device_is_ready(uart))
+        return -ENODEV;
     // Bus and UART callbacks retain these objects after an early return.
-    static skywalker::control::DmMotorBackend backend{
-        DEVICE_DT_GET(MOTOR0_NODE), skywalker::samples::dm::enableMotorPower};
+    static skywalker::control::DmMotorBackend backend{DEVICE_DT_GET(MOTOR0_NODE),
+                                                      skywalker::samples::dm::enableMotorPower};
     static skywalker::control::VelocityMotor motor{backend, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
@@ -100,10 +100,12 @@ int main() {
         if (motor.state() != skywalker::control::ExecutionState::Active) {
             const auto now = k_uptime_get();
             ret = motor.poll(now);
-            if (ret == 0) ret = motor.resume();
+            if (ret == 0)
+                ret = motor.resume();
             if (now >= next_recovery_log_ms) {
                 next_recovery_log_ms = now + 1000;
-                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()), motor.status().resume_generation, ret);
+                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()),
+                        motor.status().resume_generation, ret);
             }
             continue;
         }
@@ -118,9 +120,14 @@ int main() {
         const auto &feedback = data.measurement.feedback;
         const auto &output = data.output;
         const float channels[8] = {
-            target, output.velocity_reference_rad_s, feedback.velocity_rad_s,
-            output.velocity_error_rad_s, output.effort_command, feedback.torque_nm,
-            data.measurement.driver_temperature_c, feedback.temperature_c,
+            target,
+            output.velocity_reference_rad_s,
+            feedback.velocity_rad_s,
+            output.velocity_error_rad_s,
+            output.effort_command,
+            feedback.torque_nm,
+            data.measurement.driver_temperature_c,
+            feedback.temperature_c,
         };
         vofa_send(&vofa, channels, 8);
     }

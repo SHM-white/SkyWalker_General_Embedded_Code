@@ -29,7 +29,6 @@ constexpr float kSoftwareCurrentAbsMaxA = 0.8f;
 constexpr float kDeadbandRadS = 0.20f;
 constexpr float kVelocityFilterTauS = 0.025f;
 
-
 float requestedVelocityForTime(std::int64_t elapsed_ms) {
     if (elapsed_ms < 500) {
         return 0.0f;
@@ -88,10 +87,10 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(uart)) return -ENODEV;
+    if (!device_is_ready(uart))
+        return -ENODEV;
     // Bus and UART callbacks retain these objects after an early return.
-    static skywalker::control::DjiMotorBackend backend{
-        DEVICE_DT_GET(MOTOR0_NODE)};
+    static skywalker::control::DjiMotorBackend backend{DEVICE_DT_GET(MOTOR0_NODE)};
     static skywalker::control::VelocityMotor motor{backend, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
@@ -107,10 +106,12 @@ int main() {
         if (motor.state() != skywalker::control::ExecutionState::Active) {
             const auto now = k_uptime_get();
             ret = motor.poll(now);
-            if (ret == 0) ret = motor.resume();
+            if (ret == 0)
+                ret = motor.resume();
             if (now >= next_recovery_log_ms) {
                 next_recovery_log_ms = now + 1000;
-                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()), motor.status().resume_generation, ret);
+                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()),
+                        motor.status().resume_generation, ret);
             }
             continue;
         }
@@ -127,11 +128,17 @@ int main() {
         if (++telemetry_divider >= kTelemetryPeriodCycles) {
             telemetry_divider = 0;
             const float channels[12] = {
-                target, output.velocity_reference_rad_s, feedback.velocity_rad_s,
-                output.filtered_velocity_rad_s, output.velocity_error_rad_s,
-                output.regulator.feedback.p, output.regulator.feedback.i,
-                output.regulator.feedback.d, output.regulator.feedforward,
-                output.effort_command, output.regulator.feedback.saturated ? 1.0f : 0.0f,
+                target,
+                output.velocity_reference_rad_s,
+                feedback.velocity_rad_s,
+                output.filtered_velocity_rad_s,
+                output.velocity_error_rad_s,
+                output.regulator.feedback.p,
+                output.regulator.feedback.i,
+                output.regulator.feedback.d,
+                output.regulator.feedforward,
+                output.effort_command,
+                output.regulator.feedback.saturated ? 1.0f : 0.0f,
                 static_cast<float>(k_uptime_get() - feedback.timestamp_ms),
             };
             vofa_send(&vofa, channels, 12);

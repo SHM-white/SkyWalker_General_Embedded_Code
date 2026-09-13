@@ -9,7 +9,8 @@ namespace skywalker::control {
 // group sender instead: independent group frames would overwrite other slots.
 class DjiMotorBackend final : public MotorBackend {
 public:
-    explicit DjiMotorBackend(const device *motor) : motor_(motor) {}
+    explicit DjiMotorBackend(const device *motor) : motor_(motor) {
+    }
     int describe(MotorInfo &info) override;
     int prepare() override;
     int configure() override;
@@ -20,8 +21,12 @@ public:
     int write(float effort_a) override;
     int flush() override;
     int stop() override;
-    const motor::dji::FlushReport &report() const { return report_; }
-    const motor::dji::FlushReport &stopReport() const { return stop_report_; }
+    const motor::dji::FlushReport &report() const {
+        return report_;
+    }
+    const motor::dji::FlushReport &stopReport() const {
+        return stop_report_;
+    }
 
 private:
     bool configured_ = false;

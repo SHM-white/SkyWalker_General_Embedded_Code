@@ -47,25 +47,34 @@ int DmMotorBackend::prepare() {
     return pollPrepare(k_uptime_get());
 }
 int DmMotorBackend::pollPrepare(std::uint64_t now_ms) {
-    if (!configured_) return -EACCES;
-    int ret=pollCanRecovery(descriptor_.can); if (ret<0) return ret;
-    if (bus_.state()==motor::dm::BusState::Fault) {
-        ret=bus_.recover(report_); if (ret<0) return ret;
+    if (!configured_)
+        return -EACCES;
+    int ret = pollCanRecovery(descriptor_.can);
+    if (ret < 0)
+        return ret;
+    if (bus_.state() == motor::dm::BusState::Fault) {
+        ret = bus_.recover(report_);
+        if (ret < 0)
+            return ret;
     }
     // Disabled DM firmware may only reply to host probes. Probe often enough to
     // establish multiple fresh samples across the 30 ms preparation interval.
-    if (now_ms>=next_probe_ms_) {
-        next_probe_ms_=now_ms+10;
-        if (motor::getState(motor_)==motor::State::Fault) ret=bus_.recover(report_);
-        else ret=bus_.stop(report_);
-        if (ret<0) return ret;
+    if (now_ms >= next_probe_ms_) {
+        next_probe_ms_ = now_ms + 10;
+        if (motor::getState(motor_) == motor::State::Fault)
+            ret = bus_.recover(report_);
+        else
+            ret = bus_.stop(report_);
+        if (ret < 0)
+            return ret;
     }
     motor::dm::RawFeedback raw{};
-    ret=motor::dm::readRawFeedback(motor_,raw);
-    const auto observed_now=static_cast<std::uint64_t>(k_uptime_get());
-    if (ret==0 && raw.timestamp_ms && observed_now>=raw.timestamp_ms &&
-        observed_now-raw.timestamp_ms<=CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS &&
-        raw.status==motor::dm::DriveStatus::Disabled && motor::getState(motor_)==motor::State::Ready) return 0;
+    ret = motor::dm::readRawFeedback(motor_, raw);
+    const auto observed_now = static_cast<std::uint64_t>(k_uptime_get());
+    if (ret == 0 && raw.timestamp_ms && observed_now >= raw.timestamp_ms &&
+        observed_now - raw.timestamp_ms <= CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS &&
+        raw.status == motor::dm::DriveStatus::Disabled && motor::getState(motor_) == motor::State::Ready)
+        return 0;
     return -EAGAIN;
 }
 int DmMotorBackend::resetMeasurementReference() {

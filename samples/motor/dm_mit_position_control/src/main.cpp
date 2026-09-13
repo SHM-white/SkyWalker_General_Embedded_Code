@@ -31,7 +31,6 @@ constexpr float kTwoPi = 2.0f * kPi;
 constexpr float kPositionStepRad = kPi / 2.0f;
 constexpr float kZeroToleranceRad = 0.03f;
 
-
 float targetPositionRad(std::int64_t elapsed_ms) {
     if (elapsed_ms <= 0) {
         return 0.0f;
@@ -109,10 +108,11 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(uart)) return -ENODEV;
+    if (!device_is_ready(uart))
+        return -ENODEV;
     // Bus and UART callbacks retain these objects after an early return.
-    static skywalker::control::DmMotorBackend backend{
-        DEVICE_DT_GET(MOTOR0_NODE), skywalker::samples::dm::enableMotorPower};
+    static skywalker::control::DmMotorBackend backend{DEVICE_DT_GET(MOTOR0_NODE),
+                                                      skywalker::samples::dm::enableMotorPower};
     static skywalker::control::PositionMotor motor{backend, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
@@ -124,7 +124,7 @@ int main() {
     const double initial = motor.telemetry().measurement.position_rad;
     const double phase = singleTurnRad(static_cast<float>(initial));
     const double zero_target = initial - phase +
-        (phase <= static_cast<double>(kZeroToleranceRad) ? 0.0 : static_cast<double>(kTwoPi));
+                               (phase <= static_cast<double>(kZeroToleranceRad) ? 0.0 : static_cast<double>(kTwoPi));
     std::int64_t previous_step = 0;
     std::int64_t next_recovery_log_ms = 0;
     for (;;) {
@@ -132,10 +132,12 @@ int main() {
         if (motor.state() != skywalker::control::ExecutionState::Active) {
             const auto now = k_uptime_get();
             ret = motor.poll(now);
-            if (ret == 0) ret = motor.resume();
+            if (ret == 0)
+                ret = motor.resume();
             if (now >= next_recovery_log_ms) {
                 next_recovery_log_ms = now + 1000;
-                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()), motor.status().resume_generation, ret);
+                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()),
+                        motor.status().resume_generation, ret);
             }
             continue;
         }
@@ -160,10 +162,14 @@ int main() {
         const float channels[10] = {
             single_turn_target,
             singleTurnRad(static_cast<float>(std::fmod(data.position_rad, static_cast<double>(kTwoPi)))),
-            output.position.error, output.velocity.velocity_reference_rad_s,
-            feedback.velocity_rad_s, output.velocity.velocity_error_rad_s,
-            output.effort_command, feedback.torque_nm,
-            data.measurement.driver_temperature_c, feedback.temperature_c,
+            output.position.error,
+            output.velocity.velocity_reference_rad_s,
+            feedback.velocity_rad_s,
+            output.velocity.velocity_error_rad_s,
+            output.effort_command,
+            feedback.torque_nm,
+            data.measurement.driver_temperature_c,
+            feedback.temperature_c,
         };
         vofa_send(&vofa, channels, 10);
     }

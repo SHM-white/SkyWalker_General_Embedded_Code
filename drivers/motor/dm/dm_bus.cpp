@@ -161,7 +161,8 @@ int Bus::disableAll(TxReport &report, bool latch_fault) {
     }
 
     const std::size_t expected = static_cast<std::size_t>(report.frames_expected) + motor_count_;
-    report.frames_expected = static_cast<std::uint8_t>(expected > std::numeric_limits<std::uint8_t>::max() ? std::numeric_limits<std::uint8_t>::max() : expected);
+    report.frames_expected = static_cast<std::uint8_t>(
+        expected > std::numeric_limits<std::uint8_t>::max() ? std::numeric_limits<std::uint8_t>::max() : expected);
 
     int first_error = 0;
     for (std::size_t i = 0; i < motor_count_; ++i) {
@@ -238,7 +239,8 @@ int Bus::arm(TxReport &report) {
         int ret = 0;
         if (enable_required[i]) {
             struct can_frame enable_frame{};
-            ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Enable, enable_frame);
+            ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Enable,
+                                    enable_frame);
             if (ret == 0) {
                 ret = sendFrame(enable_frame, descriptors_[i].motor_id, report);
             }
@@ -251,8 +253,7 @@ int Bus::arm(TxReport &report) {
                     RawFeedback feedback{};
                     const int feedback_ret = readRawFeedback(motors_[i], feedback);
                     const State motor_state = skywalker::motor::getState(motors_[i]);
-                    if (feedback_ret == 0 && feedback.status == DriveStatus::Enabled &&
-                        motor_state == State::Ready) {
+                    if (feedback_ret == 0 && feedback.status == DriveStatus::Enabled && motor_state == State::Ready) {
                         break;
                     }
                     if (motor_state == State::Fault) {
@@ -355,8 +356,9 @@ int Bus::recover(TxReport &report) {
     }
 
     state_ = BusState::Fault;
-    const auto now_ms=static_cast<std::uint64_t>(k_uptime_get());
-    if (recovery_started_ms_ && now_ms>=recovery_started_ms_ && now_ms-recovery_started_ms_>=1000) recovery_started_ms_=0;
+    const auto now_ms = static_cast<std::uint64_t>(k_uptime_get());
+    if (recovery_started_ms_ && now_ms >= recovery_started_ms_ && now_ms - recovery_started_ms_ >= 1000)
+        recovery_started_ms_ = 0;
     if (recovery_started_ms_ == 0u) {
         for (std::size_t i = 0; i < motor_count_; ++i) {
             internal::prepareMotorStop(motors_[i], true);
@@ -371,9 +373,11 @@ int Bus::recover(TxReport &report) {
         for (std::size_t i = 0; i < motor_count_; ++i) {
             struct can_frame clear_frame{};
             struct can_frame disable_frame{};
-            int ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::ClearError, clear_frame);
+            int ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::ClearError,
+                                        clear_frame);
             if (ret == 0) {
-                ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Disable, disable_frame);
+                ret = buildSpecialFrame(descriptors_[i].mode, descriptors_[i].motor_id, SpecialCommand::Disable,
+                                        disable_frame);
             }
             if (ret == 0) {
                 ret = sendFrame(clear_frame, descriptors_[i].motor_id, report);
@@ -442,7 +446,8 @@ int Bus::savePositionZero(const struct device *motor, TxReport &report) {
     }
 
     struct can_frame frame{};
-    const int build_ret = buildSpecialFrame(descriptors_[motor_index].mode, descriptors_[motor_index].motor_id, SpecialCommand::SaveZero, frame);
+    const int build_ret = buildSpecialFrame(descriptors_[motor_index].mode, descriptors_[motor_index].motor_id,
+                                            SpecialCommand::SaveZero, frame);
     if (build_ret < 0) {
         report.preparation_error = build_ret;
         report.failed_motor_id = descriptors_[motor_index].motor_id;

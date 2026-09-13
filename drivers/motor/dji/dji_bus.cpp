@@ -124,7 +124,8 @@ int Bus::attach(const struct device *motor) {
         if (descriptors_[i].feedback_id == descriptor.feedback_id) {
             return -EADDRINUSE;
         }
-        if (descriptors_[i].command_id == descriptor.command_id && descriptors_[i].command_slot == descriptor.command_slot) {
+        if (descriptors_[i].command_id == descriptor.command_id &&
+            descriptors_[i].command_slot == descriptor.command_slot) {
             return -EADDRINUSE;
         }
     }
@@ -164,12 +165,15 @@ int Bus::sendZeros(FlushReport &report) {
                 report.zero_tx_error = ret;
                 report.zero_failed_command_id = group_ids_[i];
             }
-        } else {
+        }
+        else {
             ++report.zero_groups_succeeded;
         }
     }
 
-    report.zero_sent = report.zero_groups_expected > 0u && report.zero_groups_attempted == report.zero_groups_expected && report.zero_groups_succeeded == report.zero_groups_expected;
+    report.zero_sent = report.zero_groups_expected > 0u &&
+                       report.zero_groups_attempted == report.zero_groups_expected &&
+                       report.zero_groups_succeeded == report.zero_groups_expected;
     return report.zero_tx_error;
 }
 
@@ -299,7 +303,8 @@ int Bus::stop(FlushReport &report) {
 
     if (was_fault) {
         state_ = BusState::Fault;
-    } else {
+    }
+    else {
         for (std::size_t i = 0; i < motor_count_; ++i) {
             internal::clearMotorFault(motors_[i]);
         }

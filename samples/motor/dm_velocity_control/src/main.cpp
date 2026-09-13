@@ -47,12 +47,10 @@ int main() {
     const float target_velocity_rad_s = targetVelocityRadS();
     if (!std::isfinite(target_velocity_rad_s) ||
         std::fabs(target_velocity_rad_s) > session.descriptor.limits.velocity_max_rad_s) {
-        LOG_ERR("invalid velocity target: %d mrad/s",
-                static_cast<int>(target_velocity_rad_s * 1000.0f));
+        LOG_ERR("invalid velocity target: %d mrad/s", static_cast<int>(target_velocity_rad_s * 1000.0f));
         return -ERANGE;
     }
-    const float velocity_cutoff_rad_s =
-        std::fabs(target_velocity_rad_s) + kSpeedSafetyMarginRadS;
+    const float velocity_cutoff_rad_s = std::fabs(target_velocity_rad_s) + kSpeedSafetyMarginRadS;
 
     Vofa vofa{};
     vofa_init(&vofa, vofa_uart);
@@ -61,13 +59,12 @@ int main() {
         return ret;
     }
 
-    LOG_INF("native velocity control started: target=%d mrad/s",
-            static_cast<int>(target_velocity_rad_s * 1000.0f));
+    LOG_INF("native velocity control started: target=%d mrad/s", static_cast<int>(target_velocity_rad_s * 1000.0f));
     for (;;) {
         skywalker::motor::Feedback feedback{};
         skywalker::motor::dm::RawFeedback raw{};
-        ret = skywalker::samples::dm::readSafeFeedback(
-            session, velocity_cutoff_rad_s, kTemperatureCutoffC, feedback, raw);
+        ret = skywalker::samples::dm::readSafeFeedback(session, velocity_cutoff_rad_s, kTemperatureCutoffC, feedback,
+                                                       raw);
         if (ret < 0) {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }

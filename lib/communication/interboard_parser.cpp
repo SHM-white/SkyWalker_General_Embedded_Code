@@ -40,7 +40,8 @@ void InterBoardParser::discard(std::size_t n) {
     used_ -= n;
     std::memmove(buffer_.data(), buffer_.data() + n, used_);
     std::memmove(receive_ms_.data(), receive_ms_.data() + n, used_ * sizeof(receive_ms_[0]));
-    if (used_) started_ms_ = receive_ms_[0];
+    if (used_)
+        started_ms_ = receive_ms_[0];
 }
 void InterBoardParser::scan(std::uint64_t now) {
     while (used_) {

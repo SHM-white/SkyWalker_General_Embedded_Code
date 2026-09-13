@@ -28,7 +28,8 @@ int resolveEndpoint(const Profile &profile, std::uint8_t motor_id, Endpoint &out
     if (motor_id <= 4u) {
         next.command_id = profile.low_command_id;
         next.command_slot = static_cast<std::uint8_t>(motor_id - 1u);
-    } else {
+    }
+    else {
         next.command_id = profile.high_command_id;
         next.command_slot = static_cast<std::uint8_t>(motor_id - 5u);
     }
@@ -42,7 +43,8 @@ int resolveEndpoint(const Profile &profile, std::uint8_t motor_id, Endpoint &out
 int currentToRaw(const Profile &profile, float current_a, std::int16_t &out) {
     if (!std::isfinite(current_a))
         return -EINVAL;
-    if (profile.command_raw_max <= 0 || !std::isfinite(profile.protocol_current_max_a) || profile.protocol_current_max_a <= 0.0f) {
+    if (profile.command_raw_max <= 0 || !std::isfinite(profile.protocol_current_max_a) ||
+        profile.protocol_current_max_a <= 0.0f) {
         return -EINVAL;
     }
     if (std::fabs(current_a) > profile.protocol_current_max_a) {
@@ -60,7 +62,8 @@ int currentToRaw(const Profile &profile, float current_a, std::int16_t &out) {
 }
 
 int rawToCurrent(const Profile &profile, std::int16_t raw, float &out) {
-    if (profile.command_raw_max <= 0 || !std::isfinite(profile.protocol_current_max_a) || profile.protocol_current_max_a <= 0.0f) {
+    if (profile.command_raw_max <= 0 || !std::isfinite(profile.protocol_current_max_a) ||
+        profile.protocol_current_max_a <= 0.0f) {
         return -EINVAL;
     }
     if (raw < -profile.command_raw_max || raw > profile.command_raw_max) {

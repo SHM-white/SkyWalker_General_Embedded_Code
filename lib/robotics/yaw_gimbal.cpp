@@ -22,7 +22,8 @@ int YawGimbal::begin() {
 }
 void YawGimbal::seed() {
     const auto &m = motor_.telemetry().measurement;
-    target_angle_rad_ = config_.topology == YawTopology::Continuous ? double(m.feedback.absolute_position_rad) : m.position_rad;
+    target_angle_rad_ = config_.topology == YawTopology::Continuous ? double(m.feedback.absolute_position_rad)
+                                                                    : m.position_rad;
     previous_action_ = SafetyAction::Disable;
     previous_mode_ = GimbalMode::Disabled;
     initialized_ = true;
@@ -81,7 +82,8 @@ int YawGimbal::update(const GimbalCommand &c, SafetyAction action, float dt) {
                 delta = error;
             }
             else
-                delta = double(std::clamp(c.yaw_target_rad, config_.min_angle_rad, config_.max_angle_rad)) - target_angle_rad_;
+                delta = double(std::clamp(c.yaw_target_rad, config_.min_angle_rad, config_.max_angle_rad)) -
+                        target_angle_rad_;
             const double step = config_.max_rate_rad_s * dt;
             delta = std::clamp(delta, -step, step);
         }

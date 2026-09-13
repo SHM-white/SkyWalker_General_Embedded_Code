@@ -43,7 +43,6 @@ enum class PositionTargetMode {
 /* Fixed encoder zero; the backend must advertise absolute position. */
 constexpr PositionTargetMode kPositionTargetMode = PositionTargetMode::FixedZeroAbsolute;
 
-
 control_motor_position_config makePositionLoopConfig() {
     control_motor_position_config config{};
 
@@ -116,8 +115,8 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
     config.effort_unit = skywalker::control::EffortUnit::Ampere;
     config.safety = {kMeasuredVelocitySafetyMaxRadS, 0.0f};
     config.reference = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
-        ? skywalker::control::PositionReference::AbsoluteNearest
-        : skywalker::control::PositionReference::StartupRelative;
+                           ? skywalker::control::PositionReference::AbsoluteNearest
+                           : skywalker::control::PositionReference::StartupRelative;
     return config;
 }
 
@@ -125,10 +124,10 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(uart)) return -ENODEV;
+    if (!device_is_ready(uart))
+        return -ENODEV;
     // Bus and UART callbacks retain these objects after an early return.
-    static skywalker::control::DjiMotorBackend backend{
-        DEVICE_DT_GET(MOTOR0_NODE)};
+    static skywalker::control::DjiMotorBackend backend{DEVICE_DT_GET(MOTOR0_NODE)};
     static skywalker::control::PositionMotor motor{backend, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
@@ -144,18 +143,20 @@ int main() {
         if (motor.state() != skywalker::control::ExecutionState::Active) {
             const auto now = k_uptime_get();
             ret = motor.poll(now);
-            if (ret == 0) ret = motor.resume();
+            if (ret == 0)
+                ret = motor.resume();
             if (now >= next_recovery_log_ms) {
                 next_recovery_log_ms = now + 1000;
-                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()), motor.status().resume_generation, ret);
+                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()),
+                        motor.status().resume_generation, ret);
             }
             continue;
         }
 
         const auto elapsed_ms = motor.elapsedMs();
         const float target = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
-            ? requestedAbsolutePositionRad(elapsed_ms)
-            : static_cast<float>((elapsed_ms % 10000) / 2500) * kTargetOffsetRad;
+                                 ? requestedAbsolutePositionRad(elapsed_ms)
+                                 : static_cast<float>((elapsed_ms % 10000) / 2500) * kTargetOffsetRad;
         ret = motor.update(target);
         if (ret < 0) {
             LOG_WRN("cycle paused: cause=%d stop=%d", ret, motor.status().stop_error);
@@ -167,14 +168,20 @@ int main() {
             const auto &feedback = data.measurement.feedback;
             const auto &output = data.output;
             const float channels[14] = {
-                target, static_cast<float>(data.target_position_rad),
+                target,
+                static_cast<float>(data.target_position_rad),
                 static_cast<float>(data.measurement.position_rad),
                 kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute ? feedback.absolute_position_rad : 0.0f,
-                output.position.error, output.position.output,
-                output.velocity.velocity_reference_rad_s, feedback.velocity_rad_s,
-                output.velocity.velocity_error_rad_s, output.velocity.regulator.feedback.p,
-                output.velocity.regulator.feedback.i, output.effort_command,
-                data.dt_s * 1000.0f, static_cast<float>(k_uptime_get() - feedback.timestamp_ms),
+                output.position.error,
+                output.position.output,
+                output.velocity.velocity_reference_rad_s,
+                feedback.velocity_rad_s,
+                output.velocity.velocity_error_rad_s,
+                output.velocity.regulator.feedback.p,
+                output.velocity.regulator.feedback.i,
+                output.effort_command,
+                data.dt_s * 1000.0f,
+                static_cast<float>(k_uptime_get() - feedback.timestamp_ms),
             };
             vofa_send(&vofa, channels, 14);
         }

@@ -33,7 +33,8 @@ void RefereeParser::discard(std::size_t n) {
     used_ -= n;
     std::memmove(buffer_.data(), buffer_.data() + n, used_);
     std::memmove(receive_ms_.data(), receive_ms_.data() + n, used_ * sizeof(receive_ms_[0]));
-    if (used_) started_ms_ = receive_ms_[0];
+    if (used_)
+        started_ms_ = receive_ms_[0];
 }
 void RefereeParser::decode(std::uint16_t id, const std::uint8_t *p, std::size_t n, std::uint64_t now) {
     using namespace robotics;

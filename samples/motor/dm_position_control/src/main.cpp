@@ -75,14 +75,13 @@ int main() {
     bool at_ninety_degrees = false;
     float target_position_rad = zero_position_rad;
     std::int64_t next_position_step_ms = k_uptime_get() + kPositionStepPeriodMs;
-    LOG_INF("native position control started: saved zero <-> +90 deg every %lld ms",
-            kPositionStepPeriodMs);
+    LOG_INF("native position control started: saved zero <-> +90 deg every %lld ms", kPositionStepPeriodMs);
 
     for (;;) {
         skywalker::motor::Feedback feedback{};
         skywalker::motor::dm::RawFeedback raw{};
-        ret = skywalker::samples::dm::readSafeFeedback(
-            session, velocity_cutoff_rad_s, kTemperatureCutoffC, feedback, raw);
+        ret = skywalker::samples::dm::readSafeFeedback(session, velocity_cutoff_rad_s, kTemperatureCutoffC, feedback,
+                                                       raw);
         if (ret < 0) {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }
@@ -92,12 +91,10 @@ int main() {
             at_ninety_degrees = !at_ninety_degrees;
             target_position_rad = targetPositionFromSavedZeroRad(at_ninety_degrees);
             next_position_step_ms = now_ms + kPositionStepPeriodMs;
-            LOG_INF("new saved-zero-relative target: %d mdeg",
-                    static_cast<int>(target_position_rad * 180000.0f / kPi));
+            LOG_INF("new saved-zero-relative target: %d mdeg", static_cast<int>(target_position_rad * 180000.0f / kPi));
         }
 
-        ret = skywalker::motor::dm::setPositionVelocity(
-            motor, target_position_rad, velocity_limit_rad_s);
+        ret = skywalker::motor::dm::setPositionVelocity(motor, target_position_rad, velocity_limit_rad_s);
         if (ret < 0) {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }

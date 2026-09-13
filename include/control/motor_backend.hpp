@@ -35,9 +35,15 @@ public:
 
     virtual int describe(MotorInfo &info) = 0;
     virtual int prepare() = 0; // Legacy entry; new backends use the split operations below.
-    virtual int configure() { return 0; }
-    virtual int pollPrepare(std::uint64_t) { return prepare(); }
-    virtual int resetMeasurementReference() { return 0; }
+    virtual int configure() {
+        return 0;
+    }
+    virtual int pollPrepare(std::uint64_t) {
+        return prepare();
+    }
+    virtual int resetMeasurementReference() {
+        return 0;
+    }
     virtual int read(MotorMeasurement &measurement) = 0;
     virtual int arm() = 0;
     virtual int write(float effort) = 0;
@@ -59,7 +65,18 @@ struct MotorSafety {
     std::uint32_t recovery_poll_ms = 5; // Awaiting an in-progress handshake, not retrying a failed TX.
 };
 
-enum class MotorRunState { Idle, Starting, Running, Stopped, Fault, Waiting, Recovering, Ready, EStopLatched, ConfigBlocked };
+enum class MotorRunState {
+    Idle,
+    Starting,
+    Running,
+    Stopped,
+    Fault,
+    Waiting,
+    Recovering,
+    Ready,
+    EStopLatched,
+    ConfigBlocked
+};
 
 struct MotorStatus {
     MotorRunState state = MotorRunState::Idle;
@@ -89,7 +106,9 @@ public:
     int fail(int error, PauseReason reason = PauseReason::TransportTemporary);
     int stop();
     std::int64_t elapsedMs() const;
-    const MotorStatus &status() const { return status_; }
+    const MotorStatus &status() const {
+        return status_;
+    }
 
 private:
     int read(MotorMeasurement &measurement);
