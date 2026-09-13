@@ -73,7 +73,7 @@ skywalker_code/                 # west module（module.yml：kconfig/cmake/board
 │   ├── control/  matrix/  vofa/
 ├── include/                    # 公共头文件（与 drivers/lib 一一对应）
 │   ├── control/  drivers/  lib/
-├── samples/                    # 可构建样例（含 motor/dm_common 共享支持代码）
+├── samples/                    # 独立可构建上机样例（辅助代码由各项目私有）
 ├── application/                # 空占位模板目录（src/main.c 为空文件）
 ├── docs/                       # 主题文档 + 原始手册 PDF
 ├── west.yml                    # west manifest（锁定 Zephyr revision）
@@ -209,7 +209,7 @@ west flash -d build/dm_pos        # 默认 openocd；探针可选 cmsis-dap/stli
 
 2. `prj.conf` 打开对应开关：`CONFIG_SKYWALKER_DRIVER_MOTOR=y`、`CONFIG_SKYWALKER_MOTOR_DJI=y`。
 
-3. 速度/位置闭环使用 `VelocityMotor` / `PositionMotor`，按 `begin → update(目标)@周期 → stop` 调用；配置 `CONFIG_SKYWALKER_LIB_MOTOR_CONTROL=y` 和 `CONFIG_STD_CPP20=y`。达妙 MIT 与 DJI 分别选择对应后端，详见 [统一速度与位置控制](samples/motor/MOTOR_CONTROL.md)。
+3. 速度/位置闭环使用 `VelocityMotor` / `PositionMotor`，正常按 `configure → poll → resume → update(目标)@周期` 调用，临时异常后 `suspend → poll → resume`，`stop` 用于主动终止；配置 `CONFIG_SKYWALKER_LIB_MOTOR_CONTROL=y` 和 `CONFIG_STD_CPP20=y`。达妙 MIT 与 DJI 分别选择对应后端，详见 [统一速度与位置控制](samples/motor/MOTOR_CONTROL.md)。
 
 ---
 
@@ -232,7 +232,7 @@ west flash -d build/dm_pos        # 默认 openocd；探针可选 cmsis-dap/stli
 | `motor/dm_mit_velocity_control/` | `VelocityMotor` + DM 后端，软件速度环输出力矩 |
 | `motor/dm_mit_position_control/` | `PositionMotor` + DM 后端，连续正向 90° 位置序列 |
 
-> `motor/dm_common/` 不是样例，而是达妙样例共享的支持代码（`enableMotorPower` 等）。
+> 达妙 sample 的辅助代码已归入各自目录，不再共享 `dm_common`。新增 [框架上机项目](samples/FRAMEWORK_SAMPLES.md) 包括遥控、裁判、板间、命令/安全、云台、单舵轮和电机恢复。
 > `application/` 是空占位目录，`src/main.c` 为空文件，不属于模块构建。
 > 完整样例说明见 [样例索引](docs/10-samples.md)。
 
@@ -274,5 +274,5 @@ west flash -d build/dm_pos        # 默认 openocd；探针可选 cmsis-dap/stli
 
 ## 当前状态
 
-> 本仓库处于持续迭代中（分支 `dev`）。`application/` 为占位目录；`samples/motor/` 是当前唯一的样例集合。README 与 `docs/` 将随框架演进同步更新。
+> `application/` 保留为旧占位入口；双主控应用位于 `applications/sentry_gimbal` 与 `applications/sentry_chassis`。参见 [双主控框架使用说明](双主控框架使用说明.md)。
 

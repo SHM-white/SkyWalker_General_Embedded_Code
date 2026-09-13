@@ -1,0 +1,28 @@
+/* DM MC02 connection template. Set real pins, IDs, zero and status before use.
+ * usart1 PA9/PA10 is a suggested full-duplex interboard port, not a wiring claim.
+ * Add remote-uart / referee-uart aliases and DMA RX configuration for your ports.
+ * DR16: confirm DBUS electrical inversion, 100000 baud, 8E1 on the actual receiver.
+ */
+/ {
+    aliases {
+        interboard-uart = &usart1;
+        yaw-motor = &sentry_yaw;
+        /* remote-uart = &uart5; */
+        /* referee-uart = &usart3; */
+    };
+    sentry_yaw: yaw-motor {
+        compatible = "dji,gm6020-current";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <1>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+        encoder-zero-ticks = <0>;
+        current-loop-confirmed;
+    };
+};
+&usart1 { current-speed = <460800>; };
+
+/* Hardware entropy supplies a new interboard boot context after every reset. */
+&rng { status = "okay"; };

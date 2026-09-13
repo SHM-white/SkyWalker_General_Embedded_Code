@@ -1,0 +1,100 @@
+/* DM MC02 wiring template; all motor nodes are disabled until you configure them.
+ * Order is FL, FR, RL, RR. DJI current command slots and feedback IDs must not collide.
+ */
+/ {
+    aliases {
+        interboard-uart = &usart1;
+        steer-fl = &steer_fl;
+        steer-fr = &steer_fr;
+        steer-rl = &steer_rl;
+        steer-rr = &steer_rr;
+        drive-fl = &drive_fl;
+        drive-fr = &drive_fr;
+        drive-rl = &drive_rl;
+        drive-rr = &drive_rr;
+    };
+    steer_fl: steer-fl {
+        compatible = "dji,gm6020-current";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <1>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+        encoder-zero-ticks = <0>;
+        current-loop-confirmed;
+    };
+    steer_fr: steer-fr {
+        compatible = "dji,gm6020-current";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <2>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+        encoder-zero-ticks = <0>;
+        current-loop-confirmed;
+    };
+    steer_rl: steer-rl {
+        compatible = "dji,gm6020-current";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <3>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+        encoder-zero-ticks = <0>;
+        current-loop-confirmed;
+    };
+    steer_rr: steer-rr {
+        compatible = "dji,gm6020-current";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <4>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+        encoder-zero-ticks = <0>;
+        current-loop-confirmed;
+    };
+    drive_fl: drive-fl {
+        compatible = "dji,m3508-c620";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <1>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <3591>;
+        gear-ratio-den = <187>;
+    };
+    drive_fr: drive-fr {
+        compatible = "dji,m3508-c620";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <2>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <3591>;
+        gear-ratio-den = <187>;
+    };
+    drive_rl: drive-rl {
+        compatible = "dji,m3508-c620";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <3>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <3591>;
+        gear-ratio-den = <187>;
+    };
+    drive_rr: drive-rr {
+        compatible = "dji,m3508-c620";
+        status = "disabled";
+        can-bus = <&can1>;
+        motor-id = <4>;
+        current-limit-ma = <1500>;
+        gear-ratio-num = <3591>;
+        gear-ratio-den = <187>;
+    };
+};
+&usart1 { current-speed = <460800>; };
+
+/* Hardware entropy supplies a new interboard boot context after every reset. */
+&rng { status = "okay"; };

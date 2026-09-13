@@ -95,19 +95,31 @@ int main() {
     static skywalker::control::VelocityMotor motor{backend, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
-    int ret = motor.begin();
+    int ret = motor.configure();
     if (ret < 0) {
-        LOG_ERR("begin failed: cause=%d stop=%d", ret, motor.status().stop_error);
+        LOG_ERR("configuration blocked: cause=%d stop=%d", ret, motor.status().stop_error);
         return ret;
     }
+    std::int64_t next_recovery_log_ms = 0;
     std::uint32_t telemetry_divider = 0;
-    while (motor.elapsedMs() < kRunDurationMs) {
+    for (;;) {
         k_sleep(K_MSEC(kControlPeriodMs));
-        const float target = requestedVelocityForTime(motor.elapsedMs());
+        if (motor.state() != skywalker::control::ExecutionState::Active) {
+            const auto now = k_uptime_get();
+            ret = motor.poll(now);
+            if (ret == 0) ret = motor.resume();
+            if (now >= next_recovery_log_ms) {
+                next_recovery_log_ms = now + 1000;
+                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()), motor.status().resume_generation, ret);
+            }
+            continue;
+        }
+
+        const float target = requestedVelocityForTime(motor.elapsedMs() % kRunDurationMs);
         ret = motor.update(target);
         if (ret < 0) {
-            LOG_ERR("update failed: cause=%d stop=%d", ret, motor.status().stop_error);
-            return ret;
+            LOG_WRN("cycle paused: cause=%d stop=%d", ret, motor.status().stop_error);
+            continue;
         }
         const auto &data = motor.telemetry();
         const auto &feedback = data.measurement.feedback;
@@ -125,7 +137,4 @@ int main() {
             vofa_send(&vofa, channels, 12);
         }
     }
-    ret = motor.stop();
-    if (ret < 0) LOG_ERR("stop failed: %d", ret);
-    return ret;
 }

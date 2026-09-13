@@ -1,0 +1,5 @@
+zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_COMMAND command.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_SAFETY safety.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_SWERVE swerve.cpp chassis_power_limiter.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_GIMBAL yaw_gimbal.cpp)

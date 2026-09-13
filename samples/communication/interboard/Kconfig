@@ -1,0 +1,5 @@
+mainmenu "Interboard UART bench"
+source "Kconfig.zephyr"
+config BENCH_CHASSIS_ROLE
+    bool "Use the chassis peer role"
+    default n

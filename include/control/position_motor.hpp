@@ -31,7 +31,15 @@ public:
 
     PositionMotor(MotorBackend &backend, const Config &config);
     int begin();
+    // Configure once; poll while waiting. Caller supplies permission and a NEW command before resume.
+    int configure();
+    int poll(std::uint64_t now_ms);
+    int suspend(PauseReason reason);
+    int resume();
+    int clearEmergencyStop(bool released) { return runtime_.clearEmergencyStop(released); }
+    ExecutionState state() const { return runtime_.state(); }
     int update(double target_position_rad);
+    PositionReference reference() const { return config_.reference; }
     int stop();
     std::int64_t elapsedMs() const { return runtime_.elapsedMs(); }
     const Telemetry &telemetry() const { return telemetry_; }
@@ -45,6 +53,7 @@ private:
     double initial_position_rad_ = 0.0;
     double coordinate_origin_rad_ = 0.0;
     bool begin_attempted_ = false;
+    MotorMeasurement prepared_{};
 };
 
 } // namespace skywalker::control

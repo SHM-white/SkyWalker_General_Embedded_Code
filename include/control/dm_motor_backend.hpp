@@ -13,6 +13,9 @@ public:
         : motor_(motor), power_on_(power_on) {}
     int describe(MotorInfo &info) override;
     int prepare() override;
+    int configure() override;
+    int pollPrepare(std::uint64_t now_ms) override;
+    int resetMeasurementReference() override;
     int read(MotorMeasurement &measurement) override;
     int arm() override;
     int write(float effort_nm) override;
@@ -22,6 +25,8 @@ public:
     const motor::dm::TxReport &stopReport() const { return stop_report_; }
 
 private:
+    bool configured_ = false;
+    std::uint64_t next_probe_ms_ = 0;
     const device *motor_;
     int (*power_on_)();
     motor::dm::Bus bus_{};

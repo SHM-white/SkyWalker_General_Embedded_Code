@@ -141,7 +141,7 @@ void Bus::dispatchFeedback(const struct can_frame &frame) {
 }
 
 int Bus::sendFrame(const struct can_frame &frame, std::uint16_t motor_id, TxReport &report) {
-    const int ret = can_send(can_, &frame, K_MSEC(2), nullptr, nullptr);
+    const int ret = tx_.send(can_, frame);
     if (ret < 0) {
         if (report.tx_error == 0) {
             report.tx_error = ret;
@@ -349,11 +349,14 @@ int Bus::stop(TxReport &report) {
 
 int Bus::recover(TxReport &report) {
     report = {};
-    if (state_ != BusState::Fault) {
+    if (state_ != BusState::Fault && state_ != BusState::Safe) {
         report.preparation_error = -EACCES;
         return report.preparation_error;
     }
 
+    state_ = BusState::Fault;
+    const auto now_ms=static_cast<std::uint64_t>(k_uptime_get());
+    if (recovery_started_ms_ && now_ms>=recovery_started_ms_ && now_ms-recovery_started_ms_>=1000) recovery_started_ms_=0;
     if (recovery_started_ms_ == 0u) {
         for (std::size_t i = 0; i < motor_count_; ++i) {
             internal::prepareMotorStop(motors_[i], true);

@@ -1,0 +1,7 @@
+zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_REMOTE_DR16 remote.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_REFEREE referee.cpp)
+if(CONFIG_SKYWALKER_INTERBOARD)
+    zephyr_library_sources(interboard_codec.cpp interboard_parser.cpp interboard_link.cpp)
+endif()
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_UART_TRANSPORT async_uart.cpp)

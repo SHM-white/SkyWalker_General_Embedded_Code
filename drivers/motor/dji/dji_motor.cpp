@@ -360,6 +360,29 @@ int describe(const struct device *dev, Descriptor &out) {
     return 0;
 }
 
+int resetMeasurementReference(const struct device *dev) {
+    if (!internal::isDjiMotor(dev)) return -ENOTSUP;
+    auto *data=static_cast<internal::DjiData *>(dev->data);
+    const auto *cfg=static_cast<const internal::DjiConfig *>(dev->config);
+    const auto now=static_cast<std::uint64_t>(k_uptime_get());
+    const auto key=k_spin_lock(&data->lock);
+    int ret=0;
+    if (data->armed) ret=-EACCES;
+    else if (!data->last_rx_ms || now<data->last_rx_ms || now-data->last_rx_ms>CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS) ret=-EAGAIN;
+    else {
+        const auto ticks=static_cast<std::int32_t>(cfg->profile->encoder_ticks_per_turn);
+        std::int32_t seed=0;
+        if (data->feedback.valid & FeedbackAbsolutePosition) {
+            seed=static_cast<std::int32_t>(data->raw_feedback.encoder)-static_cast<std::int32_t>(cfg->encoder_zero_ticks);
+            if (seed>=ticks/2) seed-=ticks;
+            if (seed< -ticks/2) seed+=ticks;
+        }
+        data->last_encoder=data->raw_feedback.encoder; data->has_encoder=true; data->total_encoder_ticks=seed;
+        data->feedback.position_rad=static_cast<float>(seed)*(6.283185307179586f/ticks)/data->gear_ratio;
+    }
+    k_spin_unlock(&data->lock,key); return ret;
+}
+
 int readRawFeedback(const struct device *dev, RawFeedback &out) {
     if (!internal::isDjiMotor(dev))
         return -ENOTSUP;

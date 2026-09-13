@@ -156,7 +156,7 @@ int Bus::sendZeros(FlushReport &report) {
         int ret = buildCommandFrame(frame, group_ids_[i], zeros);
         if (ret == 0) {
             ++report.zero_groups_attempted;
-            ret = can_send(can_, &frame, K_MSEC(2), nullptr, nullptr);
+            ret = tx_.send(can_, frame);
         }
 
         if (ret < 0) {
@@ -266,7 +266,7 @@ int Bus::flush(FlushReport &report) {
         struct can_frame frame{};
         int ret = buildCommandFrame(frame, group_ids_[i], commands[i]);
         if (ret == 0) {
-            ret = can_send(can_, &frame, K_MSEC(2), nullptr, nullptr);
+            ret = tx_.send(can_, frame);
         }
         if (ret < 0) {
             report.command_tx_error = ret;

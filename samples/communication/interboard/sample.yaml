@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker interboard on-board bench
+  description: Standalone DM MC02 hardware exercise; requires the documented wiring
+common:
+  tags: [skywalker, hardware]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.communication.interboard: {}

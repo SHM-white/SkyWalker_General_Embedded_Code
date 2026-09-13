@@ -1,0 +1,4 @@
+/* Connect board A PA9 -> board B PA10, board B PA9 -> board A PA10, and GND. */
+/ { aliases { interboard-uart = &usart1; }; };
+&usart1 { current-speed = <460800>; };
+&rng { status = "okay"; };

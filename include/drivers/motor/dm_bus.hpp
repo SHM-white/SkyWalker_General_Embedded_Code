@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <drivers/motor/bounded_can_tx.hpp>
 #include <cstdint>
 
 #include <zephyr/device.h>
@@ -56,6 +57,7 @@ private:
     int disableAll(TxReport &report, bool latch_fault);
     int enterFaultAndDisable(TxReport &report);
 
+    BoundedCanTx tx_{};
     const struct device *can_ = nullptr;
     const struct device *motors_[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};
     Descriptor descriptors_[CONFIG_SKYWALKER_DM_MAX_MOTORS_PER_BUS]{};

@@ -1,0 +1,15 @@
+/* Configure the actual CAN and ID. GM6020 must be in confirmed CURRENT mode. */
+/ {
+    aliases { motor0 = &bench_motor; };
+    bench_motor: motor {
+        compatible = "dji,gm6020-current";
+        status = "okay";
+        can-bus = <&can1>;
+        motor-id = <1>;
+        current-limit-ma = <500>;
+        gear-ratio-num = <1>;
+        gear-ratio-den = <1>;
+        encoder-zero-ticks = <0>;
+        current-loop-confirmed;
+    };
+};
