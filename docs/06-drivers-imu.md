@@ -1,214 +1,84 @@
 # 06 IMU 与姿态解算
 
-`drivers/imu/` 提供一个通用的 **IMU 设备**：它本身不做采样算法的硬编码，
-而是通过设备树把「加速度计 + 陀螺仪 + 加热 PWM + 解算滤波器」组合起来，
-并按 `estimator` 字符串选择解算实现。当前内置实现是**四元数扩展卡尔曼
-滤波（EKF）**。
+实现位置：`drivers/imu/imu.c`、`include/drivers/imu/imu.h`。IMU 通过设备树把加速度计、陀螺仪、加热 PWM 和滤波器组合成一个 Zephyr device。
 
----
-
-## 1. 设备树 binding（`skywalker,imu`）
-
-| 属性 | 类型 | 说明 |
-|---|---|---|
-| `accel-dev` | phandle | 加速度计设备（BMI088 accel） |
-| `gyro-dev` | phandle | 陀螺仪设备（BMI088 gyro） |
-| `heat-dev` | phandle | PWM 加热设备节点 |
-| `filter-dev` | phandle | 解算滤波器设备（`skywalker,kalman_filter`） |
-| `estimator` | string | 解算方法，目前仅 `"ekf"` |
-| `heat-kp` … `heat-dt-max-s` | string | 温控 PID 参数，编译期转 float |
-| `heat-feedforward-ns` | string | 温控前馈偏置（PWM 脉宽，ns） |
-
-> 温控参数在设备树里是**字符串**，由 `DT_STRING_UNQUOTED` 在编译期转成
-> `float`。写 `heat-kp = "6000000";` 而不是 `<6000000>`。
-
-### 示例（`samples/imu_test/boards/dm_mc02.overlay`）
+## 1. 设备树结构
 
 ```dts
-/ {
-    imu: imu {
-        compatible = "skywalker,imu";
-        accel-dev = <&bmi08x_accel>;
-        gyro-dev = <&bmi08x_gyro>;
-        heat-dev = <&pwm_heat>;
-        filter-dev = <&ekf_filter>;
-        estimator = "ekf";
-        heat-kp = "6000000";
-        heat-ki = "0";
-        heat-kd = "0.02";
-        heat-integral-max = "0";
-        heat-output-max = "20000000";
-        heat-deadband = "0";
-        heat-derivative-tau-s = "0";
-        heat-dt-min-s = "0.05";
-        heat-dt-max-s = "0.20";
-        heat-feedforward-ns = "6750000";
-    };
-
-    ekf_filter: ekf_filter {
-        compatible = "skywalker,kalman_filter";
-        state-dim = <4>;      /* 四元数 */
-        measure-dim = <3>;    /* 归一化加速度 */
-    };
-};
-
-&timers3 {
-    status = "okay";
-    st,prescaler = <99>;
-    pwm_heat: pwm {
-        status = "okay";
-        pinctrl-names = "default";
-        pinctrl-0 = <&tim3_ch4_pb1>;
-    };
+imu0: imu {
+    compatible = "skywalker,imu";
+    accel-dev = <&bmi08x_accel>;
+    gyro-dev = <&bmi08x_gyro>;
+    heat-dev = <&heat_pwm>;
+    filter-dev = <&ekf_filter>;
+    estimator = "ekf";
+    heat-kp = "6000000";
+    heat-ki = "0";
+    heat-kd = "0.02";
+    heat-integral-max = "10000000";
+    heat-output-max = "20000000";
+    heat-deadband = "0";
+    heat-derivative-tau-s = "0.1";
+    heat-dt-min-s = "0.001";
+    heat-dt-max-s = "0.2";
+    heat-feedforward-ns = "6750000";
 };
 ```
 
----
+`heat-*` binding 是 string，驱动在编译期转换为 float；不要写成 `<...>`。IMU 驱动固定使用 PWM 通道 4、周期 20 ms（50 Hz），输出单位是 ns，`heat-output-max` 不能超过周期。
 
-## 2. Kconfig
-
-```conf
-CONFIG_SKYWALKER_DRIVER_IMU=y            # select CMSIS_DSP_FASTMATH + SKYWALKER_LIB_CONTROL
-CONFIG_SKYWALKER_DRIVER_KALMAN_FILTER=y  # EKF 依赖
-CONFIG_SKYWALKER_LIB_MATRIX=y            # EKF 用 CMSIS-DSP 矩阵
-```
-
-设备初始化优先级：Kalman 滤波器 **50**，IMU **91**（确保滤波器先完成
-矩阵缓冲区绑定与初始值设置）。
-
----
-
-## 3. 对外 API（`include/drivers/imu/imu.h`）
+## 2. API
 
 ```c
-void imu_fetch(const device *dev);                       // 读 accel/gyro/temp
-void imu_estimate(const device *dev, float dt);          // 姿态解算
-int  imu_heat_control(const device *dev, float target_temp, float dt); // 温控，~10 Hz
+void imu_fetch(const struct device *dev);
+void imu_estimate(const struct device *dev, float dt_s);
+int imu_heat_control(const struct device *dev, float target_temp_c, float dt_s);
 ```
 
-内部数据结构：
+`imu_fetch()` 读取 accel/gyro/temp；`imu_estimate()` 调用 estimator 的 predict → correct → get_angle；`imu_heat_control()` 用复合 PID 计算 PWM 脉宽，发生非法输入/输出时先把 PWM 置零。
 
-```c
-typedef struct {
-    float accel[3];   // m/s², x/y/z
-    float gyro[3];    // rad/s, x/y/z
-    float temp;       // °C
-    float angle[3];   // rad, roll/pitch/yaw
-    control_feedforward_pid_state heat_controller_state;
-} imu_data;
-```
+运行时数据 `imu_data` 包含：
 
-调用模式（参考 "fetch → estimate" 循环）：
+- `accel[3]`：m/s²。
+- `gyro[3]`：rad/s。
+- `temp`：°C。
+- `angle[3]`：roll/pitch/yaw，单位 rad。
 
-```c
-imu_fetch(dev);
-imu_estimate(dev, dt);
-// imu_data *data = dev->data; 读取 data->angle
-if (++n % 20 == 0) {           // 约 10 Hz
-    imu_heat_control(dev, 40.0f, dt * 20);
-}
-```
+## 3. estimator 扩展
 
----
+驱动通过 `estimator` 字符串查找 `imu_filter_api`。当前实现只有 `"ekf"`。扩展新算法时需要提供 `init/predict/correct/get_angle`，并在 `imu_get_api()` 注册；应用侧不需要改变 `imu_fetch()` / `imu_estimate()` 调用。
 
-## 4. 解算器扩展机制
+## 4. 当前 EKF
 
-```c
-struct imu_filter_api {
-    void (*init)(const device *dev);
-    void (*predict)(const device *dev, const float gyro[3], float dt, float angle[3]);
-    void (*correct)(const device *dev, const float accel[3]);
-    void (*get_angle)(const device *dev, float angle[3]);
-};
+当前实现使用 4 维四元数状态和 3 维重力方向观测：
 
-typedef struct { const char *name; const struct imu_filter_api api; } imu_estimator;
-```
+1. 陀螺积分进行预测，同时传播协方差。
+2. 静止或低动态时估计陀螺零偏。
+3. 加速度低通后归一化，用重力方向校正。
+4. 使用卡方检验和自适应增益降低震动/冲击影响。
+5. 输出 Euler 角；yaw 对外仍是 `[-π, π)` 包角。
 
-`imu_estimators[]` 是注册表，`imu_get_api()` 按 `name` 匹配。新增算法：
-实现四个函数 → 声明 `imu_estimator_xxx` → 在表里加一行 → 设备树把
-`estimator` 改成对应名字。**不需要改 IMU 驱动本身。**
+EKF 内部维护连续 yaw 计数，但当前 `imu_data` 没有公开 `YawTotal`，需要连续 yaw 的应用应自行解包。
 
----
-
-## 5. 内置 EKF 算法要点
-
-状态：四元数 `q = [q0,q1,q2,q3]`（4 维）。
-
-| 环节 | 做法 |
-|---|---|
-| 零偏估计 | 低动态（`|ω| < 0.2`、`||a|-9.8| < 0.35`）时对陀螺做 LPF（系数 0.9995） |
-| 预测 | `F = I + 0.5·Ω(ω−bias)·dt`；`Q = 10·dt·I`；`KalmanFilter_Predict` |
-| 观测 | 加速度先 LPF（系数 0.05，约 3 Hz），归一化为重力方向 |
-| 抗扰动 | 卡方检验 `χ² = ||z − h(q)||²`；阈值 `1e-8`，连续异常 >50 次判定发散 |
-| 自适应增益 | 接近阈值时缩放 `R`（`r_adj = R / scale`），抑制扰动 |
-| 收敛标志 | `χ² < 0.5·阈值` 时置位；复位后重新缓慢收敛 |
-| 输出 | 四元数 → Euler；yaw 做跨圈计数得到 `YawTotal` |
-
-常量：`EKF_Q1 = 10`、`EKF_R = 1e6`、`EKF_CHI_THRESHOLD = 1e-8`。
-
-**注意**：`imu_data.angle[2]` 输出的是 **wrap 到 `[-π, π)` 的 yaw**；
-内部虽然维护了连续 `YawTotal`，但当前没有对外暴露。需要连续 yaw 时，
-应在应用层自行解包。
-
-数值实现用了 CMSIS-DSP：`arm_sqrt_f32`、`arm_atan2_f32`，以及一个快速
-倒数平方根（`inv_sqrt`）。EKF 直接把 `filter_dev->data` 当作 `KalmanFilter` 使用，
-因此 **`filter-dev` 必须是 `skywalker,kalman_filter` 设备**，且
-`state-dim` / `measure-dim` 必须与算法一致（4 / 3）。
-
----
-
-## 6. 恒温加热控制
-
-- 通道：**PWM 通道 4**，周期 `PWM_MSEC(20)`（50 Hz）；PWM 通道号从 1 起，
-  对应 STM32 的 TIM3_CH4。
-- 控制器：`control_feedforward_pid`，输出单位 **ns**（PWM 脉宽）。
-- 首次调用会 `reset`（用当前温度初始化）；参数非法或输出非有限值时，
-  驱动会把脉宽置 0（安全侧）。
-- `heat-output-max`（ns）不得超过 20 ms 周期；初始化会校验，
-  越界返回 `-ERANGE`。
-
-`imu_test` 的 PID 结构：`kp=6000000`、`kd=0.02`、前馈 `k_bias=6750000 ns`，
-即约 6.75 ms 常开基础加热 + 比例项。实际值需按发热体与散热条件整定。
-
----
-
-## 7. 样例
-
-`samples/imu_test/`：`dm_mc02`，overlay 在 `samples/imu_test/boards/dm_mc02.overlay`。
-
-```bash
-west build -p -b dm_mc02/stm32h723xx -d build/imu_test samples/imu_test
-west flash -d build/imu_test
-```
-
-`prj.conf` 关键项：
+## 5. Kconfig 与运行顺序
 
 ```conf
 CONFIG_SKYWALKER_DRIVER_IMU=y
 CONFIG_SKYWALKER_DRIVER_KALMAN_FILTER=y
 CONFIG_SKYWALKER_LIB_MATRIX=y
-CONFIG_SKYWALKER_LIB_VOFA=y
+CONFIG_SKYWALKER_LIB_VOFA=y       # 仅在需要曲线时
 CONFIG_UART_ASYNC_API=y
-CONFIG_NOCACHE_MEMORY=y
 ```
 
----
+初始化时驱动会检查四个 phandle 设备是否 ready，并校验温控参数。应用应在循环中先 fetch，再 estimate；温控建议低频调用（约 10 Hz），姿态解算的 dt 使用真实采样周期。
 
-## 8. 常见坑
+## 6. 样例与风险
 
-1. `heat-*` 参数必须是**字符串**，写成整型 `<...>` 会导致设备树/编译期
-   转换错误。
-2. EKF 的 `filter-dev` 尺寸写错（非 4/3）会在运行时越界；驱动不会自动
-   校验维度，务必与算法匹配。
-3. `sensor_sample_fetch` 的返回值在 `imu_fetch` 中被忽略；若传感器未就绪，
-   数据可能保持旧值，初始化阶段应确认子设备 `device_is_ready`。
-4. `YawTotal` 未输出，别指望 `angle[2]` 连续。
-5. 加热 PWM 会持续耗电，台架调试注意电源与温升。
+`samples/imu_test` 针对 `dm_mc02`，overlay 在 `samples/imu_test/boards/dm_mc02.overlay`，包含 BMI088、Kalman 和加热 PWM 的组合。
 
----
+常见风险：
 
-## 9. 相关文档
-
-- [07 Kalman 与矩阵库](07-kalman-matrix.md)
-- [08 纯 C 控制算法](08-control-algorithms.md)
-- [10 样例索引](10-samples.md)
+- 上电后 IMU 未静止，零偏和姿态难以收敛。
+- `filter-dev` 维度不是 4/3，EKF 会越界或产生错误结果。
+- 传感器 fetch 的错误不能被业务层忽略；首次运行要确认设备 ready 和数据更新时间。
+- 加热器是持续功耗源，先以低目标温度验证 PWM 和温控限幅。

@@ -1,77 +1,68 @@
-# SkyWalker 项目文档
+# SkyWalker 文档中心
 
-本目录是「巡天御风通用电控框架」的文档中心。`docs/` 根目录下的 `*.pdf`
-是电机与开发板的原始手册（datasheet），下方编号 Markdown 是按主题拆分的框架文档。
+本文档以当前源码为准，覆盖从 Zephyr 工程入口到双主控机器人应用骨架的完整链路。文档中的“支持”分为三种含义：
 
-> 快速上手请直接看 [01 快速开始](01-getting-started.md)；只想跑一个样例看
-> [10 样例索引](10-samples.md)。
+- **库/驱动已实现**：对应源码和公共头文件已经存在，并由 Kconfig/CMake 接入。
+- **样例可验证**：`samples/` 中有独立 `CMakeLists.txt`、`prj.conf` 和入口代码。
+- **应用骨架**：`applications/sentry_*` 已搭好线程和消息流，但需要用户按真实接线、ID、零点和权限策略配置。
 
----
+## 推荐阅读路线
 
-## 阅读路线
-
-| 目标 | 建议顺序 |
+| 目标 | 阅读顺序 |
 |---|---|
-| 第一次跑起来 | 01 快速开始 → 10 样例索引 → 12 故障排查 |
-| 理解整体设计 | 02 架构与构建 → 03 板级支持 → 04/05 电机驱动 |
-| 调电机 | 04 DJI 驱动 / 05 达妙驱动 → 09 控制封装 → 11 调试 |
-| 做姿态解算 | 06 IMU 与 EKF → 07 Kalman 与矩阵 → 11 调试 |
-| 写控制算法 | 08 纯 C 控制算法 → 09 控制封装 |
+| 第一次编译/烧录 | [01 快速开始](01-getting-started.md) → [10 样例索引](10-samples.md) → [12 故障排查](12-troubleshooting.md) |
+| 理解工程与模块 | [02 架构与构建](02-architecture.md) → [03 板级支持](03-boards.md) |
+| 调试 DJI / 达妙 | [04 DJI 驱动](04-drivers-motor-dji.md) 或 [05 达妙驱动](05-drivers-motor-dm.md) → [09 统一电机封装](09-motor-wrapper.md) → [11 调试](11-debugging.md) |
+| 做 IMU 姿态 | [06 IMU 与 EKF](06-drivers-imu.md) → [07 Kalman 与矩阵](07-kalman-matrix.md) |
+| 做通信与双主控 | [13 通信协议](13-communication.md) → [14 机器人算法](14-robotics.md) → [15 应用骨架](15-applications.md) |
 
----
+## 主题文档
 
-## 文档清单
-
-| 文档 | 主题 |
+| 文档 | 内容 |
 |---|---|
-| [01 快速开始](01-getting-started.md) | 环境准备、west 构建、烧录、最小工程 |
-| [02 架构与构建](02-architecture.md) | 分层结构、仓库布局、module/Kconfig/CMake 机制、单位约定 |
-| [03 板级支持](03-boards.md) | `dm_mc02`（STM32H723）与 `rm_typec`（STM32F407）外设、别名与 runner |
-| [04 DJI 电机驱动](04-drivers-motor-dji.md) | M3508/M2006/GM6020、设备树 binding、CAN 协议、Bus 生命周期 |
-| [05 达妙 DM 电机驱动](05-drivers-motor-dm.md) | DM-J4310-2EC、MIT/位置速度/速度三种模式、特殊命令、Bus |
-| [06 IMU 与 EKF](06-drivers-imu.md) | `skywalker,imu` 驱动、四元数 EKF、恒温加热控制 |
-| [07 Kalman 与矩阵库](07-kalman-matrix.md) | `skywalker,kalman_filter` 设备与 CMSIS-DSP 矩阵封装 |
-| [08 纯 C 控制算法](08-control-algorithms.md) | PID、前馈、复合控制、斜坡限幅、角度工具、速度/位置内核 |
-| [09 统一速度/位置封装](09-motor-wrapper.md) | `MotorBackend`/`MotorRuntime`/`VelocityMotor`/`PositionMotor` |
-| [10 样例索引](10-samples.md) | 每个样例的用途、构建命令与运行前提 |
-| [11 调试与上位机](11-debugging.md) | VOFA+ JustFloat、命令行调参、日志与断点注意事项 |
-| [12 故障排查](12-troubleshooting.md) | 编译/链接/运行/硬件常见问题速查 |
+| [01-getting-started.md](01-getting-started.md) | 工作区、依赖、构建、烧录、最小工程 |
+| [02-architecture.md](02-architecture.md) | 分层、源码布局、west module、Kconfig/CMake、线程边界 |
+| [03-boards.md](03-boards.md) | `dm_mc02` 与 `rm_typec` 的 SoC、外设、设备树和 runner |
+| [04-drivers-motor-dji.md](04-drivers-motor-dji.md) | M3508、M2006、GM6020 和 DJI Bus |
+| [05-drivers-motor-dm.md](05-drivers-motor-dm.md) | DM-J4310-2EC、三种模式、反馈路由和恢复 |
+| [06-drivers-imu.md](06-drivers-imu.md) | BMI088、IMU API、EKF 和恒温控制 |
+| [07-kalman-matrix.md](07-kalman-matrix.md) | Kalman 设备、CMSIS-DSP 矩阵和 Flash 存储 |
+| [08-control-algorithms.md](08-control-algorithms.md) | PID、前馈、斜坡、角度、速度/位置内核 |
+| [09-motor-wrapper.md](09-motor-wrapper.md) | `MotorBackend`、恢复生命周期、速度/位置封装 |
+| [10-samples.md](10-samples.md) | 所有当前 sample、用途、硬件前提和构建入口 |
+| [11-debugging.md](11-debugging.md) | VOFA+、日志、异步 UART 和实时调试 |
+| [12-troubleshooting.md](12-troubleshooting.md) | 构建、设备树、CAN、电机、通信、应用故障排查 |
+| [13-communication.md](13-communication.md) | DR16、裁判系统、板间协议、`AsyncUart` |
+| [14-robotics.md](14-robotics.md) | 命令、安全、舵轮、Yaw、功率限幅 |
+| [15-applications.md](15-applications.md) | `sentry_chassis` / `sentry_gimbal` 双主控应用骨架 |
 
----
+## 源码对照
 
-## 与源码的对应关系
-
-| 文档 | 主要源码位置 |
+| 主题 | 主要位置 |
 |---|---|
-| 02 / 08 / 09 | `CMakeLists.txt`、`Kconfig`、`lib/`、`include/control/` |
-| 03 | `boards/` |
-| 04 / 05 | `drivers/motor/`、`include/drivers/motor/`、`dts/bindings/motor/` |
-| 06 | `drivers/imu/`、`include/drivers/imu/`、`dts/bindings/imu/` |
-| 07 | `drivers/kalman_filter/`、`lib/matrix/`、`include/lib/matrix/` |
-| 10 | `samples/` |
+| 工程门控 | `west.yml`、`zephyr/module.yml`、根 `CMakeLists.txt`、`Kconfig` |
+| 板卡 | `boards/` |
+| 设备树 binding | `dts/bindings/` |
+| 电机驱动 | `drivers/motor/`、`include/drivers/motor/` |
+| IMU / Kalman | `drivers/imu/`、`drivers/kalman_filter/` |
+| 控制库 | `lib/control/`、`include/control/` |
+| 通信库 | `lib/communication/`、`include/communication/` |
+| 机器人库 | `lib/robotics/`、`include/robotics/` |
+| 样例 | `samples/` |
+| 应用骨架 | `applications/sentry_chassis/`、`applications/sentry_gimbal/` |
 
----
+## 原始手册
 
-## 手册资料（本目录 PDF）
+`docs/` 下的 PDF 只作为硬件和协议原始资料，不由本仓库源码自动同步。主要包括：
 
-- 大疆：`M3508_User_Guide_V1.0.pdf`、`C620_User_Guide_V1.01.pdf`、
-  `M3508_Mix_Control.pdf`、`M2006_P36_User_Guide.pdf`、`C610_User_Guide.pdf`、
-  `GM6020_User_Guide.pdf`、`RoboMaster GM6020直流无刷电机使用说明20231013.pdf`、
-  `RoboMaster  开发板 C 型用户手册.pdf`
-- 达妙：`DM-J4310-2EC_V1.1_User_Manual.pdf`、
-  `调试助手使用说明书（达妙驱动控制协议）V1.4.pdf`、
-  `达妙科技 DM-MC-Board02电机开发板使用说明书.pdf`
-- 下载直链与在线手册：`DOWNLOAD_LINKS.txt`
+- DJI：M3508、C620、M2006、C610、GM6020、RoboMaster Type-C C 板。
+- 达妙：DM-J4310-2EC V1.1、DM-MC-Board02、调试助手协议。
 
----
+文件清单和外部下载链接见 [DOWNLOAD_LINKS.txt](DOWNLOAD_LINKS.txt)。
 
-## 文档约定
+## 文档维护约定
 
-- **单位**：角度 `rad`，角速度 `rad/s`，电流 `A`，力矩 `N·m`，时间 `s`（
-  Kconfig/设备树中的毫秒、毫弧度字段会显式带单位后缀）。
-- **反馈坐标系**：`Feedback::position_rad` 默认是**输出轴连续角度**，
-  首帧为 0；`absolute_position_rad` 才是固定零点单圈值。
-- **线程语义**：驱动与封装 API 默认在**单一线程**中调用，不可在 ISR 中使用；
-  CAN 回调运行在系统工作队列/中断上下文，只做解码与缓存。
-- **源码只读**：本仓库默认处于「古法编程模式」，文档只描述现状，
-  不代替你修改业务代码。
+- 路径、Kconfig 名称、设备树属性和样例名称必须以仓库当前文件为准。
+- 规划中的功能使用“计划/模板/待配置”标识，不写成已实现能力。
+- 电机、通信和安全文档都要说明数据新鲜度、线程归属、失败动作和硬件前提。
+- 单位默认使用 `rad`、`rad/s`、A、N·m、s；设备树中带 `millirad`、`millinewton-meter`、`ms` 的属性保持原名。
