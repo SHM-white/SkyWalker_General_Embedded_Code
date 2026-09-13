@@ -5,6 +5,31 @@
 #include "board_config.hpp"
 #include "chassis_hardware.hpp"
 using namespace skywalker;
+int DjiChassisHardware::findOrCreateBus(const device *can) {
+    if (!can)
+        return -ENODEV;
+    for (std::size_t i = 0; i < bus_count_; ++i)
+        if (can_devices_[i] == can)
+            return static_cast<int>(i);
+    if (bus_count_ >= kMaxBuses)
+        return -ENOTSUP;
+    const std::size_t index = bus_count_;
+    const int ret = buses_[index].init(can);
+    if (ret < 0)
+        return ret;
+    can_devices_[index] = can;
+    ++bus_count_;
+    return static_cast<int>(index);
+}
+int DjiChassisHardware::stopAllBuses() {
+    int first_error = 0;
+    for (std::size_t i = 0; i < bus_count_; ++i) {
+        const int ret = buses_[i].stop(reports_[i]);
+        if (ret < 0 && first_error == 0)
+            first_error = ret;
+    }
+    return first_error;
+}
 int DjiChassisHardware::init() {
     if (initialized_)
         return -EALREADY;
@@ -16,32 +41,42 @@ int DjiChassisHardware::init() {
         int ret = motor::dji::describe(motors_[i], descriptors_[i]);
         if (ret < 0)
             return ret;
-        if (i && descriptors_[i].can != descriptors_[0].can)
-            return -ENOTSUP; // V1: one physical shared CAN.
+        if (!descriptors_[i].can)
+            return -ENODEV;
         auto required = motor::CommandCurrent | motor::FeedbackVelocity | motor::FeedbackPosition |
                         motor::FeedbackCurrent;
         if (i < 4)
             required |= motor::FeedbackAbsolutePosition;
         if ((motor::capabilities(motors_[i]) & required) != required)
             return -ENOTSUP;
-        for (unsigned j = 0; j < i; ++j)
-            if (motors_[i] == motors_[j] || descriptors_[i].feedback_id == descriptors_[j].feedback_id ||
+        for (unsigned j = 0; j < i; ++j) {
+            if (motors_[i] == motors_[j])
+                return -EINVAL;
+            if (descriptors_[i].can != descriptors_[j].can)
+                continue;
+            if (descriptors_[i].feedback_id == descriptors_[j].feedback_id ||
                 (descriptors_[i].command_id == descriptors_[j].command_id &&
                  descriptors_[i].command_slot == descriptors_[j].command_slot))
                 return -EINVAL;
+        }
     }
     const auto config = board_config::chassisConfig();
     for (unsigned i = 0; i < 4; ++i)
         if (config.modules[i].steer.velocity.effort_abs_max > descriptors_[i].configured_current_limit_a ||
             config.modules[i].drive.effort_abs_max > descriptors_[i + 4].configured_current_limit_a)
             return -ERANGE;
-    int ret = bus_.init(descriptors_[0].can);
-    if (ret < 0)
-        return ret;
-    for (const auto *dev : motors_) {
-        ret = bus_.attach(dev);
-        if (ret < 0)
+    for (unsigned i = 0; i < 8; ++i) {
+        const int bus_index = findOrCreateBus(descriptors_[i].can);
+        if (bus_index < 0) {
+            stopAllBuses();
+            return bus_index;
+        }
+        motor_bus_index_[i] = static_cast<std::uint8_t>(bus_index);
+        const int ret = buses_[motor_bus_index_[i]].attach(motors_[i]);
+        if (ret < 0) {
+            stopAllBuses();
             return ret;
+        }
     }
     initialized_ = true;
     return 0;
@@ -95,31 +130,40 @@ int DjiChassisHardware::suspend() {
     if (!initialized_ || stopped_)
         return 0;
     stopped_ = true;
-    return bus_.stop(report_); // Withdraw all software commands even if zero transmission fails.
+    return stopAllBuses(); // Withdraw every bus's commands even if a zero transmission fails.
 }
 int DjiChassisHardware::pollRecovery(std::uint64_t now) {
     if (!initialized_ || armed_)
         return -EACCES;
     if (now < next_retry_ms_)
         return -EAGAIN;
-    int ret = control::pollCanRecovery(descriptors_[0].can);
-    if (ret == 0 && bus_.state() == motor::dji::BusState::Fault)
-        ret = bus_.recover(report_);
+    auto fail_recovery = [&](int error) {
+        ready_ = armed_ = stable_ = false;
+        stopped_ = true;
+        stopAllBuses();
+        next_retry_ms_ = now + board_config::recovery_retry_ms;
+        return error;
+    };
+    int ret = 0;
+    for (std::size_t i = 0; i < bus_count_; ++i) {
+        int bus_ret = control::pollCanRecovery(can_devices_[i]);
+        if (bus_ret == 0 && buses_[i].state() == motor::dji::BusState::Fault)
+            bus_ret = buses_[i].recover(reports_[i]);
+        if (bus_ret < 0 && ret == 0)
+            ret = bus_ret;
+    }
     robotics::ChassisFeedback f{};
     if (ret == 0)
         ret = read(f);
-    if (ret < 0) {
-        ready_ = stable_ = false;
-        next_retry_ms_ = now + board_config::recovery_retry_ms;
-        return ret;
-    }
+    if (ret < 0)
+        return fail_recovery(ret);
     if (ready_)
         return 0;
     if (!stable_) {
         for (const auto *dev : motors_) {
             ret = motor::dji::resetMeasurementReference(dev);
             if (ret < 0)
-                return ret;
+                return fail_recovery(ret);
         }
         stable_ = true;
         stable_since_ms_ = now;
@@ -144,10 +188,12 @@ int DjiChassisHardware::arm() {
         return ret;
     }
     stopped_ = false;
-    ret = bus_.arm(report_);
-    if (ret < 0 || !report_.zero_sent) {
-        suspend();
-        return ret < 0 ? ret : -EIO;
+    for (std::size_t i = 0; i < bus_count_; ++i) {
+        ret = buses_[i].arm(reports_[i]);
+        if (ret < 0 || !reports_[i].zero_sent) {
+            suspend();
+            return ret < 0 ? ret : -EIO;
+        }
     }
     armed_ = true;
     return 0;
@@ -176,8 +222,13 @@ int DjiChassisHardware::apply(const robotics::ChassisOutput &out, float scale) {
             return ret;
         }
     }
-    const int ret = bus_.flush(report_);
-    if (ret < 0)
+    int first_error = 0;
+    for (std::size_t i = 0; i < bus_count_; ++i) {
+        const int ret = buses_[i].flush(reports_[i]);
+        if (ret < 0 && first_error == 0)
+            first_error = ret;
+    }
+    if (first_error < 0)
         suspend();
-    return ret;
+    return first_error;
 }

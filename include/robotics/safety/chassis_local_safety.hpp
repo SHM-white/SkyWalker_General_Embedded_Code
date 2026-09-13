@@ -4,7 +4,7 @@ namespace skywalker::robotics {
 class ChassisLocalSafety {
 public:
     struct Config {
-        std::uint32_t command_timeout_ms = 100, stable_command_count = 3;
+        std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100, stable_command_count = 3;
     };
     explicit ChassisLocalSafety(const Config &config) : config_(config) {
     }

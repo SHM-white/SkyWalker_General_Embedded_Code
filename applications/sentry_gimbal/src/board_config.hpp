@@ -9,7 +9,8 @@ namespace board_config {
 inline constexpr bool connections_configured = false;
 inline constexpr bool require_referee_for_motion = true;
 inline constexpr auto referee_version = skywalker::communication::RefereeVersion::Unspecified;
-inline constexpr std::uint32_t permission_timeout_ms = 300, command_timeout_ms = 100;
+inline constexpr std::uint32_t permission_timeout_ms = 300, command_timeout_ms = 100,
+                               chassis_heartbeat_timeout_ms = 100, chassis_feedback_timeout_ms = 100;
 #if DT_NODE_HAS_STATUS(DT_ALIAS(interboard_uart), okay)
 inline const device *interboard_uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart));
 #else

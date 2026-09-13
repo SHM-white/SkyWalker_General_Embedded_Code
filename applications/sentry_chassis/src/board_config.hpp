@@ -6,8 +6,8 @@
 namespace board_config {
 inline constexpr bool connections_configured = false;
 inline constexpr bool require_referee_for_motion = true;
-inline constexpr std::uint32_t command_timeout_ms = 100, permission_timeout_ms = 300, feedback_stable_ms = 30,
-                               recovery_retry_ms = 100;
+inline constexpr std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100, permission_timeout_ms = 300,
+                               feedback_stable_ms = 30, recovery_retry_ms = 100;
 // The estimator is disabled until calibrated with this robot's power measurements.
 inline constexpr bool power_model_calibrated = false;
 inline constexpr float idle_power_w = 0, power_per_abs_amp_w = 0, bench_effort_scale = 0.15f;

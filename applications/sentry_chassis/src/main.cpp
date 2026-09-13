@@ -82,11 +82,17 @@ void linkTask(void *, void *, void *) {
 void chassisTask(void *, void *, void *) {
     static DjiChassisHardware hardware(board_config::motors);
     SwerveChassis chassis(board_config::chassisConfig());
-    ChassisLocalSafety safety({board_config::command_timeout_ms, 3});
+    ChassisLocalSafety::Config safety_config{};
+    safety_config.command_timeout_ms = board_config::command_timeout_ms;
+    safety_config.heartbeat_timeout_ms = board_config::heartbeat_timeout_ms;
+    safety_config.stable_command_count = 3;
+    ChassisLocalSafety safety(safety_config);
     ChassisPowerLimiter limiter;
     int configured = chassis.validate();
     if (configured == 0)
         configured = board_config::connections_configured ? hardware.init() : -ENODEV;
+    if (configured == 0)
+        LOG_INF("DJI chassis hardware buses=%u", unsigned(hardware.busCount()));
     if (!std::isfinite(board_config::bench_effort_scale) || board_config::bench_effort_scale < 0 ||
         board_config::bench_effort_scale > 1 || !std::isfinite(board_config::idle_power_w) ||
         board_config::idle_power_w < 0 || !std::isfinite(board_config::power_per_abs_amp_w) ||
@@ -163,6 +169,7 @@ void chassisTask(void *, void *, void *) {
         input.resume_generation = generation;
         input.command_boot_id = rx.command.receiver_boot_id;
         input.command_generation = rx.command.resume_generation;
+        input.peer_heartbeat_stamp = rx.peer.stamp;
         input.command_stamp = rx.command.command.stamp;
         input.global_action = rx.command.command.mode == ChassisMode::Disabled ? SafetyAction::Disable
                                                                                : rx.command.global_action;
@@ -214,8 +221,8 @@ void chassisTask(void *, void *, void *) {
         f.execution_state = configured < 0     ? ExecutionState::ConfigBlocked
                             : estop_latched    ? ExecutionState::EStopLatched
                             : hardware.armed() ? ExecutionState::Active
-                            : hardware.ready() ? ExecutionState::Ready
-                                               : decision.state;
+                            : decision.action == SafetyAction::Active && !hardware.ready() ? ExecutionState::Recovering
+                                                                                           : decision.state;
         f.safety_state = f.execution_state == ExecutionState::ConfigBlocked ? SafetyState::ConfigBlocked
                          : estop_latched                                    ? SafetyState::EmergencyStop
                          : hardware.armed()                                 ? SafetyState::Active
@@ -231,8 +238,9 @@ void chassisTask(void *, void *, void *) {
         published.put(status);
         if (now >= last_log + 1000) {
             last_log = now;
-            LOG_INF("uptime=%llu chassis=%d reasons=%x gen=%u command=%u error=%d", now, int(f.execution_state),
-                    f.active_reasons, generation, last_accepted, configured < 0 ? configured : recovery_error);
+            LOG_INF("uptime=%llu chassis=%d reasons=%x gen=%u command=%u error=%d buses=%u", now,
+                    int(f.execution_state), f.active_reasons, generation, last_accepted,
+                    configured < 0 ? configured : recovery_error, unsigned(hardware.busCount()));
         }
         k_sleep(K_MSEC(5));
     }

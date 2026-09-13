@@ -97,16 +97,24 @@ void refereeTask(void *, void *, void *) {
 void commandTask(void *, void *, void *) {
     ManualCommandMapper mapper({});
     CommandManager manager({});
-    GlobalSafetyManager safety({board_config::require_referee_for_motion, board_config::permission_timeout_ms});
+    GlobalSafetyManager::Config safety_config{};
+    safety_config.require_referee_for_motion = board_config::require_referee_for_motion;
+    safety_config.permission_timeout_ms = board_config::permission_timeout_ms;
+    safety_config.chassis_heartbeat_timeout_ms = board_config::chassis_heartbeat_timeout_ms;
+    safety_config.chassis_feedback_timeout_ms = board_config::chassis_feedback_timeout_ms;
+    GlobalSafetyManager safety(safety_config);
     CommandRouter router(local_command, remote_command);
     RemoteState remote{};
     RefereeState referee{};
     BoardHeartbeat peer{};
+    ChassisFeedbackSummary feedback{};
+    std::uint64_t next_log = 0;
     for (;;) {
         const auto now = k_uptime_get();
         remote_state.get(remote);
         referee_state.get(referee);
         peer_heartbeat.get(peer);
+        chassis_feedback.get(feedback);
         OperatorIntent intent{};
         mapper.map(remote, intent);
         GlobalSafetyInputs input{};
@@ -117,19 +125,36 @@ void commandTask(void *, void *, void *) {
         input.gimbal_power = referee.robot.gimbal_output;
         input.chassis_power = referee.robot.chassis_output;
         input.shooter_power = referee.robot.shooter_output;
+        input.chassis_heartbeat_stamp = peer.stamp;
+        input.chassis_feedback_stamp = feedback.stamp;
+        input.chassis_execution_state = feedback.execution_state;
+        input.chassis_active_reasons = feedback.active_reasons;
         if (board_config::takeEmergencyResetRequest() &&
             safety.clearEmergencyStop(!input.emergency_stop_requested) == 0)
             atomic_inc(&reset_generation);
         GlobalSafetyDecision decision{};
         safety.evaluate(input, decision);
-        if (!board_config::connections_configured) {
+        if (!board_config::connections_configured && decision.state != SafetyState::EmergencyStop) {
             decision.gimbal = decision.chassis = decision.shooter = SafetyAction::Disable;
             decision.state = SafetyState::ConfigBlocked;
             decision.active_reasons |= InvalidConfiguration;
         }
         RobotCommand command{};
-        if (manager.step(intent, decision, now, command) == 0)
-            router.route(command, decision, peer);
+        if (manager.step(intent, decision, now, command) == 0) {
+            auto routed_decision = decision;
+            // On the existing wire protocol EmergencyStop is a request, not just a diagnostic.
+            // Do not echo a chassis-local latch back as a new global request, blocking its reset.
+            if (decision.state != SafetyState::EmergencyStop)
+                routed_decision.active_reasons &= ~EmergencyStop;
+            router.route(command, routed_decision, peer);
+        }
+        if (input.now_ms >= next_log) {
+            next_log = input.now_ms + 1000;
+            LOG_INF("global=%u gimbal=%u chassis=%u peer_age=%u online=%d feedback=%u reasons=%x",
+                    unsigned(decision.state), unsigned(decision.gimbal), unsigned(decision.chassis),
+                    age(peer.stamp, now), isFresh(peer.stamp, now, board_config::chassis_heartbeat_timeout_ms),
+                    unsigned(feedback.execution_state), decision.active_reasons);
+        }
         k_sleep(K_MSEC(10));
     }
 }
@@ -232,7 +257,8 @@ void gimbalTask(void *, void *, void *) {
         previous_ms = now;
         local_command.get(command);
         referee_state.get(referee);
-        const bool estop = board_config::emergencyStopRequested() || (command.safety.active_reasons & EmergencyStop);
+        // Aggregated reasons can include a chassis-only EStop; only the global latch stops local Yaw.
+        const bool estop = board_config::emergencyStopRequested() || command.safety.state == SafetyState::EmergencyStop;
         const auto reset = atomic_get(&reset_generation);
         if (reset != last_reset) {
             local.clearEmergencyStop(!estop);

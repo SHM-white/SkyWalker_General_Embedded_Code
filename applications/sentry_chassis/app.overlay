@@ -1,5 +1,7 @@
 /* DM MC02 wiring template; all motor nodes are disabled until you configure them.
- * Order is FL, FR, RL, RR. DJI current command slots and feedback IDs must not collide.
+ * Order is FL, FR, RL, RR. DJI current command slots and feedback IDs must not collide on the same CAN.
+ * One/two CAN buses are detected from can-bus. For steer CAN1 / drive CAN2,
+ * change the four drive nodes to can-bus = <&can2>; aliases and control configuration stay the same.
  */
 / {
     aliases {
