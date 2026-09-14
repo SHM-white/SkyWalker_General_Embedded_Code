@@ -27,6 +27,9 @@ struct Descriptor {
 };
 
 int describe(const struct device *dev, Descriptor &out);
+// Non-armed only. Re-seed continuous coordinates from a fresh encoder sample.
+// Fixed-zero 1:1 axes start at calibrated absolute position, other axes at zero.
+int resetMeasurementReference(const struct device *dev);
 int readRawFeedback(const struct device *dev, RawFeedback &out);
 
 } // namespace skywalker::motor::dji

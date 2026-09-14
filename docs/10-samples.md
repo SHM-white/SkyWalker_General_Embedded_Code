@@ -1,158 +1,108 @@
 # 10 样例索引
 
-`samples/` 下的每个目录都是独立可构建的 Zephyr 应用。除特别说明外，构建
-命令都在 west 工作区根执行。
+`samples/` 中的每个目录都是独立 Zephyr 应用，拥有自己的 `CMakeLists.txt`、`prj.conf`、overlay 和入口。样例用于功能验证和台架观察，不等同于完整机器人固件。
 
----
+## 1. 基础与算法
 
-## 1. 总览
-
-| 样例 | 语言 | 板卡 | 需要硬件 | 用途 |
-|---|---|---|---|---|
-| `hello/` | C | 任意 | 串口 | 最小工程 + VOFA 单通道（uptime） |
-| `cpp_test/` | C | 任意 | 串口 | 最小工程冒烟（当前实际是 C 版 hello） |
-| `control/` | C | 任意 | 可选 VOFA | `lib/control` 算法自检（断言输出） |
-| `imu_test/` | C | `dm_mc02` | IMU + UART | IMU + EKF + 恒温加热 + VOFA |
-| `motor/can_smoke/` | C++ | 任意有 CAN | CAN 总线 | 只收 CAN 帧并转发到 VOFA，不驱动电机 |
-| `motor/dji_unified/` | C++ | 任意有 CAN | GM6020 | 开环电流老炼/安全测试 |
-| `motor/dji_speed_control/` | C++ | `dm_mc02` | GM6020 | `VelocityMotor` 速度环 |
-| `motor/dji_position_control/` | C++ | `dm_mc02`/`rm_typec` | GM6020 | `PositionMotor` 位置环（推荐参考） |
-| `motor/m2006_speed_control/` | C++ | `dm_mc02` | M2006+C610 | M2006 速度环（减速比 36:1） |
-| `motor/dm_mit_control/` | C++ | `dm_mc02` | DM-J4310 | MIT 开环力矩 |
-| `motor/dm_velocity_control/` | C++ | `dm_mc02` | DM-J4310 | DM 原生速度模式 |
-| `motor/dm_position_control/` | C++ | `dm_mc02` | DM-J4310 | DM 原生位置-速度模式 |
-| `motor/dm_mit_velocity_control/` | C++ | `dm_mc02` | DM-J4310 | `VelocityMotor` + DM 后端 |
-| `motor/dm_mit_position_control/` | C++ | `dm_mc02` | DM-J4310 | `PositionMotor` + DM 后端 |
-
-`motor/dm_common/` 不是样例，而是 DM 样例共享的 **支持库**
-（`dm_sample_support.hpp/.cpp`，含 `enableMotorPower` 等）。
-
----
-
-## 2. 基础样例
-
-### hello
-
-最小可运行工程，同时演示 VOFA：在 `usart1` 上每 5 s 发一个 JustFloat 通道
-（`k_uptime_get_32()`）。
+| 样例 | 作用 | 主要前提 |
+|---|---|---|
+| `samples/hello` | 最小启动、UART/VOFA 单通道 | 任一已支持板卡 |
+| `samples/control` | PID、前馈、角度、斜坡等控制算法自检 | 任一已支持板卡 |
+| `samples/imu_test` | BMI088、EKF、恒温 PWM、VOFA | `dm_mc02`，需按 overlay 接好 IMU/加热 |
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx -d build/hello samples/hello
-```
-
-### cpp_test
-
-与 `hello` 同级的工具链冒烟工程（注意目录名虽是 `cpp_test`，源码是
-`src/main.c`，`project(hello)`）。用于确认构建环境。
-
-```bash
-west build -p -b dm_mc02/stm32h723xx -d build/cpp_test samples/cpp_test
-```
-
-### control
-
-`lib/control` 的自检：构造已知输入，断言复合前馈 PID、斜坡限幅、角度工具
-的输出在容差内，并通过 VOFA 输出曲线。**不需要电机**。
-
-```bash
 west build -p -b dm_mc02/stm32h723xx -d build/control samples/control
+west build -p -b dm_mc02/stm32h723xx -d build/imu samples/imu_test
 ```
 
-`prj.conf`：`CONFIG_SKYWALKER_LIB_CONTROL=y`、`CONFIG_SKYWALKER_LIB_VOFA=y`、
-`CONFIG_UART_ASYNC_API=y`。
+## 2. 通信样例
 
-### imu_test
+| 样例 | 作用 | 操作/观察 |
+|---|---|---|
+| `samples/communication/dr16` | 18 字节 DR16 解码 | MC02 UART5，日志显示通道、拨杆、鼠标、键盘和 offline |
+| `samples/communication/referee` | 裁判串口 CRC 和状态解析 | MC02 USART1，观察权限、功率、buffer 和统计量 |
+| `samples/communication/interboard` | 两块板 UART 板间协议 | 一块默认 Gimbal role，另一块加 `chassis.conf` |
 
-IMU 全链路：BMI088 采样 → EKF 姿态 → 恒温加热 → VOFA 绘图。overlay 在
-`samples/imu_test/boards/dm_mc02.overlay`（含 `skywalker,imu` 与
-`skywalker,kalman_filter` 节点、TIM3_CH4 加热 PWM）。
+通信样例都只验证消息链路，不自动控制电机。样例级说明还在各自的 `README.md`。
 
 ```bash
-west build -p -b dm_mc02/stm32h723xx -d build/imu_test samples/imu_test
+west build -p -b dm_mc02/stm32h723xx -d build/dr16 samples/communication/dr16
+west build -p -b dm_mc02/stm32h723xx -d build/referee samples/communication/referee
+west build -p -b dm_mc02/stm32h723xx -d build/interboard-gimbal samples/communication/interboard
+west build -p -b dm_mc02/stm32h723xx -d build/interboard-chassis \
+  -DEXTRA_CONF_FILE=samples/communication/interboard/chassis.conf \
+  samples/communication/interboard
 ```
 
-详见 [06 IMU 与 EKF](06-drivers-imu.md)。
+两块板互连时使用 TX→RX、RX→TX 和共地；不要把两个板的同名 TX 直接并联。
 
----
+## 3. DJI 电机
 
-## 3. 电机样例
-
-### can_smoke
-
-只注册 CAN 接收回调，把 `can_id` 与 `dlc` 发到 VOFA，用于确认接线/波特率，
-**不发送任何命令**。
+| 样例 | 作用 |
+|---|---|
+| `samples/motor/can_smoke` | 只接收 CAN 帧并输出观察信息，不发送命令 |
+| `samples/motor/dji_unified` | GM6020 原生通用 API / 低电流安全台架 |
+| `samples/motor/dji_speed_control` | DJI `VelocityMotor` 速度闭环 |
+| `samples/motor/dji_position_control` | DJI `PositionMotor` 位置-速度串级，推荐参考 |
+| `samples/motor/m2006_speed_control` | M2006 + C610，含 36:1 减速比示例 |
 
 ```bash
-west build -p -b dm_mc02/stm32h723xx -d build/can_smoke samples/motor/can_smoke
+west build -p -b dm_mc02/stm32h723xx -d build/can-smoke samples/motor/can_smoke
+west build -p -b dm_mc02/stm32h723xx -d build/dji-speed samples/motor/dji_speed_control
+west build -p -b rm_typec -d build/dji-position samples/motor/dji_position_control
 ```
 
-### DJI 系列
+上机前必须替换 overlay 中的 motor ID、CAN、零点、减速比和限流；GM6020 还必须确认 current loop。先悬空、低电流，再验证正负方向。
 
-- `dji_unified/`：GM6020 开环电流老炼/安全测试，内置限速限温保护停机。
-- `dji_speed_control/`：`VelocityMotor` 速度环，复合前馈 PID + 斜坡限幅，
-  正弦速度目标，约 300 s。
-- `dji_position_control/`：**推荐参考**。`PositionMotor` 位置-速度串级，
-  默认固定零点最短路径；可选 begin 相对的 0/3/6/9 rad 序列；
-  位置积分保持冻结。
-- `m2006_speed_control/`：M2006 速度环，减速比 36:1，100 ms 后 5 rad/s。
+## 4. 达妙电机
+
+| 样例 | 控制层 |
+|---|---|
+| `samples/motor/dm_mit_control` | 原生 MIT 力矩 |
+| `samples/motor/dm_velocity_control` | 电机内置速度模式 |
+| `samples/motor/dm_position_control` | 电机内置位置-速度模式 |
+| `samples/motor/dm_mit_velocity_control` | MIT + SkyWalker 软件速度环 |
+| `samples/motor/dm_mit_position_control` | MIT + SkyWalker 软件位置-速度环 |
+| `samples/motor/recovery` | DJI 或 DM MIT 掉电/总线恢复台架 |
 
 ```bash
-west build -p -b dm_mc02/stm32h723xx -d build/dji_pos samples/motor/dji_position_control
-west build -p -b rm_typec samples/motor/dji_position_control
+west build -p -b dm_mc02/stm32h723xx -d build/dm-mit \
+  samples/motor/dm_mit_control
+west build -p -b dm_mc02/stm32h723xx -d build/dm-position \
+  samples/motor/dm_mit_position_control
 ```
 
-每个样例自带 `app.overlay` 声明 `motor0` 与 CAN 参数，上电前务必核对
-`motor-id`、`current-limit-ma`、GM6020 的 `encoder-zero-ticks`。
+DM 的 `control-mode`、`master-id`、PMAX/VMAX/TMAX 必须和电机实际设置一致。掉电恢复样例只切电机动力，不要切 MCU 电源，否则无法验证自动恢复。
 
-> `dji_speed_control/prj.conf.bak` 是遗留备份文件，不参与构建。
+## 5. 机器人算法台架
 
-### 达妙系列
+| 样例 | 作用 | 是否驱动电机 |
+|---|---|---|
+| `samples/robotics/command_safety` | DR16 → intent → global safety → command | 否，模拟底盘心跳/反馈 |
+| `samples/robotics/yaw_gimbal` | GM6020 Yaw，Hold/Rate/AbsoluteAngle | 是，单电机 |
+| `samples/robotics/swerve` | 单物理舵轮：GM6020 舵向 + M3508 驱动 | 是，单模块 |
 
-原生模式（使用电机内置闭环）：
-
-- `dm_mit_control/`：模式 1 MIT，输出 0.5 N·m，最多 200 s，超 10 rad/s 保护。
-- `dm_velocity_control/`：模式 3 速度模式，目标 0.5 rad/s。
-- `dm_position_control/`：模式 2 位置-速度串级，相对保存零点在 0°/+90° 间切换。
-
-软件闭环（复用统一封装）：
-
-- `dm_mit_velocity_control/`：`VelocityMotor` + DM 后端，2 rad/s、±0.5 N·m。
-- `dm_mit_position_control/`：`PositionMotor` + DM 后端，`DriverContinuous`
-  坐标，每 6 s 正向 +90°。
+典型构建：
 
 ```bash
-west build -p -b dm_mc02/stm32h723xx -d build/dm_pos samples/motor/dm_mit_position_control
+west build -p -b dm_mc02/stm32h723xx -d build/command-safety \
+  samples/robotics/command_safety
+west build -p -b dm_mc02/stm32h723xx -d build/yaw \
+  samples/robotics/yaw_gimbal
+west build -p -b dm_mc02/stm32h723xx -d build/swerve \
+  samples/robotics/swerve
 ```
 
-达妙样例统一约定：CAN1、1 Mbps、`motor-id=0x001`、`master-id=0x011`，
-PMAX=12.5 rad、VMAX=30 rad/s、TMAX=10 N·m；**电机持久化模式必须与样例
-一致**（在达妙调试助手中设置）。详细协议见 [05](05-drivers-motor-dm.md)，
-示例说明见 `samples/motor/DM_J4310_EXAMPLES.md`。
+键盘操作和默认 GPIO/CAN 配置见各 sample README 及 `src/board_config.hpp`。
 
----
+## 6. applications 与 samples 的区别
 
-## 4. 快速选择指引
+| 路径 | 状态 |
+|---|---|
+| `samples/` | 独立小项目，目标是验证一个驱动/协议/算法 |
+| `applications/sentry_chassis` | 四轮舵底盘双线程应用骨架，默认连接未配置 |
+| `applications/sentry_gimbal` | 云台主控双主控应用骨架，默认连接未配置 |
+| `application/` | 空历史占位，不是当前推荐入口 |
 
-- 刚拿到板子：`hello` → `control` → `imu_test`
-- 查 CAN：`can_smoke`
-- DJI 电机首测：`dji_position_control`（记得悬空 + 断电准备）
-- 达妙电机首测：`dm_mit_control`（原生 MIT），确认后转 `dm_mit_*_control`
-- 学统一封装：`dji_position_control` / `dm_mit_position_control` 是最完整的参考
-
----
-
-## 5. 通用构建/烧录约定
-
-- 样例目录内 `app.overlay` 自动生效；板卡专属 overlay 放
-  `<sample>/boards/<board>.overlay`。
-- 改过 overlay/`prj.conf` 后用 `-p` 重新 pristine 构建。
-- `dm_mc02` 默认 runner 是 openocd；`rm_typec` 也是 openocd。
-- C++ 样例建议 `CONFIG_MAIN_STACK_SIZE=8192`。
-
----
-
-## 6. 相关文档
-
-- [01 快速开始](01-getting-started.md)
-- [04 DJI 电机驱动](04-drivers-motor-dji.md) / [05 达妙 DM 电机驱动](05-drivers-motor-dm.md)
-- [06 IMU 与 EKF](06-drivers-imu.md) / [09 统一速度/位置封装](09-motor-wrapper.md)
+整机应用的配置和线程关系见 [15 应用骨架](15-applications.md)。

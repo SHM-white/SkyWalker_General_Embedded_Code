@@ -42,7 +42,8 @@ static int waitForFreshFeedback(const struct device *motor) {
 static int stopAfterFailure(int original_error) {
     skywalker::motor::dji::FlushReport stop_report{};
     const int stop_ret = dji_bus.stop(stop_report);
-    LOG_ERR("stopped: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, stop_report.zero_sent ? 1 : 0, stop_report.zero_tx_error);
+    LOG_ERR("stopped: cause=%d stop=%d zero=%d zero_err=%d", original_error, stop_ret, stop_report.zero_sent ? 1 : 0,
+            stop_report.zero_tx_error);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
@@ -69,7 +70,8 @@ int main() {
         LOG_ERR("describe/CAN failed: %d", ret);
         return ret < 0 ? ret : -ENODEV;
     }
-    LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u", descriptor.motor_id, descriptor.feedback_id, descriptor.command_id, descriptor.command_slot);
+    LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u", descriptor.motor_id, descriptor.feedback_id,
+            descriptor.command_id, descriptor.command_slot);
 
     ret = dji_bus.init(descriptor.can);
     if (ret < 0) {
@@ -113,12 +115,14 @@ int main() {
         if (skywalker::motor::getState(motor) != skywalker::motor::State::Ready) {
             return stopAfterFailure(-EHOSTDOWN);
         }
-        if ((feedback.valid & skywalker::motor::FeedbackTemperature) != 0u && feedback.temperature_c >= kTemperatureCutoffC) {
+        if ((feedback.valid & skywalker::motor::FeedbackTemperature) != 0u &&
+            feedback.temperature_c >= kTemperatureCutoffC) {
             LOG_ERR("temperature cutoff: %d C", static_cast<int>(feedback.temperature_c));
             return stopAfterFailure(-EOVERFLOW);
         }
 
-        const std::int32_t speed_abs_rpm = raw.speed_rpm < 0 ? -static_cast<std::int32_t>(raw.speed_rpm) : static_cast<std::int32_t>(raw.speed_rpm);
+        const std::int32_t speed_abs_rpm = raw.speed_rpm < 0 ? -static_cast<std::int32_t>(raw.speed_rpm)
+                                                             : static_cast<std::int32_t>(raw.speed_rpm);
         if (speed_abs_rpm > kSpeedCutoffRpm) {
             LOG_ERR("speed cutoff: %d rpm", raw.speed_rpm);
             return stopAfterFailure(-ERANGE);

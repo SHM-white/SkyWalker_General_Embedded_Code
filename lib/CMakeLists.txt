@@ -1,3 +1,5 @@
 add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_MATRIX matrix)
 add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_VOFA vofa)
 add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_CONTROL control)
+add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_COMMUNICATION communication)
+add_subdirectory_ifdef(CONFIG_SKYWALKER_LIB_ROBOTICS robotics)

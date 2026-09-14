@@ -38,4 +38,52 @@ config SKYWALKER_LIB_MOTOR_CONTROL
         Enable VelocityMotor/PositionMotor and the enabled motor-family
         backends. Includes feedback checks, timing and fault-stop handling.
         
+config SKYWALKER_LIB_COMMUNICATION
+    bool "Communication protocols"
+    depends on CPP
+
+config SKYWALKER_REMOTE_DR16
+    bool "DR16 decoder and input service"
+    default y
+    depends on SKYWALKER_LIB_COMMUNICATION
+
+config SKYWALKER_REFEREE
+    bool "Versioned referee parser"
+    default y
+    depends on SKYWALKER_LIB_COMMUNICATION
+
+config SKYWALKER_INTERBOARD
+    bool "Interboard V1 codec, parser and session"
+    default y
+    depends on SKYWALKER_LIB_COMMUNICATION
+
+config SKYWALKER_UART_TRANSPORT
+    bool "Bounded asynchronous UART transport"
+    depends on SKYWALKER_LIB_COMMUNICATION && SERIAL
+    select UART_ASYNC_API
+
+config SKYWALKER_LIB_ROBOTICS
+    bool "Robot decision and subsystem algorithms"
+    depends on CPP
+    select SKYWALKER_LIB_CONTROL
+
+config SKYWALKER_ROBOTICS_COMMAND
+    bool "Manual mapper and command manager"
+    default y
+    depends on SKYWALKER_LIB_ROBOTICS
+
+config SKYWALKER_ROBOTICS_SAFETY
+    bool "Global and local safety decisions"
+    default y
+    depends on SKYWALKER_LIB_ROBOTICS
+
+config SKYWALKER_ROBOTICS_SWERVE
+    bool "Four module swerve controller and bench power limiter"
+    default y
+    depends on SKYWALKER_LIB_ROBOTICS
+
+config SKYWALKER_ROBOTICS_GIMBAL
+    bool "Recoverable yaw gimbal"
+    depends on SKYWALKER_LIB_ROBOTICS && SKYWALKER_LIB_MOTOR_CONTROL
+
 endmenu

@@ -19,7 +19,8 @@ int control_angle_unwrap_step(control_angle_unwrapper *state, float wrapped_rad,
 
 int control_shortest_angle_error(float target_rad, float measurement_rad, float *error_rad);
 
-int control_angle_nearest_continuous_target(float requested_absolute_rad, float measured_absolute_rad, float measured_continuous_rad, float *continuous_target_rad);
+int control_angle_nearest_continuous_target(float requested_absolute_rad, float measured_absolute_rad,
+                                            float measured_continuous_rad, float *continuous_target_rad);
 
 #ifdef __cplusplus
 }

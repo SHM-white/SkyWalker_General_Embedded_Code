@@ -1,3 +1,5 @@
+> 双主控框架已加入可恢复生命周期。新项目使用 configure/poll/resume/update，临时禁用用 suspend；下文 begin/stop 是保留的兼容用法。四个 wrapper samples 已常驻恢复，详见 [上机样例索引](../FRAMEWORK_SAMPLES.md) 和 [框架说明](../../双主控框架使用说明.md)。
+
 # 统一速度与位置控制
 
 `VelocityMotor` 和 `PositionMotor` 替代原来的 `VelocityController` / `PositionController`。

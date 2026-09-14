@@ -21,7 +21,8 @@ int control_slew_rate_validate(const control_slew_rate_config *config);
 
 int control_slew_rate_reset(control_slew_rate_state *state, float current_value);
 
-int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config, float requested_value, float dt_s, float *limited_value, float *limited_rate);
+int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config,
+                           float requested_value, float dt_s, float *limited_value, float *limited_rate);
 
 #ifdef __cplusplus
 }

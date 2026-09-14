@@ -1,0 +1,16 @@
+/* Alternative to app.overlay: -DDTC_OVERLAY_FILE=dm.overlay. Match Damiao Assistant limits. */
+/ {
+    aliases { motor0 = &bench_motor; };
+    bench_motor: motor {
+        compatible = "dm,j4310-2ec-v1-1";
+        status = "okay";
+        can-bus = <&can1>;
+        motor-id = <1>;
+        master-id = <0x11>;
+        control-mode = "mit";
+        p-max-millirad = <12500>;
+        v-max-millirad-s = <30000>;
+        t-max-millinewton-meter = <10000>;
+        torque-limit-millinewton-meter = <500>;
+    };
+};

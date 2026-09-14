@@ -36,16 +36,19 @@ int control_motor_velocity_validate(const control_motor_velocity_config *config)
         return ret;
     }
 
-    if (!isfinite(config->measurement_filter_tau_s) || !isfinite(config->soft_deadband_rad_s) || !isfinite(config->requested_velocity_abs_max_rad_s) || !isfinite(config->effort_abs_max)) {
+    if (!isfinite(config->measurement_filter_tau_s) || !isfinite(config->soft_deadband_rad_s) ||
+        !isfinite(config->requested_velocity_abs_max_rad_s) || !isfinite(config->effort_abs_max)) {
         return -EINVAL;
     }
-    if (config->measurement_filter_tau_s < 0.0f || config->soft_deadband_rad_s < 0.0f || config->requested_velocity_abs_max_rad_s <= 0.0f || config->effort_abs_max < 0.0f) {
+    if (config->measurement_filter_tau_s < 0.0f || config->soft_deadband_rad_s < 0.0f ||
+        config->requested_velocity_abs_max_rad_s <= 0.0f || config->effort_abs_max < 0.0f) {
         return -EINVAL;
     }
     return 0;
 }
 
-int control_motor_velocity_reset(control_motor_velocity_state *state, float measured_velocity_rad_s, float initial_reference_rad_s) {
+int control_motor_velocity_reset(control_motor_velocity_state *state, float measured_velocity_rad_s,
+                                 float initial_reference_rad_s) {
     if (state == NULL || !isfinite(measured_velocity_rad_s) || !isfinite(initial_reference_rad_s)) {
         return -EINVAL;
     }
@@ -66,7 +69,8 @@ int control_motor_velocity_reset(control_motor_velocity_state *state, float meas
     return 0;
 }
 
-int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config, const control_motor_velocity_input *input, control_motor_velocity_output *output) {
+int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config,
+                                const control_motor_velocity_input *input, control_motor_velocity_output *output) {
     if (state == NULL || input == NULL || output == NULL) {
         return -EINVAL;
     }
@@ -75,7 +79,8 @@ int control_motor_velocity_step(control_motor_velocity_state *state, const contr
     if (ret < 0) {
         return ret;
     }
-    if (!isfinite(input->requested_velocity_rad_s) || !isfinite(input->measured_velocity_rad_s) || !isfinite(input->position_reference_rad) || !isfinite(input->dt_s)) {
+    if (!isfinite(input->requested_velocity_rad_s) || !isfinite(input->measured_velocity_rad_s) ||
+        !isfinite(input->position_reference_rad) || !isfinite(input->dt_s)) {
         return -EINVAL;
     }
     if (fabsf(input->requested_velocity_rad_s) > config->requested_velocity_abs_max_rad_s) {
@@ -96,13 +101,15 @@ int control_motor_velocity_step(control_motor_velocity_state *state, const contr
         return -ERANGE;
     }
     const float alpha = input->dt_s / filter_denominator;
-    const float filtered_velocity = next.filtered_velocity_rad_s + alpha * (input->measured_velocity_rad_s - next.filtered_velocity_rad_s);
+    const float filtered_velocity = next.filtered_velocity_rad_s +
+                                    alpha * (input->measured_velocity_rad_s - next.filtered_velocity_rad_s);
     if (!isfinite(alpha) || !isfinite(filtered_velocity)) {
         return -ERANGE;
     }
     local.filtered_velocity_rad_s = filtered_velocity;
 
-    ret = control_slew_rate_step(&next.reference_slew, &config->reference_slew, input->requested_velocity_rad_s, input->dt_s, &local.velocity_reference_rad_s, &local.acceleration_reference_rad_s2);
+    ret = control_slew_rate_step(&next.reference_slew, &config->reference_slew, input->requested_velocity_rad_s,
+                                 input->dt_s, &local.velocity_reference_rad_s, &local.acceleration_reference_rad_s2);
     if (ret < 0) {
         return ret;
     }

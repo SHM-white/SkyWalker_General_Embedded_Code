@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker yaw_gimbal physical bench
+  description: Standalone MC02 motor exercise with console controls
+common:
+  tags: [skywalker, hardware, motor]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.yaw_gimbal: {}

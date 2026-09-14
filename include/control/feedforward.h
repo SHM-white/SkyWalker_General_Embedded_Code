@@ -30,7 +30,8 @@ typedef struct {
 
 int control_feedforward_validate(const control_feedforward_config *config);
 
-int control_feedforward_calculate(const control_feedforward_config *config, const control_feedforward_reference *reference, float *output);
+int control_feedforward_calculate(const control_feedforward_config *config,
+                                  const control_feedforward_reference *reference, float *output);
 
 #ifdef __cplusplus
 }

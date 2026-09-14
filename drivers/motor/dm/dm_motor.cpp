@@ -19,7 +19,8 @@ const DmConfig *configOf(const struct device *dev) {
 }
 
 bool feedbackFreshLocked(const DmData &data, std::uint64_t now_ms) {
-    return data.last_rx_ms != 0u && now_ms >= data.last_rx_ms && now_ms - data.last_rx_ms <= CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS;
+    return data.last_rx_ms != 0u && now_ms >= data.last_rx_ms &&
+           now_ms - data.last_rx_ms <= CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS;
 }
 
 std::uint32_t getCapabilities(const struct device *dev) {
@@ -84,11 +85,14 @@ int stageFrame(const struct device *dev, ControlMode required_mode, const struct
     int ret = 0;
     if (!data->armed || data->active_epoch == 0u) {
         ret = -EACCES;
-    } else if (data->fault_latched || isFaultStatus(data->drive_status)) {
+    }
+    else if (data->fault_latched || isFaultStatus(data->drive_status)) {
         ret = -EHOSTDOWN;
-    } else if (!feedbackFreshLocked(*data, now_ms)) {
+    }
+    else if (!feedbackFreshLocked(*data, now_ms)) {
         ret = -EHOSTDOWN;
-    } else {
+    }
+    else {
         data->command_frame = frame;
         data->command_stamp_ms = now_ms;
         data->command_epoch = data->active_epoch;
@@ -122,7 +126,8 @@ int dmMotorInit(const struct device *dev) {
     if (cfg->motor_id == 0u || cfg->motor_id > 15u || cfg->master_id > CAN_STD_ID_MASK) {
         return -ERANGE;
     }
-    if (cfg->mode != ControlMode::Mit && cfg->mode != ControlMode::PositionVelocity && cfg->mode != ControlMode::Velocity) {
+    if (cfg->mode != ControlMode::Mit && cfg->mode != ControlMode::PositionVelocity &&
+        cfg->mode != ControlMode::Velocity) {
         return -EINVAL;
     }
 
@@ -131,8 +136,10 @@ int dmMotorInit(const struct device *dev) {
     limits.velocity_max_rad_s = static_cast<float>(cfg->v_max_millirad_s) / 1000.0f;
     limits.torque_max_nm = static_cast<float>(cfg->t_max_millinewton_meter) / 1000.0f;
     const float torque_limit = static_cast<float>(cfg->torque_limit_millinewton_meter) / 1000.0f;
-    if (!std::isfinite(limits.position_max_rad) || limits.position_max_rad <= 0.0f || !std::isfinite(limits.velocity_max_rad_s) || limits.velocity_max_rad_s <= 0.0f ||
-        !std::isfinite(limits.torque_max_nm) || limits.torque_max_nm <= 0.0f || !std::isfinite(torque_limit) || torque_limit <= 0.0f || torque_limit > limits.torque_max_nm) {
+    if (!std::isfinite(limits.position_max_rad) || limits.position_max_rad <= 0.0f ||
+        !std::isfinite(limits.velocity_max_rad_s) || limits.velocity_max_rad_s <= 0.0f ||
+        !std::isfinite(limits.torque_max_nm) || limits.torque_max_nm <= 0.0f || !std::isfinite(torque_limit) ||
+        torque_limit <= 0.0f || torque_limit > limits.torque_max_nm) {
         return -ERANGE;
     }
 
@@ -174,9 +181,11 @@ int claimMotor(const struct device *dev, Bus *owner) {
     int ret = 0;
     if (data->owner == owner) {
         ret = -EALREADY;
-    } else if (data->owner != nullptr) {
+    }
+    else if (data->owner != nullptr) {
         ret = -EBUSY;
-    } else {
+    }
+    else {
         data->owner = owner;
     }
     k_spin_unlock(&data->lock, key);
@@ -245,11 +254,14 @@ int preflightArm(const struct device *dev, bool &enable_required) {
     int ret = 0;
     if (data->fault_latched || isFaultStatus(data->drive_status)) {
         ret = -EHOSTDOWN;
-    } else if (!feedbackFreshLocked(*data, now_ms)) {
+    }
+    else if (!feedbackFreshLocked(*data, now_ms)) {
         ret = -EHOSTDOWN;
-    } else if (data->drive_status == DriveStatus::Disabled) {
+    }
+    else if (data->drive_status == DriveStatus::Disabled) {
         next_enable_required = true;
-    } else if (data->drive_status != DriveStatus::Enabled) {
+    }
+    else if (data->drive_status != DriveStatus::Enabled) {
         ret = -EHOSTDOWN;
     }
     k_spin_unlock(&data->lock, key);
@@ -270,9 +282,11 @@ int preflightDisabled(const struct device *dev) {
     int ret = 0;
     if (data->fault_latched || isFaultStatus(data->drive_status)) {
         ret = -EHOSTDOWN;
-    } else if (!feedbackFreshLocked(*data, now_ms)) {
+    }
+    else if (!feedbackFreshLocked(*data, now_ms)) {
         ret = -EHOSTDOWN;
-    } else if (data->drive_status != DriveStatus::Disabled) {
+    }
+    else if (data->drive_status != DriveStatus::Disabled) {
         ret = -EBUSY;
     }
     k_spin_unlock(&data->lock, key);
@@ -302,7 +316,8 @@ int buildNeutralFrame(const struct device *dev, struct can_frame &out) {
     return -EINVAL;
 }
 
-int armMotor(const struct device *dev, std::uint64_t epoch, std::uint64_t now_ms, const struct can_frame &neutral_frame) {
+int armMotor(const struct device *dev, std::uint64_t epoch, std::uint64_t now_ms,
+             const struct can_frame &neutral_frame) {
     DmData *data = dataOf(dev);
     if (data == nullptr || epoch == 0u || now_ms == 0u) {
         return -EINVAL;
@@ -359,12 +374,14 @@ bool recoveryReady(const struct device *dev, std::uint64_t recovery_started_ms) 
 
     const std::uint64_t now_ms = static_cast<std::uint64_t>(k_uptime_get());
     const k_spinlock_key_t key = k_spin_lock(&data->lock);
-    const bool ready = feedbackFreshLocked(*data, now_ms) && data->last_rx_ms > recovery_started_ms && data->drive_status == DriveStatus::Disabled;
+    const bool ready = feedbackFreshLocked(*data, now_ms) && data->last_rx_ms > recovery_started_ms &&
+                       data->drive_status == DriveStatus::Disabled;
     k_spin_unlock(&data->lock, key);
     return ready;
 }
 
-int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std::uint64_t now_ms, CommandSnapshot &out) {
+int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std::uint64_t now_ms,
+                    CommandSnapshot &out) {
     DmData *data = dataOf(dev);
     if (data == nullptr || expected_epoch == 0u) {
         return -EINVAL;
@@ -375,13 +392,18 @@ int snapshotCommand(const struct device *dev, std::uint64_t expected_epoch, std:
     const k_spinlock_key_t key = k_spin_lock(&data->lock);
     if (!data->armed || data->fault_latched || isFaultStatus(data->drive_status)) {
         ret = -EACCES;
-    } else if (!data->command_valid || data->active_epoch != expected_epoch || data->command_epoch != expected_epoch) {
+    }
+    else if (!data->command_valid || data->active_epoch != expected_epoch || data->command_epoch != expected_epoch) {
         ret = -ESTALE;
-    } else if (!feedbackFreshLocked(*data, now_ms)) {
+    }
+    else if (!feedbackFreshLocked(*data, now_ms)) {
         ret = -EHOSTDOWN;
-    } else if (data->command_stamp_ms == 0u || now_ms < data->command_stamp_ms || now_ms - data->command_stamp_ms > CONFIG_SKYWALKER_DM_COMMAND_TIMEOUT_MS) {
+    }
+    else if (data->command_stamp_ms == 0u || now_ms < data->command_stamp_ms ||
+             now_ms - data->command_stamp_ms > CONFIG_SKYWALKER_DM_COMMAND_TIMEOUT_MS) {
         ret = -ESTALE;
-    } else {
+    }
+    else {
         next.frame = data->command_frame;
     }
     k_spin_unlock(&data->lock, key);
@@ -454,12 +476,14 @@ int setPositionVelocity(const struct device *dev, float position_rad, float velo
     if (!std::isfinite(position_rad) || !std::isfinite(velocity_limit_rad_s)) {
         return -EINVAL;
     }
-    if (std::fabs(position_rad) > data->limits.position_max_rad || velocity_limit_rad_s < 0.0f || velocity_limit_rad_s > data->limits.velocity_max_rad_s) {
+    if (std::fabs(position_rad) > data->limits.position_max_rad || velocity_limit_rad_s < 0.0f ||
+        velocity_limit_rad_s > data->limits.velocity_max_rad_s) {
         return -ERANGE;
     }
 
     struct can_frame frame{};
-    const int ret = buildPositionVelocityFrame(static_cast<std::uint16_t>(cfg->motor_id), position_rad, velocity_limit_rad_s, frame);
+    const int ret = buildPositionVelocityFrame(static_cast<std::uint16_t>(cfg->motor_id), position_rad,
+                                               velocity_limit_rad_s, frame);
     if (ret < 0) {
         return ret;
     }

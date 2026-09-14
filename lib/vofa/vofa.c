@@ -2,7 +2,7 @@
 
 #include <zephyr/sys/atomic.h>
 
-#define VOFA_MAX_FLOATS 16  /* 单帧最多发送的 float 个数 */
+#define VOFA_MAX_FLOATS 16 /* 单帧最多发送的 float 个数 */
 
 static atomic_t tx_busy;
 
@@ -14,7 +14,7 @@ static atomic_t tx_busy;
  */
 static float parse_float(const char *s) {
     float result = 0.0f;
-    float sign   = 1.0f;
+    float sign = 1.0f;
 
     if (*s == '-') {
         sign = -1.0f;
@@ -57,7 +57,7 @@ static void process_line(Vofa *vofa, char *line, size_t len) {
     }
 
     if (eq && vofa->on_cmd != NULL) {
-        *eq = '\0';                     // 切断 key/value
+        *eq = '\0'; // 切断 key/value
         vofa->on_cmd(line, parse_float(eq + 1));
     }
 }
@@ -71,15 +71,14 @@ static void process_line(Vofa *vofa, char *line, size_t len) {
  *
  * 在 BUF_RELEASED / DISABLED 时自动 re-enable，调用者无需处理。
  */
-void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
-                  void *user_data) {
+void vofa_uart_cb(const struct device *dev, struct uart_event *evt, void *user_data) {
     Vofa *vofa = user_data;
 
     switch (evt->type) {
 
     // ─── 有新数据到达 ───
     case UART_RX_RDY: {
-        char  *buf = (char *)evt->data.rx.buf;
+        char *buf = (char *)evt->data.rx.buf;
         size_t len = evt->data.rx.len;
         size_t line_start = 0;
 
@@ -96,8 +95,7 @@ void vofa_uart_cb(const struct device *dev, struct uart_event *evt,
     case UART_RX_BUF_RELEASED:
     case UART_RX_DISABLED:
         if (vofa->rx_buf != NULL && vofa->rx_buf_size > 0) {
-            uart_rx_enable(dev, vofa->rx_buf, vofa->rx_buf_size,
-                           SYS_FOREVER_US);
+            uart_rx_enable(dev, vofa->rx_buf, vofa->rx_buf_size, SYS_FOREVER_US);
         }
         break;
 
@@ -143,18 +141,17 @@ void vofa_init(Vofa *vofa, const struct device *uart) {
 void vofa_send(Vofa *vofa, const float *data, uint8_t num) {
     static __nocache uint8_t buf[VOFA_MAX_FLOATS * sizeof(float) + 4];
 
-    if (num == 0 || num > VOFA_MAX_FLOATS ||
-        !atomic_cas(&tx_busy, 0, 1)) {
+    if (num == 0 || num > VOFA_MAX_FLOATS || !atomic_cas(&tx_busy, 0, 1)) {
         return;
     }
 
     size_t n = num * sizeof(float);
     const uint8_t *src = (const uint8_t *)data;
 
-    for (size_t i = 0; i < n; i++) {   // 手动拷贝，避免依赖 memcpy
+    for (size_t i = 0; i < n; i++) { // 手动拷贝，避免依赖 memcpy
         buf[i] = src[i];
     }
-    buf[n + 0] = 0x00;                 // 帧尾 0x7F800000（小端）
+    buf[n + 0] = 0x00; // 帧尾 0x7F800000（小端）
     buf[n + 1] = 0x00;
     buf[n + 2] = 0x80;
     buf[n + 3] = 0x7F;
@@ -175,9 +172,8 @@ void vofa_send(Vofa *vofa, const float *data, uint8_t num) {
  * @param rx_buf_size  缓冲区大小
  * @param on_cmd       命令回调
  */
-void vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size,
-                      vofa_cmd_handler on_cmd) {
-    vofa->rx_buf      = rx_buf;
+void vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size, vofa_cmd_handler on_cmd) {
+    vofa->rx_buf = rx_buf;
     vofa->rx_buf_size = rx_buf_size;
-    vofa->on_cmd      = on_cmd;
+    vofa->on_cmd = on_cmd;
 }

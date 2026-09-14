@@ -15,12 +15,14 @@ constexpr float kKdMin = 0.0f;
 constexpr float kKdMax = 5.0f;
 
 bool validLimits(const Limits &limits) {
-    return std::isfinite(limits.position_max_rad) && limits.position_max_rad > 0.0f && std::isfinite(limits.velocity_max_rad_s) && limits.velocity_max_rad_s > 0.0f &&
+    return std::isfinite(limits.position_max_rad) && limits.position_max_rad > 0.0f &&
+           std::isfinite(limits.velocity_max_rad_s) && limits.velocity_max_rad_s > 0.0f &&
            std::isfinite(limits.torque_max_nm) && limits.torque_max_nm > 0.0f;
 }
 
 int floatToUint(float value, float minimum, float maximum, unsigned int bits, std::uint32_t &out) {
-    if (!std::isfinite(value) || !std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum || (bits != 12u && bits != 16u)) {
+    if (!std::isfinite(value) || !std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum ||
+        (bits != 12u && bits != 16u)) {
         return -EINVAL;
     }
     if (value < minimum || value > maximum) {
@@ -170,7 +172,8 @@ int buildMitFrame(std::uint16_t motor_id, const Limits &limits, const MitCommand
     return 0;
 }
 
-int buildPositionVelocityFrame(std::uint16_t motor_id, float position_rad, float velocity_rad_s, struct can_frame &out) {
+int buildPositionVelocityFrame(std::uint16_t motor_id, float position_rad, float velocity_rad_s,
+                               struct can_frame &out) {
     if (!std::isfinite(position_rad) || !std::isfinite(velocity_rad_s)) {
         return -EINVAL;
     }
@@ -234,7 +237,8 @@ int buildSpecialFrame(ControlMode mode, std::uint16_t motor_id, SpecialCommand c
     return 0;
 }
 
-int decodeFeedback(const struct can_frame &frame, std::uint8_t expected_motor_id, const Limits &limits, DecodedFeedback &out) {
+int decodeFeedback(const struct can_frame &frame, std::uint8_t expected_motor_id, const Limits &limits,
+                   DecodedFeedback &out) {
     if (!validLimits(limits)) {
         return -EINVAL;
     }
@@ -253,14 +257,18 @@ int decodeFeedback(const struct can_frame &frame, std::uint8_t expected_motor_id
     DecodedFeedback next{};
     next.raw.motor_id = motor_id;
     next.raw.status = decodeStatus(frame.data[0] >> 4);
-    next.raw.position_raw = static_cast<std::uint16_t>((static_cast<std::uint16_t>(frame.data[1]) << 8) | frame.data[2]);
-    next.raw.velocity_raw = static_cast<std::uint16_t>((static_cast<std::uint16_t>(frame.data[3]) << 4) | (frame.data[4] >> 4));
-    next.raw.torque_raw = static_cast<std::uint16_t>((static_cast<std::uint16_t>(frame.data[4] & 0x0Fu) << 8) | frame.data[5]);
+    next.raw.position_raw = static_cast<std::uint16_t>((static_cast<std::uint16_t>(frame.data[1]) << 8) |
+                                                       frame.data[2]);
+    next.raw.velocity_raw = static_cast<std::uint16_t>((static_cast<std::uint16_t>(frame.data[3]) << 4) |
+                                                       (frame.data[4] >> 4));
+    next.raw.torque_raw = static_cast<std::uint16_t>((static_cast<std::uint16_t>(frame.data[4] & 0x0Fu) << 8) |
+                                                     frame.data[5]);
     next.raw.mos_temperature_c = frame.data[6];
     next.raw.rotor_temperature_c = frame.data[7];
 
     next.position_rad = uintToFloat(next.raw.position_raw, -limits.position_max_rad, limits.position_max_rad, 16u);
-    next.velocity_rad_s = uintToFloat(next.raw.velocity_raw, -limits.velocity_max_rad_s, limits.velocity_max_rad_s, 12u);
+    next.velocity_rad_s = uintToFloat(next.raw.velocity_raw, -limits.velocity_max_rad_s, limits.velocity_max_rad_s,
+                                      12u);
     next.torque_nm = uintToFloat(next.raw.torque_raw, -limits.torque_max_nm, limits.torque_max_nm, 12u);
     out = next;
     return 0;

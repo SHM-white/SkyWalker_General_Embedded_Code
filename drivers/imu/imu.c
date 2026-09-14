@@ -20,41 +20,41 @@ static const struct imu_filter_api *imu_get_api(const char *estimator);
 // accel-dev / gyro-dev / heat-dev / filter-dev 为 phandle。
 // 温控参数以 string 保存，并在编译期转换成 float 常量。
 // estimator 为 string，通过 DT_INST_PROP 提取，用于选择解算实现。
-#define IMU_CONFIG_DEFINE(inst)                                                                                                                                                                        \
-    static const imu_config imu_config_##inst = {                                                                                                                                                      \
-        .accel_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, accel_dev)),                                                                                                                                  \
-        .gyro_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, gyro_dev)),                                                                                                                                    \
-        .heat_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, heat_dev)),                                                                                                                                    \
-        .filter_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, filter_dev)),                                                                                                                                \
-        .heat_controller =                                                                                                                                                                             \
-            {                                                                                                                                                                                          \
-                .feedback =                                                                                                                                                                            \
-                    {                                                                                                                                                                                  \
-                        .kp = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_kp),                                                                                                                   \
-                        .ki = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_ki),                                                                                                                   \
-                        .kd = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_kd),                                                                                                                   \
-                        .derivative_tau_s = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_derivative_tau_s),                                                                                       \
-                        .integral_min = -(float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_integral_max),                                                                                              \
-                        .integral_max = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_integral_max),                                                                                               \
-                        .output_min = 0.0f,                                                                                                                                                            \
-                        .output_max = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_output_max),                                                                                                   \
-                        .deadband = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_deadband),                                                                                                       \
-                        .dt_min_s = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_dt_min_s),                                                                                                       \
-                        .dt_max_s = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_dt_max_s),                                                                                                       \
-                    },                                                                                                                                                                                 \
-                .feedforward =                                                                                                                                                                         \
-                    {                                                                                                                                                                                  \
-                        .k_bias = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_feedforward_ns),                                                                                                   \
-                        .k_static = 0.0f,                                                                                                                                                              \
-                        .k_velocity = 0.0f,                                                                                                                                                            \
-                        .k_acceleration = 0.0f,                                                                                                                                                        \
-                        .k_gravity = 0.0f,                                                                                                                                                             \
-                        .velocity_epsilon = 0.0f,                                                                                                                                                      \
-                        .acceleration_epsilon = 0.0f,                                                                                                                                                  \
-                        .gravity_model = CONTROL_GRAVITY_NONE,                                                                                                                                         \
-                    },                                                                                                                                                                                 \
-            },                                                                                                                                                                                         \
-        .estimator = DT_INST_PROP(inst, estimator),                                                                                                                                                    \
+#define IMU_CONFIG_DEFINE(inst)                                                                                        \
+    static const imu_config imu_config_##inst = {                                                                      \
+        .accel_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, accel_dev)),                                                  \
+        .gyro_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, gyro_dev)),                                                    \
+        .heat_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, heat_dev)),                                                    \
+        .filter_dev = DEVICE_DT_GET(DT_INST_PHANDLE(inst, filter_dev)),                                                \
+        .heat_controller =                                                                                             \
+            {                                                                                                          \
+                .feedback =                                                                                            \
+                    {                                                                                                  \
+                        .kp = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_kp),                                   \
+                        .ki = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_ki),                                   \
+                        .kd = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_kd),                                   \
+                        .derivative_tau_s = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_derivative_tau_s),       \
+                        .integral_min = -(float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_integral_max),              \
+                        .integral_max = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_integral_max),               \
+                        .output_min = 0.0f,                                                                            \
+                        .output_max = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_output_max),                   \
+                        .deadband = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_deadband),                       \
+                        .dt_min_s = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_dt_min_s),                       \
+                        .dt_max_s = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_dt_max_s),                       \
+                    },                                                                                                 \
+                .feedforward =                                                                                         \
+                    {                                                                                                  \
+                        .k_bias = (float)DT_STRING_UNQUOTED(DT_DRV_INST(inst), heat_feedforward_ns),                   \
+                        .k_static = 0.0f,                                                                              \
+                        .k_velocity = 0.0f,                                                                            \
+                        .k_acceleration = 0.0f,                                                                        \
+                        .k_gravity = 0.0f,                                                                             \
+                        .velocity_epsilon = 0.0f,                                                                      \
+                        .acceleration_epsilon = 0.0f,                                                                  \
+                        .gravity_model = CONTROL_GRAVITY_NONE,                                                         \
+                    },                                                                                                 \
+            },                                                                                                         \
+        .estimator = DT_INST_PROP(inst, estimator),                                                                    \
     };
 
 /**
@@ -84,7 +84,8 @@ static int skywalker_imu_init(const struct device *dev) {
     if (ret < 0) {
         return ret;
     }
-    if (cfg->heat_controller.feedback.output_min < 0.0f || cfg->heat_controller.feedback.output_max > (float)IMU_HEAT_PWM_PERIOD) {
+    if (cfg->heat_controller.feedback.output_min < 0.0f ||
+        cfg->heat_controller.feedback.output_max > (float)IMU_HEAT_PWM_PERIOD) {
         return -ERANGE;
     }
 
@@ -107,10 +108,11 @@ static int skywalker_imu_init(const struct device *dev) {
 
 // ─── 为单个 DT 实例注册 Zephyr device ───
 // data 大小固定，直接定义；config 由 IMU_CONFIG_DEFINE 生成。
-#define IMU_INST(inst)                                                                                                                                                                                 \
-    IMU_CONFIG_DEFINE(inst);                                                                                                                                                                           \
-    static imu_data imu_data_##inst;                                                                                                                                                                   \
-    DEVICE_DT_DEFINE(DT_DRV_INST(inst), skywalker_imu_init, NULL, &imu_data_##inst, &imu_config_##inst, POST_KERNEL, 91, NULL);
+#define IMU_INST(inst)                                                                                                 \
+    IMU_CONFIG_DEFINE(inst);                                                                                           \
+    static imu_data imu_data_##inst;                                                                                   \
+    DEVICE_DT_DEFINE(DT_DRV_INST(inst), skywalker_imu_init, NULL, &imu_data_##inst, &imu_config_##inst, POST_KERNEL,   \
+                     91, NULL);
 
 // ─── 展开所有 status = "okay" 的 DT 实例 ───
 DT_INST_FOREACH_STATUS_OKAY(IMU_INST)
@@ -227,7 +229,8 @@ int imu_heat_control(const struct device *dev, float target_temp, float dt) {
 
     // PWM 输出：周期 20 ms（50 Hz），output 单位 ns
     // 通道 4 对应 overlay 里 &timers3 的 pinctrl tim3_ch4_pb1（STM32 PWM 通道从 1 起）
-    return pwm_set(cfg->heat_dev, IMU_HEAT_PWM_CHANNEL, IMU_HEAT_PWM_PERIOD, (uint32_t)result.output, PWM_POLARITY_NORMAL);
+    return pwm_set(cfg->heat_dev, IMU_HEAT_PWM_CHANNEL, IMU_HEAT_PWM_PERIOD, (uint32_t)result.output,
+                   PWM_POLARITY_NORMAL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -293,7 +296,9 @@ static void imu_ekf_predict(const struct device *dev, const float gyro[3], float
         gyro_norm = 1.0f / gyro_norm;
 
     float acc_norm_val;
-    arm_sqrt_f32(ekf.AccelFiltered[0] * ekf.AccelFiltered[0] + ekf.AccelFiltered[1] * ekf.AccelFiltered[1] + ekf.AccelFiltered[2] * ekf.AccelFiltered[2], &acc_norm_val);
+    arm_sqrt_f32(ekf.AccelFiltered[0] * ekf.AccelFiltered[0] + ekf.AccelFiltered[1] * ekf.AccelFiltered[1] +
+                     ekf.AccelFiltered[2] * ekf.AccelFiltered[2],
+                 &acc_norm_val);
     if (gyro_norm < 0.2f && fabsf(acc_norm_val - 9.8f) < 0.35f) {
         if (ekf.UpdateCount == 0) {
             ekf.GyroBias[0] = gyro[0];
@@ -340,7 +345,8 @@ static void imu_ekf_predict(const struct device *dev, const float gyro[3], float
 
     KalmanFilter_Predict(kf);
 
-    float n = inv_sqrt(kf->X.pData[0] * kf->X.pData[0] + kf->X.pData[1] * kf->X.pData[1] + kf->X.pData[2] * kf->X.pData[2] + kf->X.pData[3] * kf->X.pData[3]);
+    float n = inv_sqrt(kf->X.pData[0] * kf->X.pData[0] + kf->X.pData[1] * kf->X.pData[1] +
+                       kf->X.pData[2] * kf->X.pData[2] + kf->X.pData[3] * kf->X.pData[3]);
     if (n > 0.0f)
         for (int i = 0; i < 4; i++)
             kf->X.pData[i] *= n;
@@ -365,10 +371,13 @@ static void imu_ekf_correct(const struct device *dev, const float accel[3]) {
 
     // ─── 2. z = AccelFiltered / |AccelFiltered| ───
     float acc_norm;
-    arm_sqrt_f32(ekf.AccelFiltered[0] * ekf.AccelFiltered[0] + ekf.AccelFiltered[1] * ekf.AccelFiltered[1] + ekf.AccelFiltered[2] * ekf.AccelFiltered[2], &acc_norm);
+    arm_sqrt_f32(ekf.AccelFiltered[0] * ekf.AccelFiltered[0] + ekf.AccelFiltered[1] * ekf.AccelFiltered[1] +
+                     ekf.AccelFiltered[2] * ekf.AccelFiltered[2],
+                 &acc_norm);
     if (acc_norm < 0.01f)
         return;
-    float z_buf[3] = {ekf.AccelFiltered[0] / acc_norm, ekf.AccelFiltered[1] / acc_norm, ekf.AccelFiltered[2] / acc_norm};
+    float z_buf[3] = {ekf.AccelFiltered[0] / acc_norm, ekf.AccelFiltered[1] / acc_norm,
+                      ekf.AccelFiltered[2] / acc_norm};
 
     // ─── 3. 预测重力方向 h(q) 及 新息 ───
     float q0 = kf->X.pData[0], q1 = kf->X.pData[1];
@@ -394,10 +403,12 @@ static void imu_ekf_correct(const struct device *dev, const float accel[3]) {
             ekf.ErrorCount = 0;
         if (ekf.ErrorCount > 50) {
             ekf.ConvergeFlag = 0;
-        } else {
+        }
+        else {
             return; // 残差异常，跳过修正
         }
-    } else {
+    }
+    else {
         // ─── 5. 自适应增益 ───
         if (ekf.ChiSquare > 0.1f * EKF_CHI_THRESHOLD && ekf.ConvergeFlag)
             ekf.AdaptiveGainScale = (EKF_CHI_THRESHOLD - ekf.ChiSquare) / (0.9f * EKF_CHI_THRESHOLD);
@@ -433,7 +444,8 @@ static void imu_ekf_correct(const struct device *dev, const float accel[3]) {
     Matrix_Init(&z, 3, 1, z_buf);
     KalmanFilter_Correct(kf, &z);
 
-    float n = inv_sqrt(kf->X.pData[0] * kf->X.pData[0] + kf->X.pData[1] * kf->X.pData[1] + kf->X.pData[2] * kf->X.pData[2] + kf->X.pData[3] * kf->X.pData[3]);
+    float n = inv_sqrt(kf->X.pData[0] * kf->X.pData[0] + kf->X.pData[1] * kf->X.pData[1] +
+                       kf->X.pData[2] * kf->X.pData[2] + kf->X.pData[3] * kf->X.pData[3]);
     if (n > 0.0f)
         for (int i = 0; i < 4; i++)
             kf->X.pData[i] *= n;
