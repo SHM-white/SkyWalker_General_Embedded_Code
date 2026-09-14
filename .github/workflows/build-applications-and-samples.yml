@@ -1,0 +1,116 @@
+name: Build applications and samples
+
+on:
+  push:
+    paths:
+      - 'applications/**'
+      - 'samples/**'
+      - 'boards/**'
+      - 'drivers/**'
+      - 'dts/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/build-applications-and-samples.yml'
+  pull_request:
+    paths:
+      - 'applications/**'
+      - 'samples/**'
+      - 'boards/**'
+      - 'drivers/**'
+      - 'dts/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/build-applications-and-samples.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-applications-and-samples-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: Discover Zephyr projects
+    runs-on: ubuntu-latest
+    outputs:
+      projects: ${{ steps.projects.outputs.projects }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Find applications and samples
+        id: projects
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t projects < <(
+            find applications samples \
+              -type f \
+              -name CMakeLists.txt \
+              -not -path '*/build/*' \
+              -exec dirname {} \; \
+              | sort -u
+          )
+
+          if ((${#projects[@]} == 0)); then
+            echo 'No applications or samples with CMakeLists.txt were found.' >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${projects[@]}" \
+            | jq -R -s -c '
+                split("\n")
+                | map(select(length > 0))
+                | map({path: ., name: (gsub("/"; "__"))})
+              ' > projects.json
+
+          echo "projects=$(<projects.json)" >> "$GITHUB_OUTPUT"
+          echo 'Projects to build:'
+          jq -r '.[] | "- \(.path)"' projects.json
+
+  build:
+    name: Build ${{ matrix.project.path }}
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        project: ${{ fromJSON(needs.discover.outputs.projects) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # west.yml declares the local manifest project as skywalker_code.
+          path: skywalker_code
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Zephyr
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: skywalker_code
+          toolchains: arm-zephyr-eabi
+
+      - name: Build project
+        run: >-
+          west build
+          -p always
+          -b dm_mc02/stm32h723xx
+          -d "build/ci/${{ matrix.project.name }}"
+          "skywalker_code/${{ matrix.project.path }}"
