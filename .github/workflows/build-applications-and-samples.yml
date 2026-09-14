@@ -1,0 +1,109 @@
+name: Build applications and samples
+
+on:
+  push:
+    paths:
+      - 'applications/**'
+      - 'samples/**'
+      - 'boards/**'
+      - 'drivers/**'
+      - 'dts/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/build-applications-and-samples.yml'
+  pull_request:
+    paths:
+      - 'applications/**'
+      - 'samples/**'
+      - 'boards/**'
+      - 'drivers/**'
+      - 'dts/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/build-applications-and-samples.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-applications-and-samples-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build applications and samples
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # west.yml declares the local manifest project as skywalker_code.
+          path: skywalker_code
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Zephyr
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: skywalker_code
+          toolchains: arm-zephyr-eabi
+
+      - name: Build every project
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          mapfile -t projects < <(
+            find skywalker_code/applications skywalker_code/samples \
+              -type f \
+              -name CMakeLists.txt \
+              -not -path '*/build/*' \
+              -exec dirname {} \; \
+              | sort -u
+          )
+
+          if ((${#projects[@]} == 0)); then
+            echo 'No applications or samples with CMakeLists.txt were found.' >&2
+            exit 1
+          fi
+
+          failures=()
+          echo "Found ${#projects[@]} projects."
+
+          for project in "${projects[@]}"; do
+            relative_project="${project#skywalker_code/}"
+            build_name="${relative_project//\//__}"
+
+            echo "::group::Building ${relative_project}"
+            if west build \
+              -p always \
+              -b dm_mc02/stm32h723xx \
+              -d "build/ci/${build_name}" \
+              "${project}"; then
+              echo "Build succeeded: ${relative_project}"
+            else
+              echo "Build failed: ${relative_project}" >&2
+              failures+=("${relative_project}")
+            fi
+            echo '::endgroup::'
+          done
+
+          if ((${#failures[@]} > 0)); then
+            echo 'The following projects failed to build:' >&2
+            printf ' - %s\n' "${failures[@]}" >&2
+            exit 1
+          fi
+
+          echo 'All applications and samples built successfully.'
