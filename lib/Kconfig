@@ -20,9 +20,12 @@ config SKYWALKER_LIB_MATRIX_STORAGE
 
 config SKYWALKER_LIB_VOFA
     bool "vofa"
-    depends on SERIAL
+    depends on SERIAL && SERIAL_SUPPORT_INTERRUPT
+    select UART_INTERRUPT_DRIVEN
     help
-        Enable the VOFA library for debug
+        VOFA JustFloat telemetry and line commands over an exclusive UART.
+        Uses the interrupt-driven UART API for both hardware USART and
+        USB CDC ACM, with a bounded nonblocking frame queue per instance.
 
 config SKYWALKER_LIB_CONTROL
     bool "Pure control algorithms"
