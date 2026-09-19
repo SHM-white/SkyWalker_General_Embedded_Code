@@ -36,6 +36,7 @@
 		sw0 = &user_button;
 		led-strip = &rgb_led;
 		telemetry-uart = &usart1;
+		remote-uart = &uart5;
 	};
 
 	power_en {
@@ -222,13 +223,16 @@ zephyr_udc0: &usbotg_hs {
 };
 
 &uart5 {
-	// SBUS
+	// Dedicated DBUS receiver: PD2 RX, 100000 baud, 8E1.
 	status = "okay";
-	pinctrl-0 = <&uart5_rx_pd2 &uart5_tx_pc12>;
+	pinctrl-0 = <&uart5_rx_pd2>;
 	pinctrl-names = "default";
 	current-speed = <100000>;
 	data-bits = <8>;
-	stop-bits = "2";
+	parity = "even";
+	stop-bits = "1";
+	dmas = <&dmamux1 6 65 STM32_DMA_PERIPH_RX>;
+	dma-names = "rx";
 };
 
 &usart10 {

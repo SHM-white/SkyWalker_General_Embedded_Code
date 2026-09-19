@@ -8,7 +8,8 @@ LOG_MODULE_REGISTER(interboard_bench, LOG_LEVEL_INF);
 int main() {
     using namespace skywalker::communication;
     using namespace skywalker::robotics;
-    static AsyncUart uart(bench::uart);
+    static AsyncUart::DmaBuffers dma_buffers __nocache;
+    static AsyncUart uart(bench::uart, dma_buffers);
     InterBoardLink link(bench::role);
     int ret = uart.init();
     const auto boot = sys_rand64_get() | 1ULL;

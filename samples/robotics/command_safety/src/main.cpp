@@ -10,7 +10,8 @@ LOG_MODULE_REGISTER(command_bench, LOG_LEVEL_INF);
 int main() {
     using namespace skywalker;
     using namespace skywalker::robotics;
-    static communication::AsyncUart uart(bench::remote_uart);
+    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+    static communication::AsyncUart uart(bench::remote_uart, dma_buffers);
     communication::RemoteService service(bench::decoder, bench::remote);
     ManualCommandMapper mapper({});
     CommandManager manager({});

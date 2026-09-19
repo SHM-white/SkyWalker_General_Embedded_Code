@@ -16,16 +16,19 @@
 
 ## 2. DR16
 
-`Dr16Decoder` 解码固定 18 字节帧：四个摇杆、拨轮、左右拨杆、鼠标、鼠标键和键盘 bitmask。默认配置来自 `RemoteService`：
+`Dr16Decoder` 解码固定 18 字节帧：四个摇杆通道、拨杆、鼠标、鼠标键和键盘 bitmask。默认按仓库 DT7/DR16 手册将最后两字节视为保留字段，不参与通道范围校验。配置默认值：
 
 - channel center=1024，合法范围 364–1684。
 - center deadband=10。
+- decode_wheel=false；只有确认接收机把最后两字节用作滚轮通道时才显式设为 true，关闭时 `analog.wheel=0`。
 - frame assembly gap=10 ms。
 - offline timeout=100 ms。
 
 `RemoteService::snapshot()` 返回 `RemoteState` 值拷贝；没有有效帧返回 `-EAGAIN`，已有快照但超时返回 `-ESTALE`，并将 `online=false`。
 
-MC02 样例使用 UART5 的 100000 baud、8E1；实际遥控器链路还要确认电平反相和 DMA 引脚。
+MC02 使用 UART5，C 板使用 USART3，均由板级 `remote-uart` 提供 100000 baud、8E1 和 RX DMA；实际遥控器链路还要确认电平反相和接线。
+
+[DR16 示例](../samples/communication/dr16/README.md) 在 console 输出 CH0～CH3 原始值、中心偏差、开关位域、尾字段及收字节/候选拒绝统计；示例关闭死区，直接复用 `Dr16Decoder` 并维护诊断滑动窗口。正式应用继续使用 `RemoteService`。
 
 ## 3. 裁判系统
 
@@ -76,7 +79,8 @@ end     CRC16-CCITT little-endian
 ## 6. 推荐接入模板
 
 ```cpp
-static communication::AsyncUart uart(board_config::interboard_uart);
+static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+static communication::AsyncUart uart(board_config::interboard_uart, dma_buffers);
 communication::InterBoardLink link(BoardRole::GimbalController);
 uart.init();
 for (;;) {

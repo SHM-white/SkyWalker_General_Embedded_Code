@@ -44,7 +44,8 @@ std::uint32_t age(const MessageStamp &s, std::uint64_t now) {
                : UINT32_MAX;
 }
 void remoteTask(void *, void *, void *) {
-    static communication::AsyncUart uart(board_config::remote_uart);
+    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+    static communication::AsyncUart uart(board_config::remote_uart, dma_buffers);
     communication::RemoteService service({}, {});
     int ret = uart.init();
     LOG_INF("remote UART init: %d", ret);
@@ -69,7 +70,8 @@ void remoteTask(void *, void *, void *) {
     }
 }
 void refereeTask(void *, void *, void *) {
-    static communication::AsyncUart uart(board_config::referee_uart);
+    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+    static communication::AsyncUart uart(board_config::referee_uart, dma_buffers);
     communication::RefereeService service(board_config::referee_version);
     int ret = uart.init();
     LOG_INF("referee UART init: %d, protocol profile: %d", ret, int(board_config::referee_version));
@@ -159,7 +161,8 @@ void commandTask(void *, void *, void *) {
     }
 }
 void linkTask(void *, void *, void *) {
-    static communication::AsyncUart uart(board_config::interboard_uart);
+    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+    static communication::AsyncUart uart(board_config::interboard_uart, dma_buffers);
     communication::InterBoardLink link(BoardRole::GimbalController);
     int ret = uart.init();
     LOG_INF("interboard UART init: %d", ret);

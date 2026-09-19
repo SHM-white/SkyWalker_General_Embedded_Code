@@ -35,6 +35,7 @@
 | [13-communication.md](13-communication.md) | DR16、裁判系统、板间协议、`AsyncUart` |
 | [14-robotics.md](14-robotics.md) | 命令、安全、舵轮、Yaw、功率限幅 |
 | [15-applications.md](15-applications.md) | `sentry_chassis` / `sentry_gimbal` 双主控应用骨架 |
+| [16-uart-dma-nocache.md](16-uart-dma-nocache.md) | UART DMA 缓冲区、D-cache 报错原因、修复方式与实机排查 |
 
 ## 源码对照
 

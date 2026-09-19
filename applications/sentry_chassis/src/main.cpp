@@ -28,7 +28,8 @@ Latest<Received> received;
 Latest<Published> published;
 std::uint64_t local_boot_id = 0; // Set once in main before explicitly starting tasks.
 void linkTask(void *, void *, void *) {
-    static communication::AsyncUart uart(board_config::interboard_uart);
+    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+    static communication::AsyncUart uart(board_config::interboard_uart, dma_buffers);
     communication::InterBoardLink link(BoardRole::ChassisController);
     int ret = uart.init();
     LOG_INF("interboard UART init: %d", ret);
