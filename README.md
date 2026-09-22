@@ -17,6 +17,8 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 ## 从哪里开始
 
+- 交互式查看双主控架构：[网页源码与本地打开说明](docs/architecture-browser/README.md) · [在线浏览（需访问权限）](https://skywalker-architecture-browser.docile-raven-1977.chatgpt.site/)
+
 - 第一次配置环境： [docs/01-getting-started.md](docs/01-getting-started.md)
 - 想理解项目分层： [docs/02-architecture.md](docs/02-architecture.md)
 - 想先跑硬件： [docs/10-samples.md](docs/10-samples.md)
@@ -126,3 +128,4 @@ skywalker_code/
 ## 资料
 
 `docs/` 中同时保留了 DJI 电机/电调、达妙电机/开发板和 RoboMaster C 板的 PDF 手册；下载地址见 [docs/DOWNLOAD_LINKS.txt](docs/DOWNLOAD_LINKS.txt)。
+
