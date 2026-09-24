@@ -12,6 +12,36 @@ config SKYWALKER_MOTOR_INIT_PRIORITY
     default 90
     range 0 99
 
+config SKYWALKER_MOTOR_MAX_MOTORS_PER_BUS
+    int "Maximum motors on one shared CAN bus"
+    default 16
+    range 1 32
+
+config SKYWALKER_MOTOR_MAX_BUSES
+    int "Maximum shared motor CAN buses"
+    default 3
+    range 1 8
+
+config SKYWALKER_MOTOR_MAX_GROUP_MEMBERS
+    int "Maximum linked motors in one group"
+    default 16
+    range 2 32
+
+config SKYWALKER_MOTOR_RX_QUEUE_DEPTH
+    int "Receive event queue depth per motor CAN bus"
+    default 32
+    range 4 128
+
+config SKYWALKER_MOTOR_IO_STACK_SIZE
+    int "I/O thread stack per motor CAN bus"
+    default 3072
+    range 1024 16384
+
+config SKYWALKER_MOTOR_IO_PRIORITY
+    int "I/O thread priority per motor CAN bus"
+    default 5
+    range -15 15
+
 config SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS
     int "DJI feedback freshness timeout"
     default 20

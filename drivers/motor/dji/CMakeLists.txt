@@ -1,7 +1,6 @@
 zephyr_library()
 
 zephyr_library_sources(
-    dji_protocol.cpp
     dji_profiles.cpp
     dji_motor.cpp
     dji_bus.cpp
