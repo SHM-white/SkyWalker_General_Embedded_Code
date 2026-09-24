@@ -1,22 +1,19 @@
 #pragma once
 
 #include <cstdint>
-#include <errno.h>
 #include <variant>
-#include <zephyr/device.h>
 #include <zephyr/spinlock.h>
 
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/dm_motor.hpp>
 #include <drivers/motor/motor_types.hpp>
 
-namespace skywalker::motor {
+namespace skywalker::control {
+class PositionMotor;
+class VelocityMotor;
+}
 
-enum class State : std::uint8_t {
-    Offline = 0,
-    Ready,
-    Fault,
-};
+namespace skywalker::motor {
 
 enum Capability : std::uint32_t {
     CommandCurrent = 1u << 0,
@@ -47,57 +44,6 @@ struct Feedback {
     std::uint32_t valid = 0;
     std::uint64_t timestamp_ms = 0;
 };
-
-struct Api {
-    std::uint32_t (*get_capabilities)(const struct device *dev);
-    int (*set_current)(const struct device *dev, float current_a);
-    int (*set_torque)(const struct device *dev, float torque_nm);
-    int (*read_feedback)(const struct device *dev, Feedback *out);
-    State (*get_state)(const struct device *dev);
-};
-
-inline std::uint32_t capabilities(const struct device *dev) {
-    if (dev == nullptr || dev->api == nullptr)
-        return 0u;
-    const Api *api = static_cast<const Api *>(dev->api);
-    return api->get_capabilities == nullptr ? 0u : api->get_capabilities(dev);
-}
-
-inline int setCurrent(const struct device *dev, float current_a) {
-    if (dev == nullptr || dev->api == nullptr)
-        return -EINVAL;
-    const Api *api = static_cast<const Api *>(dev->api);
-    if ((capabilities(dev) & CommandCurrent) == 0u || api->set_current == nullptr) {
-        return -ENOTSUP;
-    }
-    return api->set_current(dev, current_a);
-}
-
-inline int setTorque(const struct device *dev, float torque_nm) {
-    if (dev == nullptr || dev->api == nullptr)
-        return -EINVAL;
-    const Api *api = static_cast<const Api *>(dev->api);
-    if ((capabilities(dev) & CommandTorque) == 0u || api->set_torque == nullptr) {
-        return -ENOTSUP;
-    }
-    return api->set_torque(dev, torque_nm);
-}
-
-inline int readFeedback(const struct device *dev, Feedback &out) {
-    if (dev == nullptr || dev->api == nullptr)
-        return -EINVAL;
-    const Api *api = static_cast<const Api *>(dev->api);
-    if (api->read_feedback == nullptr)
-        return -ENOTSUP;
-    return api->read_feedback(dev, &out);
-}
-
-inline State getState(const struct device *dev) {
-    if (dev == nullptr || dev->api == nullptr)
-        return State::Offline;
-    const Api *api = static_cast<const Api *>(dev->api);
-    return api->get_state == nullptr ? State::Offline : api->get_state(dev);
-}
 
 class CanBus;
 class Group;
@@ -140,6 +86,13 @@ struct StopReport {
 
 struct MotorSnapshot {
     Feedback feedback{};
+    dji::RawFeedback native_dji_feedback{};
+    bool native_dji_feedback_valid = false;
+    float native_mos_temperature_c = 0.0f;
+    float native_rotor_temperature_c = 0.0f;
+    bool native_temperatures_valid = false;
+    float native_position_rad = 0.0f;
+    bool native_position_valid = false;
     MotorState state = MotorState::Offline;
     bool feedback_fresh = false;
     bool output_permitted = false;
@@ -196,9 +149,18 @@ public:
 private:
     friend class CanBus;
     friend class Group;
+    friend class skywalker::control::PositionMotor;
+    friend class skywalker::control::VelocityMotor;
 
     int validateConfig() const;
-    int stage(const Command &command);
+    int stage(const Command &command, const void *producer = nullptr);
+    int bindProducer(const void *producer, float velocity_abs_max_rad_s, float temperature_max_c,
+                     std::uint32_t required_feedback, bool require_position_reference);
+    int checkProducerSafetyLocked() const;
+    bool readyLocked(std::uint64_t now_ms) const;
+    int setCurrentFrom(const void *producer, float ampere);
+    int setTorqueFrom(const void *producer, float newton_meter);
+    void rejectControl(int error);
     StagedCommand copyStaged() const;
     int requestEnable(std::uint64_t generation);
     void requestDisable();
@@ -207,14 +169,16 @@ private:
     void markStarted();
     bool busStarted() const;
     void markSafePrepared(std::uint64_t expected_stop_generation = 0);
-    void markEnableTxComplete(std::uint64_t generation, std::uint64_t completed_ms);
-    void markClearTxComplete(std::uint64_t completed_ms);
+    void markEnableTxComplete(std::uint64_t generation, std::uint64_t completed_ms,
+                              std::uint64_t completed_order);
+    void markClearTxComplete(std::uint64_t completed_ms, std::uint64_t completed_order);
     void markPrepared(std::uint64_t generation);
     void markStopped(StopProgress progress, int tx_error, std::uint64_t request_generation,
-                     std::uint64_t completed_ms = 0);
+                     std::uint64_t completed_ms = 0, std::uint64_t completed_order = 0);
     void markFaultCleared();
     int acceptDjiFeedback(const dji::RawFeedback &raw, std::uint64_t received_ms);
-    int acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t received_ms);
+    int acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t received_ms,
+                         std::uint64_t callback_order);
     void raiseFault(const FaultInfo &fault);
     void wakeBus();
     bool feedbackFresh(std::uint64_t now_ms) const;
@@ -239,6 +203,13 @@ private:
     mutable struct k_spinlock lock_{};
     MotorSnapshot snapshot_{};
     StagedCommand staged_{};
+    const void *producer_ = nullptr;
+    struct ProducerSafety {
+        float velocity_abs_max_rad_s = 0.0f;
+        float temperature_max_c = 0.0f;
+        std::uint32_t required_feedback = 0;
+        bool require_position_reference = false;
+    } producer_safety_{};
     bool started_ = false;
     bool safe_prepared_ = false;
     bool safe_pending_ = false;
@@ -250,8 +221,13 @@ private:
     std::uint64_t enable_requested_at_ms_ = 0;
     std::uint64_t activated_ms_ = 0;
     std::uint64_t enable_tx_completed_ms_ = 0;
+    std::uint64_t enable_tx_completed_order_ = 0;
     std::uint64_t safe_tx_completed_ms_ = 0;
+    std::uint64_t safe_tx_completed_order_ = 0;
+    std::uint64_t safe_first_tx_completed_ms_ = 0;
     std::uint64_t clear_tx_completed_ms_ = 0;
+    std::uint64_t clear_tx_completed_order_ = 0;
+    std::uint64_t feedback_event_order_ = 0;
     std::uint64_t feedback_stable_since_ms_ = 0;
 };
 

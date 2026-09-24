@@ -1,44 +1,32 @@
-# 遥控器小 yaw + pitch 双轴测试
+# 遥控双轴电机样例
 
-只保留两个任务：`remoteTask` 接收 DR16；`gimbalTask` 读取遥控快照，控制小 yaw 和 pitch。没有裁判系统、板间通信、底盘、大 yaw、发射机构或键鼠控制。
+本样例用一台 GM6020 电流模式 yaw 和一台 DM J4310 MIT pitch 展示跨品牌、同 CAN、一个联动 Group。DR16 接收和控制各有一个应用线程；每条已启动的 CanBus 自有 I/O 线程。
 
-## 使用前配置
+## 配置与接线
 
-当前接线只是**禁用的模板**，不能直接驱动实物：
+电机型号、ID、限幅、零点、协议量程与总线绑定都在 `src/board_config.hpp`；`app.overlay` 不再声明电机设备节点。默认值是供核对的模板：
 
-| 轴 | 模板电机 | CAN / ID | 示例角度范围 |
-|---|---|---|---|
-| 小 yaw | GM6020 电流模式 | CAN1 / 1 | -1 ～ 1 rad |
-| pitch | GM6020 电流模式 | CAN2 / 1 | -0.5 ～ 0.5 rad |
+| 轴 | 电机 | 总线与 ID | 命令上限 |
+| --- | --- | --- | --- |
+| yaw | GM6020 电流模式 | CAN1 / 7 | 1.5 A |
+| pitch | J4310 MIT | CAN1 / 1、Master 0x00 | 1.0 N·m 前馈 |
 
-1. 在 `app.overlay` 按实物填写两轴电机型号、总线、ID、减速比、编码器零点和输出限制，确认后启用节点。MC02 的遥控接口沿用板级 `remote-uart`（UART5，PD2 RX，100000、8E1、RX DMA）；确认接收机接线与电平。
-2. 在 `src/board_config.hpp` 设置每轴后端、方向、机械限位、速度和 PID。DM 电机还需更换设备树节点为对应 MIT 模式配置；输出单位为 N·m，DJI 为 A，不能直接套用参数。
-3. 两轴默认 `Limited + DriverContinuous`。限位必须对应校准后的驱动坐标，不是上电位置的相对角度。示例 PID 不代表带载 pitch 已调好。
-4. 确认后将 `connections_configured` 设为 `true`。默认 false 会让控制任务记录配置错误后退出，两轴不使能。
+DM 的 PMAX、VMAX、TMAX 必须与驱动器配置一致。两轴的方向、机械限位和位置环参数也在配置文件中；pitch 的参数只供空载低限幅起步。MC02 的 DR16 UART5 接口来自板级 DTS。电机独立供电，样例没有应用层电源 GPIO；CAN 收发器由 CanBus.start 启动。
 
-现有 `DjiMotorBackend` 独占一条 CAN 总线，所以两个 DJI 轴使用不同 CAN 控制器。若实物两个 DJI 电机共用一条 CAN，必须改成共用 DJI Bus 的组帧发送方案；不能仅把两个节点都改为 CAN1，否则第二个后端会配置失败，两轴均不会启动。
+`connections_configured` 默认为 `false`，核对实物接线、GM6020 电流模式、编码器零点、DM 量程和机械支撑后才设为 `true`。改 `pitch_can` 为 CAN2 即展示跨 CAN Group：程序先 attach 两轴，再依次 start 两条 CAN，周期末分别 commit。改型号时同时改硬件工厂、控制输出单位与限幅，不能沿用另一品牌的单位。
 
-代码为每轴只构造所选的一种后端。当前 Kconfig 保留 DJI 和 DM 支持，以便选择实际电机。
+## 调用与安全行为
 
-## 控制行为
+应用先 attach/start，再 configure 两个 PositionMotor。遥控左拨杆需先到上或下位，收到新的有效帧后拨到中位，程序才调用一次 `Group.enable()`。右摇杆横向/纵向分别给 yaw/pitch 角速度；两个控制器只暂存安培和牛·米目标，周期末由 CanBus.commit 发布。任一轴反馈、限位、遥控或控制周期异常会撤销整个 Group；故障后需重新经过安全拨杆动作。Group.disable 会立刻关闭软件输出许可，安全帧由 I/O 线程发送。
 
-- 上电后，等待两个轴反馈正常，先将左拨杆置上位或下位，再拨到中位使能。
-- 右摇杆横向控制小 yaw 角速度，纵向控制 pitch 角速度。默认最大速度均为 0.3 rad/s，方向可独立调整。
-- 摇杆回中保持目标角度，左拨杆退出中位撤销两轴输出。右拨杆不切换输入源。
-- 遥控超时、反馈异常、限位越界或控制周期异常时撤销两轴输出；恢复后需要再次退出中位再使能。
-- `emergencyStopRequested()` 和 `takeEmergencyResetRequest()` 是预留接口，默认返回 false，尚未接入物理急停。接入后急停会锁存，释放并显式复位后才能重新使能。
+Limited 轴在禁用且反馈稳定后，使用 GM6020 校准的单圈绝对角或 DM 原生保存零点的位置重建连续参考。切电机电源后重新建立参考，再允许位置控制。pitch 失能可能下坠，须支撑机构；首次测试先验证方向、限位和禁用动作。
 
-pitch 在应用内复用 `YawGimbal` 作为单轴控制器，`Axis::update()` 将两轴各自的角速度放进其实际读取的 `yaw_rate_rad_s` 字段。每轴都有独立的位置环、电机实例和恢复状态；这不是 IMU 稳定控制。
+`emergencyStopRequested()`、`takeEmergencyResetRequest()` 是板级预留接口，默认返回 false。接入物理复位输入后，释放急停并请求复位会禁用联动组、清除可清故障；仍需稳定反馈和新的一轮安全拨杆动作才会重新使能。
 
-失能会撤销力矩，pitch 应有机械支撑以免下坠。首次测试使用低速、小行程，确认方向和限位。
-
-## 构建与运行
-
-在仓库目录中运行：
+## 构建
 
 ```sh
 west build -b dm_mc02 samples/robotics/gimbal_control -d ../build/gimbal_rc_test
-west flash -d ../build/gimbal_rc_test
 ```
 
-本次修改已通过 MC02 默认禁用模板的编译和链接，未刷写或实机验证。启动日志显示两轴配置返回值；配置成功后每秒输出遥控有效性、拨杆、重新使能许可、急停与两轴状态。`rc=0` 先检查接收机，配置错误先检查设备节点和 `connections_configured`；恢复错误参考对应电机反馈和 CAN 状态。
+当前默认禁用配置已在 MC02 编译链接通过；未刷写或实机验证。日志打印遥控有效性、组状态、成员状态、故障原因与 CAN 错误。

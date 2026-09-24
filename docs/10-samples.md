@@ -42,7 +42,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/interboard-chassis \
 | 样例 | 作用 |
 |---|---|
 | `samples/motor/can_smoke` | 只接收 CAN 帧并输出观察信息，不发送命令 |
-| `samples/motor/dji_unified` | GM6020 原生通用 API / 低电流安全台架 |
+| `samples/motor/dji_unified` | GM6020 `Motor`/`CanBus` 低电流台架 |
 | `samples/motor/dji_speed_control` | DJI `VelocityMotor` 速度闭环 |
 | `samples/motor/dji_position_control` | DJI `PositionMotor` 位置-速度串级，推荐参考 |
 | `samples/motor/m2006_speed_control` | M2006 + C610，含 36:1 减速比示例 |
@@ -53,7 +53,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/dji-speed samples/motor/dji_speed_
 west build -p -b rm_typec -d build/dji-position samples/motor/dji_position_control
 ```
 
-上机前必须替换 overlay 中的 motor ID、CAN、零点、减速比和限流；GM6020 还必须确认 current loop。先悬空、低电流，再验证正负方向。
+上机前必须核对 `src/main.cpp` 中的 motor ID、CAN、零点、减速比和限流；GM6020 还必须确认 current loop。先悬空、低电流，再验证正负方向。
 
 ## 4. 达妙电机
 
@@ -65,6 +65,7 @@ west build -p -b rm_typec -d build/dji-position samples/motor/dji_position_contr
 | `samples/motor/dm_mit_velocity_control` | MIT + SkyWalker 软件速度环 |
 | `samples/motor/dm_mit_position_control` | MIT + SkyWalker 软件位置-速度环 |
 | `samples/motor/recovery` | DJI 或 DM MIT 掉电/总线恢复台架 |
+| `samples/motor/mixed_topology` | DJI 同帧独立组、DM 共用 Master ID、跨 CAN 联动组与独立组故障隔离 |
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx -d build/dm-mit \
@@ -73,7 +74,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/dm-position \
   samples/motor/dm_mit_position_control
 ```
 
-DM 的 `control-mode`、`master-id`、PMAX/VMAX/TMAX 必须和电机实际设置一致。掉电恢复样例只切电机动力，不要切 MCU 电源，否则无法验证自动恢复。
+DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致。掉电恢复样例只切电机动力，不切 MCU 电源；反馈恢复后还需再次按 `e` 显式使能。
 
 ## 5. 机器人算法台架
 
@@ -82,6 +83,7 @@ DM 的 `control-mode`、`master-id`、PMAX/VMAX/TMAX 必须和电机实际设置
 | `samples/robotics/command_safety` | DR16 → intent → global safety → command | 否，模拟底盘心跳/反馈 |
 | `samples/robotics/yaw_gimbal` | GM6020 Yaw，Hold/Rate/AbsoluteAngle | 是，单电机 |
 | `samples/robotics/swerve` | 单物理舵轮：GM6020 舵向 + M3508 驱动 | 是，单模块 |
+| `samples/robotics/gimbal_control` | DJI + DM 双轴 Group 云台台架 | 是，双轴联动，默认连接未配置 |
 
 典型构建：
 

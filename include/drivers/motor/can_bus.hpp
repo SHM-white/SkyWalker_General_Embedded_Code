@@ -91,6 +91,7 @@ private:
         can_frame frame{};
         std::uint64_t received_ms = 0;
         std::uint64_t bus_generation = 0;
+        std::uint64_t callback_order = 0;
     };
     struct InFlight {
         can_frame frame{};
@@ -106,6 +107,7 @@ private:
         bool callback_seen = false;
         int callback_error = 0;
         std::uint64_t completed_ms = 0;
+        std::uint64_t completed_order = 0;
     };
     struct Route {
         std::uint16_t id = 0;
@@ -120,6 +122,7 @@ private:
     int installRoutes();
     void rollbackStart();
     void wake();
+    std::uint64_t recordCallbackOrder();
     static void onRx(const device *, can_frame *frame, void *context);
     static void onTxDone(const device *, int error, void *context);
     static void threadEntry(void *context, void *, void *);
@@ -128,6 +131,7 @@ private:
     void processTx();
     void checkDeadlines(std::uint64_t now_ms);
     void pumpTx(std::uint64_t now_ms);
+    bool pumpTarget(std::uint64_t now_ms);
     void enterRecovery(int error, FaultReason reason);
     void recoverController(std::uint64_t now_ms);
     int submit(const can_frame &frame, TxPurpose purpose, std::size_t unit_index,
@@ -135,6 +139,7 @@ private:
     int buildTarget(const TxUnit &unit, std::uint64_t now_ms, can_frame &out);
     int buildSafety(const TxUnit &unit, can_frame &out);
     bool unitHasPendingSafety(const TxUnit &unit) const;
+    bool unitNeedsDmSafetyProbe(const TxUnit &unit, std::uint64_t now_ms) const;
     void updateStopAfterTx(const InFlight &completed);
 
     const device *can_ = nullptr;
@@ -149,6 +154,8 @@ private:
     std::uint64_t neutral_done_generation_[kMaxMotors]{};
     std::uint64_t published_sequence_ = 0;
     std::size_t target_cursor_ = 0;
+    std::size_t safety_probe_cursor_ = 0;
+    bool target_before_safety_probe_ = true;
     std::size_t targets_remaining_ = 0;
     std::uint64_t bus_generation_ = 1;
     std::uint64_t next_operation_id_ = 1;
@@ -158,6 +165,8 @@ private:
 
     mutable k_spinlock state_lock_{};
     BusStatus status_{};
+    mutable k_spinlock callback_order_lock_{};
+    std::uint64_t next_callback_order_ = 1;
     mutable k_spinlock publication_lock_{};
     mutable k_spinlock rx_lock_{};
     RxEvent rx_queue_[kRxDepth]{};

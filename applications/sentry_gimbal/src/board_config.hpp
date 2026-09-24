@@ -2,6 +2,9 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <control/position_motor.hpp>
+#include <drivers/motor/can_bus.hpp>
+#include <drivers/motor/dji_motor.hpp>
+#include <drivers/motor/dm_motor.hpp>
 #include <robotics/gimbal/yaw_gimbal.hpp>
 #include <communication/referee/referee_protocol.hpp>
 namespace board_config {
@@ -26,19 +29,40 @@ inline const device *referee_uart = DEVICE_DT_GET(DT_ALIAS(referee_uart));
 #else
 inline const device *referee_uart = nullptr;
 #endif
-#if DT_NODE_HAS_STATUS(DT_ALIAS(yaw_motor), okay)
-inline const device *yaw_motor = DEVICE_DT_GET(DT_ALIAS(yaw_motor));
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(can1), okay)
+inline const device *yaw_can = DEVICE_DT_GET(DT_NODELABEL(can1));
 #else
-inline const device *yaw_motor = nullptr;
+inline const device *yaw_can = nullptr;
 #endif
-// Backend choice, effort units and position capability must match the real motor.
-inline constexpr bool yaw_is_dm = false;
+// This one factory is the active yaw configuration. Confirm the physical CAN ID,
+// zero and current control mode before setting connections_configured to true.
+inline auto yawMotorConfig() {
+    return skywalker::motor::dji::gm6020({
+        .id = 1,
+        .current_limit_a = 1.5f,
+        .encoder_zero_ticks = 0,
+        .current_mode_confirmed = false,
+        .timing = {20, 20, 30, 100},
+    });
+    // For a DM J4310 MIT yaw, replace the return above with:
+    // return skywalker::motor::dm::j4310Mit({.id = <motor ID>,
+    //     .master_id = <feedback CAN ID>, .position_max_rad = <drive range>,
+    //     .velocity_max_rad_s = <drive range>, .torque_max_nm = <drive range>,
+    //     .torque_limit_nm = <application limit>, .timing = {50, 20, 50, 3000}});
+    // Also select a mechanically valid Limited yaw topology below: DM currently
+    // does not provide the fixed-zero absolute angle required by Continuous yaw.
+    // Recheck the PID gains and effort cap in NewtonMeter before enabling motion.
+}
+
 inline constexpr skywalker::robotics::YawGimbalConfig yaw{skywalker::robotics::YawTopology::Continuous, -3.14159265f,
                                                           3.14159265f, 1.0f, true};
-inline skywalker::control::PositionMotor::Config motorConfig() {
+inline skywalker::control::PositionMotor::Config motorConfig(const skywalker::motor::MotorInfo &info) {
     skywalker::control::PositionMotor::Config c{};
-    c.effort_unit = yaw_is_dm ? skywalker::control::EffortUnit::NewtonMeter : skywalker::control::EffortUnit::Ampere;
-    c.safety = {12, 0, 30, 100};
+    if ((info.capabilities & skywalker::motor::CommandCurrent) != 0u)
+        c.effort_unit = skywalker::control::EffortUnit::Ampere;
+    else if ((info.capabilities & skywalker::motor::CommandTorque) != 0u)
+        c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
+    c.safety = {12, 0};
     c.reference = yaw.topology == skywalker::robotics::YawTopology::Continuous
                       ? skywalker::control::PositionReference::AbsoluteNearest
                       : skywalker::control::PositionReference::DriverContinuous;

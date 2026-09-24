@@ -1,15 +1,22 @@
 #pragma once
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <drivers/motor/dji_motor.hpp>
 #include <robotics/gimbal/yaw_gimbal.hpp>
 namespace bench {
-inline const device *motor = DEVICE_DT_GET(DT_ALIAS(motor0));
+inline const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+inline skywalker::motor::dji::Config motorHardware() {
+    return skywalker::motor::dji::gm6020({.id = 1, .current_limit_a = 0.5f,
+                                          .encoder_zero_ticks = 0, .current_mode_confirmed = true,
+                                          .timing = {20, 20, 20, 100}});
+}
 // Limited topology requires calibrated DriverContinuous coordinates instead.
 inline constexpr skywalker::robotics::YawGimbalConfig yaw{skywalker::robotics::YawTopology::Continuous, -3.14159265f,
                                                           3.14159265f, 0.5f, true};
 inline skywalker::control::PositionMotor::Config motorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::Ampere;
-    c.safety = {12, 70, 30, 100};
+    c.safety = {12, 70};
     c.reference = yaw.topology == skywalker::robotics::YawTopology::Continuous
                       ? skywalker::control::PositionReference::AbsoluteNearest
                       : skywalker::control::PositionReference::DriverContinuous;

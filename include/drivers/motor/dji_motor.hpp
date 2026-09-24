@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <zephyr/device.h>
 
 #include <drivers/motor/dji_protocol.hpp>
 #include <drivers/motor/motor_types.hpp>
@@ -52,7 +51,6 @@ Config m2006(const M2006Options &options);
 
 struct Descriptor {
     Model model = Model::M3508C620;
-    const struct device *can = nullptr;
     std::uint8_t motor_id = 0;
     std::uint16_t feedback_id = 0;
     std::uint16_t command_id = 0;
@@ -63,11 +61,6 @@ struct Descriptor {
     bool temperature_valid = false;
 };
 
-int describe(const struct device *dev, Descriptor &out);
 int describe(const Config &config, Descriptor &out);
-// Non-armed only. Re-seed continuous coordinates from a fresh encoder sample.
-// Fixed-zero 1:1 axes start at calibrated absolute position, other axes at zero.
-int resetMeasurementReference(const struct device *dev);
-int readRawFeedback(const struct device *dev, RawFeedback &out);
 
 } // namespace skywalker::motor::dji

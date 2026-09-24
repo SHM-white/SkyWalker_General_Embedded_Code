@@ -8,8 +8,8 @@
 #include <communication/remote/remote_service.hpp>
 #include <communication/referee/referee_service.hpp>
 #include <communication/interboard/interboard_link.hpp>
-#include <control/dji_motor_backend.hpp>
-#include <control/dm_motor_backend.hpp>
+#include <drivers/motor/can_bus.hpp>
+#include <drivers/motor/motor.hpp>
 #include <robotics/command/manual_command_mapper.hpp>
 #include <robotics/command/command_manager.hpp>
 #include <robotics/safety/global_safety_manager.hpp>
@@ -240,18 +240,26 @@ void linkTask(void *, void *, void *) {
     }
 }
 void gimbalTask(void *, void *, void *) {
-    static control::DjiMotorBackend dji_backend(board_config::yaw_motor);
-    static control::DmMotorBackend dm_backend(board_config::yaw_motor);
-    auto &backend = board_config::yaw_is_dm ? static_cast<control::MotorBackend &>(dm_backend)
-                                            : static_cast<control::MotorBackend &>(dji_backend);
-    static control::PositionMotor motor(backend, board_config::motorConfig());
-    YawGimbal yaw(motor, board_config::yaw);
+    static motor::CanBus bus(board_config::yaw_can);
+    static motor::Motor drive(board_config::yawMotorConfig());
+    static control::PositionMotor axis(drive, board_config::motorConfig(drive.info()));
+    YawGimbal yaw(drive, axis, board_config::yaw);
     GimbalLocalSafety local({board_config::command_timeout_ms});
-    const int configured = board_config::connections_configured ? yaw.begin() : -ENODEV;
+    const int configured = [&]() {
+        if (!board_config::connections_configured)
+            return -ENODEV;
+        int ret = bus.attach(drive);
+        if (ret < 0)
+            return ret;
+        ret = bus.start();
+        if (ret < 0)
+            return ret;
+        return yaw.begin();
+    }();
     LocalGimbalCommand command{};
     RefereeState referee{};
-    std::uint32_t generation = 0;
     std::uint64_t ready_ms = 0, last_log = 0;
+    bool was_ready = false;
     auto previous_ms = k_uptime_get();
     atomic_val_t last_reset = 0;
     for (;;) {
@@ -264,62 +272,70 @@ void gimbalTask(void *, void *, void *) {
         const bool estop = board_config::emergencyStopRequested() || command.safety.state == SafetyState::EmergencyStop;
         const auto reset = atomic_get(&reset_generation);
         if (reset != last_reset) {
-            local.clearEmergencyStop(!estop);
-            yaw.clearEmergencyStop(!estop);
+            if (local.clearEmergencyStop(!estop) == 0 && configured == 0 &&
+                drive.snapshot().state == motor::MotorState::Fault)
+                (void)drive.clearFault();
             last_reset = reset;
         }
         const bool powered = permission(referee.robot.gimbal_output, now);
-        if (configured == 0) {
-            if (estop)
-                yaw.suspend(PauseReason::EmergencyStop);
-            else if (!powered) {
-                if (motor.state() != ExecutionState::Waiting && motor.state() != ExecutionState::EStopLatched)
-                    yaw.suspend(PauseReason::RefereeDisabled);
-            }
-            else if (motor.state() != ExecutionState::Active) {
-                if (yaw.poll(now) == 0 && generation != motor.status().resume_generation) {
-                    generation = motor.status().resume_generation;
-                    ready_ms = now;
-                }
-            }
-        }
-        const auto &fb = motor.telemetry().measurement.feedback;
-        const std::uint32_t timeout = board_config::yaw_is_dm ? CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS
-                                                              : CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS;
+        const auto before = drive.snapshot();
+        const bool ready = configured == 0 && drive.ready();
+        const bool active = configured == 0 && drive.active();
+        if (ready && !was_ready)
+            ready_ms = now;
+        was_ready = ready;
         LocalSafetyInputs input{};
         input.now_ms = now;
         input.config_valid = configured == 0;
         input.power_allowed = powered;
         input.emergency_stop_requested = estop;
-        input.hardware_ready = motor.state() == ExecutionState::Ready || motor.state() == ExecutionState::Active;
-        input.armed = motor.state() == ExecutionState::Active;
-        input.feedback_fresh = fb.timestamp_ms && now >= static_cast<std::int64_t>(fb.timestamp_ms) &&
-                               std::uint64_t(now) - fb.timestamp_ms <= timeout;
+        input.hardware_ready = ready || active;
+        input.armed = active;
+        input.feedback_fresh = before.feedback_fresh;
         input.command_stamp = command.command.stamp;
         input.global_action = isFresh(command.safety.stamp, now, board_config::command_timeout_ms)
                                   ? command.safety.gimbal
                                   : SafetyAction::Disable;
         LocalSafetyDecision decision{};
-        local.evaluate(input, decision);
+        if (local.evaluate(input, decision) < 0)
+            decision = {SafetyAction::Disable, ExecutionState::ConfigBlocked, InvalidConfiguration};
         if (configured == 0) {
             if (decision.action == SafetyAction::Disable) {
-                if (motor.state() == ExecutionState::Active)
-                    yaw.suspend(PauseReason::CommandTimeout);
+                if (before.state == motor::MotorState::Active || before.state == motor::MotorState::Enabling)
+                    (void)drive.disable();
             }
-            else if (motor.state() == ExecutionState::Active || command.command.stamp.timestamp_ms >= ready_ms) {
+            else if (active) {
                 GimbalCommand target = command.command;
                 if (decision.action == SafetyAction::Hold)
                     target.mode = GimbalMode::Hold;
-                yaw.update(target, decision.action, dt);
+                const int ret = yaw.update(target, decision.action, dt);
+                if (ret < 0) {
+                    (void)drive.disable();
+                    LOG_ERR("yaw update failed: %d", ret);
+                }
             }
+            else if (ready && command.command.stamp.valid &&
+                     command.command.stamp.timestamp_ms >= ready_ms &&
+                     isFresh(command.command.stamp, now, board_config::command_timeout_ms)) {
+                int ret = yaw.reset();
+                if (ret == 0)
+                    ret = drive.enable();
+                if (ret < 0 && ret != -EAGAIN)
+                    LOG_ERR("yaw enable failed: %d", ret);
+            }
+            const auto submit = bus.commit();
+            if (submit.error < 0 && submit.error != -EAGAIN)
+                LOG_ERR("yaw commit failed: %d", submit.error);
         }
-        gimbal_status.put(
-            {configured < 0 ? ExecutionState::ConfigBlocked : motor.state(), generation, decision.active_reasons});
+        const auto after = drive.snapshot();
+        const auto generation = static_cast<std::uint32_t>(after.enable_generation);
+        gimbal_status.put({configured < 0 ? ExecutionState::ConfigBlocked : decision.state,
+                           generation, decision.active_reasons});
         if (std::uint64_t(now) >= last_log + 1000) {
             last_log = now;
             LOG_INF("uptime=%lld yaw=%d reasons=%x gen=%u error=%d", now,
-                    configured < 0 ? int(ExecutionState::ConfigBlocked) : int(motor.state()), decision.active_reasons,
-                    generation, configured < 0 ? configured : motor.status().last_recovery_error);
+                    configured < 0 ? int(ExecutionState::ConfigBlocked) : int(decision.state), decision.active_reasons,
+                    generation, configured < 0 ? configured : after.last_fault.error);
         }
         k_sleep(K_MSEC(5));
     }

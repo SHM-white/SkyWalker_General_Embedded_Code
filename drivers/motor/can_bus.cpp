@@ -22,6 +22,7 @@ namespace {
 #ifndef CONFIG_SKYWALKER_MOTOR_IO_PRIORITY
 #define CONFIG_SKYWALKER_MOTOR_IO_PRIORITY 5
 #endif
+constexpr std::uint32_t kDmSafetyProbeIntervalMs = 10;
 
 k_spinlock owner_lock{};
 CanBus *owners[CONFIG_SKYWALKER_MOTOR_MAX_BUSES]{};
@@ -298,17 +299,28 @@ void CanBus::wake() {
     k_sem_give(&wake_sem_);
 }
 
+std::uint64_t CanBus::recordCallbackOrder() {
+    const auto key = k_spin_lock(&callback_order_lock_);
+    // Exhaustion fails closed: order zero cannot confirm a protocol handshake.
+    const std::uint64_t order = next_callback_order_;
+    if (next_callback_order_ != std::numeric_limits<std::uint64_t>::max())
+        ++next_callback_order_;
+    k_spin_unlock(&callback_order_lock_, key);
+    return order == std::numeric_limits<std::uint64_t>::max() ? 0 : order;
+}
+
 void CanBus::onRx(const device *, can_frame *frame, void *context) {
     auto *self = static_cast<CanBus *>(context);
     if (self == nullptr || frame == nullptr)
         return;
+    const std::uint64_t callback_order = self->recordCallbackOrder();
     const auto state_key = k_spin_lock(&self->state_lock_);
     const auto generation = self->bus_generation_;
     const bool running = self->status_.state == BusState::Running;
     k_spin_unlock(&self->state_lock_, state_key);
     if (!running)
         return;
-    RxEvent event{*frame, nowMs(), generation};
+    RxEvent event{*frame, nowMs(), generation, callback_order};
     const auto key = k_spin_lock(&self->rx_lock_);
     if (self->rx_count_ == kRxDepth) {
         self->rx_overflowed_ = true;
@@ -326,11 +338,13 @@ void CanBus::onTxDone(const device *, int error, void *context) {
     auto *self = static_cast<CanBus *>(context);
     if (self == nullptr)
         return;
+    const std::uint64_t callback_order = self->recordCallbackOrder();
     const auto key = k_spin_lock(&self->tx_lock_);
     if (self->in_flight_.busy && !self->in_flight_.callback_seen) {
         self->in_flight_.callback_seen = true;
         self->in_flight_.callback_error = error;
         self->in_flight_.completed_ms = nowMs();
+        self->in_flight_.completed_order = callback_order;
     }
     k_spin_unlock(&self->tx_lock_, key);
     self->wake();
@@ -368,7 +382,7 @@ void CanBus::processRx(const RxEvent &event) {
         dm::DecodedFeedback decoded{};
         if (dm::decodeFeedback(event.frame, cfg.id, cfg.limits, decoded) == 0) {
             decoded.raw.timestamp_ms = event.received_ms;
-            if (motor.acceptDmFeedback(decoded, event.received_ms) == 0) {
+            if (motor.acceptDmFeedback(decoded, event.received_ms, event.callback_order) == 0) {
                 accepted = true;
                 const auto snapshot = motor.snapshot();
                 if (snapshot.stop.progress == StopProgress::DriveConfirmed &&
@@ -418,10 +432,12 @@ void CanBus::processTx() {
         updateStopAfterTx(completed);
     else if (completed.purpose == TxPurpose::Enable) {
         Motor &motor = *motors_[units_[completed.unit_index].motor_index];
-        motor.markEnableTxComplete(completed.enable_generation, completed.completed_ms);
+        motor.markEnableTxComplete(completed.enable_generation, completed.completed_ms,
+                                   completed.completed_order);
     }
     else if (completed.purpose == TxPurpose::ClearFault) {
-        motors_[units_[completed.unit_index].motor_index]->markClearTxComplete(completed.completed_ms);
+        motors_[units_[completed.unit_index].motor_index]->markClearTxComplete(
+            completed.completed_ms, completed.completed_order);
     }
     else if (completed.purpose == TxPurpose::Probe) {
         neutral_done_generation_[units_[completed.unit_index].motor_index] = completed.enable_generation;
@@ -453,7 +469,7 @@ void CanBus::checkDeadlines(std::uint64_t now_ms) {
         if (std::holds_alternative<dm::Config>(motor.config_) &&
             snapshot.stop.progress == StopProgress::TxComplete) {
             const auto motor_key = k_spin_lock(&motor.lock_);
-            const auto safety_completed_ms = motor.safe_tx_completed_ms_;
+            const auto safety_completed_ms = motor.safe_first_tx_completed_ms_;
             k_spin_unlock(&motor.lock_, motor_key);
             if (elapsed(now_ms, safety_completed_ms, motor.info().timing.enable_timeout_ms))
                 motor.markStopped(StopProgress::Unreachable, 0, snapshot.stop.request_generation);
@@ -470,7 +486,8 @@ void CanBus::checkDeadlines(std::uint64_t now_ms) {
             const auto requested_ms = motor.enable_requested_at_ms_;
             const bool safe = motor.safe_prepared_;
             const bool tx_done = motor.enable_tx_done_;
-            const auto tx_completed = motor.enable_tx_completed_ms_;
+            const bool feedback_after_tx = motor.enable_tx_completed_order_ != 0u &&
+                                           motor.feedback_event_order_ > motor.enable_tx_completed_order_;
             k_spin_unlock(&motor.lock_, motor_key);
             if (elapsed(now_ms, requested_ms, timing.enable_timeout_ms)) {
                 motor.raiseFault({FaultReason::EnableTimeout, -ETIMEDOUT, &motor, now_ms});
@@ -481,7 +498,7 @@ void CanBus::checkDeadlines(std::uint64_t now_ms) {
             if (std::holds_alternative<dji::Config>(motor.config_) ||
                 (tx_done && snapshot.native_drive_status_valid &&
                  snapshot.native_drive_status == static_cast<std::uint32_t>(dm::DriveStatus::Enabled) &&
-                 snapshot.feedback.timestamp_ms > tx_completed &&
+                 feedback_after_tx &&
                  neutral_done_generation_[i] == snapshot.enable_generation)) {
                 motor.markPrepared(snapshot.enable_generation);
             }
@@ -525,6 +542,24 @@ bool CanBus::unitHasPendingSafety(const TxUnit &unit) const {
             return true;
     }
     return false;
+}
+
+bool CanBus::unitNeedsDmSafetyProbe(const TxUnit &unit, std::uint64_t now_ms) const {
+    if (unit.kind != UnitKind::Dm)
+        return false;
+    const Motor &motor = *motors_[unit.motor_index];
+    const auto key = k_spin_lock(&motor.lock_);
+    const bool safe_state = motor.snapshot_.stop.progress == StopProgress::TxComplete ||
+                            motor.snapshot_.stop.progress == StopProgress::Unreachable ||
+                            motor.snapshot_.stop.progress == StopProgress::DriveConfirmed;
+    const bool due = safe_state && !motor.safe_pending_ &&
+                     motor.safe_tx_done_ && motor.safe_tx_completed_ms_ != 0 &&
+                     motor.snapshot_.state != MotorState::Active &&
+                     motor.snapshot_.state != MotorState::Enabling &&
+                     now_ms >= motor.safe_tx_completed_ms_ &&
+                     now_ms - motor.safe_tx_completed_ms_ >= kDmSafetyProbeIntervalMs;
+    k_spin_unlock(&motor.lock_, key);
+    return due;
 }
 
 int CanBus::buildTarget(const TxUnit &unit, std::uint64_t now_ms, can_frame &out) {
@@ -652,9 +687,14 @@ void CanBus::updateStopAfterTx(const InFlight &completed) {
                 continue;
         }
         const auto snapshot = motor.snapshot();
-        if (snapshot.stop.progress == StopProgress::Pending)
+        if (snapshot.stop.progress == StopProgress::Pending ||
+            (unit.kind == UnitKind::Dm &&
+             (snapshot.stop.progress == StopProgress::TxComplete ||
+              snapshot.stop.progress == StopProgress::Unreachable ||
+              snapshot.stop.progress == StopProgress::DriveConfirmed) &&
+             snapshot.state != MotorState::Active && snapshot.state != MotorState::Enabling))
             motor.markStopped(StopProgress::TxComplete, 0, completed.stop_generations[i],
-                              completed.completed_ms);
+                              completed.completed_ms, completed.completed_order);
         if (unit.kind == UnitKind::Dji)
             motor.markSafePrepared(completed.stop_generations[i]);
     }
@@ -731,7 +771,8 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
             continue;
         const auto key = k_spin_lock(&motor.lock_);
         const bool enabled_after_tx = motor.enable_tx_done_ &&
-                                      snapshot.feedback.timestamp_ms > motor.enable_tx_completed_ms_;
+                                      motor.enable_tx_completed_order_ != 0u &&
+                                      motor.feedback_event_order_ > motor.enable_tx_completed_order_;
         const auto native_position = std::get<Motor::DmRuntime>(motor.protocol_state_).last_native_position_rad;
         k_spin_unlock(&motor.lock_, key);
         if (!enabled_after_tx)
@@ -758,6 +799,35 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
         return;
     }
 
+    // Disabled DM drives may need a host command to produce fresh feedback.
+    // Alternate periodic safety probes with committed targets so either kind
+    // of work progresses on a mixed bus under sustained load.
+    if (target_before_safety_probe_ && pumpTarget(now_ms)) {
+        target_before_safety_probe_ = false;
+        return;
+    }
+    for (std::size_t attempt = 0; attempt < unit_count_; ++attempt) {
+        const std::size_t u = (safety_probe_cursor_ + attempt) % unit_count_;
+        if (!unitNeedsDmSafetyProbe(units_[u], now_ms))
+            continue;
+        can_frame frame{};
+        const int ret = buildSafety(units_[u], frame);
+        if (ret < 0) {
+            enterRecovery(ret, FaultReason::TransportError);
+            return;
+        }
+        safety_probe_cursor_ = (u + 1) % unit_count_;
+        target_before_safety_probe_ = true;
+        (void)submit(frame, TxPurpose::SafeOutput, u, 0, now_ms);
+        return;
+    }
+    if (!target_before_safety_probe_ && pumpTarget(now_ms)) {
+        target_before_safety_probe_ = false;
+        return;
+    }
+}
+
+bool CanBus::pumpTarget(std::uint64_t now_ms) {
     for (std::size_t attempts = 0; attempts < unit_count_; ++attempts) {
         TxUnit unit{};
         std::size_t index = 0;
@@ -765,7 +835,7 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
         const auto key = k_spin_lock(&publication_lock_);
         if (targets_remaining_ == 0) {
             k_spin_unlock(&publication_lock_, key);
-            return;
+            return false;
         }
         index = target_cursor_;
         unit = units_[index];
@@ -783,8 +853,9 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
             continue;
         }
         (void)submit(frame, TxPurpose::Target, index, sequence, now_ms);
-        return;
+        return true;
     }
+    return false;
 }
 
 void CanBus::enterRecovery(int error, FaultReason reason) {

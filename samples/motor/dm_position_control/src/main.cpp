@@ -11,7 +11,6 @@
 
 LOG_MODULE_REGISTER(dm_position_control, LOG_LEVEL_INF);
 
-#define MOTOR0_NODE DT_ALIAS(motor0)
 #define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
 
 #if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
@@ -38,15 +37,22 @@ float positionVelocityLimitRadS() {
 } // namespace
 
 int main() {
-    const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
     const struct device *vofa_uart = DEVICE_DT_GET(VOFA_UART_NODE);
     if (!device_is_ready(vofa_uart)) {
         LOG_ERR("VOFA UART device not ready");
         return -ENODEV;
     }
 
-    skywalker::samples::dm::Session session{};
-    int ret = skywalker::samples::dm::prepare(session, motor);
+    static skywalker::samples::dm::Session session{
+        DEVICE_DT_GET(DT_NODELABEL(can1)),
+        skywalker::motor::dm::j4310PositionVelocity({.id = 1,
+                                                     .master_id = 0x11,
+                                                     .position_max_rad = 12.5f,
+                                                     .velocity_max_rad_s = 45.0f,
+                                                     .torque_max_nm = 18.0f,
+                                                     .torque_limit_nm = 0.05f,
+                                                     .timing = {50, 20, 50, 3000}})};
+    int ret = skywalker::samples::dm::prepare(session);
     if (ret < 0) {
         return ret;
     }
@@ -65,7 +71,7 @@ int main() {
     }
     const float velocity_cutoff_rad_s = velocity_limit_rad_s + kSpeedSafetyMarginRadS;
 
-    Vofa vofa{};
+    static Vofa vofa{};
     vofa_init(&vofa, vofa_uart);
     ret = skywalker::samples::dm::arm(session);
     if (ret < 0) {
@@ -78,10 +84,8 @@ int main() {
     LOG_INF("native position control started: saved zero <-> +90 deg every %lld ms", kPositionStepPeriodMs);
 
     for (;;) {
-        skywalker::motor::Feedback feedback{};
-        skywalker::motor::dm::RawFeedback raw{};
-        ret = skywalker::samples::dm::readSafeFeedback(session, velocity_cutoff_rad_s, kTemperatureCutoffC, feedback,
-                                                       raw);
+        skywalker::motor::MotorSnapshot view{};
+        ret = skywalker::samples::dm::readSafeFeedback(session, velocity_cutoff_rad_s, kTemperatureCutoffC, view);
         if (ret < 0) {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }
@@ -94,7 +98,7 @@ int main() {
             LOG_INF("new saved-zero-relative target: %d mdeg", static_cast<int>(target_position_rad * 180000.0f / kPi));
         }
 
-        ret = skywalker::motor::dm::setPositionVelocity(motor, target_position_rad, velocity_limit_rad_s);
+        ret = session.motor.setPositionVelocity(target_position_rad, velocity_limit_rad_s);
         if (ret < 0) {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }
@@ -103,13 +107,14 @@ int main() {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }
 
+        const auto &feedback = view.feedback;
         const float channels[6] = {
             target_position_rad,
-            feedback.position_rad,
+            view.native_position_rad,
             feedback.velocity_rad_s,
             feedback.torque_nm,
-            static_cast<float>(raw.mos_temperature_c),
-            static_cast<float>(raw.rotor_temperature_c),
+            view.native_mos_temperature_c,
+            view.native_rotor_temperature_c,
         };
         vofa_send(&vofa, channels, 6);
         k_sleep(K_MSEC(kControlPeriodMs));

@@ -7,19 +7,7 @@
 / {
     aliases {
         interboard-uart = &usart1;
-        yaw-motor = &sentry_yaw;
         /* referee-uart = &usart3; */
-    };
-    sentry_yaw: yaw-motor {
-        compatible = "dji,gm6020-current";
-        status = "disabled";
-        can-bus = <&can1>;
-        motor-id = <1>;
-        current-limit-ma = <1500>;
-        gear-ratio-num = <1>;
-        gear-ratio-den = <1>;
-        encoder-zero-ticks = <0>;
-        current-loop-confirmed;
     };
 };
 &usart1 { current-speed = <460800>; };

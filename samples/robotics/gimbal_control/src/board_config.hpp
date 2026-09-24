@@ -2,6 +2,8 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <control/position_motor.hpp>
+#include <drivers/motor/dji_motor.hpp>
+#include <drivers/motor/dm_motor.hpp>
 #include <robotics/gimbal/yaw_gimbal.hpp>
 
 namespace board_config {
@@ -13,20 +15,27 @@ inline const device *remote_uart = DEVICE_DT_GET(DT_ALIAS(remote_uart));
 #else
 inline const device *remote_uart = nullptr;
 #endif
-#if DT_NODE_HAS_STATUS(DT_ALIAS(yaw_motor), okay)
-inline const device *yaw_motor = DEVICE_DT_GET(DT_ALIAS(yaw_motor));
-#else
-inline const device *yaw_motor = nullptr;
-#endif
-#if DT_NODE_HAS_STATUS(DT_ALIAS(pitch_motor), okay)
-inline const device *pitch_motor = DEVICE_DT_GET(DT_ALIAS(pitch_motor));
-#else
-inline const device *pitch_motor = nullptr;
-#endif
+// Change pitch_can to can2 for the cross-CAN Group example. Both buses must be
+// attached before either is started. CAN transceiver power follows can_start.
+inline const device *yaw_can = DEVICE_DT_GET(DT_NODELABEL(can1));
+inline const device *pitch_can = DEVICE_DT_GET(DT_NODELABEL(can1));
 
-// Templates only. DM requires a matching MIT-mode device node and torque limits.
-// Two independent DJI backends MUST use different CAN controllers.
-inline constexpr bool yaw_is_dm = false, pitch_is_dm = false;
+// Disabled hardware template: match IDs, drive mode, zero and protocol limits
+// to the installed motors before setting connections_configured to true.
+inline skywalker::motor::dji::Config yawHardware() {
+    return skywalker::motor::dji::gm6020({.id = 7, .current_limit_a = 1.5f,
+                                          .encoder_zero_ticks = 0, .current_mode_confirmed = true,
+                                          .timing = {20, 20, 30, 100}});
+}
+inline skywalker::motor::dm::Config pitchHardware() {
+    return skywalker::motor::dm::j4310Mit({.id = 1, .master_id = 0x00,
+                                           .position_max_rad = 12.5f,
+                                           .velocity_max_rad_s = 30.0f,
+                                           .torque_max_nm = 10.0f,
+                                           .torque_limit_nm = 1.0f,
+                                           .timing = {50, 20, 50, 3000}});
+}
+
 inline constexpr float yaw_direction = -1.0f, pitch_direction = 1.0f;
 // Limited axes use calibrated driver coordinates, not a startup-relative zero.
 // Replace these example ranges with the actual mechanical limits in radians.
@@ -36,10 +45,10 @@ inline constexpr skywalker::robotics::YawGimbalConfig pitch{
     skywalker::robotics::YawTopology::Limited, -0.5f, 0.5f, 0.3f, true};
 
 inline skywalker::control::PositionMotor::Config motorConfig(
-    bool is_dm, const skywalker::robotics::YawGimbalConfig &axis) {
+    skywalker::control::EffortUnit unit, const skywalker::robotics::YawGimbalConfig &axis) {
     skywalker::control::PositionMotor::Config c{};
-    c.effort_unit = is_dm ? skywalker::control::EffortUnit::NewtonMeter : skywalker::control::EffortUnit::Ampere;
-    c.safety = {12, 0, 30, 100};
+    c.effort_unit = unit;
+    c.safety = {12, 0};
     c.reference = axis.topology == skywalker::robotics::YawTopology::Continuous
                       ? skywalker::control::PositionReference::AbsoluteNearest
                       : skywalker::control::PositionReference::DriverContinuous;
@@ -51,11 +60,11 @@ inline skywalker::control::PositionMotor::Config motorConfig(
     return c;
 }
 inline skywalker::control::PositionMotor::Config yawMotorConfig() {
-    return motorConfig(yaw_is_dm, yaw);
+    return motorConfig(skywalker::control::EffortUnit::Ampere, yaw);
 }
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     // Tune pitch independently here; these defaults are not a loaded-axis tune.
-    return motorConfig(pitch_is_dm, pitch);
+    return motorConfig(skywalker::control::EffortUnit::NewtonMeter, pitch);
 }
 
 // Connect physical estop/reset inputs here. RC disable is recoverable, not estop.

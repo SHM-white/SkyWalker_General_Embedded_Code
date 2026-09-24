@@ -1,40 +1,5 @@
-/* MC02 wiring TEMPLATE: verify models, CAN, IDs, zero and current mode.
- * remote-uart and RX DMA are inherited from the board DTS (UART5, DR16).
- * Keep disabled until actual wiring and board_config.hpp have been checked.
- * Independent DJI backends require separate CAN controllers.
+/* CAN controllers and remote-uart are provided by the MC02 board DTS.
+ * Motor model, IDs and limits are configured in src/board_config.hpp.
  */
 / {
-    aliases {
-        yaw-motor = &test_yaw;
-        pitch-motor = &test_pitch;
-    };
-
-    test_yaw: yaw-motor {
-        compatible = "dji,gm6020-current";
-        status = "okay";
-        can-bus = <&can1>;
-        motor-id = <7>;
-        /* Bench-only limit: confirm the mechanism is suspended before arming. */
-        current-limit-ma = <1500>;
-        /* M3508 gearbox ratio; confirm it against the actual drivetrain. */
-        gear-ratio-num = <1>;
-        gear-ratio-den = <1>;
-        /* Replace after reading raw.encoder at the mechanism's zero pose. */
-        encoder-zero-ticks = <0>;
-        current-loop-confirmed;
-    };
-
-    test_pitch: pitch-motor {
-        compatible = "dm,j4310-2ec-v1-1";
-        status = "okay";
-        can-bus = <&can1>;
-        motor-id = <1>;
-        master-id = <0x00>;
-        control-mode = "mit";
-        /* Must match PMAX/VMAX/TMAX read from Damiao Assistant. */
-        p-max-millirad = <12500>;
-        v-max-millirad-s = <30000>;
-        t-max-millinewton-meter = <10000>;
-        torque-limit-millinewton-meter = <1000>;
-    };
 };

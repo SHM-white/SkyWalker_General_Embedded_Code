@@ -23,12 +23,12 @@
 | [01-getting-started.md](01-getting-started.md) | 工作区、依赖、构建、烧录、最小工程 |
 | [02-architecture.md](02-architecture.md) | 分层、源码布局、west module、Kconfig/CMake、线程边界 |
 | [03-boards.md](03-boards.md) | `dm_mc02` 与 `rm_typec` 的 SoC、外设、设备树和 runner |
-| [04-drivers-motor-dji.md](04-drivers-motor-dji.md) | M3508、M2006、GM6020 和 DJI Bus |
+| [04-drivers-motor-dji.md](04-drivers-motor-dji.md) | M3508、M2006、GM6020 的配置、反馈和共享 CanBus |
 | [05-drivers-motor-dm.md](05-drivers-motor-dm.md) | DM-J4310-2EC、三种模式、反馈路由和恢复 |
 | [06-drivers-imu.md](06-drivers-imu.md) | BMI088、IMU API、EKF 和恒温控制 |
 | [07-kalman-matrix.md](07-kalman-matrix.md) | Kalman 设备、CMSIS-DSP 矩阵和 Flash 存储 |
 | [08-control-algorithms.md](08-control-algorithms.md) | PID、前馈、斜坡、角度、速度/位置内核 |
-| [09-motor-wrapper.md](09-motor-wrapper.md) | `MotorBackend`、恢复生命周期、速度/位置封装 |
+| [09-motor-wrapper.md](09-motor-wrapper.md) | `Motor` 与速度/位置控制器的调用顺序和安全语义 |
 | [10-samples.md](10-samples.md) | 所有当前 sample、用途、硬件前提和构建入口 |
 | [11-debugging.md](11-debugging.md) | VOFA+、日志、异步 UART 和实时调试 |
 | [12-troubleshooting.md](12-troubleshooting.md) | 构建、设备树、CAN、电机、通信、应用故障排查 |

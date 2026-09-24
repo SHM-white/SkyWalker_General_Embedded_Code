@@ -1,0 +1,4 @@
+/* MC02 provides CAN1, CAN2, USART10 console, and XT30_1 regulator.
+ * Motor endpoints, IDs, limits, and Group membership are declared in C++.
+ */
+/ { };

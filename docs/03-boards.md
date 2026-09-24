@@ -56,36 +56,25 @@ west flash -d build/dji_position
 
 ## 4. Overlay 与 alias
 
-样例通常把真实节点放在 `/ { ... };` 下，并使用 alias 给应用稳定名字：
+电机样例在 C++ 中配置型号、ID 和限幅，overlay 只需启用物理外设或声明 UART 等 alias。例如：
 
 ```dts
 / {
     aliases {
-        motor0 = &my_motor;
-    };
-
-    my_motor: motor {
-        compatible = "dji,gm6020-current";
-        status = "okay";
-        can-bus = <&can1>;
-        motor-id = <1>;
-        current-limit-ma = <500>;
-        gear-ratio-num = <1>;
-        gear-ratio-den = <1>;
-        encoder-zero-ticks = <0>;
-        current-loop-confirmed;
+        telemetry-uart = &usart1;
     };
 };
+&can1 { status = "okay"; };
 ```
 
-应用通过 `DT_ALIAS(motor0)` 获取节点；如果节点 `status` 为 `disabled`，`DT_NODE_HAS_STATUS` 会让对应指针变成空指针。`applications/sentry_*` 正是利用这个机制保留“模板可编译、真实连接未启用”的安全默认值。
+应用通过 `DEVICE_DT_GET(DT_NODELABEL(can1))` 获取物理 CAN，电机对象由 `motor::dji::gm6020(...)` 等工厂构造。`applications/sentry_*` 的 `board_config.hpp` 保留 `connections_configured=false` 安全默认值，实机接线和参数确认后再启用。
 
 ## 5. 设备树配置排查
 
-1. `compatible` 必须能在 `dts/bindings/` 找到。
-2. 所有 binding 的 required 属性必须填写。
-3. `can-bus` 指向 board DTS 中状态为 `okay` 的 CAN 节点。
-4. 修改 `app.overlay` 后使用 pristine build。
-5. 生成后检查 `build/<name>/zephyr/zephyr.dts`，确认节点、ID、状态和 phandle 都是预期值。
+1. 物理 CAN/UART 节点必须为 `okay`，引脚和波特率与接线一致。
+2. 使用的 alias 或 node label 必须在 board DTS / overlay 中存在。
+3. 修改 `app.overlay` 后使用 pristine build。
+4. 生成后检查 `build/<name>/zephyr/zephyr.dts`，确认物理控制器、状态和引脚配置。
+5. 电机 ID、模式、限幅和 Group 关系在应用 C++ 配置中核对。
 
 不要把板卡 DTS 里的 alias 名字直接当成所有 sample 的契约；每个 sample/application 可能在 overlay 里覆盖或新增 alias。

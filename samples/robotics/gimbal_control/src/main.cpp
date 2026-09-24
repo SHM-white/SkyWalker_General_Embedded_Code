@@ -1,15 +1,18 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
-#include <type_traits>
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
+#include <cstdint>
+
 #include <communication/async_uart.hpp>
 #include <communication/remote/remote_service.hpp>
-#include <control/dji_motor_backend.hpp>
-#include <control/dm_motor_backend.hpp>
-#include "board_config.hpp"
+#include <control/position_motor.hpp>
+#include <drivers/motor/can_bus.hpp>
+#include <drivers/motor/group.hpp>
 #include <latest.hpp>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+
+#include "board_config.hpp"
 
 LOG_MODULE_REGISTER(gimbal_rc, LOG_LEVEL_INF);
 using namespace skywalker;
@@ -53,46 +56,61 @@ float normalizeStick(std::int16_t raw) {
     return std::fabs(x) <= deadband ? 0.0f : std::copysign((std::fabs(x) - deadband) / (1.0f - deadband), x);
 }
 
-// Each axis owns its motor lifecycle. Only gimbalTask accesses these objects.
 struct Axis {
-    control::PositionMotor motor;
+    motor::Motor &drive;
+    control::PositionMotor axis_motor;
     YawGimbal controller;
     const YawGimbalConfig config;
-    const std::uint32_t feedback_timeout_ms;
-    std::uint32_t generation = 0;
     std::uint64_t ready_ms = 0;
+    bool was_ready = false;
+    bool reference_seeded = false;
 
-    Axis(control::MotorBackend &backend, const control::PositionMotor::Config &motor_config,
-         const YawGimbalConfig &axis_config, std::uint32_t timeout)
-        : motor(backend, motor_config), controller(motor, axis_config), config(axis_config),
-          feedback_timeout_ms(timeout) {
+    Axis(motor::Motor &endpoint, const control::PositionMotor::Config &motor_config,
+         const YawGimbalConfig &axis_config)
+        : drive(endpoint), axis_motor(endpoint, motor_config),
+          controller(endpoint, axis_motor, axis_config), config(axis_config) {}
+
+    bool feedbackHealthy(bool require_reference = true) const {
+        const auto view = drive.snapshot();
+        const auto &feedback = view.feedback;
+        if (!view.feedback_fresh)
+            return false;
+        if (config.topology == YawTopology::Limited && !require_reference) {
+            return ((feedback.valid & motor::FeedbackAbsolutePosition) &&
+                    std::isfinite(feedback.absolute_position_rad)) ||
+                   (view.native_position_valid && std::isfinite(view.native_position_rad));
+        }
+        const std::uint32_t required = config.topology == YawTopology::Continuous
+                                           ? motor::FeedbackAbsolutePosition : motor::FeedbackPosition;
+        if ((feedback.valid & required) == 0 ||
+            (config.topology == YawTopology::Limited && !view.position_reference_valid))
+            return false;
+        const float angle = config.topology == YawTopology::Continuous
+                                ? feedback.absolute_position_rad : feedback.position_rad;
+        return std::isfinite(angle) &&
+               (config.topology != YawTopology::Limited ||
+                (angle >= config.min_angle_rad && angle <= config.max_angle_rad));
     }
 
     bool ready(std::uint64_t now) {
-        if (motor.state() != ExecutionState::Active) {
-            if (controller.poll(now) < 0)
-                return false;
-            if (generation != motor.status().resume_generation) {
-                generation = motor.status().resume_generation;
-                ready_ms = now;
+        bool current = drive.ready() && feedbackHealthy(false);
+        if (current && config.topology == YawTopology::Limited) {
+            const auto view = drive.snapshot();
+            if (!reference_seeded || !view.position_reference_valid) {
+                const bool absolute = (view.feedback.valid & motor::FeedbackAbsolutePosition) != 0;
+                const double known = absolute ? view.feedback.absolute_position_rad
+                                              : view.native_position_rad;
+                current = (absolute || view.native_position_valid) &&
+                          drive.reseedPosition(known) == 0;
+                if (current)
+                    reference_seeded = true;
             }
         }
-        const auto &measurement = motor.telemetry().measurement;
-        const auto stamp = measurement.feedback.timestamp_ms;
-        // Check bounds before the first arm too; the single-axis controller
-        // checks them during subsequent active updates.
-        return stamp != 0 && now >= stamp && now - stamp <= feedback_timeout_ms &&
-               std::isfinite(measurement.position_rad) &&
-               (config.topology != YawTopology::Limited ||
-                (measurement.position_rad >= config.min_angle_rad && measurement.position_rad <= config.max_angle_rad));
-    }
-
-    void suspend(PauseReason reason, bool force = false) {
-        if (force || motor.state() == ExecutionState::Active) {
-            const int ret = controller.suspend(reason);
-            if (ret < 0)
-                LOG_ERR("axis stop failed: %d", ret);
-        }
+        current = current && feedbackHealthy();
+        if (current && !was_ready)
+            ready_ms = now;
+        was_ready = current;
+        return current;
     }
 
     int update(float rate, const MessageStamp &stamp, float dt) {
@@ -100,97 +118,140 @@ struct Axis {
         command.mode = GimbalMode::Rate;
         command.source = ControlSource::Remote;
         command.stamp = stamp;
-        // YawGimbal is reused as a single-axis controller: even the pitch
-        // instance consumes yaw_rate_rad_s, not pitch_rate_rad_s.
+        // Both single-axis controllers consume yaw_rate_rad_s.
         command.yaw_rate_rad_s = rate;
         return controller.update(command, SafetyAction::Active, dt);
     }
 };
 
 void gimbalTask(void *, void *, void *) {
-    using YawBackend = std::conditional_t<board_config::yaw_is_dm, control::DmMotorBackend, control::DjiMotorBackend>;
-    using PitchBackend = std::conditional_t<board_config::pitch_is_dm, control::DmMotorBackend,
-                                            control::DjiMotorBackend>;
-    static YawBackend yaw_backend(board_config::yaw_motor);
-    static PitchBackend pitch_backend(board_config::pitch_motor);
-    static Axis yaw(yaw_backend, board_config::yawMotorConfig(), board_config::yaw,
-                    board_config::yaw_is_dm ? CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS
-                                            : CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS);
-    static Axis pitch(pitch_backend, board_config::pitchMotorConfig(), board_config::pitch,
-                      board_config::pitch_is_dm ? CONFIG_SKYWALKER_DM_FEEDBACK_TIMEOUT_MS
-                                                : CONFIG_SKYWALKER_DJI_FEEDBACK_TIMEOUT_MS);
-    const int yaw_configured = board_config::connections_configured ? yaw.controller.begin() : -ENODEV;
-    const int pitch_configured = board_config::connections_configured ? pitch.controller.begin() : -ENODEV;
-    LOG_INF("configure: yaw=%d pitch=%d", yaw_configured, pitch_configured);
-    if (yaw_configured < 0 || pitch_configured < 0)
-        return; // Neither axis has been armed.
+    static motor::Motor yaw_drive(board_config::yawHardware());
+    static motor::Motor pitch_drive(board_config::pitchHardware());
+    static motor::Group gimbal(yaw_drive, pitch_drive);
+    static motor::CanBus yaw_bus(board_config::yaw_can);
+    static motor::CanBus pitch_bus(board_config::pitch_can);
+    static Axis yaw(yaw_drive, board_config::yawMotorConfig(), board_config::yaw);
+    static Axis pitch(pitch_drive, board_config::pitchMotorConfig(), board_config::pitch);
+
+    if (!board_config::connections_configured) {
+        LOG_ERR("hardware template disabled; check board_config.hpp");
+        return;
+    }
+    const bool split_buses = board_config::yaw_can != board_config::pitch_can;
+    int ret = split_buses ? yaw_bus.attach(yaw_drive)
+                          : yaw_bus.attach(yaw_drive, pitch_drive);
+    if (ret == 0 && split_buses)
+        ret = pitch_bus.attach(pitch_drive);
+    if (ret == 0)
+        ret = yaw_bus.start();
+    if (ret == 0 && split_buses)
+        ret = pitch_bus.start();
+    if (ret == 0)
+        ret = yaw.controller.begin();
+    if (ret == 0)
+        ret = pitch.controller.begin();
+    LOG_INF("configure=%d split_buses=%d", ret, split_buses);
+    if (ret < 0)
+        return;
 
     RemoteState remote{};
-    bool estop_latched = false, rearm_allowed = false;
+    bool estop_latched = false, rearm_allowed = false, enable_issued = false;
     auto previous_ms = k_uptime_get();
     std::uint64_t next_log = 0;
     for (;;) {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const float dt = (now - previous_ms) / 1000.0f;
         previous_ms = now;
-        // On lock contention retain the previous snapshot and its original age.
-        remote_state.get(remote);
+        remote_state.get(remote); // Retain the snapshot and its original age on contention.
         const bool fresh = remote.online && isFresh(remote.stamp, now, board_config::command_timeout_ms);
         const bool estop = board_config::emergencyStopRequested();
         if (estop && !estop_latched) {
-            yaw.suspend(PauseReason::EmergencyStop, true);
-            pitch.suspend(PauseReason::EmergencyStop, true);
+            gimbal.disable();
             estop_latched = true;
+            enable_issued = false;
+            rearm_allowed = false;
         }
-        if (board_config::takeEmergencyResetRequest() && !estop && estop_latched) {
-            const int yr = yaw.controller.clearEmergencyStop(true);
-            const int pr = pitch.controller.clearEmergencyStop(true);
-            if (yr == 0 && pr == 0)
-                estop_latched = false;
+        if (board_config::takeEmergencyResetRequest() && !estop) {
+            gimbal.disable();
+            ret = gimbal.clearFault();
+            if (ret < 0)
+                LOG_ERR("group clear fault failed: %d", ret);
+            estop_latched = false;
+            enable_issued = false;
+            rearm_allowed = false;
         }
-        // Evaluate separately: both axes must make recovery progress.
-        const bool yaw_ready = !estop_latched && yaw.ready(now);
-        const bool pitch_ready = !estop_latched && pitch.ready(now);
+
+        const bool yaw_ready = yaw.ready(now);
+        const bool pitch_ready = pitch.ready(now);
+        const bool feedback_ok = yaw.feedbackHealthy() && pitch.feedbackHealthy();
         const bool timing_ok = dt > 0.0f && dt <= 0.02f;
-        const bool safe_switch = remote.left_switch == RcSwitch::Up || remote.left_switch == RcSwitch::Down;
+        const bool safe_switch = remote.left_switch == RcSwitch::Up ||
+                                 remote.left_switch == RcSwitch::Down;
         const bool new_command = remote.stamp.timestamp_ms > std::max(yaw.ready_ms, pitch.ready_ms);
-        if (!fresh || !yaw_ready || !pitch_ready || !timing_ok || estop_latched ||
+        const auto group = gimbal.status();
+        if (enable_issued && !group.active && !group.enable_pending) {
+            enable_issued = false;
+            rearm_allowed = false; // A driver fault needs a new safe-switch cycle.
+        }
+        if (!fresh || !feedback_ok || !timing_ok || estop_latched ||
             remote.left_switch == RcSwitch::Unknown)
             rearm_allowed = false;
-        else if (safe_switch && new_command)
+        else if (safe_switch && yaw_ready && pitch_ready && new_command)
             rearm_allowed = true;
 
-        const bool enabled = fresh && yaw_ready && pitch_ready && timing_ok && !estop_latched && rearm_allowed &&
-                             new_command && remote.left_switch == RcSwitch::Middle;
-        if (!enabled) {
-            const auto reason = estop_latched                  ? PauseReason::EmergencyStop
-                                : !fresh                       ? PauseReason::CommandTimeout
-                                : !timing_ok                   ? PauseReason::InvalidCycle
-                                : (!yaw_ready || !pitch_ready) ? PauseReason::FeedbackTimeout
-                                                               : PauseReason::OperatorDisabled;
-            yaw.suspend(reason);
-            pitch.suspend(reason);
+        const bool requested = fresh && feedback_ok && timing_ok && !estop_latched &&
+                               rearm_allowed && new_command &&
+                               remote.left_switch == RcSwitch::Middle;
+        if (!requested) {
+            if (group.active || group.enable_pending) {
+                gimbal.disable();
+                enable_issued = false;
+            }
         }
-        else {
-            const float yaw_rate = board_config::yaw_direction * normalizeStick(remote.analog.right_x) *
+        else if (!enable_issued && gimbal.ready()) {
+            ret = yaw.controller.reset();
+            if (ret == 0)
+                ret = pitch.controller.reset();
+            if (ret == 0)
+                ret = gimbal.enable();
+            enable_issued = ret == 0;
+            if (ret < 0) {
+                rearm_allowed = false;
+                LOG_ERR("group enable failed: %d", ret);
+            }
+        }
+        else if (gimbal.active()) {
+            const float yaw_rate = board_config::yaw_direction *
+                                   normalizeStick(remote.analog.right_x) *
                                    board_config::yaw.max_rate_rad_s;
-            const float pitch_rate = board_config::pitch_direction * normalizeStick(remote.analog.right_y) *
+            const float pitch_rate = board_config::pitch_direction *
+                                     normalizeStick(remote.analog.right_y) *
                                      board_config::pitch.max_rate_rad_s;
             const int yr = yaw.update(yaw_rate, remote.stamp, dt);
             const int pr = yr == 0 ? pitch.update(pitch_rate, remote.stamp, dt) : 0;
-            if (yr < 0 || pr < 0) {
-                yaw.suspend(PauseReason::InvalidCycle, true);
-                pitch.suspend(PauseReason::InvalidCycle, true);
+            int submit = 0;
+            if (yr == 0 && pr == 0)
+                submit = yaw_bus.commit().error;
+            if (yr == 0 && pr == 0 && submit == 0 && split_buses)
+                submit = pitch_bus.commit().error;
+            if (yr < 0 || pr < 0 || submit < 0) {
+                gimbal.disable();
+                enable_issued = false;
                 rearm_allowed = false;
-                LOG_ERR("axis update failed: yaw=%d pitch=%d", yr, pr);
+                LOG_ERR("axis update failed: yaw=%d pitch=%d commit=%d", yr, pr, submit);
             }
         }
+
         if (now >= next_log) {
             next_log = now + 1000;
-            LOG_INF("rc=%d switch=%u rearm=%d estop=%d yaw=%u pitch=%u errors=%d/%d", fresh,
-                    unsigned(remote.left_switch), rearm_allowed, estop_latched, unsigned(yaw.motor.state()),
-                    unsigned(pitch.motor.state()), yaw.motor.status().last_recovery_error,
-                    pitch.motor.status().last_recovery_error);
+            const auto status = gimbal.status();
+            const auto ys = yaw_drive.snapshot();
+            const auto ps = pitch_drive.snapshot();
+            LOG_INF("rc=%d switch=%u rearm=%d estop=%d group=%d/%d yaw=%u pitch=%u fault=%u bus=%d/%d",
+                    fresh, unsigned(remote.left_switch), rearm_allowed, estop_latched,
+                    status.active, status.enable_pending, unsigned(ys.state), unsigned(ps.state),
+                    unsigned(status.last_fault.reason), yaw_bus.status().last_error,
+                    split_buses ? pitch_bus.status().last_error : 0);
         }
         k_sleep(K_MSEC(5));
     }
@@ -200,7 +261,7 @@ void gimbalTask(void *, void *, void *) {
 K_THREAD_DEFINE(remote_thread, 3072, remoteTask, nullptr, nullptr, nullptr, 6, 0, 0);
 K_THREAD_DEFINE(gimbal_thread, 6144, gimbalTask, nullptr, nullptr, nullptr, 4, 0, 0);
 int main() {
-    LOG_INF("RC small yaw + pitch: configured=%d; check app.overlay and src/board_config.hpp",
+    LOG_INF("RC small yaw + pitch: configured=%d; check src/board_config.hpp",
             board_config::connections_configured);
     return 0;
 }
