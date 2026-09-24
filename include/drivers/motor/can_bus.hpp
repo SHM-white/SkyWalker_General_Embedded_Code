@@ -23,7 +23,9 @@
 namespace skywalker::motor {
 
 struct BusOptions {
+    // 单帧 CAN 发送完成的等待上限，单位 ms。
     std::uint32_t tx_timeout_ms = 2;
+    // CAN 控制器恢复失败后的重试间隔，单位 ms。
     std::uint32_t recovery_retry_ms = 100;
 };
 

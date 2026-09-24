@@ -5,8 +5,11 @@
 namespace skywalker::robotics {
 enum class ControlSource : std::uint8_t { None, Remote, KeyboardMouse, Vision, Autonomous };
 struct MessageStamp {
+    // 消息产生或接收时的系统时间，单位 ms。
     std::uint64_t timestamp_ms = 0;
+    // 消息序号，用于识别新消息和重复消息。
     std::uint32_t sequence = 0;
+    // 时间戳和消息内容是否可用。
     bool valid = false;
 };
 inline bool isFresh(const MessageStamp &s, std::uint64_t now_ms, std::uint32_t timeout_ms) {
@@ -35,8 +38,11 @@ enum SafetyReason : std::uint32_t {
     PowerBudgetStale = 1u << 9
 };
 struct OutputPermission {
+    // 输出许可数据是否有效。
     bool valid = false;
+    // 对应机构的电源输出是否获准开启。
     bool enabled = false;
+    // 输出许可的时间戳与序号。
     MessageStamp stamp{};
 };
 } // namespace skywalker::robotics

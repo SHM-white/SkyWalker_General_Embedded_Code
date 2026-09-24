@@ -33,8 +33,11 @@ enum class SpecialCommand : std::uint8_t {
 };
 
 struct Limits {
+    // 驱动器配置的 PMAX，位置编解码范围的绝对值，单位 rad。
     float position_max_rad = 0.0f;
+    // 驱动器配置的 VMAX，速度编解码范围的绝对值，单位 rad/s。
     float velocity_max_rad_s = 0.0f;
+    // 驱动器配置的 TMAX，力矩编解码范围的绝对值，单位 N·m。
     float torque_max_nm = 0.0f;
 };
 
