@@ -52,8 +52,8 @@ int waitUntilReady(Session &session) {
         }
         const auto now_ms = k_uptime_get();
         if (now_ms >= next_log_ms) {
-            LOG_WRN("waiting for safe DM feedback: state=%u status=0x%x stop=%u",
-                    unsigned(view.state), unsigned(view.native_drive_status), unsigned(view.stop.progress));
+            LOG_WRN("waiting for safe DM feedback: state=%u status=0x%x stop=%u", unsigned(view.state),
+                    unsigned(view.native_drive_status), unsigned(view.stop.progress));
             next_log_ms = now_ms + 1000;
         }
         k_sleep(K_MSEC(5));
@@ -63,34 +63,32 @@ int waitUntilReady(Session &session) {
     return -ETIMEDOUT;
 }
 
-int checkSafeFeedback(const Session &session, float velocity_abs_max_rad_s, float temperature_max_c,
-                      bool before_enable, motor::MotorSnapshot &snapshot) {
-    if (!std::isfinite(velocity_abs_max_rad_s) || velocity_abs_max_rad_s <= 0.0f ||
-        !std::isfinite(temperature_max_c) || temperature_max_c <= 0.0f)
+int checkSafeFeedback(const Session &session, float velocity_abs_max_rad_s, float temperature_max_c, bool before_enable,
+                      motor::MotorSnapshot &snapshot) {
+    if (!std::isfinite(velocity_abs_max_rad_s) || velocity_abs_max_rad_s <= 0.0f || !std::isfinite(temperature_max_c) ||
+        temperature_max_c <= 0.0f)
         return -EINVAL;
     const auto view = session.motor.snapshot();
     const auto expected_state = before_enable ? motor::MotorState::Disabled : motor::MotorState::Active;
     const auto expected_status = before_enable ? motor::dm::DriveStatus::Disabled : motor::dm::DriveStatus::Enabled;
-    if (view.state != expected_state || !view.feedback_fresh ||
-        (!before_enable && !view.output_permitted) || !view.native_drive_status_valid ||
-        view.native_drive_status != unsigned(expected_status)) {
+    if (view.state != expected_state || !view.feedback_fresh || (!before_enable && !view.output_permitted) ||
+        !view.native_drive_status_valid || view.native_drive_status != unsigned(expected_status)) {
         LOG_ERR("feedback unavailable: state=%u status=0x%x fresh=%d", unsigned(view.state),
                 unsigned(view.native_drive_status), view.feedback_fresh);
         return -EHOSTDOWN;
     }
-    constexpr std::uint32_t required = motor::FeedbackPosition | motor::FeedbackVelocity |
-                                       motor::FeedbackTorque | motor::FeedbackTemperature;
+    constexpr std::uint32_t required = motor::FeedbackPosition | motor::FeedbackVelocity | motor::FeedbackTorque |
+                                       motor::FeedbackTemperature;
     const auto &feedback = view.feedback;
     if ((feedback.valid & required) != required || !view.native_temperatures_valid || !view.native_position_valid)
         return -ENODATA;
     if (!std::isfinite(feedback.position_rad) || !std::isfinite(feedback.velocity_rad_s) ||
         !std::isfinite(feedback.torque_nm) || !std::isfinite(feedback.temperature_c) ||
-        !std::isfinite(view.native_position_rad) ||
-        !std::isfinite(view.native_mos_temperature_c) || !std::isfinite(view.native_rotor_temperature_c))
+        !std::isfinite(view.native_position_rad) || !std::isfinite(view.native_mos_temperature_c) ||
+        !std::isfinite(view.native_rotor_temperature_c))
         return -EINVAL;
     if (std::fabs(feedback.velocity_rad_s) > velocity_abs_max_rad_s ||
-        view.native_mos_temperature_c >= temperature_max_c ||
-        view.native_rotor_temperature_c >= temperature_max_c) {
+        view.native_mos_temperature_c >= temperature_max_c || view.native_rotor_temperature_c >= temperature_max_c) {
         LOG_ERR("safety cutoff: speed=%d limit=%d mrad/s MOS=%d rotor=%d limit=%d C",
                 int(feedback.velocity_rad_s * 1000.0f), int(velocity_abs_max_rad_s * 1000.0f),
                 int(view.native_mos_temperature_c), int(view.native_rotor_temperature_c), int(temperature_max_c));
@@ -113,8 +111,7 @@ int prepare(Session &session) {
             unsigned(session.descriptor.control_id), unsigned(session.descriptor.mode),
             int(session.descriptor.limits.position_max_rad * 1000.0f),
             int(session.descriptor.limits.velocity_max_rad_s * 1000.0f),
-            int(session.descriptor.limits.torque_max_nm * 1000.0f),
-            int(session.descriptor.torque_limit_nm * 1000.0f));
+            int(session.descriptor.limits.torque_max_nm * 1000.0f), int(session.descriptor.torque_limit_nm * 1000.0f));
     ret = session.bus.attach(session.motor);
     if (ret == 0)
         ret = session.bus.start();
@@ -132,8 +129,7 @@ int prepare(Session &session) {
 
 int arm(Session &session) {
     motor::MotorSnapshot pre_enable{};
-    int ret = checkSafeFeedback(session, kPreEnableVelocityCutoffRadS, kPreEnableTemperatureCutoffC,
-                                true, pre_enable);
+    int ret = checkSafeFeedback(session, kPreEnableVelocityCutoffRadS, kPreEnableTemperatureCutoffC, true, pre_enable);
     if (ret < 0) {
         LOG_ERR("pre-enable safety check failed: %d", ret);
         return ret;

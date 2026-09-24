@@ -64,8 +64,7 @@ public:
 
     [[nodiscard]] int attach(Motor &motor);
 
-    template <class... Motors>
-    [[nodiscard]] int attach(Motor &first, Motor &second, Motors &...rest) {
+    template <class... Motors> [[nodiscard]] int attach(Motor &first, Motor &second, Motors &...rest) {
         Motor *batch[] = {&first, &second, &rest...};
         return attachBatch(batch, sizeof...(rest) + 2);
     }
@@ -116,8 +115,7 @@ private:
 
     int attachBatch(Motor *const *batch, std::size_t count);
     static bool isDji(const Motor &motor);
-    static int describeMotor(const Motor &motor, std::uint16_t &rx_id,
-                             std::uint16_t &tx_id, std::uint8_t &slot);
+    static int describeMotor(const Motor &motor, std::uint16_t &rx_id, std::uint16_t &tx_id, std::uint8_t &slot);
     int validateTopology();
     int installRoutes();
     void rollbackStart();
@@ -134,8 +132,8 @@ private:
     bool pumpTarget(std::uint64_t now_ms);
     void enterRecovery(int error, FaultReason reason);
     void recoverController(std::uint64_t now_ms);
-    int submit(const can_frame &frame, TxPurpose purpose, std::size_t unit_index,
-               std::uint64_t sequence, std::uint64_t now_ms);
+    int submit(const can_frame &frame, TxPurpose purpose, std::size_t unit_index, std::uint64_t sequence,
+               std::uint64_t now_ms);
     int buildTarget(const TxUnit &unit, std::uint64_t now_ms, can_frame &out);
     int buildSafety(const TxUnit &unit, can_frame &out);
     bool unitHasPendingSafety(const TxUnit &unit) const;

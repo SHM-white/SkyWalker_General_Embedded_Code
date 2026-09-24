@@ -29,14 +29,16 @@ constexpr float kDmTestTorqueNm = 0.02f;
 constexpr std::int64_t kControlPeriodMs = 5;
 
 motor::dji::Config m3508Id1() {
-    return motor::dji::m3508({.id = 1, .current_limit_a = 0.3f,
-                              .gear_ratio = 3591.0f / 187.0f, .timing = kDjiTiming});
+    return motor::dji::m3508({.id = 1, .current_limit_a = 0.3f, .gear_ratio = 3591.0f / 187.0f, .timing = kDjiTiming});
 }
 
 motor::dm::Config dmMit(std::uint8_t id) {
-    return motor::dm::j4310Mit({.id = id, .master_id = 0x11,
-                                .position_max_rad = 12.5f, .velocity_max_rad_s = 30.0f,
-                                .torque_max_nm = 10.0f, .torque_limit_nm = 0.1f,
+    return motor::dm::j4310Mit({.id = id,
+                                .master_id = 0x11,
+                                .position_max_rad = 12.5f,
+                                .velocity_max_rad_s = 30.0f,
+                                .torque_max_nm = 10.0f,
+                                .torque_limit_nm = 0.1f,
                                 .timing = kDmTiming});
 }
 
@@ -55,8 +57,8 @@ constexpr const char *kTopologyName = "linked M3508/DM across CAN1/CAN2 plus one
 struct Topology {
 #if defined(MIXED_TOPOLOGY_DJI_SHARED_FRAME)
     motor::Motor first{m3508Id1()};
-    motor::Motor second{motor::dji::m2006({.id = 2, .current_limit_a = 0.3f,
-                                            .gear_ratio = 36.0f, .timing = kDjiTiming})};
+    motor::Motor second{
+        motor::dji::m2006({.id = 2, .current_limit_a = 0.3f, .gear_ratio = 36.0f, .timing = kDjiTiming})};
     motor::Group first_group{first};
     motor::Group second_group{second};
     motor::CanBus can1{DEVICE_DT_GET(DT_NODELABEL(can1))};
@@ -71,8 +73,8 @@ struct Topology {
     motor::Motor second{dmMit(1)};
     motor::Group linked_group{first, second};
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-    motor::Motor third{motor::dji::m2006({.id = 2, .current_limit_a = 0.3f,
-                                          .gear_ratio = 36.0f, .timing = kDjiTiming})};
+    motor::Motor third{
+        motor::dji::m2006({.id = 2, .current_limit_a = 0.3f, .gear_ratio = 36.0f, .timing = kDjiTiming})};
     motor::Motor fourth{dmMit(2)};
     motor::Group third_group{third};
     motor::Group fourth_group{fourth};
@@ -83,23 +85,18 @@ struct Topology {
 
     static bool safeToEnable(const motor::Motor &drive) {
         const auto view = drive.snapshot();
-        if (!drive.ready() || !view.feedback_fresh ||
-            (view.feedback.valid & motor::FeedbackVelocity) == 0u ||
-            !std::isfinite(view.feedback.velocity_rad_s) ||
-            std::fabs(view.feedback.velocity_rad_s) >= 10.0f)
+        if (!drive.ready() || !view.feedback_fresh || (view.feedback.valid & motor::FeedbackVelocity) == 0u ||
+            !std::isfinite(view.feedback.velocity_rad_s) || std::fabs(view.feedback.velocity_rad_s) >= 10.0f)
             return false;
         if ((drive.info().capabilities & motor::FeedbackTemperature) != 0u &&
             (((view.feedback.valid & motor::FeedbackTemperature) == 0u) ||
              !std::isfinite(view.feedback.temperature_c) || view.feedback.temperature_c >= 60.0f))
             return false;
-        if ((drive.info().capabilities & motor::CommandTorque) != 0u &&
-            !view.native_temperatures_valid)
+        if ((drive.info().capabilities & motor::CommandTorque) != 0u && !view.native_temperatures_valid)
             return false;
         return !view.native_temperatures_valid ||
-               (std::isfinite(view.native_mos_temperature_c) &&
-                std::isfinite(view.native_rotor_temperature_c) &&
-                view.native_mos_temperature_c < 60.0f &&
-                view.native_rotor_temperature_c < 60.0f);
+               (std::isfinite(view.native_mos_temperature_c) && std::isfinite(view.native_rotor_temperature_c) &&
+                view.native_mos_temperature_c < 60.0f && view.native_rotor_temperature_c < 60.0f);
     }
 
     int start() {
@@ -303,36 +300,34 @@ struct Topology {
 
     static void logMotor(const char *name, const motor::Motor &drive) {
         const auto view = drive.snapshot();
-        LOG_INF("%s state=%u fresh=%d gen=%llu ref=%llu feedback_ms=%llu stop=%u/%llu/%d fault=%u/%d",
-                name, unsigned(view.state), view.feedback_fresh, view.enable_generation,
-                view.reference_generation, view.feedback.timestamp_ms, unsigned(view.stop.progress),
-                view.stop.request_generation, view.stop.tx_error, unsigned(view.last_fault.reason),
-                view.last_fault.error);
+        LOG_INF("%s state=%u fresh=%d gen=%llu ref=%llu feedback_ms=%llu stop=%u/%llu/%d fault=%u/%d", name,
+                unsigned(view.state), view.feedback_fresh, view.enable_generation, view.reference_generation,
+                view.feedback.timestamp_ms, unsigned(view.stop.progress), view.stop.request_generation,
+                view.stop.tx_error, unsigned(view.last_fault.reason), view.last_fault.error);
     }
 
     static void logBus(const char *name, const motor::CanBus &bus) {
         const auto status = bus.status();
-        LOG_INF("%s state=%u commit=%llu last_tx=%d/%llu/0x%03x/%u/%d/%llu error=%d",
-                name, unsigned(status.state), status.latest_submitted_sequence, status.last_tx.valid,
-                status.last_tx.sequence, unsigned(status.last_tx.can_id), unsigned(status.last_tx.purpose),
-                status.last_tx.error, status.last_tx.completed_ms, status.last_error);
+        LOG_INF("%s state=%u commit=%llu last_tx=%d/%llu/0x%03x/%u/%d/%llu error=%d", name, unsigned(status.state),
+                status.latest_submitted_sequence, status.last_tx.valid, status.last_tx.sequence,
+                unsigned(status.last_tx.can_id), unsigned(status.last_tx.purpose), status.last_tx.error,
+                status.last_tx.completed_ms, status.last_error);
     }
 
     void logStatus() const {
         LOG_INF("uptime_ms=%lld topology=%s", k_uptime_get(), kTopologyName);
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_GROUP) || defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
         const auto linked = linked_group.status();
-        LOG_INF("linked ready=%d active=%d pending=%d gen=%llu fault=%u/%d",
-                linked.ready, linked.active, linked.enable_pending, linked.enable_generation,
-                unsigned(linked.last_fault.reason), linked.last_fault.error);
+        LOG_INF("linked ready=%d active=%d pending=%d gen=%llu fault=%u/%d", linked.ready, linked.active,
+                linked.enable_pending, linked.enable_generation, unsigned(linked.last_fault.reason),
+                linked.last_fault.error);
         logMotor("linked CAN1 M3508", first);
         logMotor("linked CAN2 DM", second);
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
         const auto can1_group = third_group.status();
         const auto can2_group = fourth_group.status();
-        LOG_INF("independent CAN1=%d/%d/%llu CAN2=%d/%d/%llu",
-                can1_group.ready, can1_group.active, can1_group.enable_generation,
-                can2_group.ready, can2_group.active, can2_group.enable_generation);
+        LOG_INF("independent CAN1=%d/%d/%llu CAN2=%d/%d/%llu", can1_group.ready, can1_group.active,
+                can1_group.enable_generation, can2_group.ready, can2_group.active, can2_group.enable_generation);
         logMotor("independent CAN1 M2006", third);
         logMotor("independent CAN2 DM", fourth);
 #endif
@@ -341,9 +336,9 @@ struct Topology {
 #else
         const auto group_a = first_group.status();
         const auto group_b = second_group.status();
-        LOG_INF("G1 ready=%d active=%d pending=%d gen=%llu G2 ready=%d active=%d pending=%d gen=%llu",
-                group_a.ready, group_a.active, group_a.enable_pending, group_a.enable_generation,
-                group_b.ready, group_b.active, group_b.enable_pending, group_b.enable_generation);
+        LOG_INF("G1 ready=%d active=%d pending=%d gen=%llu G2 ready=%d active=%d pending=%d gen=%llu", group_a.ready,
+                group_a.active, group_a.enable_pending, group_a.enable_generation, group_b.ready, group_b.active,
+                group_b.enable_pending, group_b.enable_generation);
         logMotor("G1", first);
         logMotor("G2", second);
         logBus("CAN1", can1);

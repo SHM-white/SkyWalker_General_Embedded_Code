@@ -74,8 +74,7 @@ int main() {
 
         const auto view = drive.snapshot();
         if (!requested || estop) {
-            if (view.state == motor::MotorState::Active ||
-                view.state == motor::MotorState::Enabling) {
+            if (view.state == motor::MotorState::Active || view.state == motor::MotorState::Enabling) {
                 ret = drive.disable();
                 if (ret < 0)
                     LOG_ERR("disable: %d", ret);
@@ -117,10 +116,9 @@ int main() {
             const auto telemetry = axis.telemetry();
             LOG_INF("state=%u mode=%u gen=%llu target=%.3f absolute=%.3f velocity=%.3f effort=%.3f fault=%u err=%d",
                     unsigned(snapshot.state), unsigned(command.mode),
-                    static_cast<unsigned long long>(snapshot.enable_generation),
-                    double(yaw.targetAngleRad()), double(snapshot.feedback.absolute_position_rad),
-                    double(snapshot.feedback.velocity_rad_s), double(telemetry.effort_command),
-                    unsigned(snapshot.last_fault.reason), bus.status().last_error);
+                    static_cast<unsigned long long>(snapshot.enable_generation), double(yaw.targetAngleRad()),
+                    double(snapshot.feedback.absolute_position_rad), double(snapshot.feedback.velocity_rad_s),
+                    double(telemetry.effort_command), unsigned(snapshot.last_fault.reason), bus.status().last_error);
         }
         k_sleep(K_MSEC(5));
     }

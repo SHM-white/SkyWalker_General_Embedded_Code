@@ -111,9 +111,13 @@ int main() {
     if (!device_is_ready(uart) || !device_is_ready(can))
         return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dm::j4310Mit({
-        .id = 1, .master_id = 0x11, .position_max_rad = 12.5f,
-        .velocity_max_rad_s = 30.0f, .torque_max_nm = 10.0f,
-        .torque_limit_nm = 1.0f, .timing = {50, 20, 50, 3000},
+        .id = 1,
+        .master_id = 0x11,
+        .position_max_rad = 12.5f,
+        .velocity_max_rad_s = 30.0f,
+        .torque_max_nm = 10.0f,
+        .torque_limit_nm = 1.0f,
+        .timing = {50, 20, 50, 3000},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};

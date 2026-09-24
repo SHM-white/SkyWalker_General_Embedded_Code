@@ -29,8 +29,8 @@ int waitForReady(skywalker::motor::Motor &motor) {
             return view.last_fault.error < 0 ? view.last_fault.error : -EHOSTDOWN;
         const std::int64_t now_ms = k_uptime_get();
         if (now_ms >= next_log_ms) {
-            LOG_WRN("waiting for GM6020 ID 4 feedback on CAN1 (0x208); state=%u stop=%u",
-                    unsigned(view.state), unsigned(view.stop.progress));
+            LOG_WRN("waiting for GM6020 ID 4 feedback on CAN1 (0x208); state=%u stop=%u", unsigned(view.state),
+                    unsigned(view.stop.progress));
             next_log_ms = now_ms + 1000;
         }
         k_sleep(K_MSEC(5));
@@ -55,8 +55,8 @@ int waitForActive(skywalker::motor::Motor &motor) {
 int stopAfterFailure(skywalker::motor::Motor &motor, int original_error) {
     const int stop_ret = motor.disable();
     const auto report = motor.snapshot().stop;
-    LOG_ERR("stopped: cause=%d stop_request=%d progress=%u stop_tx_error=%d",
-            original_error, stop_ret, unsigned(report.progress), report.tx_error);
+    LOG_ERR("stopped: cause=%d stop_request=%d progress=%u stop_tx_error=%d", original_error, stop_ret,
+            unsigned(report.progress), report.tx_error);
     return stop_ret < 0 ? stop_ret : original_error;
 }
 
@@ -105,8 +105,8 @@ int main() {
     int ret = skywalker::motor::dji::describe(config, descriptor);
     if (ret < 0)
         return ret;
-    LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u", descriptor.motor_id,
-            descriptor.feedback_id, descriptor.command_id, descriptor.command_slot);
+    LOG_INF("GM6020 ID=%u feedback=0x%03x command=0x%03x slot=%u", descriptor.motor_id, descriptor.feedback_id,
+            descriptor.command_id, descriptor.command_slot);
     ret = bus.attach(motor);
     if (ret == 0)
         ret = bus.start();
@@ -133,8 +133,8 @@ int main() {
         const auto view = motor.snapshot();
         const auto &feedback = view.feedback;
         const auto &raw = view.native_dji_feedback;
-        if (view.state != skywalker::motor::MotorState::Active || !view.feedback_fresh ||
-            !view.output_permitted || !view.native_dji_feedback_valid)
+        if (view.state != skywalker::motor::MotorState::Active || !view.feedback_fresh || !view.output_permitted ||
+            !view.native_dji_feedback_valid)
             return stopAfterFailure(motor, -EHOSTDOWN);
         ret = checkSafeFeedback(view);
         if (ret < 0)

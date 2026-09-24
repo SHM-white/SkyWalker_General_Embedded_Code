@@ -28,11 +28,21 @@ public:
     int apply(const skywalker::robotics::ChassisOutput &output, float effort_scale);
     int clearFault();
 
-    bool ready() const { return ready_; }
-    bool armed() const { return initialized_ && group_.active(); }
-    bool enabling() const { return initialized_ && group_.status().enable_pending; }
-    std::size_t busCount() const { return bus_count_; }
-    float estimatedPowerW() const { return estimated_power_w_; }
+    bool ready() const {
+        return ready_;
+    }
+    bool armed() const {
+        return initialized_ && group_.active();
+    }
+    bool enabling() const {
+        return initialized_ && group_.status().enable_pending;
+    }
+    std::size_t busCount() const {
+        return bus_count_;
+    }
+    float estimatedPowerW() const {
+        return estimated_power_w_;
+    }
 
 private:
     static const device *secondaryCan(const std::array<ChassisMotorConnection, 8> &connections);

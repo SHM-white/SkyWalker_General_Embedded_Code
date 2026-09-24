@@ -90,8 +90,11 @@ int main() {
     if (!device_is_ready(uart) || !device_is_ready(can))
         return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::gm6020({
-        .id = 4, .current_limit_a = 3.0f, .encoder_zero_ticks = 0,
-        .current_mode_confirmed = true, .timing = {20, 20, 20, 100},
+        .id = 4,
+        .current_limit_a = 3.0f,
+        .encoder_zero_ticks = 0,
+        .current_mode_confirmed = true,
+        .timing = {20, 20, 20, 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::VelocityMotor axis{drive, makeMotorConfig()};

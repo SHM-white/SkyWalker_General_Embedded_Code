@@ -19,14 +19,21 @@ int main() {
         return -ENODEV;
 #ifdef SKYWALKER_RECOVERY_DM
     static motor::Motor drive{motor::dm::j4310Mit({
-        .id = 1, .master_id = 0x11, .position_max_rad = 12.5f,
-        .velocity_max_rad_s = 30.0f, .torque_max_nm = 10.0f,
-        .torque_limit_nm = 0.5f, .timing = {50, 20, 50, 3000},
+        .id = 1,
+        .master_id = 0x11,
+        .position_max_rad = 12.5f,
+        .velocity_max_rad_s = 30.0f,
+        .torque_max_nm = 10.0f,
+        .torque_limit_nm = 0.5f,
+        .timing = {50, 20, 50, 3000},
     })};
 #else
     static motor::Motor drive{motor::dji::gm6020({
-        .id = 1, .current_limit_a = 0.5f, .encoder_zero_ticks = 0,
-        .current_mode_confirmed = true, .timing = {20, 20, 20, 100},
+        .id = 1,
+        .current_limit_a = 0.5f,
+        .encoder_zero_ticks = 0,
+        .current_mode_confirmed = true,
+        .timing = {20, 20, 20, 100},
     })};
 #endif
     static motor::CanBus bus{can};

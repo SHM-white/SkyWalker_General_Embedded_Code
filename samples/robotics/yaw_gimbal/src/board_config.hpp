@@ -6,8 +6,10 @@
 namespace bench {
 inline const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
 inline skywalker::motor::dji::Config motorHardware() {
-    return skywalker::motor::dji::gm6020({.id = 1, .current_limit_a = 0.5f,
-                                          .encoder_zero_ticks = 0, .current_mode_confirmed = true,
+    return skywalker::motor::dji::gm6020({.id = 1,
+                                          .current_limit_a = 0.5f,
+                                          .encoder_zero_ticks = 0,
+                                          .current_mode_confirmed = true,
                                           .timing = {20, 20, 20, 100}});
 }
 // Limited topology requires calibrated DriverContinuous coordinates instead.

@@ -59,7 +59,8 @@ int main() {
                 if (decoder.decodeFrame(pending, sizeof(pending), chunk.timestamp_ms, state) == 0) {
                     std::memcpy(last_frame, pending, sizeof(last_frame));
                     used = 0;
-                } else {
+                }
+                else {
                     --used;
                     std::memmove(pending, pending + 1, used);
                 }
@@ -69,24 +70,21 @@ int main() {
         if (now >= next_log) {
             next_log = now + 100;
             const bool fresh = state.stamp.valid && now >= state.stamp.timestamp_ms &&
-                now - state.stamp.timestamp_ms <= bench::remote.offline_timeout_ms;
-            LOG_INF("online=%d bytes=%u chunks=%u valid=%u rejected_windows=%u gaps=%u dropped=%u service=%d",
-                    fresh, rx_bytes, rx_chunks, decoder.validFrameCount(),
-                    decoder.invalidFrameCount(), discontinuities,
+                               now - state.stamp.timestamp_ms <= bench::remote.offline_timeout_ms;
+            LOG_INF("online=%d bytes=%u chunks=%u valid=%u rejected_windows=%u gaps=%u dropped=%u service=%d", fresh,
+                    rx_bytes, rx_chunks, decoder.validFrameCount(), decoder.invalidFrameCount(), discontinuities,
                     static_cast<unsigned>(uart.droppedChunks()), service_error);
             if (state.stamp.valid) {
                 // No deadband in this sample: adding center recovers raw CH0..CH3.
                 const auto &a = state.analog;
                 LOG_INF("CH0=%d CH1=%d CH2=%d CH3=%d d0=%d d1=%d d2=%d d3=%d",
                         a.right_x + bench::decoder.channel_center, a.right_y + bench::decoder.channel_center,
-                        a.left_x + bench::decoder.channel_center, a.left_y + bench::decoder.channel_center,
-                        a.right_x, a.right_y, a.left_x, a.left_y);
+                        a.left_x + bench::decoder.channel_center, a.left_y + bench::decoder.channel_center, a.right_x,
+                        a.right_y, a.left_x, a.left_y);
                 LOG_INF("SW_HIGH=%u SW_LOW=%u TAIL16=%u mouse=%d/%d/%d buttons=%u/%u keys=%04x",
-                        unsigned((last_frame[5] >> 6) & 3),
-                        unsigned((last_frame[5] >> 4) & 3),
-                        unsigned(communication::wire::loadLe16(last_frame + 16)),
-                        state.mouse.x, state.mouse.y, state.mouse.z,
-                        unsigned(state.mouse.left), unsigned(state.mouse.right),
+                        unsigned((last_frame[5] >> 6) & 3), unsigned((last_frame[5] >> 4) & 3),
+                        unsigned(communication::wire::loadLe16(last_frame + 16)), state.mouse.x, state.mouse.y,
+                        state.mouse.z, unsigned(state.mouse.left), unsigned(state.mouse.right),
                         unsigned(state.keyboard.bits));
             }
             if (!fresh && last_chunk_size) {

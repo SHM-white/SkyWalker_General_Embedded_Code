@@ -12,8 +12,7 @@ namespace skywalker::control {
 namespace {
 
 bool finiteFloat(double value) {
-    return std::isfinite(value) &&
-           std::fabs(value) <= static_cast<double>(std::numeric_limits<float>::max());
+    return std::isfinite(value) && std::fabs(value) <= static_cast<double>(std::numeric_limits<float>::max());
 }
 
 int validateSafety(const MotorSafety &safety, std::uint32_t capabilities) {
@@ -49,8 +48,7 @@ int validateEffort(const motor::MotorInfo &info, EffortUnit unit, float requeste
     return 0;
 }
 
-int validateMeasurement(const motor::MotorSnapshot &snapshot, const MotorSafety &safety,
-                        std::uint32_t required) {
+int validateMeasurement(const motor::MotorSnapshot &snapshot, const MotorSafety &safety, std::uint32_t required) {
     if (!snapshot.feedback_fresh)
         return -ESTALE;
     const auto &feedback = snapshot.feedback;
@@ -58,8 +56,7 @@ int validateMeasurement(const motor::MotorSnapshot &snapshot, const MotorSafety 
         return -ENODATA;
     if (!std::isfinite(feedback.velocity_rad_s) ||
         ((required & motor::FeedbackPosition) != 0u && !std::isfinite(feedback.position_rad)) ||
-        ((required & motor::FeedbackAbsolutePosition) != 0u &&
-         !std::isfinite(feedback.absolute_position_rad)))
+        ((required & motor::FeedbackAbsolutePosition) != 0u && !std::isfinite(feedback.absolute_position_rad)))
         return -EINVAL;
     if (std::fabs(feedback.velocity_rad_s) > safety.velocity_abs_max_rad_s)
         return -ERANGE;
@@ -92,8 +89,8 @@ int validateDt(float dt_s, float minimum, float maximum) {
 
 } // namespace
 
-VelocityMotor::VelocityMotor(motor::Motor &motor, const Config &config)
-    : motor_(motor), config_(config) {}
+VelocityMotor::VelocityMotor(motor::Motor &motor, const Config &config) : motor_(motor), config_(config) {
+}
 
 int VelocityMotor::configure() {
     if (configured_)
@@ -112,8 +109,8 @@ int VelocityMotor::configure() {
         return ret;
     if ((info.capabilities & motor::FeedbackVelocity) == 0u)
         return -ENOTSUP;
-    ret = motor_.bindProducer(this, config_.safety.velocity_abs_max_rad_s,
-                              config_.safety.temperature_max_c, motor::FeedbackVelocity, false);
+    ret = motor_.bindProducer(this, config_.safety.velocity_abs_max_rad_s, config_.safety.temperature_max_c,
+                              motor::FeedbackVelocity, false);
     if (ret < 0)
         return ret;
     configured_ = true;
@@ -198,16 +195,14 @@ int VelocityMotor::update(float target_rad_s, float dt_s) {
     if (ret < 0)
         return fail(ret, snapshot, true);
 
-    const bool new_generation = !history_valid_ ||
-        snapshot.enable_generation != observed_enable_generation_ ||
-        snapshot.reference_generation != observed_reference_generation_;
+    const bool new_generation = !history_valid_ || snapshot.enable_generation != observed_enable_generation_ ||
+                                snapshot.reference_generation != observed_reference_generation_;
     if (new_generation) {
         ret = resetFrom(snapshot);
         if (ret < 0)
             return fail(ret, snapshot, true);
-        ret = config_.effort_unit == EffortUnit::Ampere
-                  ? motor_.setCurrentFrom(this, 0.0f)
-                  : motor_.setTorqueFrom(this, 0.0f);
+        ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, 0.0f)
+                                                        : motor_.setTorqueFrom(this, 0.0f);
         if (ret < 0)
             return fail(ret, snapshot, true);
         Telemetry next{};
@@ -232,9 +227,8 @@ int VelocityMotor::update(float target_rad_s, float dt_s) {
     ret = control_motor_velocity_step(&next_state, &config_.loop, &input, &output);
     if (ret < 0)
         return fail(ret, snapshot, true);
-    ret = config_.effort_unit == EffortUnit::Ampere
-              ? motor_.setCurrentFrom(this, output.effort_command)
-              : motor_.setTorqueFrom(this, output.effort_command);
+    ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, output.effort_command)
+                                                    : motor_.setTorqueFrom(this, output.effort_command);
     if (ret < 0)
         return fail(ret, snapshot, true);
     state_ = next_state;
@@ -250,8 +244,8 @@ int VelocityMotor::update(float target_rad_s, float dt_s) {
     return 0;
 }
 
-PositionMotor::PositionMotor(motor::Motor &motor, const Config &config)
-    : motor_(motor), config_(config) {}
+PositionMotor::PositionMotor(motor::Motor &motor, const Config &config) : motor_(motor), config_(config) {
+}
 
 int PositionMotor::configure() {
     if (configured_)
@@ -282,8 +276,8 @@ int PositionMotor::configure() {
         required |= motor::FeedbackAbsolutePosition;
     if ((info.capabilities & required) != required)
         return -ENOTSUP;
-    ret = motor_.bindProducer(this, config_.safety.velocity_abs_max_rad_s,
-                              config_.safety.temperature_max_c, required, true);
+    ret = motor_.bindProducer(this, config_.safety.velocity_abs_max_rad_s, config_.safety.temperature_max_c, required,
+                              true);
     if (ret < 0)
         return ret;
     configured_ = true;
@@ -292,8 +286,7 @@ int PositionMotor::configure() {
 
 int PositionMotor::resetFrom(const motor::MotorSnapshot &snapshot, bool explicit_reset) {
     control_motor_position_state next_state{};
-    const int ret = control_motor_position_reset(&next_state, &config_.loop, 0.0f,
-                                                 snapshot.feedback.velocity_rad_s);
+    const int ret = control_motor_position_reset(&next_state, &config_.loop, 0.0f, snapshot.feedback.velocity_rad_s);
     if (ret < 0)
         return ret;
     state_ = next_state;
@@ -386,9 +379,8 @@ int PositionMotor::update(double target_position_rad, float dt_s) {
     if (ret < 0)
         return fail(ret, snapshot, true);
 
-    const bool new_generation = !history_valid_ ||
-        snapshot.enable_generation != observed_enable_generation_ ||
-        snapshot.reference_generation != observed_reference_generation_;
+    const bool new_generation = !history_valid_ || snapshot.enable_generation != observed_enable_generation_ ||
+                                snapshot.reference_generation != observed_reference_generation_;
     if (new_generation) {
         ret = resetFrom(snapshot, false);
         if (ret < 0)
@@ -412,9 +404,8 @@ int PositionMotor::update(double target_position_rad, float dt_s) {
         return fail(-ERANGE, snapshot, true);
 
     if (new_generation) {
-        ret = config_.effort_unit == EffortUnit::Ampere
-                  ? motor_.setCurrentFrom(this, 0.0f)
-                  : motor_.setTorqueFrom(this, 0.0f);
+        ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, 0.0f)
+                                                        : motor_.setTorqueFrom(this, 0.0f);
         if (ret < 0)
             return fail(ret, snapshot, true);
         Telemetry next{};
@@ -455,9 +446,8 @@ int PositionMotor::update(double target_position_rad, float dt_s) {
     ret = control_motor_position_step(&next_state, &config_.loop, &input, &output);
     if (ret < 0)
         return fail(ret, snapshot, true);
-    ret = config_.effort_unit == EffortUnit::Ampere
-              ? motor_.setCurrentFrom(this, output.effort_command)
-              : motor_.setTorqueFrom(this, output.effort_command);
+    ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, output.effort_command)
+                                                    : motor_.setTorqueFrom(this, output.effort_command);
     if (ret < 0)
         return fail(ret, snapshot, true);
     state_ = next_state;

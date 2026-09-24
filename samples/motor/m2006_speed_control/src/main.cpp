@@ -80,7 +80,9 @@ int main() {
     if (!device_is_ready(uart) || !device_is_ready(can))
         return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::m2006({
-        .id = 4, .current_limit_a = 10.0f, .gear_ratio = 36.0f,
+        .id = 4,
+        .current_limit_a = 10.0f,
+        .gear_ratio = 36.0f,
         .timing = {20, 20, 20, 100},
     })};
     static skywalker::motor::CanBus bus{can};

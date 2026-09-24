@@ -38,8 +38,7 @@ int Dr16Decoder::decodeFrame(const std::uint8_t *p, std::size_t size, std::uint6
         return static_cast<std::int16_t>(u < 0x8000 ? int(u) : int(u) - 65536);
     };
     RemoteState n{};
-    n.analog = {channel(0), channel(1), channel(2), channel(3),
-                config_.decode_wheel ? channel(4) : std::int16_t{0}};
+    n.analog = {channel(0), channel(1), channel(2), channel(3), config_.decode_wheel ? channel(4) : std::int16_t{0}};
     n.left_switch = sw(left);
     n.right_switch = sw(right);
     n.mouse = {signed16(p + 6), signed16(p + 8), signed16(p + 10), p[12] != 0, p[13] != 0};

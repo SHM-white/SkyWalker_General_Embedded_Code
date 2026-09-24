@@ -70,12 +70,14 @@ static void receive_byte(Vofa *vofa, uint8_t byte) {
         }
         vofa->rx_length = 0;
         vofa->rx_discard = false;
-    } else if (!vofa->rx_discard) {
+    }
+    else if (!vofa->rx_discard) {
         if (byte == '\0' || vofa->rx_length >= vofa->rx_buf_size - 1) {
             /* Never interpret the tail of a truncated command as a new line. */
             vofa->rx_length = 0;
             vofa->rx_discard = true;
-        } else {
+        }
+        else {
             vofa->rx_buf[vofa->rx_length++] = byte;
         }
     }
@@ -87,8 +89,7 @@ static int transmit_ready(Vofa *vofa) {
 
     if (vofa->tx_count != 0) {
         const uint8_t head = vofa->tx_head;
-        written = uart_fifo_fill(vofa->uart,
-                                 &vofa->tx_frames[head][vofa->tx_offset],
+        written = uart_fifo_fill(vofa->uart, &vofa->tx_frames[head][vofa->tx_offset],
                                  vofa->tx_lengths[head] - vofa->tx_offset);
         if (written > 0) {
             vofa->tx_offset += written;
@@ -97,7 +98,8 @@ static int transmit_ready(Vofa *vofa) {
                 vofa->tx_count--;
                 vofa->tx_offset = 0;
             }
-        } else if (written < 0) {
+        }
+        else if (written < 0) {
             vofa->tx_error = written;
             vofa->tx_count = 0;
             vofa->tx_offset = 0;

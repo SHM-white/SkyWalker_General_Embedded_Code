@@ -26,14 +26,13 @@ int YawGimbal::begin() {
 int YawGimbal::seed(const motor::MotorSnapshot &snapshot) {
     if (!snapshot.feedback_fresh)
         return -EAGAIN;
-    const std::uint32_t required = config_.topology == YawTopology::Continuous
-                                       ? motor::FeedbackAbsolutePosition : motor::FeedbackPosition;
+    const std::uint32_t required = config_.topology == YawTopology::Continuous ? motor::FeedbackAbsolutePosition
+                                                                               : motor::FeedbackPosition;
     if ((snapshot.feedback.valid & required) == 0 ||
         (config_.topology == YawTopology::Limited && !snapshot.position_reference_valid))
         return -ENODATA;
-    target_angle_rad_ = config_.topology == YawTopology::Continuous
-                            ? double(snapshot.feedback.absolute_position_rad)
-                            : double(snapshot.feedback.position_rad);
+    target_angle_rad_ = config_.topology == YawTopology::Continuous ? double(snapshot.feedback.absolute_position_rad)
+                                                                    : double(snapshot.feedback.position_rad);
     previous_action_ = SafetyAction::Disable;
     previous_mode_ = GimbalMode::Disabled;
     generation_ = snapshot.enable_generation;
@@ -103,8 +102,7 @@ int YawGimbal::update(const GimbalCommand &command, SafetyAction action, float d
         const double actual = snapshot.feedback.position_rad;
         if (actual < double(config_.min_angle_rad) || actual > double(config_.max_angle_rad))
             return -ERANGE;
-        target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad),
-                                       double(config_.max_angle_rad));
+        target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad), double(config_.max_angle_rad));
     }
     else
         target_angle_rad_ = std::remainder(target_angle_rad_, 6.283185307179586);

@@ -17,15 +17,12 @@ const device *DjiChassisHardware::secondaryCan(const std::array<ChassisMotorConn
 }
 
 DjiChassisHardware::DjiChassisHardware(const std::array<ChassisMotorConnection, 8> &connections)
-    : connections_(connections),
-      motors_{{motor::Motor(connections[0].config), motor::Motor(connections[1].config),
-               motor::Motor(connections[2].config), motor::Motor(connections[3].config),
-               motor::Motor(connections[4].config), motor::Motor(connections[5].config),
-               motor::Motor(connections[6].config), motor::Motor(connections[7].config)}},
-      group_(motors_[0], motors_[1], motors_[2], motors_[3],
-             motors_[4], motors_[5], motors_[6], motors_[7]),
-      first_bus_(connections[0].can), second_bus_(secondaryCan(connections)),
-      buses_{{&first_bus_, &second_bus_}} {
+    : connections_(connections), motors_{{motor::Motor(connections[0].config), motor::Motor(connections[1].config),
+                                          motor::Motor(connections[2].config), motor::Motor(connections[3].config),
+                                          motor::Motor(connections[4].config), motor::Motor(connections[5].config),
+                                          motor::Motor(connections[6].config), motor::Motor(connections[7].config)}},
+      group_(motors_[0], motors_[1], motors_[2], motors_[3], motors_[4], motors_[5], motors_[6], motors_[7]),
+      first_bus_(connections[0].can), second_bus_(secondaryCan(connections)), buses_{{&first_bus_, &second_bus_}} {
     can_devices_[0] = connections[0].can;
     can_devices_[1] = secondaryCan(connections);
 }
@@ -51,8 +48,8 @@ int DjiChassisHardware::init() {
         const int described = motor::dji::describe(connections_[i].config, descriptors_[i]);
         if (described < 0)
             return described;
-        auto required = motor::CommandCurrent | motor::FeedbackVelocity |
-                        motor::FeedbackPosition | motor::FeedbackCurrent;
+        auto required = motor::CommandCurrent | motor::FeedbackVelocity | motor::FeedbackPosition |
+                        motor::FeedbackCurrent;
         if (i < 4)
             required |= motor::FeedbackAbsolutePosition;
         if ((motors_[i].info().capabilities & required) != required)
@@ -104,8 +101,7 @@ int DjiChassisHardware::validateFeedback(std::size_t index, const motor::MotorSn
         required |= motor::FeedbackAbsolutePosition;
     if (require_reference)
         required |= motor::FeedbackPosition;
-    if ((f.valid & required) != required || !std::isfinite(f.velocity_rad_s) ||
-        !std::isfinite(f.current_a) ||
+    if ((f.valid & required) != required || !std::isfinite(f.velocity_rad_s) || !std::isfinite(f.current_a) ||
         (index < 4 && !std::isfinite(f.absolute_position_rad)) ||
         (require_reference && (!snapshot.position_reference_valid || !std::isfinite(f.position_rad))))
         return -ENODATA;

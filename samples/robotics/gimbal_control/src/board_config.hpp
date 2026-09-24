@@ -23,12 +23,15 @@ inline const device *pitch_can = DEVICE_DT_GET(DT_NODELABEL(can1));
 // Disabled hardware template: match IDs, drive mode, zero and protocol limits
 // to the installed motors before setting connections_configured to true.
 inline skywalker::motor::dji::Config yawHardware() {
-    return skywalker::motor::dji::gm6020({.id = 7, .current_limit_a = 1.5f,
-                                          .encoder_zero_ticks = 0, .current_mode_confirmed = true,
+    return skywalker::motor::dji::gm6020({.id = 7,
+                                          .current_limit_a = 1.5f,
+                                          .encoder_zero_ticks = 0,
+                                          .current_mode_confirmed = true,
                                           .timing = {20, 20, 30, 100}});
 }
 inline skywalker::motor::dm::Config pitchHardware() {
-    return skywalker::motor::dm::j4310Mit({.id = 1, .master_id = 0x00,
+    return skywalker::motor::dm::j4310Mit({.id = 1,
+                                           .master_id = 0x00,
                                            .position_max_rad = 12.5f,
                                            .velocity_max_rad_s = 30.0f,
                                            .torque_max_nm = 10.0f,
@@ -39,13 +42,13 @@ inline skywalker::motor::dm::Config pitchHardware() {
 inline constexpr float yaw_direction = -1.0f, pitch_direction = 1.0f;
 // Limited axes use calibrated driver coordinates, not a startup-relative zero.
 // Replace these example ranges with the actual mechanical limits in radians.
-inline constexpr skywalker::robotics::YawGimbalConfig yaw{
-    skywalker::robotics::YawTopology::Limited, -1.0f, 1.0f, 0.3f, true};
-inline constexpr skywalker::robotics::YawGimbalConfig pitch{
-    skywalker::robotics::YawTopology::Limited, -0.5f, 0.5f, 0.3f, true};
+inline constexpr skywalker::robotics::YawGimbalConfig yaw{skywalker::robotics::YawTopology::Limited, -1.0f, 1.0f, 0.3f,
+                                                          true};
+inline constexpr skywalker::robotics::YawGimbalConfig pitch{skywalker::robotics::YawTopology::Limited, -0.5f, 0.5f,
+                                                            0.3f, true};
 
-inline skywalker::control::PositionMotor::Config motorConfig(
-    skywalker::control::EffortUnit unit, const skywalker::robotics::YawGimbalConfig &axis) {
+inline skywalker::control::PositionMotor::Config motorConfig(skywalker::control::EffortUnit unit,
+                                                             const skywalker::robotics::YawGimbalConfig &axis) {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = unit;
     c.safety = {12, 0};

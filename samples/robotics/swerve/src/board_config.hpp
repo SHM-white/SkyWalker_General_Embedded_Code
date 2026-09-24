@@ -6,14 +6,15 @@
 namespace bench {
 inline const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
 inline skywalker::motor::dji::Config steerHardware() {
-    return skywalker::motor::dji::gm6020({.id = 1, .current_limit_a = 0.5f,
-                                          .encoder_zero_ticks = 0, .current_mode_confirmed = true,
+    return skywalker::motor::dji::gm6020({.id = 1,
+                                          .current_limit_a = 0.5f,
+                                          .encoder_zero_ticks = 0,
+                                          .current_mode_confirmed = true,
                                           .timing = {20, 20, 30, 100}});
 }
 inline skywalker::motor::dji::Config driveHardware() {
-    return skywalker::motor::dji::m3508({.id = 1, .current_limit_a = 0.5f,
-                                         .gear_ratio = 3591.0f / 187.0f,
-                                         .timing = {20, 20, 30, 100}});
+    return skywalker::motor::dji::m3508(
+        {.id = 1, .current_limit_a = 0.5f, .gear_ratio = 3591.0f / 187.0f, .timing = {20, 20, 30, 100}});
 }
 inline constexpr float steer_direction = 1, drive_direction = 1;
 inline constexpr float test_speed_m_s = 0.1f;

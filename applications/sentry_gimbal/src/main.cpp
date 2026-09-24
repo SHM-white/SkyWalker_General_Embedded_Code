@@ -314,8 +314,7 @@ void gimbalTask(void *, void *, void *) {
                     LOG_ERR("yaw update failed: %d", ret);
                 }
             }
-            else if (ready && command.command.stamp.valid &&
-                     command.command.stamp.timestamp_ms >= ready_ms &&
+            else if (ready && command.command.stamp.valid && command.command.stamp.timestamp_ms >= ready_ms &&
                      isFresh(command.command.stamp, now, board_config::command_timeout_ms)) {
                 int ret = yaw.reset();
                 if (ret == 0)
@@ -329,8 +328,8 @@ void gimbalTask(void *, void *, void *) {
         }
         const auto after = drive.snapshot();
         const auto generation = static_cast<std::uint32_t>(after.enable_generation);
-        gimbal_status.put({configured < 0 ? ExecutionState::ConfigBlocked : decision.state,
-                           generation, decision.active_reasons});
+        gimbal_status.put(
+            {configured < 0 ? ExecutionState::ConfigBlocked : decision.state, generation, decision.active_reasons});
         if (std::uint64_t(now) >= last_log + 1000) {
             last_log = now;
             LOG_INF("uptime=%lld yaw=%d reasons=%x gen=%u error=%d", now,

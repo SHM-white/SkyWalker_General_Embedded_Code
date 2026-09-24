@@ -26,8 +26,7 @@ struct GroupStatus {
 
 class Group {
 public:
-    template <class... Others>
-    explicit Group(Motor &first, Others &...others) {
+    template <class... Others> explicit Group(Motor &first, Others &...others) {
         addMember(first);
         (addMember(others), ...);
     }

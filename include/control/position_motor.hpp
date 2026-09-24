@@ -45,7 +45,9 @@ public:
     [[nodiscard]] int update(double target_position_rad, float dt_s);
     [[nodiscard]] int reset();
     Telemetry telemetry() const;
-    PositionReference reference() const { return config_.reference; }
+    PositionReference reference() const {
+        return config_.reference;
+    }
 
 private:
     int resetFrom(const motor::MotorSnapshot &snapshot, bool explicit_reset);

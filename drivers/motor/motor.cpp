@@ -27,8 +27,8 @@ bool isFresh(std::uint64_t stamp, std::uint32_t limit, std::uint64_t now) {
 }
 
 bool validTiming(const Timing &timing) {
-    return timing.feedback_timeout_ms > 0u && timing.command_timeout_ms > 0u &&
-           timing.recovery_stable_ms > 0u && timing.enable_timeout_ms > 0u;
+    return timing.feedback_timeout_ms > 0u && timing.command_timeout_ms > 0u && timing.recovery_stable_ms > 0u &&
+           timing.enable_timeout_ms > 0u;
 }
 
 float djiProtocolCurrentMax(dji::Model model) {
@@ -48,8 +48,7 @@ std::int16_t djiRawCurrentMax(dji::Model model) {
 }
 
 bool validDjiModel(dji::Model model) {
-    return model == dji::Model::M3508C620 || model == dji::Model::M2006C610 ||
-           model == dji::Model::GM6020Current;
+    return model == dji::Model::M3508C620 || model == dji::Model::M2006C610 || model == dji::Model::GM6020Current;
 }
 
 bool validDmMode(dm::ControlMode mode) {
@@ -80,12 +79,12 @@ int checkCommand(const dm::Config &config, const Command &command) {
         if (config.mode != dm::ControlMode::Mit)
             return -ENOTSUP;
         const dm::MitCommand &mit = command.mit;
-        if (!std::isfinite(mit.position_rad) || !std::isfinite(mit.velocity_rad_s) ||
-            !std::isfinite(mit.kp) || !std::isfinite(mit.kd) || !std::isfinite(mit.torque_ff_nm))
+        if (!std::isfinite(mit.position_rad) || !std::isfinite(mit.velocity_rad_s) || !std::isfinite(mit.kp) ||
+            !std::isfinite(mit.kd) || !std::isfinite(mit.torque_ff_nm))
             return -EINVAL;
         return std::fabs(mit.position_rad) <= limits.position_max_rad &&
-                       std::fabs(mit.velocity_rad_s) <= limits.velocity_max_rad_s &&
-                       mit.kp >= 0.0f && mit.kp <= 500.0f && mit.kd >= 0.0f && mit.kd <= 5.0f &&
+                       std::fabs(mit.velocity_rad_s) <= limits.velocity_max_rad_s && mit.kp >= 0.0f &&
+                       mit.kp <= 500.0f && mit.kd >= 0.0f && mit.kd <= 5.0f &&
                        std::fabs(mit.torque_ff_nm) <= config.torque_limit_nm
                    ? 0
                    : -ERANGE;
@@ -115,8 +114,8 @@ int checkCommand(const dm::Config &config, const Command &command) {
 namespace dji {
 
 Config gm6020(const Gm6020Options &options) {
-    return {Model::GM6020Current, options.id, options.current_limit_a, 1.0f,
-            options.encoder_zero_ticks, options.current_mode_confirmed, options.timing};
+    return {Model::GM6020Current,           options.id,    options.current_limit_a, 1.0f, options.encoder_zero_ticks,
+            options.current_mode_confirmed, options.timing};
 }
 
 Config m3508(const M3508Options &options) {
@@ -128,14 +127,12 @@ Config m2006(const M2006Options &options) {
 }
 
 int describe(const Config &config, Descriptor &out) {
-    if (!validDjiModel(config.model) || config.id == 0u ||
-        config.id > (config.model == Model::GM6020Current ? 7u : 8u))
+    if (!validDjiModel(config.model) || config.id == 0u || config.id > (config.model == Model::GM6020Current ? 7u : 8u))
         return -ERANGE;
     Descriptor next{};
     next.model = config.model;
     next.motor_id = config.id;
-    next.feedback_id = static_cast<std::uint16_t>(
-        (config.model == Model::GM6020Current ? 0x204u : 0x200u) + config.id);
+    next.feedback_id = static_cast<std::uint16_t>((config.model == Model::GM6020Current ? 0x204u : 0x200u) + config.id);
     next.command_id = config.id <= 4u ? (config.model == Model::GM6020Current ? 0x1FEu : 0x200u)
                                       : (config.model == Model::GM6020Current ? 0x2FEu : 0x1FFu);
     next.command_slot = config.id <= 4u ? config.id - 1u : config.id - 5u;
@@ -153,9 +150,13 @@ namespace dm {
 
 namespace {
 Config makeConfig(const J4310Options &options, ControlMode mode) {
-    return {Model::J4310_2EC_V1_1, mode, options.id, options.master_id,
+    return {Model::J4310_2EC_V1_1,
+            mode,
+            options.id,
+            options.master_id,
             {options.position_max_rad, options.velocity_max_rad_s, options.torque_max_nm},
-            options.torque_limit_nm, options.timing};
+            options.torque_limit_nm,
+            options.timing};
 }
 } // namespace
 
@@ -181,8 +182,9 @@ int describe(const Config &config, Descriptor &out) {
     next.mode = config.mode;
     next.motor_id = config.id;
     next.master_id = config.master_id;
-    next.control_id = static_cast<std::uint16_t>(config.id +
-        (config.mode == ControlMode::Mit ? 0u : config.mode == ControlMode::PositionVelocity ? 0x100u : 0x200u));
+    next.control_id = static_cast<std::uint16_t>(config.id + (config.mode == ControlMode::Mit                ? 0u
+                                                              : config.mode == ControlMode::PositionVelocity ? 0x100u
+                                                                                                             : 0x200u));
     next.limits = config.limits;
     next.torque_limit_nm = config.torque_limit_nm;
     out = next;
@@ -191,78 +193,83 @@ int describe(const Config &config, Descriptor &out) {
 
 } // namespace dm
 
-Motor::Motor(dji::Config config) : config_(config), protocol_state_(DjiRuntime{}) {}
-Motor::Motor(dm::Config config) : config_(config), protocol_state_(DmRuntime{}) {}
+Motor::Motor(dji::Config config) : config_(config), protocol_state_(DjiRuntime{}) {
+}
+Motor::Motor(dm::Config config) : config_(config), protocol_state_(DmRuntime{}) {
+}
 
 int Motor::validateConfig() const {
-    return std::visit([](const auto &config) -> int {
-        if (!validTiming(config.timing))
-            return -ERANGE;
-        using T = std::decay_t<decltype(config)>;
-        if constexpr (std::is_same_v<T, dji::Config>) {
+    return std::visit(
+        [](const auto &config) -> int {
+            if (!validTiming(config.timing))
+                return -ERANGE;
+            using T = std::decay_t<decltype(config)>;
+            if constexpr (std::is_same_v<T, dji::Config>) {
 #if !defined(CONFIG_SKYWALKER_MOTOR_DJI)
-            return -ENOTSUP;
+                return -ENOTSUP;
 #endif
-            if (!validDjiModel(config.model) || config.id == 0u ||
-                config.id > (config.model == dji::Model::GM6020Current ? 7u : 8u))
-                return -ERANGE;
-            if (!std::isfinite(config.current_limit_a) || config.current_limit_a <= 0.0f ||
-                config.current_limit_a > djiProtocolCurrentMax(config.model) ||
-                !std::isfinite(config.gear_ratio) || config.gear_ratio <= 0.0f ||
-                config.encoder_zero_ticks >= kDjiEncoderTicks)
-                return -ERANGE;
-            if (config.model == dji::Model::GM6020Current && !config.current_mode_confirmed)
-                return -EINVAL;
-        }
-        else {
+                if (!validDjiModel(config.model) || config.id == 0u ||
+                    config.id > (config.model == dji::Model::GM6020Current ? 7u : 8u))
+                    return -ERANGE;
+                if (!std::isfinite(config.current_limit_a) || config.current_limit_a <= 0.0f ||
+                    config.current_limit_a > djiProtocolCurrentMax(config.model) || !std::isfinite(config.gear_ratio) ||
+                    config.gear_ratio <= 0.0f || config.encoder_zero_ticks >= kDjiEncoderTicks)
+                    return -ERANGE;
+                if (config.model == dji::Model::GM6020Current && !config.current_mode_confirmed)
+                    return -EINVAL;
+            }
+            else {
 #if !defined(CONFIG_SKYWALKER_MOTOR_DM)
-            return -ENOTSUP;
+                return -ENOTSUP;
 #endif
-            if (config.model != dm::Model::J4310_2EC_V1_1 || !validDmMode(config.mode))
-                return -EINVAL;
-            const dm::Limits &limits = config.limits;
-            if (config.id == 0u || config.id > 15u || config.master_id > CAN_STD_ID_MASK ||
-                !std::isfinite(limits.position_max_rad) || limits.position_max_rad <= 0.0f ||
-                !std::isfinite(limits.velocity_max_rad_s) || limits.velocity_max_rad_s <= 0.0f ||
-                !std::isfinite(limits.torque_max_nm) || limits.torque_max_nm <= 0.0f ||
-                !std::isfinite(config.torque_limit_nm) || config.torque_limit_nm <= 0.0f ||
-                config.torque_limit_nm > limits.torque_max_nm)
-                return -ERANGE;
-        }
-        return 0;
-    }, config_);
+                if (config.model != dm::Model::J4310_2EC_V1_1 || !validDmMode(config.mode))
+                    return -EINVAL;
+                const dm::Limits &limits = config.limits;
+                if (config.id == 0u || config.id > 15u || config.master_id > CAN_STD_ID_MASK ||
+                    !std::isfinite(limits.position_max_rad) || limits.position_max_rad <= 0.0f ||
+                    !std::isfinite(limits.velocity_max_rad_s) || limits.velocity_max_rad_s <= 0.0f ||
+                    !std::isfinite(limits.torque_max_nm) || limits.torque_max_nm <= 0.0f ||
+                    !std::isfinite(config.torque_limit_nm) || config.torque_limit_nm <= 0.0f ||
+                    config.torque_limit_nm > limits.torque_max_nm)
+                    return -ERANGE;
+            }
+            return 0;
+        },
+        config_);
 }
 
 MotorInfo Motor::info() const {
-    return std::visit([](const auto &config) {
-        MotorInfo out{};
-        out.timing = config.timing;
-        using T = std::decay_t<decltype(config)>;
-        if constexpr (std::is_same_v<T, dji::Config>) {
-            out.capabilities = CommandCurrent | FeedbackPosition | FeedbackVelocity | FeedbackCurrent;
-            if (config.model != dji::Model::M2006C610)
-                out.capabilities |= FeedbackTemperature;
-            if (config.model == dji::Model::GM6020Current && config.gear_ratio == 1.0f)
-                out.capabilities |= FeedbackAbsolutePosition;
-            out.current_limit_a = config.current_limit_a;
-        }
-        else {
-            out.capabilities = FeedbackPosition | FeedbackVelocity | FeedbackTorque | FeedbackTemperature;
-            switch (config.mode) {
-            case dm::ControlMode::Mit:
-                out.capabilities |= CommandTorque | CommandMit;
-                break;
-            case dm::ControlMode::Velocity:
-                out.capabilities |= CommandVelocity;
-                break;
-            case dm::ControlMode::PositionVelocity:
-                out.capabilities |= CommandPositionVelocity;
-                break;
+    return std::visit(
+        [](const auto &config) {
+            MotorInfo out{};
+            out.timing = config.timing;
+            using T = std::decay_t<decltype(config)>;
+            if constexpr (std::is_same_v<T, dji::Config>) {
+                out.capabilities = CommandCurrent | FeedbackPosition | FeedbackVelocity | FeedbackCurrent;
+                if (config.model != dji::Model::M2006C610)
+                    out.capabilities |= FeedbackTemperature;
+                if (config.model == dji::Model::GM6020Current && config.gear_ratio == 1.0f)
+                    out.capabilities |= FeedbackAbsolutePosition;
+                out.current_limit_a = config.current_limit_a;
             }
-            out.torque_limit_nm = config.torque_limit_nm;
-        }
-        return out;
-    }, config_);
+            else {
+                out.capabilities = FeedbackPosition | FeedbackVelocity | FeedbackTorque | FeedbackTemperature;
+                switch (config.mode) {
+                case dm::ControlMode::Mit:
+                    out.capabilities |= CommandTorque | CommandMit;
+                    break;
+                case dm::ControlMode::Velocity:
+                    out.capabilities |= CommandVelocity;
+                    break;
+                case dm::ControlMode::PositionVelocity:
+                    out.capabilities |= CommandPositionVelocity;
+                    break;
+                }
+                out.torque_limit_nm = config.torque_limit_nm;
+            }
+            return out;
+        },
+        config_);
 }
 
 MotorSnapshot Motor::snapshot() const {
@@ -288,7 +295,8 @@ bool Motor::feedbackFresh(std::uint64_t now_ms) const {
 bool Motor::readyLocked(std::uint64_t now) const {
     const bool drive_disabled = !std::holds_alternative<dm::Config>(config_) ||
                                 (snapshot_.native_drive_status_valid &&
-                                 snapshot_.native_drive_status == static_cast<std::uint32_t>(dm::DriveStatus::Disabled));
+                                 snapshot_.native_drive_status ==
+                                     static_cast<std::uint32_t>(dm::DriveStatus::Disabled));
     return started_ && safe_prepared_ && drive_disabled && snapshot_.state == MotorState::Disabled &&
            isFresh(snapshot_.feedback.timestamp_ms, info().timing.feedback_timeout_ms, now) &&
            feedback_stable_since_ms_ != 0u && now >= feedback_stable_since_ms_ &&
@@ -391,7 +399,8 @@ void Motor::requestDisable() {
     snapshot_.output_permitted = false;
     if (snapshot_.state != MotorState::Fault)
         snapshot_.state = isFresh(snapshot_.feedback.timestamp_ms, info().timing.feedback_timeout_ms, now)
-                              ? MotorState::Disabled : MotorState::Offline;
+                              ? MotorState::Disabled
+                              : MotorState::Offline;
     staged_.valid = false;
     enable_pending_ = false;
     enable_tx_done_ = false;
@@ -418,8 +427,7 @@ void Motor::requestDisable() {
 int Motor::requestClearFault() {
     const k_spinlock_key_t key = k_spin_lock(&lock_);
     int ret = 0;
-    if (snapshot_.output_permitted || snapshot_.state == MotorState::Active ||
-        snapshot_.state == MotorState::Enabling)
+    if (snapshot_.output_permitted || snapshot_.state == MotorState::Active || snapshot_.state == MotorState::Enabling)
         ret = -EBUSY;
     else if (snapshot_.state != MotorState::Fault)
         ret = -EALREADY;
@@ -465,8 +473,7 @@ int Motor::clearFault() {
 
 void Motor::grantGroupActive(std::uint64_t generation) {
     const k_spinlock_key_t key = k_spin_lock(&lock_);
-    if (enable_pending_ && snapshot_.state == MotorState::Enabling &&
-        snapshot_.enable_generation == generation) {
+    if (enable_pending_ && snapshot_.state == MotorState::Enabling && snapshot_.enable_generation == generation) {
         snapshot_.state = MotorState::Active;
         snapshot_.output_permitted = true;
         enable_pending_ = false;
@@ -481,8 +488,8 @@ void Motor::markSafePrepared(std::uint64_t expected_stop_generation) {
     const bool stop_confirmed = std::holds_alternative<dji::Config>(config_)
                                     ? snapshot_.stop.progress == StopProgress::TxComplete
                                     : snapshot_.stop.progress == StopProgress::DriveConfirmed;
-    if ((expected_stop_generation != 0u &&
-         snapshot_.stop.request_generation != expected_stop_generation) || !stop_confirmed) {
+    if ((expected_stop_generation != 0u && snapshot_.stop.request_generation != expected_stop_generation) ||
+        !stop_confirmed) {
         k_spin_unlock(&lock_, key);
         return;
     }
@@ -495,11 +502,9 @@ void Motor::markSafePrepared(std::uint64_t expected_stop_generation) {
     k_spin_unlock(&lock_, key);
 }
 
-void Motor::markEnableTxComplete(std::uint64_t generation, std::uint64_t completed_ms,
-                                 std::uint64_t completed_order) {
+void Motor::markEnableTxComplete(std::uint64_t generation, std::uint64_t completed_ms, std::uint64_t completed_order) {
     const k_spinlock_key_t key = k_spin_lock(&lock_);
-    if (enable_pending_ && snapshot_.state == MotorState::Enabling &&
-        snapshot_.enable_generation == generation) {
+    if (enable_pending_ && snapshot_.state == MotorState::Enabling && snapshot_.enable_generation == generation) {
         enable_tx_done_ = true;
         enable_tx_completed_ms_ = completed_ms;
         enable_tx_completed_order_ = completed_order;
@@ -520,8 +525,7 @@ void Motor::markClearTxComplete(std::uint64_t completed_ms, std::uint64_t comple
 void Motor::markPrepared(std::uint64_t generation) {
     Group *group = nullptr;
     const k_spinlock_key_t key = k_spin_lock(&lock_);
-    if (enable_pending_ && snapshot_.state == MotorState::Enabling &&
-        snapshot_.enable_generation == generation) {
+    if (enable_pending_ && snapshot_.state == MotorState::Enabling && snapshot_.enable_generation == generation) {
         if (group_ == nullptr) {
             snapshot_.state = MotorState::Active;
             snapshot_.output_permitted = true;
@@ -569,7 +573,8 @@ void Motor::markFaultCleared() {
     clear_tx_completed_order_ = 0;
     if (snapshot_.state == MotorState::Fault) {
         snapshot_.state = isFresh(snapshot_.feedback.timestamp_ms, info().timing.feedback_timeout_ms, now)
-                              ? MotorState::Disabled : MotorState::Offline;
+                              ? MotorState::Disabled
+                              : MotorState::Offline;
         snapshot_.output_permitted = false;
         staged_.valid = false;
         safe_prepared_ = false;
@@ -590,8 +595,7 @@ void Motor::markFaultCleared() {
 int Motor::bindProducer(const void *producer, float velocity_abs_max_rad_s, float temperature_max_c,
                         std::uint32_t required_feedback, bool require_position_reference) {
     if (producer == nullptr || !std::isfinite(velocity_abs_max_rad_s) || velocity_abs_max_rad_s <= 0.0f ||
-        !std::isfinite(temperature_max_c) || temperature_max_c < 0.0f ||
-        (required_feedback & FeedbackVelocity) == 0u ||
+        !std::isfinite(temperature_max_c) || temperature_max_c < 0.0f || (required_feedback & FeedbackVelocity) == 0u ||
         (require_position_reference && (required_feedback & FeedbackPosition) == 0u))
         return -EINVAL;
     if (temperature_max_c > 0.0f)
@@ -610,8 +614,7 @@ int Motor::bindProducer(const void *producer, float velocity_abs_max_rad_s, floa
         ret = -EBUSY;
     else {
         producer_ = producer;
-        producer_safety_ = {velocity_abs_max_rad_s, temperature_max_c, required_feedback,
-                            require_position_reference};
+        producer_safety_ = {velocity_abs_max_rad_s, temperature_max_c, required_feedback, require_position_reference};
     }
     k_spin_unlock(&lock_, key);
     return ret;
@@ -625,8 +628,7 @@ int Motor::checkProducerSafetyLocked() const {
         (producer_safety_.require_position_reference && !snapshot_.position_reference_valid))
         return -ENODATA;
     if (!std::isfinite(feedback.velocity_rad_s) ||
-        ((producer_safety_.required_feedback & FeedbackPosition) != 0u &&
-         !std::isfinite(feedback.position_rad)) ||
+        ((producer_safety_.required_feedback & FeedbackPosition) != 0u && !std::isfinite(feedback.position_rad)) ||
         ((producer_safety_.required_feedback & FeedbackAbsolutePosition) != 0u &&
          !std::isfinite(feedback.absolute_position_rad)))
         return -EINVAL;
@@ -641,8 +643,7 @@ int Motor::checkProducerSafetyLocked() const {
     if (std::holds_alternative<dm::Config>(config_)) {
         if (!snapshot_.native_temperatures_valid)
             return -ENODATA;
-        if (!std::isfinite(snapshot_.native_mos_temperature_c) ||
-            !std::isfinite(snapshot_.native_rotor_temperature_c))
+        if (!std::isfinite(snapshot_.native_mos_temperature_c) || !std::isfinite(snapshot_.native_rotor_temperature_c))
             return -EINVAL;
         if (snapshot_.native_mos_temperature_c >= producer_safety_.temperature_max_c ||
             snapshot_.native_rotor_temperature_c >= producer_safety_.temperature_max_c)
@@ -817,7 +818,7 @@ int Motor::acceptDjiFeedback(const dji::RawFeedback &raw, std::uint64_t received
     }
     DjiRuntime &state = std::get<DjiRuntime>(protocol_state_);
     const bool gap = state.has_encoder &&
-        received_ms - snapshot_.feedback.timestamp_ms > config.timing.feedback_timeout_ms;
+                     received_ms - snapshot_.feedback.timestamp_ms > config.timing.feedback_timeout_ms;
     if (gap) {
         if (snapshot_.position_reference_valid &&
             snapshot_.reference_generation < std::numeric_limits<std::uint64_t>::max())
@@ -841,7 +842,7 @@ int Motor::acceptDjiFeedback(const dji::RawFeedback &raw, std::uint64_t received
     state.last_encoder = raw.encoder;
     if (snapshot_.position_reference_valid) {
         next.position_rad = static_cast<float>(state.total_encoder_ticks * kTwoPi /
-                                                (kDjiEncoderTicks * static_cast<double>(config.gear_ratio)));
+                                               (kDjiEncoderTicks * static_cast<double>(config.gear_ratio)));
         next.valid |= FeedbackPosition;
     }
     snapshot_.feedback = next;
@@ -880,7 +881,7 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     }
     DmRuntime &state = std::get<DmRuntime>(protocol_state_);
     const bool gap = state.has_native_position &&
-        received_ms - snapshot_.feedback.timestamp_ms > config.timing.feedback_timeout_ms;
+                     received_ms - snapshot_.feedback.timestamp_ms > config.timing.feedback_timeout_ms;
     if (gap) {
         if (snapshot_.position_reference_valid &&
             snapshot_.reference_generation < std::numeric_limits<std::uint64_t>::max())
@@ -898,8 +899,7 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     }
     else if (!gap && snapshot_.position_reference_valid) {
         const double p_max = static_cast<double>(config.limits.position_max_rad);
-        double delta = static_cast<double>(decoded.position_rad) -
-                       static_cast<double>(state.last_native_position_rad);
+        double delta = static_cast<double>(decoded.position_rad) - static_cast<double>(state.last_native_position_rad);
         if (delta > p_max)
             delta -= 2.0 * p_max;
         else if (delta < -p_max)
@@ -908,8 +908,7 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     }
     state.last_native_position_rad = decoded.position_rad;
     if (snapshot_.position_reference_valid) {
-        next.position_rad = static_cast<float>(state.position_offset_rad +
-                                               state.accumulated_native_rad);
+        next.position_rad = static_cast<float>(state.position_offset_rad + state.accumulated_native_rad);
         next.valid |= FeedbackPosition;
     }
     snapshot_.feedback = next;
@@ -923,23 +922,20 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     snapshot_.native_drive_status_valid = true;
     // RX and TX callbacks may occur in the same uptime millisecond. Confirm
     // only feedback whose callback followed the safety TX callback.
-    if (decoded.raw.status == dm::DriveStatus::Disabled && safe_tx_done_ &&
-        safe_tx_completed_order_ != 0u && callback_order > safe_tx_completed_order_ &&
-        (snapshot_.stop.progress == StopProgress::TxComplete ||
-         snapshot_.stop.progress == StopProgress::Unreachable))
+    if (decoded.raw.status == dm::DriveStatus::Disabled && safe_tx_done_ && safe_tx_completed_order_ != 0u &&
+        callback_order > safe_tx_completed_order_ &&
+        (snapshot_.stop.progress == StopProgress::TxComplete || snapshot_.stop.progress == StopProgress::Unreachable))
         snapshot_.stop.progress = StopProgress::DriveConfirmed;
     if (started_ && snapshot_.state == MotorState::Offline && safe_prepared_ &&
         decoded.raw.status == dm::DriveStatus::Disabled)
         snapshot_.state = MotorState::Disabled;
     unexpected_disabled = snapshot_.state == MotorState::Active && decoded.raw.status == dm::DriveStatus::Disabled;
     drive_fault = dm::isFaultStatus(decoded.raw.status);
-    clear_confirmed = clear_pending_ && clear_tx_done_ &&
-                      clear_tx_completed_order_ != 0u && callback_order > clear_tx_completed_order_ &&
-                      decoded.raw.status == dm::DriveStatus::Disabled;
-    if (decoded.raw.status == dm::DriveStatus::Enabled && !snapshot_.output_permitted &&
-        !enable_pending_ && !clear_pending_) {
-        const bool was_confirmed = safe_prepared_ ||
-                                   snapshot_.stop.progress == StopProgress::DriveConfirmed;
+    clear_confirmed = clear_pending_ && clear_tx_done_ && clear_tx_completed_order_ != 0u &&
+                      callback_order > clear_tx_completed_order_ && decoded.raw.status == dm::DriveStatus::Disabled;
+    if (decoded.raw.status == dm::DriveStatus::Enabled && !snapshot_.output_permitted && !enable_pending_ &&
+        !clear_pending_) {
+        const bool was_confirmed = safe_prepared_ || snapshot_.stop.progress == StopProgress::DriveConfirmed;
         safe_prepared_ = false;
         if (was_confirmed && !safe_pending_ &&
             snapshot_.stop.request_generation < std::numeric_limits<std::uint64_t>::max()) {
@@ -974,8 +970,7 @@ void Motor::raiseFault(const FaultInfo &fault) {
     if (record.occurred_ms == 0u)
         record.occurred_ms = nowMs();
     const k_spinlock_key_t check_key = k_spin_lock(&lock_);
-    const bool duplicate = snapshot_.state == MotorState::Fault &&
-                           snapshot_.last_fault.reason == record.reason &&
+    const bool duplicate = snapshot_.state == MotorState::Fault && snapshot_.last_fault.reason == record.reason &&
                            snapshot_.last_fault.source_motor == record.source_motor;
     k_spin_unlock(&lock_, check_key);
     if (duplicate)

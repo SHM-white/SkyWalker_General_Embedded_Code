@@ -10,7 +10,8 @@ namespace skywalker::samples::dm {
 
 struct Session {
     Session(const device *can_device, motor::dm::Config motor_config)
-        : can(can_device), config(motor_config), motor(config), bus(can) {}
+        : can(can_device), config(motor_config), motor(config), bus(can) {
+    }
 
     const device *can;
     motor::dm::Config config;

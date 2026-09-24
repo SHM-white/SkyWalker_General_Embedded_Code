@@ -43,15 +43,15 @@ int main() {
         return -ENODEV;
     }
 
-    static skywalker::samples::dm::Session session{
-        DEVICE_DT_GET(DT_NODELABEL(can1)),
-        skywalker::motor::dm::j4310PositionVelocity({.id = 1,
-                                                     .master_id = 0x11,
-                                                     .position_max_rad = 12.5f,
-                                                     .velocity_max_rad_s = 45.0f,
-                                                     .torque_max_nm = 18.0f,
-                                                     .torque_limit_nm = 0.05f,
-                                                     .timing = {50, 20, 50, 3000}})};
+    static skywalker::samples::dm::Session session{DEVICE_DT_GET(DT_NODELABEL(can1)),
+                                                   skywalker::motor::dm::j4310PositionVelocity(
+                                                       {.id = 1,
+                                                        .master_id = 0x11,
+                                                        .position_max_rad = 12.5f,
+                                                        .velocity_max_rad_s = 45.0f,
+                                                        .torque_max_nm = 18.0f,
+                                                        .torque_limit_nm = 0.05f,
+                                                        .timing = {50, 20, 50, 3000}})};
     int ret = skywalker::samples::dm::prepare(session);
     if (ret < 0) {
         return ret;
@@ -109,12 +109,8 @@ int main() {
 
         const auto &feedback = view.feedback;
         const float channels[6] = {
-            target_position_rad,
-            view.native_position_rad,
-            feedback.velocity_rad_s,
-            feedback.torque_nm,
-            view.native_mos_temperature_c,
-            view.native_rotor_temperature_c,
+            target_position_rad, view.native_position_rad,      feedback.velocity_rad_s,
+            feedback.torque_nm,  view.native_mos_temperature_c, view.native_rotor_temperature_c,
         };
         vofa_send(&vofa, channels, 6);
         k_sleep(K_MSEC(kControlPeriodMs));

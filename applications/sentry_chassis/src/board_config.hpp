@@ -15,9 +15,8 @@ namespace board_config {
 
 inline constexpr bool connections_configured = false;
 inline constexpr bool require_referee_for_motion = true;
-inline constexpr std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100,
-                               permission_timeout_ms = 300, feedback_stable_ms = 30,
-                               recovery_retry_ms = 100;
+inline constexpr std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100, permission_timeout_ms = 300,
+                               feedback_stable_ms = 30, recovery_retry_ms = 100;
 // The estimator is disabled until calibrated with this robot's power measurements.
 inline constexpr bool power_model_calibrated = false;
 inline constexpr float idle_power_w = 0, power_per_abs_amp_w = 0, bench_effort_scale = 0.15f;
@@ -67,17 +66,20 @@ inline skywalker::motor::dji::Config driveConfig(std::uint8_t id) {
 // Order: steer FL, FR, RL, RR; drive FL, FR, RL, RR. All four GM6020
 // current-control modes and encoder zeroes must be confirmed on the real robot.
 inline const std::array<ChassisMotorConnection, 8> motors{{
-    {steer_can, steerConfig(1)}, {steer_can, steerConfig(2)},
-    {steer_can, steerConfig(3)}, {steer_can, steerConfig(4)},
-    {drive_can, driveConfig(1)}, {drive_can, driveConfig(2)},
-    {drive_can, driveConfig(3)}, {drive_can, driveConfig(4)},
+    {steer_can, steerConfig(1)},
+    {steer_can, steerConfig(2)},
+    {steer_can, steerConfig(3)},
+    {steer_can, steerConfig(4)},
+    {drive_can, driveConfig(1)},
+    {drive_can, driveConfig(2)},
+    {drive_can, driveConfig(3)},
+    {drive_can, driveConfig(4)},
 }};
 
 inline skywalker::robotics::SwerveChassis::Config chassisConfig() {
     using namespace skywalker::robotics;
     SwerveChassis::Config c{};
-    c.kinematics.locations = {ModuleLocation{0.2f, 0.2f}, {0.2f, -0.2f},
-                              {-0.2f, 0.2f}, {-0.2f, -0.2f}};
+    c.kinematics.locations = {ModuleLocation{0.2f, 0.2f}, {0.2f, -0.2f}, {-0.2f, 0.2f}, {-0.2f, -0.2f}};
     c.kinematics.max_wheel_velocity_m_s = 0.5f;
     for (auto &m : c.modules) {
         m.wheel_radius_m = 0.05f;
@@ -91,7 +93,9 @@ inline skywalker::robotics::SwerveChassis::Config chassisConfig() {
     return c;
 }
 
-inline bool emergencyStopRequested() { return false; }
+inline bool emergencyStopRequested() {
+    return false;
+}
 inline bool takeEmergencyResetRequest() {
 #if DT_NODE_HAS_STATUS(DT_ALIAS(sw0), okay)
     static const gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);

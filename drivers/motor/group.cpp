@@ -59,8 +59,7 @@ bool Group::ready() const {
         return false;
     }
     const k_spinlock_key_t key = k_spin_lock(&lock_);
-    bool all_ready = config_error_ == 0 && member_count_ != 0 && !stopping_ &&
-                     !enable_pending_ && !active_;
+    bool all_ready = config_error_ == 0 && member_count_ != 0 && !stopping_ && !enable_pending_ && !active_;
     if (all_ready) {
         for (std::size_t i = 0; i < member_count_; ++i) {
             if (!members_[i]->busStarted() || !members_[i]->ready()) {
@@ -225,9 +224,7 @@ GroupStatus Group::status() const {
     }
     for (std::size_t i = 0; i < member_count_; ++i) {
         const Motor &member = *members_[i];
-        const bool blocked = result.enable_pending ? !prepared[i]
-                             : result.active         ? !member.active()
-                                                     : !member.ready();
+        const bool blocked = result.enable_pending ? !prepared[i] : result.active ? !member.active() : !member.ready();
         if (blocked) {
             result.blocking_member = &member;
             break;
@@ -283,8 +280,7 @@ void Group::memberPrepared(Motor &member, std::uint64_t enable_generation) {
     }
 
     const MotorSnapshot member_status = member.snapshot();
-    if (member_status.state != MotorState::Enabling ||
-        member_status.enable_generation != enable_generation) {
+    if (member_status.state != MotorState::Enabling || member_status.enable_generation != enable_generation) {
         k_spin_unlock(&lock_, key);
         return;
     }
@@ -303,8 +299,7 @@ void Group::memberPrepared(Motor &member, std::uint64_t enable_generation) {
     }
     for (std::size_t i = 0; i < member_count_; ++i) {
         const MotorSnapshot current = members_[i]->snapshot();
-        if (current.state != MotorState::Active ||
-            current.enable_generation != enable_generation) {
+        if (current.state != MotorState::Active || current.enable_generation != enable_generation) {
             enable_pending_ = false;
             stopping_ = true;
             k_spin_unlock(&lock_, key);
