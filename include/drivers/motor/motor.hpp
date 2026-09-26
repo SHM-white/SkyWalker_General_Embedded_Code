@@ -170,11 +170,12 @@ private:
     bool busStarted() const;
     void markSafePrepared(std::uint64_t expected_stop_generation = 0);
     void markEnableTxComplete(std::uint64_t generation, std::uint64_t completed_ms, std::uint64_t completed_order);
-    void markClearTxComplete(std::uint64_t completed_ms, std::uint64_t completed_order);
+    void markClearTxComplete(std::uint64_t generation, std::uint64_t completed_ms, std::uint64_t completed_order);
     void markPrepared(std::uint64_t generation);
     void markStopped(StopProgress progress, int tx_error, std::uint64_t request_generation,
                      std::uint64_t completed_ms = 0, std::uint64_t completed_order = 0);
-    void markFaultCleared();
+    void markFaultCleared(std::uint64_t generation);
+    void expireFeedbackBeforeAccept(std::uint64_t received_ms, std::uint64_t callback_order = 0);
     int acceptDjiFeedback(const dji::RawFeedback &raw, std::uint64_t received_ms);
     int acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t received_ms, std::uint64_t callback_order);
     void raiseFault(const FaultInfo &fault);
@@ -200,6 +201,7 @@ private:
     bool group_conflict_ = false;
     mutable struct k_spinlock lock_{};
     MotorSnapshot snapshot_{};
+    FaultInfo latched_fault_{};
     StagedCommand staged_{};
     const void *producer_ = nullptr;
     struct ProducerSafety {

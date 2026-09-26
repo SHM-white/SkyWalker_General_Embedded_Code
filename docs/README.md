@@ -16,6 +16,8 @@
 | 做 IMU 姿态 | [06 IMU 与 EKF](06-drivers-imu.md) → [07 Kalman 与矩阵](07-kalman-matrix.md) |
 | 做通信与双主控 | [13 通信协议](13-communication.md) → [14 机器人算法](14-robotics.md) → [15 应用骨架](15-applications.md) |
 
+交互阅读：[架构浏览器](architecture-browser/index.html) · [电机详细工作链路](architecture-browser/index.html#motor-workflow)。
+
 ## 主题文档
 
 | 文档 | 内容 |
@@ -36,6 +38,7 @@
 | [14-robotics.md](14-robotics.md) | 命令、安全、舵轮、Yaw、功率限幅 |
 | [15-applications.md](15-applications.md) | `sentry_chassis` / `sentry_gimbal` 双主控应用骨架 |
 | [16-uart-dma-nocache.md](16-uart-dma-nocache.md) | UART DMA 缓冲区、D-cache 报错原因、修复方式与实机排查 |
+| [17-motor-workflow.md](17-motor-workflow.md) | 电机模块调用图、启动/发送/反馈/停机/恢复、线程弹性、调用示例与诊断 |
 
 ## 源码对照
 

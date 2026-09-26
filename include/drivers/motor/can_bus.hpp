@@ -72,6 +72,9 @@ public:
     }
 
     [[nodiscard]] int start();
+    // Publish this entire bus. Application writers must coordinate their
+    // setter/update + commit batches; multiple control threads may own
+    // different buses. Success acknowledges publication, not CAN completion.
     [[nodiscard]] CommitResult commit();
     BusStatus status() const;
 
@@ -102,6 +105,7 @@ private:
         std::uint64_t operation_id = 0;
         std::uint64_t submitted_ms = 0;
         std::uint64_t enable_generation = 0;
+        std::uint64_t clear_generation = 0;
         std::uint64_t stop_generations[kMaxMotors]{};
         std::size_t unit_index = 0;
         bool busy = false;
@@ -113,6 +117,27 @@ private:
     struct Route {
         std::uint16_t id = 0;
         int filter_id = -1;
+    };
+
+    // I/O-owned storage: frame bytes and their authority are captured together.
+    struct CandidateMotor {
+        StagedCommand command{};
+        std::uint64_t enable_generation = 0;
+        std::uint64_t stop_generation = 0;
+        std::uint64_t feedback_ms = 0;
+        MotorState state = MotorState::Offline;
+        bool included = false;
+        bool output_permitted = false;
+        bool motion = false;
+        bool safe_action = false;
+    };
+    struct TxCandidate {
+        can_frame frame{};
+        CandidateMotor motors[kMaxMotors]{};
+        std::uint64_t sequence = 0;
+        std::uint64_t bus_generation = 0;
+        std::size_t unit_index = 0;
+        TxPurpose purpose = TxPurpose::Target;
     };
 
     int attachBatch(Motor *const *batch, std::size_t count);
@@ -134,10 +159,11 @@ private:
     bool pumpTarget(std::uint64_t now_ms);
     void enterRecovery(int error, FaultReason reason);
     void recoverController(std::uint64_t now_ms);
-    int submit(const can_frame &frame, TxPurpose purpose, std::size_t unit_index, std::uint64_t sequence,
-               std::uint64_t now_ms);
-    int buildTarget(const TxUnit &unit, std::uint64_t now_ms, can_frame &out);
-    int buildSafety(const TxUnit &unit, can_frame &out);
+    void captureCandidate(std::size_t unit_index, TxPurpose purpose);
+    int submitCandidate();
+    int buildTarget(std::uint64_t now_ms);
+    int buildSafety();
+    std::uint32_t nextWaitMs(std::uint64_t now_ms) const;
     bool unitHasPendingSafety(const TxUnit &unit) const;
     bool unitNeedsDmSafetyProbe(const TxUnit &unit, std::uint64_t now_ms) const;
     void updateStopAfterTx(const InFlight &completed);
@@ -176,6 +202,7 @@ private:
     bool rx_overflowed_ = false;
     mutable k_spinlock tx_lock_{};
     InFlight in_flight_{};
+    TxCandidate candidate_{};
     k_sem wake_sem_{};
     k_thread thread_{};
     K_KERNEL_STACK_MEMBER(thread_stack_, CONFIG_SKYWALKER_MOTOR_IO_STACK_SIZE);

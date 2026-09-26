@@ -70,3 +70,7 @@ const auto data = axis.telemetry();
 出错时检查 `drive.snapshot()`、`group.status()` 与 `bus.status()`，停止发送运动命令。`disable()` 立即撤销软件输出许可，但安全帧与 DM 失能确认是异步的，应观察 `snapshot().stop.progress`。对 `MotorState::Fault` 的独立电机调用 `clearFault()`，组内使用 `group.clearFault()`；等待重新 `ready()` 后复位控制器，并显式重新使能。清故障及 CAN 控制器恢复都不会自动恢复运动命令。
 
 参考样例：[DJI 速度](../samples/motor/dji_speed_control/)、[DJI 位置](../samples/motor/dji_position_control/)、[DM MIT 速度](../samples/motor/dm_mit_velocity_control/)、[DM MIT 位置](../samples/motor/dm_mit_position_control/)、[共享总线与 Group](../samples/motor/mixed_topology/) 和 [恢复](../samples/motor/recovery/)。
+
+## 完整工作链路与并发约定
+
+见 [17 电机工作链路](17-motor-workflow.md) 的模块调用图、完整调用示例和故障时序，或在 [浏览器](architecture-browser/index.html#motor-workflow) 中逐步查看。业务线程数量不固定；每个控制器保持单写入方，共享 CAN 的命令发布需协调。发送候选把帧、批次与操作代次绑定，反馈间断先撤销旧许可，快速恢复重新建立稳定窗口，锁存 Fault 不因后续通信恢复而自动清除。公开 setter/update/commit 调用方式保持不变。

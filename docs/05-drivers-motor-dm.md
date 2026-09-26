@@ -72,3 +72,7 @@ CONFIG_SKYWALKER_MOTOR_DM=y
 首次上机须核对物理 CAN 口、终端电阻、电机 ID、Master ID、持久化控制模式和调试助手中的 PMAX/VMAX/TMAX。编码范围或模式不一致会造成拒收、解码错误、位置跳变或立即故障。先设小力矩/速度限幅，确认机构安全、温度和正方向，再逐步增大命令。失能后机构仍可能自由转动。
 
 原生模式样例：[dm_mit_control](../samples/motor/dm_mit_control/)、[dm_velocity_control](../samples/motor/dm_velocity_control/)、[dm_position_control](../samples/motor/dm_position_control/)。MIT 软件闭环样例：[dm_mit_velocity_control](../samples/motor/dm_mit_velocity_control/)、[dm_mit_position_control](../samples/motor/dm_mit_position_control/)。共享反馈路由与跨 CAN 组见 [mixed_topology](../samples/motor/mixed_topology/)。
+
+## 完整工作链路与并发约定
+
+见 [17 电机工作链路](17-motor-workflow.md) 的模块调用图、完整调用示例和故障时序，或在 [浏览器](architecture-browser/index.html#motor-workflow) 中逐步查看。业务线程数量不固定；每个控制器保持单写入方，共享 CAN 的命令发布需协调。发送候选把帧、批次与操作代次绑定，反馈间断先撤销旧许可，快速恢复重新建立稳定窗口，锁存 Fault 不因后续通信恢复而自动清除。公开 setter/update/commit 调用方式保持不变。

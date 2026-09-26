@@ -103,7 +103,7 @@ UART async callback
 
 - `AsyncUart` 的 callback 只复制 RX chunk、维护 DMA buffer 和发送完成标志。
 - `InterBoardLink`、`RefereeParser`、`RemoteService` 规定由一个通信线程拥有。
-- 一个业务控制线程顺序计算多个电机目标并 `commit()`；每条物理 CAN 有自己的 I/O 线程，CAN 回调只入队。
+- 业务控制线程总数由应用决定，可按底盘、云台及周期拆分；每台电机/控制器有明确的命令写入方，共享 CAN 的写入和 commit 必须协调。每条物理 CAN 默认一个 I/O 线程，CAN 回调只保存事件。详细调用图与规则见 [17 电机工作链路](17-motor-workflow.md)。
 - `applications/sentry_chassis` 将链路线程与底盘线程分开，通过 `Latest<T>` 交换值拷贝；`sentry_gimbal` 类似地拆分遥控、裁判、命令、板间和云台线程。
 - `CanBus`、`Motor`、`Group` 应静态存活到应用结束，因为 CAN callback 和 I/O 线程持有这些对象。
 
@@ -116,14 +116,14 @@ UART async callback
 | DJI effort | A |
 | DM MIT effort | N·m |
 | 时间 API | ms 或 s，按函数名/字段后缀区分 |
-| 设备树电机限幅 | `current-limit-ma`、`torque-limit-millinewton-meter` |
+| C++ 电机配置限幅 | `current_limit_a`、`torque_limit_nm` |
 
-不要把 `State`（电机设备 Offline/Ready/Fault）、`BusState`（总线生命周期）和 `ExecutionState`（统一封装 Waiting/Recovering/Ready/Active 等）混为一谈。
+不要把 `MotorState`（Offline/Disabled/Enabling/Active/Fault）、`BusState`（总线生命周期）和应用层 `ExecutionState` 混为一谈。ready 是附带安全准备及反馈稳定条件的查询，不是 MotorState 枚举。
 
 ## 8. 常见设计误区
 
-1. 只改 `prj.conf` 不改 overlay：不会生成电机设备。
+1. 只改 `prj.conf` 而未启用板级物理 CAN：C++ Motor 对象仍无法完成总线启动。
 2. 只改 overlay 不打开 Kconfig：驱动源文件可能根本没有加入构建。
 3. 把 `drivers/pid`（如果外部工程提供设备型 PID）和 `lib/control/pid.h` 的纯算法 PID 当成同一个 API。
 4. 用旧文档里的 `cpp_test`、`dm_common` 等已删除目录；当前电机样例路径以 `rg --files samples/motor` 为准。
-5. 在 UART callback 里直接 arm 电机或执行重控制；这会把中断/回调时序和控制周期耦合起来。
+5. 在 UART callback 里直接使能电机或执行重控制；这会把中断/回调时序和控制周期耦合起来。

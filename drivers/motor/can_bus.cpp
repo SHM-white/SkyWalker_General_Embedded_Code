@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cerrno>
 #include <limits>
+#include <functional>
 #include <variant>
 
 #include <drivers/motor/dji_protocol.hpp>
@@ -22,6 +23,9 @@ namespace {
 #ifndef CONFIG_SKYWALKER_MOTOR_IO_PRIORITY
 #define CONFIG_SKYWALKER_MOTOR_IO_PRIORITY 5
 #endif
+BUILD_ASSERT(CONFIG_SKYWALKER_MOTOR_IO_PRIORITY >= 0 &&
+                 CONFIG_SKYWALKER_MOTOR_IO_PRIORITY < CONFIG_NUM_PREEMPT_PRIORITIES,
+             "Motor I/O requires a valid preemptible priority");
 constexpr std::uint32_t kDmSafetyProbeIntervalMs = 10;
 
 k_spinlock owner_lock{};
@@ -436,7 +440,8 @@ void CanBus::processTx() {
         motor.markEnableTxComplete(completed.enable_generation, completed.completed_ms, completed.completed_order);
     }
     else if (completed.purpose == TxPurpose::ClearFault) {
-        motors_[units_[completed.unit_index].motor_index]->markClearTxComplete(completed.completed_ms,
+        motors_[units_[completed.unit_index].motor_index]->markClearTxComplete(completed.clear_generation,
+                                                                               completed.completed_ms,
                                                                                completed.completed_order);
     }
     else if (completed.purpose == TxPurpose::Probe) {
@@ -558,107 +563,209 @@ bool CanBus::unitNeedsDmSafetyProbe(const TxUnit &unit, std::uint64_t now_ms) co
     return due;
 }
 
-int CanBus::buildTarget(const TxUnit &unit, std::uint64_t now_ms, can_frame &out) {
-    if (unit.kind == UnitKind::Dji) {
-        std::int16_t slots[4]{};
-        for (std::size_t i = 0; i < motor_count_; ++i) {
-            Motor &motor = *motors_[i];
-            const auto *cfg = std::get_if<dji::Config>(&motor.config_);
-            if (cfg == nullptr)
+void CanBus::captureCandidate(std::size_t unit_index, TxPurpose purpose) {
+    candidate_.frame = {};
+    candidate_.unit_index = unit_index;
+    candidate_.purpose = purpose;
+    candidate_.bus_generation = bus_generation_;
+    // One publication, including its sequence. Never read individual slots
+    // again while encoding. This storage is private to this bus's I/O thread.
+    const auto publication_key = k_spin_lock(&publication_lock_);
+    candidate_.sequence = published_sequence_;
+    for (std::size_t i = 0; i < motor_count_; ++i) {
+        candidate_.motors[i] = {};
+        candidate_.motors[i].command = published_[i];
+    }
+    k_spin_unlock(&publication_lock_, publication_key);
+    const TxUnit &unit = units_[unit_index];
+    for (std::size_t i = 0; i < motor_count_; ++i) {
+        Motor &motor = *motors_[i];
+        auto &entry = candidate_.motors[i];
+        if (unit.kind == UnitKind::Dm && i != unit.motor_index)
+            continue;
+        if (unit.kind == UnitKind::Dji) {
+            std::uint16_t rx = 0, tx = 0;
+            std::uint8_t slot = 0;
+            if (!isDji(motor) || describeMotor(motor, rx, tx, slot) < 0 || tx != unit.command_id)
                 continue;
+        }
+        const auto key = k_spin_lock(&motor.lock_);
+        entry.included = true;
+        entry.enable_generation = motor.snapshot_.enable_generation;
+        entry.stop_generation = motor.snapshot_.stop.request_generation;
+        entry.feedback_ms = motor.snapshot_.feedback.timestamp_ms;
+        entry.state = motor.snapshot_.state;
+        entry.output_permitted = motor.snapshot_.output_permitted;
+        entry.safe_action = purpose == TxPurpose::SafeOutput &&
+                            (motor.safe_pending_ || (unit.kind == UnitKind::Dm && entry.state != MotorState::Active &&
+                                                     entry.state != MotorState::Enabling));
+        k_spin_unlock(&motor.lock_, key);
+    }
+}
+
+int CanBus::buildTarget(std::uint64_t now_ms) {
+    const TxUnit &unit = units_[candidate_.unit_index];
+    std::int16_t slots[4]{};
+    for (std::size_t i = 0; i < motor_count_; ++i) {
+        auto &entry = candidate_.motors[i];
+        if (!entry.included)
+            continue;
+        Motor &motor = *motors_[i];
+        const auto &command = entry.command;
+        const Timing timing = motor.info().timing;
+        entry.motion = entry.state == MotorState::Active && entry.output_permitted && command.valid &&
+                       command.enable_generation == entry.enable_generation &&
+                       !elapsed(now_ms, command.written_ms, timing.command_timeout_ms) &&
+                       !elapsed(now_ms, entry.feedback_ms, timing.feedback_timeout_ms) &&
+                       (motor.group_ == nullptr || motor.group_->permits(entry.enable_generation));
+        if (!entry.motion) {
+            if (unit.kind == UnitKind::Dm)
+                return -ENOENT;
+            continue;
+        }
+        entry.safe_action = false; // A live slot is never a stop acknowledgement.
+        if (unit.kind == UnitKind::Dji) {
+            const auto &cfg = std::get<dji::Config>(motor.config_);
             dji::Descriptor descriptor{};
-            if (dji::describe(*cfg, descriptor) < 0 || descriptor.command_id != unit.command_id)
-                continue;
-            StagedCommand command{};
-            const auto key = k_spin_lock(&publication_lock_);
-            command = published_[i];
-            k_spin_unlock(&publication_lock_, key);
-            const MotorSnapshot snapshot = motor.snapshot();
-            if (!motor.active() || !command.valid || command.command.kind != CommandKind::Current ||
-                command.enable_generation != snapshot.enable_generation ||
-                elapsed(now_ms, command.written_ms, cfg->timing.command_timeout_ms) ||
-                elapsed(now_ms, snapshot.feedback.timestamp_ms, cfg->timing.feedback_timeout_ms))
-                continue;
+            if (command.command.kind != CommandKind::Current || dji::describe(cfg, descriptor) < 0)
+                return -EINVAL;
             const float scaled = command.command.primary *
                                  (descriptor.model == dji::Model::M2006C610 ? 10000.0f : 16384.0f) /
                                  descriptor.protocol_current_max_a;
             slots[descriptor.command_slot] = static_cast<std::int16_t>(std::lround(scaled));
+            continue;
         }
-        return dji::buildCommandFrame(out, unit.command_id, slots);
+        const auto &cfg = std::get<dm::Config>(motor.config_);
+        switch (command.command.kind) {
+        case CommandKind::Torque: {
+            dm::MitCommand mit{};
+            mit.torque_ff_nm = command.command.primary;
+            return dm::buildMitFrame(cfg.id, cfg.limits, mit, candidate_.frame);
+        }
+        case CommandKind::Mit:
+            return dm::buildMitFrame(cfg.id, cfg.limits, command.command.mit, candidate_.frame);
+        case CommandKind::Velocity:
+            return dm::buildVelocityFrame(cfg.id, command.command.primary, candidate_.frame);
+        case CommandKind::PositionVelocity:
+            return dm::buildPositionVelocityFrame(cfg.id, command.command.primary, command.command.secondary,
+                                                  candidate_.frame);
+        default:
+            return -ENOTSUP;
+        }
     }
-
-    Motor &motor = *motors_[unit.motor_index];
-    const auto &cfg = std::get<dm::Config>(motor.config_);
-    const MotorSnapshot snapshot = motor.snapshot();
-    StagedCommand command{};
-    const auto key = k_spin_lock(&publication_lock_);
-    command = published_[unit.motor_index];
-    k_spin_unlock(&publication_lock_, key);
-    if (!motor.active() || !command.valid || command.enable_generation != snapshot.enable_generation ||
-        elapsed(now_ms, command.written_ms, cfg.timing.command_timeout_ms) ||
-        elapsed(now_ms, snapshot.feedback.timestamp_ms, cfg.timing.feedback_timeout_ms))
-        return -ENOENT;
-    switch (command.command.kind) {
-    case CommandKind::Torque: {
-        dm::MitCommand mit{};
-        mit.torque_ff_nm = command.command.primary;
-        return dm::buildMitFrame(cfg.id, cfg.limits, mit, out);
-    }
-    case CommandKind::Mit:
-        return dm::buildMitFrame(cfg.id, cfg.limits, command.command.mit, out);
-    case CommandKind::Velocity:
-        return dm::buildVelocityFrame(cfg.id, command.command.primary, out);
-    case CommandKind::PositionVelocity:
-        return dm::buildPositionVelocityFrame(cfg.id, command.command.primary, command.command.secondary, out);
-    default:
-        return -ENOTSUP;
-    }
+    return dji::buildCommandFrame(candidate_.frame, unit.command_id, slots);
 }
 
-int CanBus::buildSafety(const TxUnit &unit, can_frame &out) {
+int CanBus::buildSafety() {
+    const TxUnit &unit = units_[candidate_.unit_index];
     if (unit.kind == UnitKind::Dji)
-        return buildTarget(unit, nowMs(), out); // inactive slots become zero; healthy slots retain their target.
+        return buildTarget(nowMs());
     const auto &cfg = std::get<dm::Config>(motors_[unit.motor_index]->config_);
-    return dm::buildSpecialFrame(cfg.mode, cfg.id, dm::SpecialCommand::Disable, out);
+    return dm::buildSpecialFrame(cfg.mode, cfg.id, dm::SpecialCommand::Disable, candidate_.frame);
 }
 
-int CanBus::submit(const can_frame &frame, TxPurpose purpose, std::size_t unit_index, std::uint64_t sequence,
-                   std::uint64_t now_ms) {
-    const auto key = k_spin_lock(&tx_lock_);
-    if (in_flight_.busy) {
-        k_spin_unlock(&tx_lock_, key);
-        return -EBUSY;
+int CanBus::submitCandidate() {
+    // Keep lifecycle diagnostics independent from ordinary commit results.
+    // The private candidate still retains its publication sequence for encoding.
+    const std::uint64_t sequence = candidate_.purpose == TxPurpose::Target ? candidate_.sequence : 0;
+    // Fixed global order for shared Groups, then this bus's endpoints, then TX.
+    // A Motor belongs to only one bus. No other path holds TX while taking an
+    // endpoint lock, and publication locks are never nested here.
+    Group *groups[kMaxMotors]{};
+    k_spinlock_key_t group_keys[kMaxMotors]{};
+    k_spinlock_key_t motor_keys[kMaxMotors]{};
+    std::size_t group_count = 0;
+    for (std::size_t i = 0; i < motor_count_; ++i) {
+        Group *group = motors_[i]->group_;
+        if (candidate_.motors[i].included && group != nullptr &&
+            std::find(groups, groups + group_count, group) == groups + group_count)
+            groups[group_count++] = group;
     }
-    if (next_operation_id_ == std::numeric_limits<std::uint64_t>::max()) {
-        k_spin_unlock(&tx_lock_, key);
-        return -EOVERFLOW;
+    std::sort(groups, groups + group_count, std::less<Group *>{});
+    for (std::size_t g = 0; g < group_count; ++g)
+        group_keys[g] = k_spin_lock(&groups[g]->lock_);
+    for (std::size_t i = 0; i < motor_count_; ++i) {
+        if (candidate_.motors[i].included)
+            motor_keys[i] = k_spin_lock(&motors_[i]->lock_);
     }
-    in_flight_ = {};
-    in_flight_.frame = frame;
-    in_flight_.purpose = purpose;
-    in_flight_.unit_index = unit_index;
-    in_flight_.sequence = sequence;
-    in_flight_.bus_generation = bus_generation_;
-    in_flight_.operation_id = next_operation_id_++;
-    in_flight_.submitted_ms = now_ms;
-    if (purpose == TxPurpose::Enable || purpose == TxPurpose::Probe)
-        in_flight_.enable_generation = motors_[units_[unit_index].motor_index]->snapshot().enable_generation;
-    if (purpose == TxPurpose::SafeOutput) {
-        for (std::size_t i = 0; i < motor_count_; ++i)
-            in_flight_.stop_generations[i] = motors_[i]->snapshot().stop.request_generation;
+    const auto tx_key = k_spin_lock(&tx_lock_);
+    const auto now = nowMs();
+    int error = 0;
+    if (in_flight_.busy)
+        error = -EBUSY;
+    else if (next_operation_id_ == std::numeric_limits<std::uint64_t>::max())
+        error = -EOVERFLOW;
+    else if (candidate_.bus_generation != bus_generation_)
+        error = -EAGAIN;
+    for (std::size_t i = 0; error == 0 && i < motor_count_; ++i) {
+        const auto &entry = candidate_.motors[i];
+        if (!entry.included)
+            continue;
+        const Motor &motor = *motors_[i];
+        const auto &view = motor.snapshot_;
+        const Group *group = motor.group_;
+        if (view.enable_generation != entry.enable_generation ||
+            view.stop.request_generation != entry.stop_generation || view.state != entry.state ||
+            view.output_permitted != entry.output_permitted) {
+            error = -EAGAIN;
+            break;
+        }
+        const Timing timing = motor.info().timing;
+        if (entry.motion &&
+            (elapsed(now, entry.command.written_ms, timing.command_timeout_ms) ||
+             elapsed(now, view.feedback.timestamp_ms, timing.feedback_timeout_ms) ||
+             (group != nullptr && (!group->active_ || group->enable_generation_ != entry.enable_generation))))
+            error = -EAGAIN;
+        if (candidate_.purpose == TxPurpose::Enable || candidate_.purpose == TxPurpose::Probe) {
+            if (!motor.enable_pending_ || view.state != MotorState::Enabling ||
+                elapsed(now, view.feedback.timestamp_ms, timing.feedback_timeout_ms) ||
+                elapsed(now, motor.enable_requested_at_ms_, timing.enable_timeout_ms) ||
+                (group != nullptr &&
+                 (!group->enable_pending_ || group->stopping_ || group->enable_generation_ != entry.enable_generation)))
+                error = -EAGAIN;
+        }
+        if (candidate_.purpose == TxPurpose::ClearFault &&
+            (!motor.clear_pending_ || motor.clear_tx_done_ || view.state != MotorState::Fault))
+            error = -EAGAIN;
     }
-    in_flight_.busy = true;
-    k_spin_unlock(&tx_lock_, key);
+    if (error == 0) {
+        in_flight_ = {};
+        in_flight_.frame = candidate_.frame;
+        in_flight_.purpose = candidate_.purpose;
+        in_flight_.unit_index = candidate_.unit_index;
+        in_flight_.sequence = sequence;
+        in_flight_.bus_generation = candidate_.bus_generation;
+        in_flight_.operation_id = next_operation_id_++;
+        in_flight_.submitted_ms = now;
+        const auto &endpoint = candidate_.motors[units_[candidate_.unit_index].motor_index];
+        in_flight_.enable_generation = endpoint.enable_generation;
+        in_flight_.clear_generation = endpoint.stop_generation;
+        for (std::size_t i = 0; i < motor_count_; ++i) {
+            if (candidate_.motors[i].included && candidate_.motors[i].safe_action)
+                in_flight_.stop_generations[i] = candidate_.motors[i].stop_generation;
+        }
+        in_flight_.busy = true; // Linearization point: disable permits at most this one residual frame.
+    }
+    k_spin_unlock(&tx_lock_, tx_key);
+    for (std::size_t i = motor_count_; i-- > 0;) {
+        if (candidate_.motors[i].included)
+            k_spin_unlock(&motors_[i]->lock_, motor_keys[i]);
+    }
+    for (std::size_t g = group_count; g-- > 0;)
+        k_spin_unlock(&groups[g]->lock_, group_keys[g]);
+    if (error != 0) {
+        if (error == -EAGAIN)
+            wake(); // Rebuild; never attach current generations to stale bytes.
+        return error;
+    }
 
-    // The slot and callback context remain owned until completion or confirmed
-    // controller cancellation. CAN operations never run while holding a spinlock.
     const int ret = can_send(can_, &in_flight_.frame, K_NO_WAIT, onTxDone, this);
     if (ret < 0) {
         const auto cancel_key = k_spin_lock(&tx_lock_);
         in_flight_.busy = false;
         k_spin_unlock(&tx_lock_, cancel_key);
         const auto state_key = k_spin_lock(&state_lock_);
-        status_.last_tx = {true, sequence, frame.id, purpose, ret, nowMs()};
+        status_.last_tx = {true, sequence, candidate_.frame.id, candidate_.purpose, ret, nowMs()};
         status_.last_error = ret;
         k_spin_unlock(&state_lock_, state_key);
         enterRecovery(ret, FaultReason::TransportError);
@@ -682,6 +789,8 @@ void CanBus::updateStopAfterTx(const InFlight &completed) {
             if (!isDji(motor) || describeMotor(motor, rx, tx, slot) < 0 || tx != unit.command_id)
                 continue;
         }
+        if (completed.stop_generations[i] == 0)
+            continue; // This frame did not carry a safety action for this endpoint.
         const auto snapshot = motor.snapshot();
         if (snapshot.stop.progress == StopProgress::Pending ||
             (unit.kind == UnitKind::Dm &&
@@ -708,13 +817,13 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
     for (std::size_t u = 0; u < unit_count_; ++u) {
         if (!unitHasPendingSafety(units_[u]))
             continue;
-        can_frame frame{};
-        const int ret = buildSafety(units_[u], frame);
+        captureCandidate(u, TxPurpose::SafeOutput);
+        const int ret = buildSafety();
         if (ret < 0) {
             enterRecovery(ret, FaultReason::TransportError);
             return;
         }
-        (void)submit(frame, TxPurpose::SafeOutput, u, 0, now_ms);
+        (void)submitCandidate();
         return;
     }
 
@@ -724,9 +833,10 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
             continue;
         const auto key = k_spin_lock(&motor.lock_);
         const bool clear = motor.clear_pending_;
+        const auto clear_generation = motor.snapshot_.stop.request_generation;
         k_spin_unlock(&motor.lock_, key);
         if (clear) {
-            motor.markFaultCleared();
+            motor.markFaultCleared(clear_generation);
             return;
         }
     }
@@ -743,14 +853,14 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
         if (!clear && !enable)
             continue;
         const auto &cfg = std::get<dm::Config>(motor.config_);
-        can_frame frame{};
+        captureCandidate(u, clear ? TxPurpose::ClearFault : TxPurpose::Enable);
         const auto command = clear ? dm::SpecialCommand::ClearError : dm::SpecialCommand::Enable;
-        const int ret = dm::buildSpecialFrame(cfg.mode, cfg.id, command, frame);
+        const int ret = dm::buildSpecialFrame(cfg.mode, cfg.id, command, candidate_.frame);
         if (ret < 0) {
             motor.raiseFault({FaultReason::TransportError, ret, &motor, now_ms});
             return;
         }
-        (void)submit(frame, clear ? TxPurpose::ClearFault : TxPurpose::Enable, u, 0, now_ms);
+        (void)submitCandidate();
         return;
     }
 
@@ -773,24 +883,24 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
         if (!enabled_after_tx)
             continue;
         const auto &cfg = std::get<dm::Config>(motor.config_);
-        can_frame frame{};
+        captureCandidate(u, TxPurpose::Probe);
         int ret = 0;
         switch (cfg.mode) {
         case dm::ControlMode::Mit:
-            ret = dm::buildMitFrame(cfg.id, cfg.limits, dm::MitCommand{}, frame);
+            ret = dm::buildMitFrame(cfg.id, cfg.limits, dm::MitCommand{}, candidate_.frame);
             break;
         case dm::ControlMode::Velocity:
-            ret = dm::buildVelocityFrame(cfg.id, 0.0f, frame);
+            ret = dm::buildVelocityFrame(cfg.id, 0.0f, candidate_.frame);
             break;
         case dm::ControlMode::PositionVelocity:
-            ret = dm::buildPositionVelocityFrame(cfg.id, native_position, 0.0f, frame);
+            ret = dm::buildPositionVelocityFrame(cfg.id, native_position, 0.0f, candidate_.frame);
             break;
         }
         if (ret < 0) {
             motor.raiseFault({FaultReason::InvalidCommand, ret, &motor, now_ms});
             return;
         }
-        (void)submit(frame, TxPurpose::Probe, u, 0, now_ms);
+        (void)submitCandidate();
         return;
     }
 
@@ -805,15 +915,15 @@ void CanBus::pumpTx(std::uint64_t now_ms) {
         const std::size_t u = (safety_probe_cursor_ + attempt) % unit_count_;
         if (!unitNeedsDmSafetyProbe(units_[u], now_ms))
             continue;
-        can_frame frame{};
-        const int ret = buildSafety(units_[u], frame);
+        captureCandidate(u, TxPurpose::SafeOutput);
+        const int ret = buildSafety();
         if (ret < 0) {
             enterRecovery(ret, FaultReason::TransportError);
             return;
         }
         safety_probe_cursor_ = (u + 1) % unit_count_;
         target_before_safety_probe_ = true;
-        (void)submit(frame, TxPurpose::SafeOutput, u, 0, now_ms);
+        (void)submitCandidate();
         return;
     }
     if (!target_before_safety_probe_ && pumpTarget(now_ms)) {
@@ -826,7 +936,6 @@ bool CanBus::pumpTarget(std::uint64_t now_ms) {
     for (std::size_t attempts = 0; attempts < unit_count_; ++attempts) {
         TxUnit unit{};
         std::size_t index = 0;
-        std::uint64_t sequence = 0;
         const auto key = k_spin_lock(&publication_lock_);
         if (targets_remaining_ == 0) {
             k_spin_unlock(&publication_lock_, key);
@@ -834,12 +943,11 @@ bool CanBus::pumpTarget(std::uint64_t now_ms) {
         }
         index = target_cursor_;
         unit = units_[index];
-        sequence = published_sequence_;
         target_cursor_ = (target_cursor_ + 1) % unit_count_;
         --targets_remaining_;
         k_spin_unlock(&publication_lock_, key);
-        can_frame frame{};
-        const int ret = buildTarget(unit, now_ms, frame);
+        captureCandidate(index, TxPurpose::Target);
+        const int ret = buildTarget(now_ms);
         if (ret == -ENOENT)
             continue;
         if (ret < 0) {
@@ -847,7 +955,18 @@ bool CanBus::pumpTarget(std::uint64_t now_ms) {
                 {FaultReason::InvalidCommand, ret, motors_[unit.motor_index], now_ms});
             continue;
         }
-        (void)submit(frame, TxPurpose::Target, index, sequence, now_ms);
+        const int submitted = submitCandidate();
+        if (submitted == -EAGAIN || submitted == -EBUSY) {
+            const auto retry_key = k_spin_lock(&publication_lock_);
+            if (published_sequence_ == candidate_.sequence) {
+                target_cursor_ = index;
+                targets_remaining_ = std::min(unit_count_, targets_remaining_ + 1);
+            }
+            k_spin_unlock(&publication_lock_, retry_key);
+        }
+        else if (submitted == -EOVERFLOW) {
+            enterRecovery(submitted, FaultReason::TransportError);
+        }
         return true;
     }
     return false;
@@ -914,6 +1033,85 @@ void CanBus::recoverController(std::uint64_t now_ms) {
     k_spin_unlock(&state_lock_, key);
 }
 
+std::uint32_t CanBus::nextWaitMs(std::uint64_t now_ms) const {
+    // Controller state currently has no callback, so keep a 2 ms probe bound.
+    // All software deadlines can shorten this wait; queued work never sleeps.
+    std::uint64_t wait = 2;
+    const auto due = [&](std::uint64_t deadline) {
+        wait = std::min(wait, deadline <= now_ms ? std::uint64_t{0} : deadline - now_ms);
+    };
+    const auto expiry = [&](std::uint64_t stamp, std::uint32_t duration) {
+        // elapsed() expires strictly after the limit, not at equality.
+        if (stamp == 0 || now_ms < stamp)
+            wait = 0;
+        else
+            due(stamp + duration + 1);
+    };
+    const auto rx_key = k_spin_lock(&rx_lock_);
+    const bool rx_ready = rx_count_ != 0 || rx_overflowed_;
+    k_spin_unlock(&rx_lock_, rx_key);
+    if (rx_ready)
+        return 0;
+    const auto tx_key = k_spin_lock(&tx_lock_);
+    const bool busy = in_flight_.busy;
+    const bool completed = busy && in_flight_.callback_seen;
+    if (busy)
+        expiry(in_flight_.submitted_ms, options_.tx_timeout_ms);
+    k_spin_unlock(&tx_lock_, tx_key);
+    if (completed)
+        return 0;
+    if (status().state == BusState::Recovering) {
+        // While recovery waits for cancellation/retry, a past TX deadline is
+        // already handled and must not make the worker spin.
+        return next_recovery_ms_ <= now_ms
+                   ? 0
+                   : static_cast<std::uint32_t>(
+                         std::min<std::uint64_t>(next_recovery_ms_ - now_ms, options_.recovery_retry_ms));
+    }
+    for (std::size_t i = 0; i < motor_count_; ++i) {
+        const Motor &motor = *motors_[i];
+        StagedCommand command{};
+        const auto publication_key = k_spin_lock(&publication_lock_);
+        command = published_[i];
+        k_spin_unlock(&publication_lock_, publication_key);
+        const auto key = k_spin_lock(&motor.lock_);
+        const auto &view = motor.snapshot_;
+        const Timing timing = motor.info().timing;
+        if (view.state == MotorState::Active || view.state == MotorState::Enabling)
+            expiry(view.feedback.timestamp_ms, timing.feedback_timeout_ms);
+        if (view.state == MotorState::Active)
+            expiry(command.valid && command.enable_generation == view.enable_generation ? command.written_ms
+                                                                                        : motor.activated_ms_,
+                   timing.command_timeout_ms);
+        if (view.state == MotorState::Enabling)
+            expiry(motor.enable_requested_at_ms_, timing.enable_timeout_ms);
+        const bool dm = !isDji(motor);
+        if (dm && view.stop.progress == StopProgress::TxComplete)
+            expiry(motor.safe_first_tx_completed_ms_, timing.enable_timeout_ms);
+        if (!busy) {
+            if (motor.safe_pending_ || (motor.clear_pending_ && !motor.clear_tx_done_) ||
+                (dm && motor.enable_pending_ && !motor.enable_tx_done_))
+                wait = 0;
+            if (dm && motor.enable_pending_ && motor.enable_tx_done_ &&
+                motor.feedback_event_order_ > motor.enable_tx_completed_order_ && view.native_drive_status_valid &&
+                view.native_drive_status == static_cast<std::uint32_t>(dm::DriveStatus::Enabled) &&
+                neutral_done_generation_[i] != view.enable_generation)
+                wait = 0;
+            if (dm && motor.safe_tx_done_ && motor.safe_tx_completed_ms_ != 0 && view.state != MotorState::Active &&
+                view.state != MotorState::Enabling)
+                due(motor.safe_tx_completed_ms_ + kDmSafetyProbeIntervalMs);
+        }
+        k_spin_unlock(&motor.lock_, key);
+    }
+    if (!busy) {
+        const auto key = k_spin_lock(&publication_lock_);
+        if (targets_remaining_ != 0)
+            wait = 0;
+        k_spin_unlock(&publication_lock_, key);
+    }
+    return static_cast<std::uint32_t>(wait);
+}
+
 void CanBus::ioMain() {
     for (;;) {
         processTx();
@@ -959,9 +1157,13 @@ void CanBus::ioMain() {
                 pumpTx(now);
         }
 
-        // The semaphore covers new work; the short timeout also bounds
-        // feedback, command, enable, and controller-state checks when idle.
-        (void)k_sem_take(&wake_sem_, K_MSEC(2));
+        const auto wait_ms = nextWaitMs(nowMs());
+        if (wait_ms == 0) {
+            // Another bounded pass, including TX/deadlines, before more RX.
+            k_yield();
+            continue;
+        }
+        (void)k_sem_take(&wake_sem_, K_MSEC(wait_ms));
     }
 }
 

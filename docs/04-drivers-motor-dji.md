@@ -81,3 +81,7 @@ CONFIG_SKYWALKER_MOTOR_DJI=y
 5. 先发零输出与极小正负电流；停机后查看安全帧的异步完成状态。
 
 相关样例：[dji_unified](../samples/motor/dji_unified/)、[dji_speed_control](../samples/motor/dji_speed_control/)、[dji_position_control](../samples/motor/dji_position_control/)、[m2006_speed_control](../samples/motor/m2006_speed_control/) 和 [mixed_topology](../samples/motor/mixed_topology/)。
+
+## 完整工作链路与并发约定
+
+见 [17 电机工作链路](17-motor-workflow.md) 的模块调用图、完整调用示例和故障时序，或在 [浏览器](architecture-browser/index.html#motor-workflow) 中逐步查看。业务线程数量不固定；每个控制器保持单写入方，共享 CAN 的命令发布需协调。发送候选把帧、批次与操作代次绑定，反馈间断先撤销旧许可，快速恢复重新建立稳定窗口，锁存 Fault 不因后续通信恢复而自动清除。公开 setter/update/commit 调用方式保持不变。

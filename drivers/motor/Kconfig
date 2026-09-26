@@ -35,4 +35,4 @@ config SKYWALKER_MOTOR_IO_STACK_SIZE
 config SKYWALKER_MOTOR_IO_PRIORITY
     int "I/O thread priority per motor CAN bus"
     default 5
-    range -15 15
+    range 0 15

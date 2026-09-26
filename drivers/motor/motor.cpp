@@ -512,9 +512,9 @@ void Motor::markEnableTxComplete(std::uint64_t generation, std::uint64_t complet
     k_spin_unlock(&lock_, key);
 }
 
-void Motor::markClearTxComplete(std::uint64_t completed_ms, std::uint64_t completed_order) {
+void Motor::markClearTxComplete(std::uint64_t generation, std::uint64_t completed_ms, std::uint64_t completed_order) {
     const k_spinlock_key_t key = k_spin_lock(&lock_);
-    if (clear_pending_ && snapshot_.state == MotorState::Fault) {
+    if (clear_pending_ && snapshot_.state == MotorState::Fault && snapshot_.stop.request_generation == generation) {
         clear_tx_done_ = true;
         clear_tx_completed_ms_ = completed_ms;
         clear_tx_completed_order_ = completed_order;
@@ -564,9 +564,14 @@ void Motor::markStopped(StopProgress progress, int tx_error, std::uint64_t reque
     k_spin_unlock(&lock_, key);
 }
 
-void Motor::markFaultCleared() {
+void Motor::markFaultCleared(std::uint64_t generation) {
     const std::uint64_t now = nowMs();
     const k_spinlock_key_t key = k_spin_lock(&lock_);
+    if (!clear_pending_ || snapshot_.stop.request_generation != generation) {
+        k_spin_unlock(&lock_, key);
+        return;
+    }
+    latched_fault_ = {};
     clear_pending_ = false;
     clear_tx_done_ = false;
     clear_tx_completed_ms_ = 0;
@@ -653,8 +658,12 @@ int Motor::checkProducerSafetyLocked() const {
 }
 
 void Motor::rejectControl(int error) {
-    if (error < 0 && active())
-        raiseFault({FaultReason::ControlRejected, error, this, nowMs()});
+    // active() masks stale feedback. Rejecting stale control must still revoke
+    // the persisted permission and notify the other members of a Group.
+    const auto view = snapshot();
+    if (error < 0 && (view.state == MotorState::Active || view.state == MotorState::Enabling))
+        raiseFault(
+            {view.feedback_fresh ? FaultReason::ControlRejected : FaultReason::FeedbackExpired, error, this, nowMs()});
 }
 
 int Motor::stage(const Command &command, const void *producer) {
@@ -784,10 +793,29 @@ int Motor::reseedPosition(double known_position_rad) {
     return ret;
 }
 
+void Motor::expireFeedbackBeforeAccept(std::uint64_t received_ms, std::uint64_t callback_order) {
+    // Called only by the owning I/O thread, before replacing the old timestamp.
+    // Closing the endpoint first prevents enable during Group notification.
+    const auto key = k_spin_lock(&lock_);
+    const auto previous = snapshot_.feedback.timestamp_ms;
+    const bool ordered = callback_order == 0 || callback_order > feedback_event_order_;
+    const bool expired = ordered && previous != 0 && received_ms > previous &&
+                         received_ms - previous > info().timing.feedback_timeout_ms &&
+                         (snapshot_.state == MotorState::Active || snapshot_.state == MotorState::Enabling);
+    if (expired) {
+        snapshot_.output_permitted = false;
+        snapshot_.state = MotorState::Offline;
+    }
+    k_spin_unlock(&lock_, key);
+    if (expired)
+        raiseFault({FaultReason::FeedbackExpired, -ETIMEDOUT, this, received_ms});
+}
+
 int Motor::acceptDjiFeedback(const dji::RawFeedback &raw, std::uint64_t received_ms) {
     if (received_ms == 0u || raw.encoder >= kDjiEncoderTicks || !std::holds_alternative<dji::Config>(config_))
         return -EBADMSG;
     const dji::Config &config = std::get<dji::Config>(config_);
+    expireFeedbackBeforeAccept(received_ms);
     Feedback next{};
     next.velocity_rad_s = static_cast<float>(raw.speed_rpm) * static_cast<float>(kTwoPi / 60.0) / config.gear_ratio;
     next.valid = FeedbackVelocity;
@@ -845,6 +873,8 @@ int Motor::acceptDjiFeedback(const dji::RawFeedback &raw, std::uint64_t received
                                                (kDjiEncoderTicks * static_cast<double>(config.gear_ratio)));
         next.valid |= FeedbackPosition;
     }
+    if (feedback_stable_since_ms_ == 0)
+        feedback_stable_since_ms_ = received_ms;
     snapshot_.feedback = next;
     snapshot_.native_dji_feedback = raw;
     snapshot_.native_dji_feedback.timestamp_ms = received_ms;
@@ -862,6 +892,7 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     const dm::Config &config = std::get<dm::Config>(config_);
     if (decoded.raw.motor_id != config.id)
         return -ENOENT;
+    expireFeedbackBeforeAccept(received_ms, callback_order);
     Feedback next{};
     next.velocity_rad_s = decoded.velocity_rad_s;
     next.torque_nm = decoded.torque_nm;
@@ -872,6 +903,7 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     bool drive_fault = false;
     bool unexpected_disabled = false;
     bool clear_confirmed = false;
+    std::uint64_t clear_generation = 0;
     bool retry_disable = false;
     const k_spinlock_key_t key = k_spin_lock(&lock_);
     if (callback_order <= feedback_event_order_ ||
@@ -911,6 +943,8 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
         next.position_rad = static_cast<float>(state.position_offset_rad + state.accumulated_native_rad);
         next.valid |= FeedbackPosition;
     }
+    if (feedback_stable_since_ms_ == 0)
+        feedback_stable_since_ms_ = received_ms;
     snapshot_.feedback = next;
     feedback_event_order_ = callback_order;
     snapshot_.native_mos_temperature_c = static_cast<float>(decoded.raw.mos_temperature_c);
@@ -931,6 +965,7 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
         snapshot_.state = MotorState::Disabled;
     unexpected_disabled = snapshot_.state == MotorState::Active && decoded.raw.status == dm::DriveStatus::Disabled;
     drive_fault = dm::isFaultStatus(decoded.raw.status);
+    clear_generation = snapshot_.stop.request_generation;
     clear_confirmed = clear_pending_ && clear_tx_done_ && clear_tx_completed_order_ != 0u &&
                       callback_order > clear_tx_completed_order_ && decoded.raw.status == dm::DriveStatus::Disabled;
     if (decoded.raw.status == dm::DriveStatus::Enabled && !snapshot_.output_permitted && !enable_pending_ &&
@@ -955,7 +990,7 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     if (retry_disable)
         wakeBus();
     if (clear_confirmed)
-        markFaultCleared();
+        markFaultCleared(clear_generation);
     if (drive_fault)
         raiseFault({FaultReason::DriveFault, -EIO, this, received_ms});
     else if (unexpected_disabled)
@@ -969,41 +1004,47 @@ void Motor::raiseFault(const FaultInfo &fault) {
         record.source_motor = this;
     if (record.occurred_ms == 0u)
         record.occurred_ms = nowMs();
-    const k_spinlock_key_t check_key = k_spin_lock(&lock_);
+    const k_spinlock_key_t key = k_spin_lock(&lock_);
+    const bool communication = record.reason == FaultReason::FeedbackExpired ||
+                               record.reason == FaultReason::TransportError || record.reason == FaultReason::RxOverflow;
+    const bool requires_clear = !communication && record.reason != FaultReason::CommandExpired;
     const bool duplicate = snapshot_.state == MotorState::Fault && snapshot_.last_fault.reason == record.reason &&
                            snapshot_.last_fault.source_motor == record.source_motor;
-    k_spin_unlock(&lock_, check_key);
-    if (duplicate)
+    if (duplicate) {
+        k_spin_unlock(&lock_, key);
         return;
-    if (group_ != nullptr)
-        group_->trip(*this, record);
-    else
-        requestDisable();
-
-    const k_spinlock_key_t key = k_spin_lock(&lock_);
-    snapshot_.last_fault = record;
+    }
+    if (requires_clear && latched_fault_.reason == FaultReason::None)
+        latched_fault_ = record;
+    // Preserve the root that requires acknowledgement. Transport diagnostics
+    // remain available on BusStatus; recovery is never a substitute for clear.
+    snapshot_.last_fault = latched_fault_.reason != FaultReason::None ? latched_fault_ : record;
     snapshot_.output_permitted = false;
     staged_.valid = false;
     enable_pending_ = false;
-    switch (record.reason) {
-    case FaultReason::FeedbackExpired:
-    case FaultReason::TransportError:
-    case FaultReason::RxOverflow:
-        snapshot_.state = MotorState::Offline;
+    if (communication) {
         if (snapshot_.position_reference_valid &&
             snapshot_.reference_generation < std::numeric_limits<std::uint64_t>::max())
             ++snapshot_.reference_generation;
         snapshot_.position_reference_valid = false;
         feedback_stable_since_ms_ = 0;
-        break;
-    case FaultReason::CommandExpired:
-        snapshot_.state = MotorState::Disabled;
-        break;
-    default:
-        snapshot_.state = MotorState::Fault;
-        break;
     }
+    snapshot_.state = latched_fault_.reason != FaultReason::None ? MotorState::Fault
+                      : communication                            ? MotorState::Offline
+                                                                 : MotorState::Disabled;
     k_spin_unlock(&lock_, key);
+    // Never take Group while holding Motor. State/permission were revoked
+    // before notification, so a competing enable cannot reuse the old state.
+    if (group_ != nullptr)
+        group_->trip(*this, record);
+    else
+        requestDisable();
+    if (communication) {
+        const auto offline_key = k_spin_lock(&lock_);
+        if (latched_fault_.reason == FaultReason::None)
+            snapshot_.state = MotorState::Offline;
+        k_spin_unlock(&lock_, offline_key);
+    }
     wakeBus();
 }
 
