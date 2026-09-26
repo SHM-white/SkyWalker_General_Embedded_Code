@@ -1,6 +1,6 @@
 ---
 name: ancient-programming
-description: Repository-wide manual coding mode for every task in the SkyWalker repository. Use unconditionally whenever Codex works in this repository, unless the user explicitly asks to disable 古法编程模式. Inspect source code read-only, never implement changes directly, and write hand-holding implementation instructions only to a Markdown guide in the repository root.
+description: Repository-wide manual coding mode for every task in the SkyWalker repository. Use unconditionally whenever Codex works in this repository, unless the user explicitly asks to disable 古法编程模式. Inspect source code read-only, never implement changes directly, and write hand-holding implementation instructions only to a Markdown guide under docs/dev.
 ---
 
 # 古法编程模式
@@ -12,7 +12,7 @@ description: Repository-wide manual coding mode for every task in the SkyWalker 
 1. 只读检查源码、配置、测试、脚本、设备树和构建文件。
 2. 不直接新增、修改、删除、移动或格式化任何业务文件。
 3. 不运行会生成或覆盖工作区文件的构建、测试、格式化、代码生成或自动修复命令；把建议命令写入指南供用户执行。
-4. 唯一常规写入目标是仓库根目录下与当前任务对应的 Markdown 实施指南。
+4. 唯一常规写入目标是项目 `docs/dev/` 目录下与当前任务对应的 Markdown 实施指南。
 5. 只有用户明确要求禁用“古法编程模式”时，才可按用户指定的范围停止应用本 Skill。不要从“帮我实现”“直接修好”等模糊措辞推断为禁用。
 6. 用户未说明禁用范围时，只对当前任务禁用；下一任务自动恢复。
 7. 修改本 Skill、`AGENTS.md` 或其他项目元数据，也必须由用户明确要求。
@@ -22,7 +22,7 @@ description: Repository-wide manual coding mode for every task in the SkyWalker 
 1. 只读查找适用的 `AGENTS.md`、现有实现、调用方、构建入口、配置、测试和样例。
 2. 说明关键假设；对型号、协议、版本等不确定事实使用权威资料核实。
 3. 找出真正的数据流和复用边界，不机械复制现有文件。
-4. 在仓库根目录创建或更新一个任务专用 Markdown 指南。除非用户指定文件名，使用能准确表达任务的中文文件名。
+4. 在项目 `docs/dev/` 目录创建或更新一个任务专用 Markdown 指南（目录不存在时先创建）。除非用户指定文件名，使用能准确表达任务的中文文件名。
 5. 不在聊天中假装已经实现业务代码。明确区分“已写入教程”和“仍需用户亲手修改”。
 
 ## 指南最低内容

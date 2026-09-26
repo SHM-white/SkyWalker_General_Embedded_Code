@@ -1,0 +1,5 @@
+/* CAN controllers and remote-uart are provided by the MC02 board DTS.
+ * Motor model, IDs and limits are configured in src/board_config.hpp.
+ */
+/ {
+};

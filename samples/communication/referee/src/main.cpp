@@ -6,7 +6,8 @@
 LOG_MODULE_REGISTER(referee_bench, LOG_LEVEL_INF);
 int main() {
     using namespace skywalker;
-    static communication::AsyncUart uart(bench::referee_uart);
+    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+    static communication::AsyncUart uart(bench::referee_uart, dma_buffers);
     communication::RefereeParser parser(bench::version);
     int ret = uart.init();
     LOG_INF("Referee physical UART init=%d profile=%d", ret, int(bench::version));

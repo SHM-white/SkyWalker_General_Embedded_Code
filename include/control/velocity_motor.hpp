@@ -1,7 +1,11 @@
 #pragma once
 
-#include <control/motor_backend.hpp>
+#include <cstdint>
+
+#include <control/motor_common.hpp>
 #include <control/motor_velocity.h>
+#include <drivers/motor/motor.hpp>
+#include <zephyr/spinlock.h>
 
 namespace skywalker::control {
 
@@ -12,49 +16,41 @@ public:
         EffortUnit effort_unit = EffortUnit::Unspecified;
         MotorSafety safety{};
     };
+
     struct Telemetry {
-        MotorMeasurement measurement{};
+        motor::MotorSnapshot motor{};
         control_motor_velocity_output output{};
         float target_rad_s = 0.0f;
         float dt_s = 0.0f;
+        float effort_command = 0.0f;
+        EffortUnit effort_unit = EffortUnit::Unspecified;
         bool valid = false;
+        int error = 0;
     };
 
-    VelocityMotor(MotorBackend &backend, const Config &config);
-    // One begin attempt per object. May block and enable motor output.
-    int begin();
-    // Configure once; poll while waiting. Caller supplies permission and a NEW command before resume.
-    int configure();
-    int poll(std::uint64_t now_ms);
-    int suspend(PauseReason reason);
-    int resume();
-    int clearEmergencyStop(bool released) {
-        return runtime_.clearEmergencyStop(released);
-    }
-    ExecutionState state() const {
-        return runtime_.state();
-    }
-    // Call periodically after begin, in rad/s. Computes real dt, reads/checks
-    // feedback, steps the C controller and sends. Runtime failures suspend output and can be recovered via poll/resume.
-    int update(float target_velocity_rad_s);
-    int stop();
-    std::int64_t elapsedMs() const {
-        return runtime_.elapsedMs();
-    }
-    const Telemetry &telemetry() const {
-        return telemetry_;
-    }
-    const MotorStatus &status() const {
-        return runtime_.status();
-    }
+    VelocityMotor(motor::Motor &motor, const Config &config);
+    VelocityMotor(const VelocityMotor &) = delete;
+    VelocityMotor &operator=(const VelocityMotor &) = delete;
+
+    [[nodiscard]] int configure();
+    [[nodiscard]] int update(float target_rad_s, float dt_s);
+    [[nodiscard]] int reset();
+    Telemetry telemetry() const;
 
 private:
-    Config config_;
-    MotorRuntime runtime_;
+    int resetFrom(const motor::MotorSnapshot &snapshot);
+    int fail(int error, const motor::MotorSnapshot &snapshot, bool active);
+    void publish(const Telemetry &next);
+
+    motor::Motor &motor_;
+    Config config_{};
     control_motor_velocity_state state_{};
+    mutable struct k_spinlock telemetry_lock_{};
     Telemetry telemetry_{};
-    bool begin_attempted_ = false;
-    MotorMeasurement prepared_{};
+    std::uint64_t observed_enable_generation_ = 0;
+    std::uint64_t observed_reference_generation_ = 0;
+    bool configured_ = false;
+    bool history_valid_ = false;
 };
 
 } // namespace skywalker::control

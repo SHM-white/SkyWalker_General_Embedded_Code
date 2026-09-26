@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.20.0)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(mixed_motor_topology)
+
+set(MIXED_TOPOLOGY "dji_shared_frame" CACHE STRING "Motor topology: dji_shared_frame, dm_shared_master, cross_can_group, cross_can_isolation")
+set_property(CACHE MIXED_TOPOLOGY PROPERTY STRINGS dji_shared_frame dm_shared_master cross_can_group cross_can_isolation)
+
+if(MIXED_TOPOLOGY STREQUAL "dji_shared_frame")
+  target_compile_definitions(app PRIVATE MIXED_TOPOLOGY_DJI_SHARED_FRAME=1)
+elseif(MIXED_TOPOLOGY STREQUAL "dm_shared_master")
+  target_compile_definitions(app PRIVATE MIXED_TOPOLOGY_DM_SHARED_MASTER=1)
+elseif(MIXED_TOPOLOGY STREQUAL "cross_can_group")
+  target_compile_definitions(app PRIVATE MIXED_TOPOLOGY_CROSS_CAN_GROUP=1)
+elseif(MIXED_TOPOLOGY STREQUAL "cross_can_isolation")
+  target_compile_definitions(app PRIVATE MIXED_TOPOLOGY_CROSS_CAN_ISOLATION=1)
+else()
+  message(FATAL_ERROR "Unknown MIXED_TOPOLOGY: ${MIXED_TOPOLOGY}")
+endif()
+
+target_sources(app PRIVATE src/main.cpp)

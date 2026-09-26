@@ -1,465 +1,470 @@
-#include <algorithm>
-#include <cerrno>
-#include <cmath>
-#include <zephyr/kernel.h>
-#include <control/angle.h>
 #include <control/position_motor.hpp>
 #include <control/velocity_motor.hpp>
 
+#include <algorithm>
+#include <cerrno>
+#include <cmath>
+#include <limits>
+
+#include <control/angle.h>
+
 namespace skywalker::control {
+namespace {
 
-MotorRuntime::MotorRuntime(MotorBackend &backend, EffortUnit unit, MotorSafety safety)
-    : backend_(backend), unit_(unit), safety_(safety) {
+bool finiteFloat(double value) {
+    return std::isfinite(value) && std::fabs(value) <= static_cast<double>(std::numeric_limits<float>::max());
 }
 
-int MotorRuntime::block(int error) {
-    status_.state = MotorRunState::ConfigBlocked;
-    status_.error = error;
-    return error;
-}
-int MotorRuntime::configure(float effort_limit, std::uint32_t required) {
-    if (owns_backend_ || status_.state == MotorRunState::ConfigBlocked)
-        return -EALREADY;
-    if (!std::isfinite(effort_limit) || effort_limit < 0 || !std::isfinite(safety_.velocity_abs_max_rad_s) ||
-        safety_.velocity_abs_max_rad_s <= 0 || !std::isfinite(safety_.temperature_max_c) ||
-        safety_.temperature_max_c < 0 || !safety_.recovery_retry_ms || !safety_.recovery_poll_ms ||
-        safety_.recovery_retry_ms > 1000 || safety_.recovery_poll_ms > safety_.recovery_retry_ms)
-        return block(-EINVAL);
-    if (backend_.claimed_)
-        return block(-EBUSY);
-    int ret = backend_.describe(info_);
-    if (ret < 0)
-        return block(ret);
-    if (unit_ == EffortUnit::Unspecified || unit_ != info_.effort_unit)
-        return block(-EINVAL);
-    if (!std::isfinite(info_.effort_limit) || info_.effort_limit <= 0 || effort_limit > info_.effort_limit ||
-        !info_.feedback_timeout_ms)
-        return block(-ERANGE);
-    required_ = required | motor::FeedbackVelocity;
-    if (safety_.temperature_max_c > 0)
-        required_ |= motor::FeedbackTemperature;
-    if ((info_.capabilities & required_) != required_)
-        return block(-ENOTSUP);
-    backend_.claimed_ = true;
-    owns_backend_ = true;
-    prepare_attempted_ = true;
-    ret = backend_.configure();
-    if (ret < 0)
-        return block(ret);
-    status_.state = MotorRunState::Waiting;
+int validateSafety(const MotorSafety &safety, std::uint32_t capabilities) {
+    if (!std::isfinite(safety.velocity_abs_max_rad_s) || safety.velocity_abs_max_rad_s <= 0.0f ||
+        !std::isfinite(safety.temperature_max_c) || safety.temperature_max_c < 0.0f)
+        return -EINVAL;
+    if (safety.temperature_max_c > 0.0f && (capabilities & motor::FeedbackTemperature) == 0u)
+        return -ENOTSUP;
     return 0;
 }
-int MotorRuntime::prepare(float effort_limit, std::uint32_t required, MotorMeasurement &first) {
-    int ret = configure(effort_limit, required);
-    if (ret < 0)
-        return ret;
-    const auto deadline = k_uptime_get() + 3000;
-    do {
-        ret = poll(k_uptime_get(), first);
-        if (ret == 0)
-            return 0;
-        k_sleep(K_MSEC(5));
-    } while (k_uptime_get() < deadline);
-    return ret;
-}
-ExecutionState MotorRuntime::state() const {
-    switch (status_.state) {
-    case MotorRunState::Running:
-        return ExecutionState::Active;
-    case MotorRunState::Ready:
-        return ExecutionState::Ready;
-    case MotorRunState::Recovering:
-        return ExecutionState::Recovering;
-    case MotorRunState::EStopLatched:
-        return ExecutionState::EStopLatched;
-    case MotorRunState::ConfigBlocked:
-        return ExecutionState::ConfigBlocked;
+
+int validateEffort(const motor::MotorInfo &info, EffortUnit unit, float requested_limit) {
+    if (!std::isfinite(requested_limit) || requested_limit < 0.0f)
+        return -EINVAL;
+    std::uint32_t required = 0;
+    float available = 0.0f;
+    switch (unit) {
+    case EffortUnit::Ampere:
+        required = motor::CommandCurrent;
+        available = info.current_limit_a;
+        break;
+    case EffortUnit::NewtonMeter:
+        required = motor::CommandTorque;
+        available = info.torque_limit_nm;
+        break;
     default:
-        return ExecutionState::Waiting;
-    }
-}
-int MotorRuntime::suspend(PauseReason reason) {
-    if (status_.state == MotorRunState::ConfigBlocked || !owns_backend_)
-        return -EACCES;
-    if (status_.state == MotorRunState::EStopLatched)
-        return 0;
-    const bool transition = status_.state != MotorRunState::Waiting;
-    if (transition || reason == PauseReason::EmergencyStop) {
-        reference_reset_ = false;
-        stable_started_ = false;
-        next_retry_ms_ = 0;
-        status_.reason = reason;
-        status_.state = reason == PauseReason::EmergencyStop ? MotorRunState::EStopLatched : MotorRunState::Waiting;
-        status_.stop_error = backend_.stop();
-    }
-    return status_.stop_error;
-}
-int MotorRuntime::clearEmergencyStop(bool released) {
-    if (!released)
-        return -EBUSY;
-    if (status_.state == MotorRunState::EStopLatched) {
-        status_.state = MotorRunState::Waiting;
-        next_retry_ms_ = 0;
-    }
-    return 0;
-}
-int MotorRuntime::poll(std::uint64_t now, MotorMeasurement &measurement) {
-    if (!owns_backend_ || status_.state == MotorRunState::ConfigBlocked ||
-        status_.state == MotorRunState::EStopLatched || status_.state == MotorRunState::Stopped)
-        return -EACCES;
-    if (status_.state == MotorRunState::Running)
-        return -EALREADY;
-    if (now < next_retry_ms_)
-        return -EAGAIN;
-    const bool was_ready = status_.state == MotorRunState::Ready;
-    int ret = backend_.pollPrepare(now);
-    if (ret == 0 && !reference_reset_) {
-        ret = backend_.resetMeasurementReference();
-        if (ret == 0)
-            reference_reset_ = true;
-    }
-    MotorMeasurement next{};
-    if (ret == 0)
-        ret = read(next);
-    if (ret < 0) {
-        if (was_ready)
-            suspend(PauseReason::FeedbackTimeout);
-        stable_started_ = false;
-        reference_reset_ = false;
-        status_.state = MotorRunState::Recovering;
-        status_.last_recovery_error = ret;
-        ++status_.recovery_attempts;
-        next_retry_ms_ = now + ((ret == -EAGAIN || ret == -EINPROGRESS) ? safety_.recovery_poll_ms
-                                                                        : safety_.recovery_retry_ms);
-        return ret;
-    }
-    next_retry_ms_ = 0;
-    if (!stable_started_ || now < stable_since_ms_ || next.feedback.timestamp_ms < last_feedback_ms_ ||
-        next.feedback.timestamp_ms - last_feedback_ms_ > info_.feedback_timeout_ms) {
-        if (was_ready) {
-            suspend(PauseReason::FeedbackTimeout);
-            status_.state = MotorRunState::Recovering;
-            return -EAGAIN;
-        }
-        stable_started_ = true;
-        stable_since_ms_ = now;
-        last_feedback_ms_ = next.feedback.timestamp_ms;
-    }
-    else if (next.feedback.timestamp_ms != last_feedback_ms_) {
-        last_feedback_ms_ = next.feedback.timestamp_ms;
-        if (now - stable_since_ms_ >= safety_.recovery_stable_ms && !was_ready) {
-            ++status_.resume_generation;
-            status_.state = MotorRunState::Ready;
-            status_.error = 0;
-            status_.last_recovery_error = 0;
-        }
-    }
-    if (safety_.recovery_stable_ms == 0 && !was_ready && status_.state != MotorRunState::Ready) {
-        status_.state = MotorRunState::Ready;
-        ++status_.resume_generation;
-    }
-    if (status_.state != MotorRunState::Ready) {
-        status_.state = MotorRunState::Recovering;
-        return -EAGAIN;
-    }
-    measurement = next;
-    return 0;
-}
-
-int MotorRuntime::read(MotorMeasurement &measurement) {
-    MotorMeasurement next{};
-    int ret = backend_.read(next);
-    if (ret < 0)
-        return ret;
-    const auto &fb = next.feedback;
-    const auto now = static_cast<std::uint64_t>(k_uptime_get());
-    if (fb.timestamp_ms == 0 || now < fb.timestamp_ms || now - fb.timestamp_ms > info_.feedback_timeout_ms)
-        return -ESTALE;
-    if ((fb.valid & required_) != required_)
-        return -ENODATA;
-    if (!std::isfinite(fb.velocity_rad_s))
         return -EINVAL;
-    if ((required_ & motor::FeedbackPosition) && !std::isfinite(next.position_rad))
-        return -EINVAL;
-    if ((required_ & motor::FeedbackAbsolutePosition) && !std::isfinite(fb.absolute_position_rad))
-        return -EINVAL;
-    if (std::fabs(fb.velocity_rad_s) > safety_.velocity_abs_max_rad_s)
+    }
+    if ((info.capabilities & required) == 0u)
+        return -ENOTSUP;
+    if (!std::isfinite(available) || available <= 0.0f || requested_limit > available)
         return -ERANGE;
-    if (safety_.temperature_max_c > 0.0f) {
-        if (!std::isfinite(fb.temperature_c) ||
-            (next.driver_temperature_valid && !std::isfinite(next.driver_temperature_c)))
+    return 0;
+}
+
+int validateMeasurement(const motor::MotorSnapshot &snapshot, const MotorSafety &safety, std::uint32_t required) {
+    if (!snapshot.feedback_fresh)
+        return -ESTALE;
+    const auto &feedback = snapshot.feedback;
+    if ((feedback.valid & required) != required)
+        return -ENODATA;
+    if (!std::isfinite(feedback.velocity_rad_s) ||
+        ((required & motor::FeedbackPosition) != 0u && !std::isfinite(feedback.position_rad)) ||
+        ((required & motor::FeedbackAbsolutePosition) != 0u && !std::isfinite(feedback.absolute_position_rad)))
+        return -EINVAL;
+    if (std::fabs(feedback.velocity_rad_s) > safety.velocity_abs_max_rad_s)
+        return -ERANGE;
+    if (safety.temperature_max_c > 0.0f) {
+        if ((feedback.valid & motor::FeedbackTemperature) == 0u)
+            return -ENODATA;
+        if (!std::isfinite(feedback.temperature_c))
             return -EINVAL;
-        if (fb.temperature_c >= safety_.temperature_max_c ||
-            (next.driver_temperature_valid && next.driver_temperature_c >= safety_.temperature_max_c))
+        if (feedback.temperature_c >= safety.temperature_max_c)
             return -ERANGE;
+        // DM exposes rotor temperature in the generic feedback and MOS
+        // temperature separately. Both protected the old MIT bench loops.
+        if (snapshot.native_temperatures_valid) {
+            if (!std::isfinite(snapshot.native_mos_temperature_c) ||
+                !std::isfinite(snapshot.native_rotor_temperature_c))
+                return -EINVAL;
+            if (snapshot.native_mos_temperature_c >= safety.temperature_max_c ||
+                snapshot.native_rotor_temperature_c >= safety.temperature_max_c)
+                return -ERANGE;
+        }
     }
-    measurement = next;
     return 0;
 }
 
-int MotorRuntime::arm() {
-    if (status_.state != MotorRunState::Ready)
-        return -EAGAIN;
-    MotorMeasurement current{};
-    int check = read(current);
-    if (check < 0)
-        return fail(check);
-    const int ret = backend_.arm();
-    if (ret < 0)
-        return fail(ret);
-    started_ms_ = previous_ms_ = k_uptime_get();
-    status_.state = MotorRunState::Running;
-    return 0;
+int validateDt(float dt_s, float minimum, float maximum) {
+    if (!std::isfinite(dt_s) || dt_s <= 0.0f)
+        return -EINVAL;
+    return dt_s >= minimum && dt_s <= maximum ? 0 : -ERANGE;
 }
 
-int MotorRuntime::cycle(float dt_min_s, float dt_max_s, MotorMeasurement &measurement, float &dt_s) {
-    if (status_.state != MotorRunState::Running)
-        return -EACCES;
-    const auto now = k_uptime_get();
-    if (now <= previous_ms_)
-        return fail(-ERANGE, PauseReason::InvalidCycle);
-    dt_s = static_cast<float>(now - previous_ms_) / 1000.0f;
-    if (dt_s < dt_min_s || dt_s > dt_max_s)
-        return fail(-ERANGE, PauseReason::InvalidCycle);
-    const int ret = read(measurement);
-    if (ret < 0)
-        return fail(ret, PauseReason::FeedbackTimeout);
-    previous_ms_ = now;
-    return 0;
-}
+} // namespace
 
-int MotorRuntime::send(float effort) {
-    int ret = backend_.write(effort);
-    if (ret == 0)
-        ret = backend_.flush();
-    return ret < 0 ? fail(ret) : 0;
-}
-
-int MotorRuntime::fail(int error, PauseReason reason) {
-    if (!owns_backend_)
-        return block(error);
-    if (status_.error == 0)
-        status_.error = error;
-    suspend(reason);
-    return error;
-}
-int MotorRuntime::stop() {
-    const int ret = owns_backend_ && prepare_attempted_ ? backend_.stop() : 0;
-    status_.stop_error = ret;
-    status_.state = MotorRunState::Stopped;
-    return ret;
-}
-
-std::int64_t MotorRuntime::elapsedMs() const {
-    return status_.state == MotorRunState::Running ? k_uptime_get() - started_ms_ : 0;
-}
-
-VelocityMotor::VelocityMotor(MotorBackend &backend, const Config &config)
-    : config_(config), runtime_(backend, config.effort_unit, config.safety) {
+VelocityMotor::VelocityMotor(motor::Motor &motor, const Config &config) : motor_(motor), config_(config) {
 }
 
 int VelocityMotor::configure() {
-    if (begin_attempted_)
+    if (configured_)
         return -EALREADY;
-    begin_attempted_ = true;
     int ret = control_motor_velocity_validate(&config_.loop);
     if (ret < 0)
-        return runtime_.block(ret);
+        return ret;
+    const motor::MotorInfo info = motor_.info();
+    ret = validateSafety(config_.safety, info.capabilities);
+    if (ret < 0)
+        return ret;
     if (config_.loop.requested_velocity_abs_max_rad_s > config_.safety.velocity_abs_max_rad_s)
-        return runtime_.block(-ERANGE);
-    return runtime_.configure(config_.loop.effort_abs_max, 0);
-}
-int VelocityMotor::poll(std::uint64_t now_ms) {
-    const int ret = runtime_.poll(now_ms, prepared_);
-    if (ret == 0)
-        telemetry_.measurement = prepared_;
-    return ret;
-}
-int VelocityMotor::suspend(PauseReason reason) {
-    telemetry_.valid = false;
-    return runtime_.suspend(reason);
-}
-int VelocityMotor::resume() {
-    if (runtime_.state() != ExecutionState::Ready)
-        return -EAGAIN;
-    int fresh = runtime_.poll(k_uptime_get(), prepared_);
-    if (fresh < 0)
-        return fresh;
-    int ret = control_motor_velocity_reset(&state_, prepared_.feedback.velocity_rad_s, 0);
-    if (ret < 0)
-        return runtime_.fail(ret);
-    return runtime_.arm();
-}
-int VelocityMotor::begin() {
-    int ret = configure();
+        return -ERANGE;
+    ret = validateEffort(info, config_.effort_unit, config_.loop.effort_abs_max);
     if (ret < 0)
         return ret;
-    const auto deadline = k_uptime_get() + 3000;
-    do {
-        ret = poll(k_uptime_get());
-        if (ret == 0)
-            return resume();
-        k_sleep(K_MSEC(5));
-    } while (k_uptime_get() < deadline);
-    return ret;
-}
-
-int VelocityMotor::update(float target_velocity_rad_s) {
-    telemetry_.valid = false;
-    if (status().state != MotorRunState::Running)
-        return -EACCES;
-    if (!std::isfinite(target_velocity_rad_s))
-        return runtime_.fail(-EINVAL);
-    Telemetry next{};
-    const auto &pid = config_.loop.regulator.feedback;
-    int ret = runtime_.cycle(pid.dt_min_s, pid.dt_max_s, next.measurement, next.dt_s);
+    if ((info.capabilities & motor::FeedbackVelocity) == 0u)
+        return -ENOTSUP;
+    ret = motor_.bindProducer(this, config_.safety.velocity_abs_max_rad_s, config_.safety.temperature_max_c,
+                              motor::FeedbackVelocity, false);
     if (ret < 0)
         return ret;
-    const control_motor_velocity_input input = {
-        .requested_velocity_rad_s = target_velocity_rad_s,
-        .measured_velocity_rad_s = next.measurement.feedback.velocity_rad_s,
-        .position_reference_rad = 0.0f,
-        .dt_s = next.dt_s,
-        .freeze_integrator = false,
-    };
-    ret = control_motor_velocity_step(&state_, &config_.loop, &input, &next.output);
-    if (ret < 0)
-        return runtime_.fail(ret);
-    ret = runtime_.send(next.output.effort_command);
-    if (ret < 0)
-        return ret;
-    next.target_rad_s = target_velocity_rad_s;
-    next.valid = true;
-    telemetry_ = next;
+    configured_ = true;
     return 0;
 }
 
-int VelocityMotor::stop() {
-    telemetry_.valid = false;
-    return runtime_.stop();
+int VelocityMotor::resetFrom(const motor::MotorSnapshot &snapshot) {
+    control_motor_velocity_state next_state{};
+    const int ret = control_motor_velocity_reset(&next_state, snapshot.feedback.velocity_rad_s, 0.0f);
+    if (ret < 0)
+        return ret;
+    state_ = next_state;
+    observed_enable_generation_ = snapshot.enable_generation;
+    observed_reference_generation_ = snapshot.reference_generation;
+    history_valid_ = true;
+    return 0;
 }
 
-PositionMotor::PositionMotor(MotorBackend &backend, const Config &config)
-    : config_(config), runtime_(backend, config.effort_unit, config.safety) {
+int VelocityMotor::reset() {
+    if (!configured_)
+        return -EACCES;
+    const motor::MotorSnapshot snapshot = motor_.snapshot();
+    if (snapshot.state == motor::MotorState::Active || snapshot.state == motor::MotorState::Enabling)
+        return -EBUSY;
+    if (!snapshot.feedback_fresh)
+        return -EAGAIN;
+    const int ret = validateMeasurement(snapshot, config_.safety, motor::FeedbackVelocity);
+    if (ret < 0)
+        return ret;
+    history_valid_ = false;
+    const int reset_error = resetFrom(snapshot);
+    if (reset_error == 0) {
+        Telemetry next{};
+        next.motor = snapshot;
+        next.effort_unit = config_.effort_unit;
+        publish(next);
+    }
+    return reset_error;
+}
+
+int VelocityMotor::fail(int error, const motor::MotorSnapshot &snapshot, bool active) {
+    Telemetry next{};
+    next.motor = snapshot;
+    next.effort_unit = config_.effort_unit;
+    next.error = error;
+    publish(next);
+    if (active)
+        motor_.rejectControl(error);
+    return error;
+}
+
+void VelocityMotor::publish(const Telemetry &next) {
+    const k_spinlock_key_t key = k_spin_lock(&telemetry_lock_);
+    telemetry_ = next;
+    k_spin_unlock(&telemetry_lock_, key);
+}
+
+VelocityMotor::Telemetry VelocityMotor::telemetry() const {
+    const k_spinlock_key_t key = k_spin_lock(&telemetry_lock_);
+    const Telemetry copy = telemetry_;
+    k_spin_unlock(&telemetry_lock_, key);
+    return copy;
+}
+
+int VelocityMotor::update(float target_rad_s, float dt_s) {
+    const motor::MotorSnapshot snapshot = motor_.snapshot();
+    if (!configured_ || snapshot.state != motor::MotorState::Active)
+        return fail(-EACCES, snapshot, false);
+    if (!snapshot.feedback_fresh)
+        return fail(-ESTALE, snapshot, true);
+    if (!snapshot.output_permitted || !motor_.active())
+        return fail(-EACCES, snapshot, false);
+    if (!std::isfinite(target_rad_s))
+        return fail(-EINVAL, snapshot, true);
+    if (std::fabs(target_rad_s) > config_.loop.requested_velocity_abs_max_rad_s)
+        return fail(-ERANGE, snapshot, true);
+    const auto &pid = config_.loop.regulator.feedback;
+    int ret = validateDt(dt_s, pid.dt_min_s, pid.dt_max_s);
+    if (ret < 0)
+        return fail(ret, snapshot, true);
+    ret = validateMeasurement(snapshot, config_.safety, motor::FeedbackVelocity);
+    if (ret < 0)
+        return fail(ret, snapshot, true);
+
+    const bool new_generation = !history_valid_ || snapshot.enable_generation != observed_enable_generation_ ||
+                                snapshot.reference_generation != observed_reference_generation_;
+    if (new_generation) {
+        ret = resetFrom(snapshot);
+        if (ret < 0)
+            return fail(ret, snapshot, true);
+        ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, 0.0f)
+                                                        : motor_.setTorqueFrom(this, 0.0f);
+        if (ret < 0)
+            return fail(ret, snapshot, true);
+        Telemetry next{};
+        next.motor = snapshot;
+        next.target_rad_s = target_rad_s;
+        next.dt_s = dt_s;
+        next.effort_unit = config_.effort_unit;
+        next.valid = true;
+        publish(next);
+        return 0;
+    }
+
+    control_motor_velocity_state next_state = state_;
+    control_motor_velocity_output output{};
+    const control_motor_velocity_input input = {
+        .requested_velocity_rad_s = target_rad_s,
+        .measured_velocity_rad_s = snapshot.feedback.velocity_rad_s,
+        .position_reference_rad = 0.0f,
+        .dt_s = dt_s,
+        .freeze_integrator = false,
+    };
+    ret = control_motor_velocity_step(&next_state, &config_.loop, &input, &output);
+    if (ret < 0)
+        return fail(ret, snapshot, true);
+    ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, output.effort_command)
+                                                    : motor_.setTorqueFrom(this, output.effort_command);
+    if (ret < 0)
+        return fail(ret, snapshot, true);
+    state_ = next_state;
+    Telemetry next{};
+    next.motor = snapshot;
+    next.output = output;
+    next.target_rad_s = target_rad_s;
+    next.dt_s = dt_s;
+    next.effort_command = output.effort_command;
+    next.effort_unit = config_.effort_unit;
+    next.valid = true;
+    publish(next);
+    return 0;
+}
+
+PositionMotor::PositionMotor(motor::Motor &motor, const Config &config) : motor_(motor), config_(config) {
 }
 
 int PositionMotor::configure() {
-    if (begin_attempted_)
+    if (configured_)
         return -EALREADY;
-    begin_attempted_ = true;
     int ret = control_motor_position_validate(&config_.loop);
     if (ret < 0)
-        return runtime_.block(ret);
+        return ret;
     const auto &position_pid = config_.loop.position;
     const auto &velocity_pid = config_.loop.velocity.regulator.feedback;
     if (std::max(position_pid.dt_min_s, velocity_pid.dt_min_s) >
             std::min(position_pid.dt_max_s, velocity_pid.dt_max_s) ||
         config_.loop.velocity.requested_velocity_abs_max_rad_s > config_.safety.velocity_abs_max_rad_s)
-        return runtime_.block(-ERANGE);
+        return -ERANGE;
     if (config_.reference != PositionReference::StartupRelative &&
         config_.reference != PositionReference::DriverContinuous &&
         config_.reference != PositionReference::AbsoluteNearest)
-        return runtime_.block(-EINVAL);
-    std::uint32_t required = motor::FeedbackPosition;
+        return -EINVAL;
+
+    const motor::MotorInfo info = motor_.info();
+    ret = validateSafety(config_.safety, info.capabilities);
+    if (ret < 0)
+        return ret;
+    ret = validateEffort(info, config_.effort_unit, config_.loop.velocity.effort_abs_max);
+    if (ret < 0)
+        return ret;
+    std::uint32_t required = motor::FeedbackPosition | motor::FeedbackVelocity;
     if (config_.reference == PositionReference::AbsoluteNearest)
         required |= motor::FeedbackAbsolutePosition;
-    return runtime_.configure(config_.loop.velocity.effort_abs_max, required);
-}
-int PositionMotor::poll(std::uint64_t now_ms) {
-    const int ret = runtime_.poll(now_ms, prepared_);
-    if (ret == 0)
-        telemetry_.measurement = prepared_;
-    return ret;
-}
-int PositionMotor::suspend(PauseReason reason) {
-    telemetry_.valid = false;
-    return runtime_.suspend(reason);
-}
-int PositionMotor::resume() {
-    if (runtime_.state() != ExecutionState::Ready)
-        return -EAGAIN;
-    int fresh = runtime_.poll(k_uptime_get(), prepared_);
-    if (fresh < 0)
-        return fresh;
-    initial_position_rad_ = coordinate_origin_rad_ = prepared_.position_rad;
-    int ret = control_motor_position_reset(&state_, &config_.loop, 0, prepared_.feedback.velocity_rad_s);
-    if (ret < 0)
-        return runtime_.fail(ret);
-    return runtime_.arm();
-}
-int PositionMotor::begin() {
-    int ret = configure();
+    if ((info.capabilities & required) != required)
+        return -ENOTSUP;
+    ret = motor_.bindProducer(this, config_.safety.velocity_abs_max_rad_s, config_.safety.temperature_max_c, required,
+                              true);
     if (ret < 0)
         return ret;
-    const auto deadline = k_uptime_get() + 3000;
-    do {
-        ret = poll(k_uptime_get());
-        if (ret == 0)
-            return resume();
-        k_sleep(K_MSEC(5));
-    } while (k_uptime_get() < deadline);
-    return ret;
+    configured_ = true;
+    return 0;
 }
 
-int PositionMotor::update(double target_position_rad) {
-    telemetry_.valid = false;
-    if (status().state != MotorRunState::Running)
-        return -EACCES;
-    if (!std::isfinite(target_position_rad))
-        return runtime_.fail(-EINVAL);
-    Telemetry next{};
-    const auto &pid = config_.loop.position;
-    const auto &velocity_pid = config_.loop.velocity.regulator.feedback;
-    int ret = runtime_.cycle(std::max(pid.dt_min_s, velocity_pid.dt_min_s),
-                             std::min(pid.dt_max_s, velocity_pid.dt_max_s), next.measurement, next.dt_s);
+int PositionMotor::resetFrom(const motor::MotorSnapshot &snapshot, bool explicit_reset) {
+    control_motor_position_state next_state{};
+    const int ret = control_motor_position_reset(&next_state, &config_.loop, 0.0f, snapshot.feedback.velocity_rad_s);
     if (ret < 0)
         return ret;
+    state_ = next_state;
+    if (explicit_reset || !explicit_reset_anchor_valid_ ||
+        anchor_reference_generation_ != snapshot.reference_generation) {
+        initial_position_rad_ = snapshot.feedback.position_rad;
+        anchor_reference_generation_ = snapshot.reference_generation;
+        explicit_reset_anchor_valid_ = explicit_reset;
+    }
+    coordinate_origin_rad_ = snapshot.feedback.position_rad;
+    observed_enable_generation_ = snapshot.enable_generation;
+    observed_reference_generation_ = snapshot.reference_generation;
+    history_valid_ = true;
+    return 0;
+}
+
+int PositionMotor::reset() {
+    if (!configured_)
+        return -EACCES;
+    const motor::MotorSnapshot snapshot = motor_.snapshot();
+    if (snapshot.state == motor::MotorState::Active || snapshot.state == motor::MotorState::Enabling)
+        return -EBUSY;
+    if (!snapshot.feedback_fresh)
+        return -EAGAIN;
+    if (!snapshot.position_reference_valid)
+        return -ENODATA;
+    std::uint32_t required = motor::FeedbackPosition | motor::FeedbackVelocity;
+    if (config_.reference == PositionReference::AbsoluteNearest)
+        required |= motor::FeedbackAbsolutePosition;
+    const int ret = validateMeasurement(snapshot, config_.safety, required);
+    if (ret < 0)
+        return ret;
+    history_valid_ = false;
+    const int reset_error = resetFrom(snapshot, true);
+    if (reset_error == 0) {
+        Telemetry next{};
+        next.motor = snapshot;
+        next.effort_unit = config_.effort_unit;
+        publish(next);
+    }
+    return reset_error;
+}
+
+int PositionMotor::fail(int error, const motor::MotorSnapshot &snapshot, bool active) {
+    Telemetry next{};
+    next.motor = snapshot;
+    next.effort_unit = config_.effort_unit;
+    next.error = error;
+    publish(next);
+    if (active)
+        motor_.rejectControl(error);
+    return error;
+}
+
+void PositionMotor::publish(const Telemetry &next) {
+    const k_spinlock_key_t key = k_spin_lock(&telemetry_lock_);
+    telemetry_ = next;
+    k_spin_unlock(&telemetry_lock_, key);
+}
+
+PositionMotor::Telemetry PositionMotor::telemetry() const {
+    const k_spinlock_key_t key = k_spin_lock(&telemetry_lock_);
+    const Telemetry copy = telemetry_;
+    k_spin_unlock(&telemetry_lock_, key);
+    return copy;
+}
+
+int PositionMotor::update(double target_position_rad, float dt_s) {
+    const motor::MotorSnapshot snapshot = motor_.snapshot();
+    if (!configured_ || snapshot.state != motor::MotorState::Active)
+        return fail(-EACCES, snapshot, false);
+    if (!snapshot.feedback_fresh)
+        return fail(-ESTALE, snapshot, true);
+    if (!snapshot.output_permitted || !motor_.active())
+        return fail(-EACCES, snapshot, false);
+    if (!std::isfinite(target_position_rad))
+        return fail(-EINVAL, snapshot, true);
+    const auto &position_pid = config_.loop.position;
+    const auto &velocity_pid = config_.loop.velocity.regulator.feedback;
+    int ret = validateDt(dt_s, std::max(position_pid.dt_min_s, velocity_pid.dt_min_s),
+                         std::min(position_pid.dt_max_s, velocity_pid.dt_max_s));
+    if (ret < 0)
+        return fail(ret, snapshot, true);
+    if (!snapshot.position_reference_valid)
+        return fail(-ENODATA, snapshot, true);
+    std::uint32_t required = motor::FeedbackPosition | motor::FeedbackVelocity;
+    if (config_.reference == PositionReference::AbsoluteNearest)
+        required |= motor::FeedbackAbsolutePosition;
+    ret = validateMeasurement(snapshot, config_.safety, required);
+    if (ret < 0)
+        return fail(ret, snapshot, true);
+
+    const bool new_generation = !history_valid_ || snapshot.enable_generation != observed_enable_generation_ ||
+                                snapshot.reference_generation != observed_reference_generation_;
+    if (new_generation) {
+        ret = resetFrom(snapshot, false);
+        if (ret < 0)
+            return fail(ret, snapshot, true);
+    }
+
     double resolved = target_position_rad;
     if (config_.reference == PositionReference::StartupRelative)
         resolved += initial_position_rad_;
     if (config_.reference == PositionReference::AbsoluteNearest) {
+        if (!finiteFloat(target_position_rad))
+            return fail(-ERANGE, snapshot, true);
         float error = 0.0f;
         ret = control_shortest_angle_error(static_cast<float>(target_position_rad),
-                                           next.measurement.feedback.absolute_position_rad, &error);
+                                           snapshot.feedback.absolute_position_rad, &error);
         if (ret < 0)
-            return runtime_.fail(ret);
-        resolved = next.measurement.position_rad + static_cast<double>(error);
+            return fail(ret, snapshot, true);
+        resolved = static_cast<double>(snapshot.feedback.position_rad) + static_cast<double>(error);
     }
-    // Rebase only after many turns. Shift PID measurement history by the same
-    // amount, so changing coordinates does not create a derivative impulse.
-    if (std::fabs(next.measurement.position_rad - coordinate_origin_rad_) > 128.0) {
-        const double shift = next.measurement.position_rad - coordinate_origin_rad_;
-        state_.position.previous_measurement -= static_cast<float>(shift);
-        coordinate_origin_rad_ = next.measurement.position_rad;
+    if (!finiteFloat(resolved))
+        return fail(-ERANGE, snapshot, true);
+
+    if (new_generation) {
+        ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, 0.0f)
+                                                        : motor_.setTorqueFrom(this, 0.0f);
+        if (ret < 0)
+            return fail(ret, snapshot, true);
+        Telemetry next{};
+        next.motor = snapshot;
+        next.requested_position_rad = target_position_rad;
+        next.target_position_rad = resolved;
+        next.position_rad = static_cast<double>(snapshot.feedback.position_rad) -
+                            (config_.reference == PositionReference::StartupRelative ? initial_position_rad_ : 0.0);
+        next.dt_s = dt_s;
+        next.effort_unit = config_.effort_unit;
+        next.valid = true;
+        publish(next);
+        return 0;
     }
-    control_motor_position_input input = {
-        .continuous_target_rad = static_cast<float>(resolved - coordinate_origin_rad_),
-        .continuous_position_rad = static_cast<float>(next.measurement.position_rad - coordinate_origin_rad_),
-        .measured_velocity_rad_s = next.measurement.feedback.velocity_rad_s,
-        .dt_s = next.dt_s,
+
+    control_motor_position_state next_state = state_;
+    double next_origin = coordinate_origin_rad_;
+    if (std::fabs(static_cast<double>(snapshot.feedback.position_rad) - next_origin) > 128.0) {
+        const double shift = static_cast<double>(snapshot.feedback.position_rad) - next_origin;
+        if (!finiteFloat(shift))
+            return fail(-ERANGE, snapshot, true);
+        next_state.position.previous_measurement -= static_cast<float>(shift);
+        next_origin = snapshot.feedback.position_rad;
+    }
+    const double local_target = resolved - next_origin;
+    const double local_position = static_cast<double>(snapshot.feedback.position_rad) - next_origin;
+    if (!finiteFloat(local_target) || !finiteFloat(local_position))
+        return fail(-ERANGE, snapshot, true);
+    const control_motor_position_input input = {
+        .continuous_target_rad = static_cast<float>(local_target),
+        .continuous_position_rad = static_cast<float>(local_position),
+        .measured_velocity_rad_s = snapshot.feedback.velocity_rad_s,
+        .dt_s = dt_s,
+        .position_reference_rad = static_cast<float>(resolved),
+        .has_position_reference = true,
     };
-    // The C kernel uses target coordinates for gravity feedforward. Keep that
-    // coordinate independent of the PID origin (see the optional reference).
-    input.position_reference_rad = static_cast<float>(resolved);
-    input.has_position_reference = true;
-    ret = control_motor_position_step(&state_, &config_.loop, &input, &next.output);
+    control_motor_position_output output{};
+    ret = control_motor_position_step(&next_state, &config_.loop, &input, &output);
     if (ret < 0)
-        return runtime_.fail(ret);
-    ret = runtime_.send(next.output.effort_command);
+        return fail(ret, snapshot, true);
+    ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, output.effort_command)
+                                                    : motor_.setTorqueFrom(this, output.effort_command);
     if (ret < 0)
-        return ret;
+        return fail(ret, snapshot, true);
+    state_ = next_state;
+    coordinate_origin_rad_ = next_origin;
+    Telemetry next{};
+    next.motor = snapshot;
+    next.output = output;
     next.requested_position_rad = target_position_rad;
     next.target_position_rad = resolved;
-    next.position_rad = next.measurement.position_rad -
+    next.position_rad = static_cast<double>(snapshot.feedback.position_rad) -
                         (config_.reference == PositionReference::StartupRelative ? initial_position_rad_ : 0.0);
+    next.dt_s = dt_s;
+    next.effort_command = output.effort_command;
+    next.effort_unit = config_.effort_unit;
     next.valid = true;
-    telemetry_ = next;
+    publish(next);
     return 0;
-}
-
-int PositionMotor::stop() {
-    telemetry_.valid = false;
-    return runtime_.stop();
 }
 
 } // namespace skywalker::control

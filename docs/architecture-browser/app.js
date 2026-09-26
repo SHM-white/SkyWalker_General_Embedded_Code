@@ -13,8 +13,8 @@ const plain = {
  chassis_safety: ['确认这条命令可以执行', '收到命令不等于立即驱动。底盘还要核对时效、心跳、许可和本地硬件；恢复后必须等到新的合法命令。', '远端命令、心跳、boot_id / generation、本地反馈', 'LocalSafetyDecision：允许执行，或继续等待'],
  swerve: ['把车体运动分解到四轮', '将前后、左右、旋转速度解算为四组舵向和驱动目标。轮子位置、半径、方向都来自底盘配置。', 'ChassisCommand + ChassisFeedback + dt', 'ChassisOutput：FL / FR / RL / RR 四组控制输出'],
  power_limiter: ['给底盘输出做功率缩放', '按估计功率、裁判额度与缓冲能量计算缩放比例。已有台架算法，比赛功率控制仍需实测标定。', 'ChassisPowerInput + dt', 'ChassisPowerDecision.effort_scale'],
- chassis_hardware: ['统一管理八电机输出', '把四个舵电机和四个驱动电机按物理 CAN 分组，统一发送。任一 Bus 出错，就暂停整个底盘输出域。', 'ChassisOutput + effort_scale', '1 或 2 个共享 DJI Bus，统一 arm / flush / stop'],
- motor_layer: ['电机闭环与底层驱动', '这是两板共用的控制基础。云台使用 PositionMotor / Backend；八电机底盘使用聚合硬件适配器与共享 Bus。', '位置 / 速度目标，或底盘已计算的 effort', 'CAN 电机命令与反馈；DJI 单位 A，DM MIT 单位 N·m'],
+ chassis_hardware: ['统一管理八电机输出', '把四个舵电机和四个驱动电机按物理 CAN 分组，统一发送。任一 Bus 出错，就暂停整个底盘输出域。', 'ChassisOutput + effort_scale', '1 或 2 个 CanBus，Group 联动，周期末统一 commit'],
+ motor_layer: ['电机闭环与底层驱动', '这是两板共用的控制基础：控制器引用 Motor，Group 管理许可，CanBus 统一收发。页面下方可逐步查看完整链路。', '位置 / 速度目标，或底盘已计算的 effort', 'CAN 电机命令与反馈；DJI 单位 A，DM MIT 单位 N·m'],
  vision_auto: ['自主目标源还未接入', '当前没有视觉或自主导航生产者。Auto 模式存在，但不能因此把自主控制当成已完成。', '规划中的视觉 / 导航目标', '待实现：自主命令生产者'],
  shooter: ['发射机构还缺执行链', 'ShooterCommand 结构已经存在，摩擦轮、拨弹和离散射击事件尚未接入正式应用。', '已有 ShooterCommand 消息结构', '待实现：执行器与离散事件处理'],
  reset_event: ['跨板复位还缺显式协议', '全局急停可让底盘锁存；跨板明确复位尚未实现。当前底盘复位需要本地 reset hook。', '已解除的急停输入 + 明确复位请求', '待实现：跨板复位事件；当前使用本地 hook']
@@ -40,12 +40,12 @@ const scenes = {
   ['yaw_gimbal','如果云台本地许可、反馈和硬件仍有效，小 Yaw 可以继续运行。全局急停仍会禁用全部输出。']
  ]},
  recovery:{title:'看恢复',summary:'供电与反馈恢复后，底盘先重新准备，再回传恢复上下文；云台产生新命令，底盘等待 3 条后重新使能。',steps:[
-  ['chassis_hardware','反馈中断：暂停输出。供电许可恢复后，pollRecovery 周期性推进准备，先等新反馈。'],
+  ['chassis_hardware','反馈中断时驱动撤销 Group，I/O 持续处理安全输出和反馈。应用 pollRecovery 检查参考与状态；不是它推进 CAN 收发。'],
   ['swerve','八电机反馈恢复并满足稳定条件后，重置测量参考和舵轮算法，不继续追赶旧目标。'],
   ['async_uart','底盘进入 Ready，推进 resume_generation，并用心跳回传 boot_id / generation。'],
   ['command_manager','云台从当前输入重新产生命令。Router 回显底盘的 boot_id 和 generation。'],
   ['chassis_safety','底盘确认上下文一致，并累计连续 3 条新的 producer sequence；重复旧命令不计数。'],
-  ['chassis_hardware','本地条件全部满足后再 arm 并执行。普通掉线可以自动恢复；显式急停仍需明确复位。']
+  ['chassis_hardware','本地条件全部满足后，应用 arm 发出新的 Group.enable 请求，等待 active 后提交新目标；锁存电机 Fault 需 clearFault，急停需明确复位。']
  ]}
 };
 const state={selected:'command_manager',scene:'manual',tab:'overview',step:-1,timer:null,filter:'all',query:''};
@@ -57,7 +57,7 @@ function renderDetail(){
  const n=byId[state.selected],p=plain[n.id];
  const downstream=n.provides.filter(id=>byId[id]?.status!=='todo');
  const future=n.provides.filter(id=>byId[id]?.status==='todo');
- document.getElementById('detail').innerHTML=`<h2 class="detail-title">${escapeHTML(p[0])}</h2><div class="class-name">${escapeHTML(n.title)}</div><div class="badges">${badges(n)}</div><p class="plain-description">${escapeHTML(p[1])}</p><div class="io-block"><span>INPUT / 输入</span><p>${escapeHTML(p[2])}</p></div><div class="io-block"><span>OUTPUT / 输出</span><p>${escapeHTML(p[3])}</p></div><div class="detail-tabs" role="group" aria-label="详情内容"><button data-tab="overview" class="${state.tab==='overview'?'on':''}" aria-pressed="${state.tab==='overview'}">关系与约束</button><button data-tab="code" class="${state.tab==='code'?'on':''}" aria-pressed="${state.tab==='code'}">接口与源码</button></div><div class="detail-body">${state.tab==='code'?`<h3>类接口 / 数据契约</h3>${n.interfaces.map(s=>`<code class="code">${escapeHTML(s)}</code>`).join('')}<h3>源码固定到 77b0538</h3><div class="sources">${n.sources.map(s=>`<a target="_blank" rel="noreferrer" href="${sourceUrl(s)}">${escapeHTML(s)} ↗</a>`).join('')}</div>`:`<h3>上游数据 / 协作模块</h3><div class="relations">${n.dependsOn.length?n.dependsOn.map(moduleButton).join(''):'<span class="class-name">底层数据或设备输入</span>'}</div>${downstream.length?`<h3>下游使用</h3><div class="relations">${downstream.map(moduleButton).join('')}</div>`:''}${future.length?`<h3>后续扩展</h3><div class="relations">${future.map(moduleButton).join('')}</div>`:''}<h3>必须遵守的约束</h3><ul class="constraints">${n.constraints.map(s=>`<li>${escapeHTML(s)}</li>`).join('')}</ul>`}</div>`;
+ document.getElementById('detail').innerHTML=`<h2 class="detail-title">${escapeHTML(p[0])}</h2><div class="class-name">${escapeHTML(n.title)}</div><div class="badges">${badges(n)}</div><p class="plain-description">${escapeHTML(p[1])}</p><div class="io-block"><span>INPUT / 输入</span><p>${escapeHTML(p[2])}</p></div><div class="io-block"><span>OUTPUT / 输出</span><p>${escapeHTML(p[3])}</p></div><div class="detail-tabs" role="group" aria-label="详情内容"><button data-tab="overview" class="${state.tab==='overview'?'on':''}" aria-pressed="${state.tab==='overview'}">关系与约束</button><button data-tab="code" class="${state.tab==='code'?'on':''}" aria-pressed="${state.tab==='code'}">接口与源码</button></div><div class="detail-body">${state.tab==='code'?`<h3>类接口 / 数据契约</h3>${n.interfaces.map(s=>`<code class="code">${escapeHTML(s)}</code>`).join('')}<h3>${n.current?'源码路径 · 当前工作区':'源码固定到历史基线 77b0538'}</h3><div class="sources">${n.sources.map(s=>n.current?`<code class="code">${escapeHTML(s)}</code>`:`<a target="_blank" rel="noreferrer" href="${sourceUrl(s)}">${escapeHTML(s)} ↗</a>`).join('')}</div>`:`<h3>上游数据 / 协作模块</h3><div class="relations">${n.dependsOn.length?n.dependsOn.map(moduleButton).join(''):'<span class="class-name">底层数据或设备输入</span>'}</div>${downstream.length?`<h3>下游使用</h3><div class="relations">${downstream.map(moduleButton).join('')}</div>`:''}${future.length?`<h3>后续扩展</h3><div class="relations">${future.map(moduleButton).join('')}</div>`:''}<h3>必须遵守的约束</h3><ul class="constraints">${n.constraints.map(s=>`<li>${escapeHTML(s)}</li>`).join('')}</ul>`}</div>`;
  document.querySelectorAll('[data-module]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.module===state.selected)));
  document.querySelectorAll('.flow-node').forEach(el=>el.classList.toggle('selected',el.id==='stage-'+stageMap[state.selected]));
 }

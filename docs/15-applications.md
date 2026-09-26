@@ -5,7 +5,7 @@
 - `applications/sentry_gimbal/`：遥控/裁判/板间汇聚、全局安全、云台执行。
 - `applications/sentry_chassis/`：板间接收、四轮舵底盘、本地安全、DJI 多总线硬件。
 
-它们已经是可读的 Zephyr application 工程，但默认配置 intentionally 保守：连接未配置、部分电机节点 disabled、云台/底盘不会因为编译成功就自动运动。
+它们已经是可读的 Zephyr application 工程，但默认配置保守：连接未配置，云台和底盘不会因为编译成功就自动运动。
 
 ## 1. 架构
 
@@ -33,8 +33,9 @@
 
 - `linkTask`：异步 UART、解析板间帧、周期发送 heartbeat + chassis feedback。
 - `chassisTask`：检查 peer boot、权限、功率、DJI 八个电机反馈，运行 `SwerveChassis`、`ChassisLocalSafety` 和 `DjiChassisHardware`。
-- `chassis_hardware.*`：按 CAN 设备去重创建 Bus，支持一到多个 CAN，总线统一 arm/flush/stop/recovery。
-- 默认拓扑：4 个 GM6020 舵向 + 4 个 M3508 驱动；实际 `app.overlay` 中节点默认为 disabled。
+- `chassis_hardware.*`：8 台 `Motor` 与一组 `Group` 先完成绑定，再启动所需 `CanBus`；控制目标按总线提交。
+- 默认拓扑：4 个 GM6020 舵向 + 4 个 M3508 驱动；`board_config::connections_configured=false` 阻止未核对接线时使能。
+- 底盘在锁存故障后可按 MC02 的 `sw0` 用户按钮请求清除；按下经过 30 ms 消抖后触发一次，仍须等待全组安全停机与稳定反馈，并收到新代次命令才能再次使能。
 
 安全相关默认值：
 
@@ -47,10 +48,10 @@ bench_effort_scale = 0.15f;
 
 要启用真实底盘，至少需要修改：
 
-1. `app.overlay` 的八个电机 `status`、CAN、ID、限流、GM6020 零点和减速比。
-2. `src/board_config.hpp` 的 `connections_configured`、方向、底盘几何、轮半径、PID 和权限策略。
+1. `src/board_config.hpp` 的八台电机 CAN 绑定、ID、限流、GM6020 零点和 M3508 减速比。
+2. 同一文件中的 `connections_configured`、方向、底盘几何、轮半径、PID 和权限策略。
 3. 板间 UART 及其波特率，确认与云台应用相反端口接线。
-4. 真实急停输入和 reset hook；当前函数返回 false 是模板占位。
+4. 真实急停输入；复位入口默认使用 MC02 `sw0` 用户按钮，需确认现场可触达且接线正确。
 5. 功率模型标定后才能把 `power_model_calibrated` 设为 true。
 
 ## 3. `sentry_gimbal`
@@ -63,12 +64,12 @@ bench_effort_scale = 0.15f;
 - `refereeTask`：裁判 UART → `RefereeService` → `RefereeState`。
 - `commandTask`：Remote/Referee/Peer feedback → mapper → global safety → `CommandManager` → `CommandRouter`。
 - `linkTask`：板间接收并周期发送 heartbeat、约束和底盘控制。
-- `gimbalTask`：选择 DJI 或 DM backend，运行 `YawGimbal`、`GimbalLocalSafety` 和电机恢复。
+- `gimbalTask`：构造一台 `Motor` 与 `CanBus`，运行 `PositionMotor`、`YawGimbal` 和 `GimbalLocalSafety`，显式管理使能与故障清除。
 
 默认 `app.overlay` 中：
 
 - interboard UART alias 已给出，但仅是建议端口。
-- `yaw-motor` 节点为 disabled。
+- Yaw 电机的型号、ID 和限幅位于 `src/board_config.hpp`，默认 `connections_configured=false`。
 - remote/referee alias 仍是注释，需要按真实 DMA 和电气链路启用。
 - `board_config::connections_configured=false`，所以命令层会进入 `ConfigBlocked`。
 

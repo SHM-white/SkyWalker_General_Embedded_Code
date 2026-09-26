@@ -28,7 +28,8 @@ Latest<Received> received;
 Latest<Published> published;
 std::uint64_t local_boot_id = 0; // Set once in main before explicitly starting tasks.
 void linkTask(void *, void *, void *) {
-    static communication::AsyncUart uart(board_config::interboard_uart);
+    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+    static communication::AsyncUart uart(board_config::interboard_uart, dma_buffers);
     communication::InterBoardLink link(BoardRole::ChassisController);
     int ret = uart.init();
     LOG_INF("interboard UART init: %d", ret);
@@ -124,6 +125,7 @@ void chassisTask(void *, void *, void *) {
             safety.clearEmergencyStop(true);
             estop_latched = false;
             hardware.suspend();
+            (void)hardware.clearFault();
             algorithm_ready = false;
         }
         const auto &constraint = rx.constraint;
@@ -139,7 +141,7 @@ void chassisTask(void *, void *, void *) {
         int feedback_ret = -EAGAIN;
         if (configured == 0) {
             if (estop_latched || !powered || !budget_allowed) {
-                if (hardware.armed() || hardware.ready())
+                if (hardware.armed() || hardware.enabling() || hardware.ready())
                     hardware.suspend();
                 algorithm_ready = false;
             }
@@ -184,7 +186,7 @@ void chassisTask(void *, void *, void *) {
         if (!budget_allowed)
             decision.active_reasons |= PowerBudgetStale;
         if (decision.action != SafetyAction::Active) {
-            if (hardware.armed()) {
+            if (hardware.armed() || hardware.enabling()) {
                 hardware.suspend();
                 algorithm_ready = false;
             }
@@ -250,7 +252,7 @@ K_THREAD_DEFINE(link_thread, 6144, linkTask, nullptr, nullptr, nullptr, 5, 0, SY
 K_THREAD_DEFINE(chassis_thread, 8192, chassisTask, nullptr, nullptr, nullptr, 4, 0, SYS_FOREVER_MS);
 int main() {
     local_boot_id = sys_rand64_get() | 1ULL;
-    LOG_INF("MC02 sentry chassis: configured=%d referee_required=%d; edit app.overlay and src/board_config.hpp",
+    LOG_INF("MC02 sentry chassis: configured=%d referee_required=%d; edit src/board_config.hpp",
             board_config::connections_configured, board_config::require_referee_for_motion);
     k_thread_start(link_thread);
     k_thread_start(chassis_thread);

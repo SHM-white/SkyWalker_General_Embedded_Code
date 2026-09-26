@@ -1,9 +1,9 @@
 sample:
   name: SkyWalker command_safety on-board bench
-  description: Standalone DM MC02 hardware exercise; requires the documented wiring
+  description: Remote command safety exercise using the board remote-uart; requires the documented wiring
 common:
   tags: [skywalker, hardware]
-  platform_allow: [dm_mc02/stm32h723xx]
+  platform_allow: [dm_mc02/stm32h723xx, rm_typec/stm32f407xx]
   build_only: true
 tests:
   sample.skywalker.robotics.command_safety: {}

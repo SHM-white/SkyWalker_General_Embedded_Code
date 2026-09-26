@@ -1,18 +1,33 @@
 #pragma once
-#include <zephyr/device.h>
+
 #include <control/velocity_motor.hpp>
+
 namespace bench {
-inline const device *motor = DEVICE_DT_GET(DT_ALIAS(motor0));
-inline constexpr bool dm = DT_NODE_HAS_COMPAT(DT_ALIAS(motor0), dm_j4310_2ec_v1_1);
-inline constexpr float target_velocity_rad_s = 2;
+#ifdef SKYWALKER_RECOVERY_DM
+inline constexpr bool dm = true;
+#else
+inline constexpr bool dm = false;
+#endif
+inline constexpr float target_velocity_rad_s = 2.0f;
+
 inline skywalker::control::VelocityMotor::Config motorConfig() {
-    skywalker::control::VelocityMotor::Config c{};
-    c.effort_unit = dm ? skywalker::control::EffortUnit::NewtonMeter : skywalker::control::EffortUnit::Ampere;
-    c.safety = {12, 70, 30, 100};
-    c.loop.regulator.feedback = {.03f, .1f, 0, 0, -.3f, .3f, -.3f, .3f, 0, .001f, .02f};
-    c.loop.reference_slew = {5, 5};
-    c.loop.requested_velocity_abs_max_rad_s = 6;
-    c.loop.effort_abs_max = .3f;
-    return c;
+    skywalker::control::VelocityMotor::Config config{};
+    config.effort_unit = dm ? skywalker::control::EffortUnit::NewtonMeter : skywalker::control::EffortUnit::Ampere;
+    config.safety = {12.0f, 70.0f};
+    config.loop.regulator.feedback = {.kp = .03f,
+                                      .ki = .1f,
+                                      .kd = 0.0f,
+                                      .derivative_tau_s = 0.0f,
+                                      .integral_min = -.3f,
+                                      .integral_max = .3f,
+                                      .output_min = -.3f,
+                                      .output_max = .3f,
+                                      .deadband = 0.0f,
+                                      .dt_min_s = .001f,
+                                      .dt_max_s = .02f};
+    config.loop.reference_slew = {5.0f, 5.0f};
+    config.loop.requested_velocity_abs_max_rad_s = 6.0f;
+    config.loop.effort_abs_max = .3f;
+    return config;
 }
 }

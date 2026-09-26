@@ -1,14 +1,18 @@
 #pragma once
 
-#include <control/motor_backend.hpp>
+#include <cstdint>
+
+#include <control/motor_common.hpp>
 #include <control/motor_position.h>
+#include <drivers/motor/motor.hpp>
+#include <zephyr/spinlock.h>
 
 namespace skywalker::control {
 
 enum class PositionReference {
-    StartupRelative,  // Continuous rad, zero at begin's first valid measurement.
-    DriverContinuous, // Continuous driver coordinates (DM saved zero / DJI RX zero).
-    AbsoluteNearest,  // Single-turn target, nearest path; requires capability.
+    StartupRelative,
+    DriverContinuous,
+    AbsoluteNearest,
 };
 
 class PositionMotor {
@@ -19,53 +23,50 @@ public:
         MotorSafety safety{};
         PositionReference reference = PositionReference::StartupRelative;
     };
+
     struct Telemetry {
-        MotorMeasurement measurement{};
+        motor::MotorSnapshot motor{};
         control_motor_position_output output{};
         double requested_position_rad = 0.0;
-        double target_position_rad = 0.0; // Resolved in driver coordinates.
-        double position_rad = 0.0;        // Relative to begin only in StartupRelative.
+        double target_position_rad = 0.0;
+        double position_rad = 0.0;
         float dt_s = 0.0f;
+        float effort_command = 0.0f;
+        EffortUnit effort_unit = EffortUnit::Unspecified;
         bool valid = false;
+        int error = 0;
     };
 
-    PositionMotor(MotorBackend &backend, const Config &config);
-    int begin();
-    // Configure once; poll while waiting. Caller supplies permission and a NEW command before resume.
-    int configure();
-    int poll(std::uint64_t now_ms);
-    int suspend(PauseReason reason);
-    int resume();
-    int clearEmergencyStop(bool released) {
-        return runtime_.clearEmergencyStop(released);
-    }
-    ExecutionState state() const {
-        return runtime_.state();
-    }
-    int update(double target_position_rad);
+    PositionMotor(motor::Motor &motor, const Config &config);
+    PositionMotor(const PositionMotor &) = delete;
+    PositionMotor &operator=(const PositionMotor &) = delete;
+
+    [[nodiscard]] int configure();
+    [[nodiscard]] int update(double target_position_rad, float dt_s);
+    [[nodiscard]] int reset();
+    Telemetry telemetry() const;
     PositionReference reference() const {
         return config_.reference;
     }
-    int stop();
-    std::int64_t elapsedMs() const {
-        return runtime_.elapsedMs();
-    }
-    const Telemetry &telemetry() const {
-        return telemetry_;
-    }
-    const MotorStatus &status() const {
-        return runtime_.status();
-    }
 
 private:
-    Config config_;
-    MotorRuntime runtime_;
+    int resetFrom(const motor::MotorSnapshot &snapshot, bool explicit_reset);
+    int fail(int error, const motor::MotorSnapshot &snapshot, bool active);
+    void publish(const Telemetry &next);
+
+    motor::Motor &motor_;
+    Config config_{};
     control_motor_position_state state_{};
+    mutable struct k_spinlock telemetry_lock_{};
     Telemetry telemetry_{};
     double initial_position_rad_ = 0.0;
     double coordinate_origin_rad_ = 0.0;
-    bool begin_attempted_ = false;
-    MotorMeasurement prepared_{};
+    std::uint64_t anchor_reference_generation_ = 0;
+    std::uint64_t observed_enable_generation_ = 0;
+    std::uint64_t observed_reference_generation_ = 0;
+    bool configured_ = false;
+    bool history_valid_ = false;
+    bool explicit_reset_anchor_valid_ = false;
 };
 
 } // namespace skywalker::control

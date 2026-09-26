@@ -1,0 +1,7 @@
+tests:
+  skywalker.motor.regression:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - motor
+      - can

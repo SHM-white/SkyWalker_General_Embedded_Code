@@ -7,6 +7,9 @@ public:
     static constexpr std::size_t kFrameSize = 18;
     struct Config {
         std::int16_t channel_center = 1024, channel_min = 364, channel_max = 1684, center_deadband = 10;
+        // The DT7/DR16 manual reserves bytes 16..17. Opt in only for receivers
+        // that encode a fifth (wheel) channel there.
+        bool decode_wheel = false;
     };
     explicit Dr16Decoder(const Config &config) : config_(config) {
     }

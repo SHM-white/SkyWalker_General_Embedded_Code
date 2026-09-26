@@ -7,13 +7,12 @@
 #include <zephyr/logging/log.h>
 
 #include <control/position_motor.hpp>
-#include <control/dm_motor_backend.hpp>
+#include <drivers/motor/can_bus.hpp>
 #include <dm_sample_support.hpp>
 #include <lib/vofa/vofa.h>
 
 LOG_MODULE_REGISTER(dm_mit_position_control, LOG_LEVEL_INF);
 
-#define MOTOR0_NODE DT_ALIAS(motor0)
 #define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
 #if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
 #error "A ready telemetry-uart alias is required for VOFA"
@@ -108,56 +107,93 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(uart))
+    const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+    if (!device_is_ready(uart) || !device_is_ready(can))
         return -ENODEV;
-    // Bus and UART callbacks retain these objects after an early return.
-    static skywalker::control::DmMotorBackend backend{DEVICE_DT_GET(MOTOR0_NODE),
-                                                      skywalker::samples::dm::enableMotorPower};
-    static skywalker::control::PositionMotor motor{backend, makeMotorConfig()};
+    static skywalker::motor::Motor drive{skywalker::motor::dm::j4310Mit({
+        .id = 1,
+        .master_id = 0x11,
+        .position_max_rad = 12.5f,
+        .velocity_max_rad_s = 30.0f,
+        .torque_max_nm = 10.0f,
+        .torque_limit_nm = 1.0f,
+        .timing = {50, 20, 50, 3000},
+    })};
+    static skywalker::motor::CanBus bus{can};
+    static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
-    int ret = motor.configure();
+    int ret = bus.attach(drive);
+    if (ret == 0)
+        ret = bus.start();
+    if (ret == 0)
+        ret = skywalker::samples::dm::enableMotorPower();
+    if (ret == 0)
+        k_sleep(K_MSEC(1500));
+    if (ret == 0)
+        ret = axis.configure();
     if (ret < 0) {
-        LOG_ERR("configuration blocked: cause=%d stop=%d", ret, motor.status().stop_error);
+        LOG_ERR("configuration blocked: %d", ret);
         return ret;
     }
-    const double initial = motor.telemetry().measurement.position_rad;
+    const auto ready_deadline = k_uptime_get() + 3000;
+    while (!drive.ready() && k_uptime_get() < ready_deadline)
+        k_sleep(K_MSEC(kControlPeriodMs));
+    if (!drive.ready())
+        return -ETIMEDOUT;
+    const auto before_reseed = drive.snapshot();
+    if (!before_reseed.native_position_valid)
+        return -ENODATA;
+    // The old MIT position bench used the drive's native startup angle as its
+    // continuous coordinate. Preserve that origin for the 0/90/180/270 path.
+    ret = drive.reseedPosition(before_reseed.native_position_rad);
+    if (ret < 0)
+        return ret;
+    const double initial = drive.snapshot().feedback.position_rad;
     const double phase = singleTurnRad(static_cast<float>(initial));
     const double zero_target = initial - phase +
                                (phase <= static_cast<double>(kZeroToleranceRad) ? 0.0 : static_cast<double>(kTwoPi));
+    ret = axis.reset(); // Check speed, temperature and reference before enabling.
+    if (ret == 0)
+        ret = drive.enable();
+    if (ret < 0)
+        return ret;
+    const auto active_deadline = k_uptime_get() + 5000;
+    while (!drive.active() && k_uptime_get() < active_deadline)
+        k_sleep(K_MSEC(kControlPeriodMs));
+    if (!drive.active()) {
+        (void)drive.disable();
+        return -ETIMEDOUT;
+    }
+    const auto started_ms = k_uptime_get();
+    auto previous_ms = started_ms;
     std::int64_t previous_step = 0;
-    std::int64_t next_recovery_log_ms = 0;
     for (;;) {
         k_sleep(K_MSEC(kControlPeriodMs));
-        if (motor.state() != skywalker::control::ExecutionState::Active) {
-            const auto now = k_uptime_get();
-            ret = motor.poll(now);
-            if (ret == 0)
-                ret = motor.resume();
-            if (now >= next_recovery_log_ms) {
-                next_recovery_log_ms = now + 1000;
-                LOG_INF("recovery state=%u generation=%u result=%d", unsigned(motor.state()),
-                        motor.status().resume_generation, ret);
-            }
-            continue;
-        }
-
-        const auto elapsed_ms = motor.elapsedMs();
+        const auto now = k_uptime_get();
+        const float dt_s = float(now - previous_ms) / 1000.0f;
+        previous_ms = now;
+        if (!drive.active())
+            return -EHOSTDOWN;
+        const auto elapsed_ms = now - started_ms;
         const auto step = elapsed_ms / kPositionStepPeriodMs;
         const float single_turn_target = targetPositionRad(elapsed_ms);
         const double target = zero_target + static_cast<double>(step / 4) * static_cast<double>(kTwoPi) +
                               static_cast<double>(single_turn_target);
-        ret = motor.update(target);
+        ret = axis.update(target, dt_s);
+        if (ret == 0)
+            ret = bus.commit().error;
         if (ret < 0) {
-            LOG_WRN("cycle paused: cause=%d stop=%d", ret, motor.status().stop_error);
-            continue;
+            (void)drive.disable();
+            LOG_ERR("cycle stopped: %d", ret);
+            return ret;
         }
         if (step != previous_step) {
             LOG_INF("time=%lld ms target=%u deg", elapsed_ms, static_cast<unsigned int>(step % 4) * 90U);
             previous_step = step;
         }
-        const auto &data = motor.telemetry();
-        const auto &feedback = data.measurement.feedback;
+        const auto data = axis.telemetry();
+        const auto &feedback = data.motor.feedback;
         const auto &output = data.output;
         const float channels[10] = {
             single_turn_target,
@@ -168,7 +204,7 @@ int main() {
             output.velocity.velocity_error_rad_s,
             output.effort_command,
             feedback.torque_nm,
-            data.measurement.driver_temperature_c,
+            data.motor.native_mos_temperature_c,
             feedback.temperature_c,
         };
         vofa_send(&vofa, channels, 10);

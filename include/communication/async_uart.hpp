@@ -4,20 +4,31 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
+#include <zephyr/linker/section_tags.h>
 #include <zephyr/sys/atomic.h>
 namespace skywalker::communication {
 // One communication task calls init/service/read/send. Callback only owns buffers
 // and copies RX chunks. Instances must outlive registered device callbacks.
 class AsyncUart {
 public:
+    // Define one static DmaBuffers per instance with the __nocache attribute.
+    // No initializers: the nocache section may be NOLOAD. RX is written by DMA,
+    // and send() copies every transmitted byte before starting TX.
+    struct DmaBuffers {
+        alignas(32) std::uint8_t rx[2][128];
+        alignas(32) std::uint8_t tx[256];
+    };
     struct RxChunk {
         std::uint8_t bytes[64]{};
         std::uint16_t size = 0;
         std::uint64_t timestamp_ms = 0;
         atomic_val_t generation = 0;
     };
-    explicit AsyncUart(const device *uart) : uart_(uart) {
+    // Both the instance and its exclusive DMA storage must outlive callbacks.
+    AsyncUart(const device *uart, DmaBuffers &buffers) : uart_(uart), dma_(buffers) {
     }
+    AsyncUart(const AsyncUart &) = delete;
+    AsyncUart &operator=(const AsyncUart &) = delete;
     int init();
     int service(std::uint64_t now_ms);
     int read(RxChunk &out); // -EAGAIN empty; -EOVERFLOW: caller MUST discard parser partial bytes.
@@ -34,8 +45,7 @@ private:
     void event(uart_event &);
     int startRx();
     const device *uart_;
-    alignas(32) std::uint8_t rx_[2][128]{};
-    alignas(32) std::uint8_t tx_[256]{};
+    DmaBuffers &dma_;
     alignas(4) char queue_storage_[8 * sizeof(RxChunk)]{};
     k_msgq queue_{};
     atomic_t in_use_ = 0, rx_disabled_ = 1, tx_busy_ = 0, generation_ = 0, dropped_ = 0;

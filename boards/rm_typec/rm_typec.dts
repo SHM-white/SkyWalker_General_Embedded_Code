@@ -89,6 +89,7 @@
         buzzer0 = &buzzer;
         accel0 = &bmi08x_accel;
         gyro0 = &bmi08x_gyro;
+        remote-uart = &usart3;
     };
 };
 
@@ -132,13 +133,13 @@
 };
 
 &usart3 {
-    pinctrl-0 = <&usart3_tx_pc10 &usart3_rx_pc11>;
-    dmas = <&dma1 3 4 STM32_DMA_PERIPH_TX STM32_DMA_FIFO_FULL>,    // TX: DMA1 Stream 3, request 4
-           <&dma1 1 4 STM32_DMA_PERIPH_RX STM32_DMA_FIFO_FULL>;    // RX: DMA1 Stream 1, request 4
+    // Dedicated DBUS receiver: PC11 RX, 100000 baud, 8E1.
+    pinctrl-0 = <&usart3_rx_pc11>;
+    dmas = <&dma1 1 4 STM32_DMA_PERIPH_RX STM32_DMA_FIFO_FULL>;    // RX: DMA1 Stream 1, Channel 4
     stop-bits = "1";
     data-bits = <8>;
-    parity = "none";
-    dma-names = "tx", "rx";
+    parity = "even";
+    dma-names = "rx";
     pinctrl-names = "default";
     current-speed = <100000>;
     status = "okay";

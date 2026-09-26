@@ -1,24 +1,4 @@
-/ {
-    aliases {
-        motor0 = &gm6020_1;
-    };
-
-    gm6020_1: motor-1 {
-        compatible = "dji,gm6020-current";
-        status = "okay";
-        can-bus = <&can1>;
-        motor-id = <4>;
-
-        /* The demo commands 50 mA; the device boundary remains 100 mA. */
-        current-limit-ma = <100>;
-
-        gear-ratio-num = <1>;
-        gear-ratio-den = <1>;
-
-        /* Replace after reading raw.encoder at the mechanism's zero pose. */
-        encoder-zero-ticks = <0>;
-
-        /* Requires firmware >=1.0.11.2 and current loop enabled. */
-        current-loop-confirmed;
-    };
-};
+/* CAN1 and USART1 are provided by the board devicetree.
+ * GM6020 ID, current limit, and encoder zero are configured in src/main.cpp.
+ */
+/ { };

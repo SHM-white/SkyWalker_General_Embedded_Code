@@ -21,8 +21,9 @@ int Dr16Decoder::decodeFrame(const std::uint8_t *p, std::size_t size, std::uint6
     const int channels[] = {(p[0] | (p[1] << 8)) & 0x7ff, ((p[1] >> 3) | (p[2] << 5)) & 0x7ff,
                             ((p[2] >> 6) | (p[3] << 2) | (p[4] << 10)) & 0x7ff, ((p[4] >> 1) | (p[5] << 7)) & 0x7ff,
                             wire::loadLe16(p + 16)};
-    for (int c : channels)
-        if (c < config_.channel_min || c > config_.channel_max)
+    const int channel_count = config_.decode_wheel ? 5 : 4;
+    for (int i = 0; i < channel_count; ++i)
+        if (channels[i] < config_.channel_min || channels[i] > config_.channel_max)
             return bad(-EBADMSG);
     const auto left = (p[5] >> 6) & 3, right = (p[5] >> 4) & 3;
     if (!left || !right || p[12] > 1 || p[13] > 1)
@@ -37,7 +38,7 @@ int Dr16Decoder::decodeFrame(const std::uint8_t *p, std::size_t size, std::uint6
         return static_cast<std::int16_t>(u < 0x8000 ? int(u) : int(u) - 65536);
     };
     RemoteState n{};
-    n.analog = {channel(0), channel(1), channel(2), channel(3), channel(4)};
+    n.analog = {channel(0), channel(1), channel(2), channel(3), config_.decode_wheel ? channel(4) : std::int16_t{0}};
     n.left_switch = sw(left);
     n.right_switch = sw(right);
     n.mouse = {signed16(p + 6), signed16(p + 8), signed16(p + 10), p[12] != 0, p[13] != 0};

@@ -1,24 +1,2 @@
-/ {
-    aliases {
-        motor0 = &gm6020_7;
-    };
-
-    gm6020_7: motor-7 {
-        compatible = "dji,gm6020-current";
-        status = "okay";
-        can-bus = <&can1>;
-        motor-id = <4>;
-
-        /* Bench-only limit: confirm the mechanism is suspended before arming. */
-        current-limit-ma = <1500>;
-
-        /* M3508 gearbox ratio; confirm it against the actual drivetrain. */
-        gear-ratio-num = <1>;
-        gear-ratio-den = <1>;
-
-        /* Replace after reading raw.encoder at the mechanism's zero pose. */
-        encoder-zero-ticks = <0>;
-
-        current-loop-confirmed;
-    };
-};
+/* GM6020 ID4, confirmed current mode and 1.5 A limit are configured in src/main.cpp. */
+/ {};

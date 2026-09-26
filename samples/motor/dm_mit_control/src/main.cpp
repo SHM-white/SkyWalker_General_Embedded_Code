@@ -12,7 +12,6 @@
 
 LOG_MODULE_REGISTER(dm_mit_control, LOG_LEVEL_INF);
 
-#define MOTOR0_NODE DT_ALIAS(motor0)
 #define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
 
 #if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
@@ -33,20 +32,26 @@ float targetTorqueNm() {
 } // namespace
 
 int main() {
-    const struct device *motor = DEVICE_DT_GET(MOTOR0_NODE);
     const struct device *vofa_uart = DEVICE_DT_GET(VOFA_UART_NODE);
     if (!device_is_ready(vofa_uart)) {
         LOG_ERR("VOFA UART device not ready");
         return -ENODEV;
     }
 
-    // The CAN RX filter retains a pointer to session.bus even after main exits.
-    static skywalker::samples::dm::Session session{};
-    int ret = skywalker::samples::dm::prepare(session, motor);
+    // CAN callbacks and the I/O thread retain this session for the firmware lifetime.
+    static skywalker::samples::dm::Session session{DEVICE_DT_GET(DT_NODELABEL(can1)),
+                                                   skywalker::motor::dm::j4310Mit({.id = 1,
+                                                                                   .master_id = 0x11,
+                                                                                   .position_max_rad = 12.5f,
+                                                                                   .velocity_max_rad_s = 30.0f,
+                                                                                   .torque_max_nm = 10.0f,
+                                                                                   .torque_limit_nm = 10.0f,
+                                                                                   .timing = {50, 20, 50, 3000}})};
+    int ret = skywalker::samples::dm::prepare(session);
     if (ret < 0) {
         return ret;
     }
-    if ((skywalker::motor::capabilities(motor) & skywalker::motor::CommandTorque) == 0U) {
+    if ((session.motor.info().capabilities & skywalker::motor::CommandTorque) == 0U) {
         LOG_ERR("MIT torque capability unavailable; check motor control mode");
         return -ENOTSUP;
     }
@@ -70,15 +75,13 @@ int main() {
             kRunDurationMs);
     const std::int64_t started_ms = k_uptime_get();
     while (k_uptime_get() - started_ms < kRunDurationMs) {
-        skywalker::motor::Feedback feedback{};
-        skywalker::motor::dm::RawFeedback raw{};
-        ret = skywalker::samples::dm::readSafeFeedback(session, kVelocityCutoffRadS, kTemperatureCutoffC, feedback,
-                                                       raw);
+        skywalker::motor::MotorSnapshot view{};
+        ret = skywalker::samples::dm::readSafeFeedback(session, kVelocityCutoffRadS, kTemperatureCutoffC, view);
         if (ret < 0) {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }
 
-        ret = skywalker::motor::setTorque(motor, target_torque_nm);
+        ret = session.motor.setTorque(target_torque_nm);
         if (ret < 0) {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }
@@ -87,19 +90,16 @@ int main() {
             return skywalker::samples::dm::stopAfterFailure(session, ret);
         }
 
+        const auto &feedback = view.feedback;
         const float channels[6] = {
-            target_torque_nm,
-            feedback.position_rad,
-            feedback.velocity_rad_s,
-            feedback.torque_nm,
-            static_cast<float>(raw.mos_temperature_c),
-            static_cast<float>(raw.rotor_temperature_c),
+            target_torque_nm,   view.native_position_rad,      feedback.velocity_rad_s,
+            feedback.torque_nm, view.native_mos_temperature_c, view.native_rotor_temperature_c,
         };
         vofa_send(&vofa, channels, 6);
         k_sleep(K_MSEC(kControlPeriodMs));
     }
 
-    ret = skywalker::motor::setTorque(motor, 0.0f);
+    ret = session.motor.setTorque(0.0f);
     if (ret < 0) {
         return skywalker::samples::dm::stopAfterFailure(session, ret);
     }

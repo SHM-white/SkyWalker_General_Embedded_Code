@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker shared motor topology bench
+  description: Explicitly enabled multi-motor CAN topology exercise
+common:
+  tags: [skywalker, hardware, motor]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.motor.mixed_topology: {}

@@ -7,12 +7,11 @@
 #include <zephyr/logging/log.h>
 
 #include <control/velocity_motor.hpp>
-#include <control/dji_motor_backend.hpp>
+#include <drivers/motor/can_bus.hpp>
 #include <lib/vofa/vofa.h>
 
 LOG_MODULE_REGISTER(m2006_speed_control, LOG_LEVEL_INF);
 
-#define MOTOR0_NODE DT_ALIAS(motor0)
 #define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
 #if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
 #error "A ready telemetry-uart alias is required for VOFA"
@@ -77,28 +76,65 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(uart))
+    const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+    if (!device_is_ready(uart) || !device_is_ready(can))
         return -ENODEV;
-    // Bus and UART callbacks retain these objects after an early return.
-    static skywalker::control::DjiMotorBackend backend{DEVICE_DT_GET(MOTOR0_NODE)};
-    static skywalker::control::VelocityMotor motor{backend, makeMotorConfig()};
+    static skywalker::motor::Motor drive{skywalker::motor::dji::m2006({
+        .id = 4,
+        .current_limit_a = 10.0f,
+        .gear_ratio = 36.0f,
+        .timing = {20, 20, 20, 100},
+    })};
+    static skywalker::motor::CanBus bus{can};
+    static skywalker::control::VelocityMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
     vofa_init(&vofa, uart);
-    int ret = motor.begin();
+    int ret = bus.attach(drive);
+    if (ret == 0)
+        ret = bus.start();
+    if (ret == 0)
+        ret = axis.configure();
     if (ret < 0) {
-        LOG_ERR("begin failed: cause=%d stop=%d", ret, motor.status().stop_error);
+        LOG_ERR("configuration failed: %d", ret);
         return ret;
     }
-    while (motor.elapsedMs() < kRunDurationMs) {
+    const auto ready_deadline = k_uptime_get() + 3000;
+    while (!drive.ready() && k_uptime_get() < ready_deadline)
         k_sleep(K_MSEC(kControlPeriodMs));
-        const float target = motor.elapsedMs() < 100 ? 0.0f : kRequestedVelocityRadS;
-        ret = motor.update(target);
+    if (!drive.ready())
+        return -ETIMEDOUT;
+    ret = axis.reset(); // Check speed, temperature and reference before enabling.
+    if (ret == 0)
+        ret = drive.enable();
+    if (ret < 0)
+        return ret;
+    const auto active_deadline = k_uptime_get() + 3000;
+    while (!drive.active() && k_uptime_get() < active_deadline)
+        k_sleep(K_MSEC(kControlPeriodMs));
+    if (!drive.active()) {
+        (void)drive.disable();
+        return -ETIMEDOUT;
+    }
+    const auto started_ms = k_uptime_get();
+    auto previous_ms = started_ms;
+    while (k_uptime_get() - started_ms < kRunDurationMs) {
+        k_sleep(K_MSEC(kControlPeriodMs));
+        const auto now = k_uptime_get();
+        const float dt_s = float(now - previous_ms) / 1000.0f;
+        previous_ms = now;
+        if (!drive.active())
+            return -EHOSTDOWN;
+        const float target = now - started_ms < 100 ? 0.0f : kRequestedVelocityRadS;
+        ret = axis.update(target, dt_s);
+        if (ret == 0)
+            ret = bus.commit().error;
         if (ret < 0) {
-            LOG_ERR("update failed: cause=%d stop=%d", ret, motor.status().stop_error);
+            (void)drive.disable();
+            LOG_ERR("update failed: %d", ret);
             return ret;
         }
-        const auto &data = motor.telemetry();
-        const auto &feedback = data.measurement.feedback;
+        const auto data = axis.telemetry();
+        const auto &feedback = data.motor.feedback;
         const auto &output = data.output;
         const float channels[10] = {
             target,
@@ -114,7 +150,7 @@ int main() {
         };
         vofa_send(&vofa, channels, 10);
     }
-    ret = motor.stop();
+    ret = drive.disable();
     if (ret < 0)
         LOG_ERR("stop failed: %d", ret);
     return ret;

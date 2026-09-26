@@ -4,16 +4,18 @@
 
 ## 接线
 
-MC02 + DR16，默认 UART5 接线同本项目 app.overlay。没有电机，也不会发送 CAN 输出。
+MC02 或 RoboMaster C 板 + DR16。使用板级 `remote-uart`：MC02 为 UART5（PD2 RX），C 板为 USART3（PC11 RX），均为 100000 baud、8E1、RX DMA。接收机 TX 接对应 RX 并共地，确认板卡反相通路。没有电机，也不会发送 CAN 输出。
 
-控制台沿用 MC02 板定义的 USART10，115200 baud。
+控制台沿用板级定义：MC02 为 USART10，C 板为 USART1，均为 115200 baud。
 
 ## 构建与刷写
 
 ```sh
-west build -b dm_mc02 samples/robotics/command_safety -d build/bench_command_safety
+west build -b dm_mc02/stm32h723xx samples/robotics/command_safety -d build/bench_command_safety
 west flash -d build/bench_command_safety
 ```
+
+C 板使用 `-b rm_typec/stm32f407xx` 和独立构建目录，无需添加 overlay。
 
 ## 操作与预期现象
 
@@ -23,6 +25,6 @@ west flash -d build/bench_command_safety
 
 ## 自行配置
 
-本目录的 overlay、board_config.hpp 与 main.cpp 中 mapper/manager/safety 配置；不读取正式应用配置。
+串口配置由各板 DTS 维护；本目录的 board_config.hpp 与 main.cpp 维护 mapper/manager/safety 配置，不读取正式应用配置。
 
 目前已做固件编译，未在此环境刷写或连接真实外设验证。

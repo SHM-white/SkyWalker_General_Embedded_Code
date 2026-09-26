@@ -3,6 +3,8 @@
 #include <cstring>
 #include <communication/async_uart.hpp>
 namespace skywalker::communication {
+static_assert(!IS_ENABLED(CONFIG_DCACHE) || IS_ENABLED(CONFIG_NOCACHE_MEMORY),
+              "AsyncUart DMA buffers require CONFIG_NOCACHE_MEMORY when DCACHE is enabled");
 int AsyncUart::init() {
     if (initialized_)
         return -EALREADY;
@@ -18,7 +20,7 @@ int AsyncUart::init() {
 int AsyncUart::startRx() {
     atomic_set(&in_use_, 1);
     atomic_clear(&rx_disabled_);
-    const int ret = uart_rx_enable(uart_, rx_[0], sizeof(rx_[0]), 1000);
+    const int ret = uart_rx_enable(uart_, dma_.rx[0], sizeof(dma_.rx[0]), 1000);
     if (ret < 0) {
         atomic_clear(&in_use_);
         atomic_set(&rx_disabled_, 1);
@@ -30,7 +32,7 @@ int AsyncUart::service(std::uint64_t now) {
         return -EACCES;
     if (atomic_get(&tx_busy_) && now >= tx_deadline_ms_) {
         tx_deadline_ms_ = now + 100;
-        uart_tx_abort(uart_); // Only the completion/abort callback releases tx_.
+        uart_tx_abort(uart_); // Only the completion/abort callback releases dma_.tx.
     }
     if (!atomic_get(&rx_disabled_))
         return 0;
@@ -65,14 +67,14 @@ void AsyncUart::event(uart_event &e) {
     case UART_RX_BUF_REQUEST:
         for (unsigned i = 0; i < 2; ++i)
             if (!atomic_test_and_set_bit(&in_use_, i)) {
-                if (uart_rx_buf_rsp(uart_, rx_[i], sizeof(rx_[i])) < 0)
+                if (uart_rx_buf_rsp(uart_, dma_.rx[i], sizeof(dma_.rx[i])) < 0)
                     atomic_clear_bit(&in_use_, i);
                 break;
             }
         break;
     case UART_RX_BUF_RELEASED:
         for (unsigned i = 0; i < 2; ++i)
-            if (e.data.rx_buf.buf == rx_[i])
+            if (e.data.rx_buf.buf == dma_.rx[i])
                 atomic_clear_bit(&in_use_, i);
         break;
     case UART_RX_STOPPED:
@@ -110,13 +112,13 @@ int AsyncUart::read(RxChunk &out) {
     return -EAGAIN;
 }
 int AsyncUart::send(const std::uint8_t *p, std::size_t n, std::uint32_t timeout) {
-    if (!initialized_ || !p || !n || n > sizeof(tx_) || !timeout || timeout > 1000)
+    if (!initialized_ || !p || !n || n > sizeof(dma_.tx) || !timeout || timeout > 1000)
         return -EINVAL;
     if (!atomic_cas(&tx_busy_, 0, 1))
         return -EAGAIN;
     tx_deadline_ms_ = static_cast<std::uint64_t>(k_uptime_get()) + timeout;
-    std::memcpy(tx_, p, n);
-    const int ret = uart_tx(uart_, tx_, n, timeout * 1000);
+    std::memcpy(dma_.tx, p, n);
+    const int ret = uart_tx(uart_, dma_.tx, n, timeout * 1000);
     if (ret < 0)
         atomic_clear(&tx_busy_);
     return ret;

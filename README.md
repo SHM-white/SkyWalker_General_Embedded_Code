@@ -46,7 +46,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 - DJI：M3508-C620、M2006-C610、GM6020 电流模式；支持反馈解码、输出轴角度、温度和总线分组发送。
 - 达妙：DM-J4310-2EC V1.1；支持 MIT、位置-速度、速度三种原生 CAN 模式，以及 Enable/Disable/ClearError/SaveZero。
-- 统一电机封装：`MotorBackend`、`MotorRuntime`、`VelocityMotor`、`PositionMotor`，包含反馈新鲜度、真实 dt、超速/超温保护和有限重试恢复。
+- 统一 CAN 电机驱动：`CanBus` 管物理传输，`Motor` 管端点，`Group` 声明联动停机；`VelocityMotor`、`PositionMotor` 复用纯 C 控制算法并暂存目标。
 - 纯 C 控制库：PID、前馈、复合前馈 PID、斜坡限幅、角度工具、速度环和位置-速度串级。
 - IMU：BMI088 + `skywalker,imu` + 四元数 EKF + 恒温 PWM；底层使用 Kalman 设备和 CMSIS-DSP。
 
@@ -93,11 +93,11 @@ west build -p -b rm_typec -d build/dji_position samples/motor/dji_position_contr
 ```text
 skywalker_code/
 ├── boards/                     本仓库维护的 Zephyr boards
-├── dts/bindings/               IMU、Kalman、电机 binding
+├── dts/bindings/               IMU、Kalman 等设备 binding
 ├── drivers/
 │   ├── imu/                    IMU 设备驱动
 │   ├── kalman_filter/          通用 Kalman 设备
-│   └── motor/{dji,dm}/         DJI / 达妙 CAN 驱动
+│   └── motor/                  共享 CAN I/O、DJI / 达妙协议
 ├── include/                    公共头文件，按 drivers/lib 对应组织
 ├── lib/
 │   ├── control/                纯 C 控制与 C++ 电机封装
@@ -115,11 +115,11 @@ skywalker_code/
 
 ## 重要约定
 
-1. 设备树负责实例化驱动；`status = "okay"` 的节点才会进入设备构建和运行时。
+1. 设备树提供物理 CAN 与 UART 设备；电机型号、ID、限幅和 Group 关系在应用 C++ 中配置。
 2. DJI 的统一 effort 单位是 A；DM 的 MIT effort 单位是 N·m，代码不会自动换算两者。
-3. `motor::Feedback::position_rad` 是连续输出轴角度，首个参考点由驱动/封装生命周期决定；GM6020 的 `absolute_position_rad` 才是固定零点单圈角。
-4. 多个原生电机实例必须由同一物理 CAN 的一个 `Bus` 统一 `flush()`；统一 `DjiMotorBackend` / `DmMotorBackend` 是单电机独占封装。
-5. 电机 `stop()` 是撤回命令/发送禁用或零输出，不等于机械制动，也不切断板上动力电源。
+3. `motor::Feedback::position_rad` 是首帧归零的连续输出轴角度，可在禁用状态通过 `reseedPosition()` 建立已知坐标；GM6020 的 `absolute_position_rad` 是固定零点单圈角。
+4. 同一物理 CAN 只创建一个 `CanBus`：各 `Motor` 暂存目标后，由总线 `commit()` 提交；只有机械联动的电机才放入同一个 `Group`。
+5. `disable()` 立即撤销软件输出许可，安全帧异步发送；这不等于机械制动，也不切断板上动力电源。反馈恢复后仍需新的显式 `enable()`。
 6. `samples/` 是已存在的验证入口；`applications/sentry_*` 是需要按真实机器人修改 overlay 和 `src/board_config.hpp` 的应用骨架，不应被描述为开箱即用整机固件。
 7. 当前仓库没有独立 `tests/` 测试树，控制、通信和安全链路主要通过样例与日志进行台架验证。
 
