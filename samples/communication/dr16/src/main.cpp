@@ -1,96 +1,125 @@
 #include <cerrno>
-#include <cstring>
+#include <cstdint>
+#include <communication/async_uart.hpp>
+#include <communication/remote/remote_service.hpp>
+#include <latest.hpp>
+#include <lib/vofa/vofa.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <communication/async_uart.hpp>
-#include <communication/wire.hpp>
+
 #include "board_config.hpp"
 
 LOG_MODULE_REGISTER(dr16_bench, LOG_LEVEL_INF);
+using namespace skywalker;
 
-int main() {
-    using namespace skywalker;
+namespace {
+struct BenchSnapshot {
+    robotics::RemoteState remote{};
+    std::uint32_t rx_chunks = 0, resets = 0;
+    unsigned dropped = 0;
+    int uart_error = 0;
+};
+
+Latest<BenchSnapshot> latest;
+
+void remoteTask(void *, void *, void *) {
     static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
     static communication::AsyncUart uart(bench::remote_uart, dma_buffers);
-    communication::Dr16Decoder decoder(bench::decoder);
-    robotics::RemoteState state{};
-    std::uint8_t pending[18]{}, last_frame[18]{}, last_chunk[64]{};
-    std::size_t used = 0, last_chunk_size = 0;
-    std::uint32_t rx_bytes = 0, rx_chunks = 0, discontinuities = 0;
-    std::uint64_t last_bytes_ms = 0, next_log = 0;
-    int service_error = 0;
+    communication::RemoteService service(bench::decoder, bench::remote);
+    BenchSnapshot snapshot{};
+
     const int init_ret = uart.init();
-    LOG_INF("DR16 init=%d; console raw channel monitor", init_ret);
+    LOG_INF("DR16 init=%d", init_ret);
     if (init_ret < 0) {
-        LOG_ERR("UART initialization failed; fix the reported device/DMA/buffer error before decoding");
-        return init_ret;
+        snapshot.uart_error = init_ret;
+        latest.put(snapshot);
+        LOG_ERR("DR16 UART initialization failed");
+        return;
     }
 
     for (;;) {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const int sr = uart.service(now);
         if (sr < 0 && sr != -EAGAIN)
-            service_error = sr;
+            snapshot.uart_error = sr;
         else if (sr == 0)
-            service_error = 0;
+            snapshot.uart_error = 0;
 
         communication::AsyncUart::RxChunk chunk{};
         for (unsigned budget = 0; budget < 8; ++budget) {
             const int rr = uart.read(chunk);
             if (rr == -EOVERFLOW) {
-                used = 0;
-                ++discontinuities;
+                service.discardPartial();
+                ++snapshot.resets;
                 continue;
             }
             if (rr < 0)
                 break;
-            rx_bytes += chunk.size;
-            ++rx_chunks;
-            last_chunk_size = chunk.size;
-            std::memcpy(last_chunk, chunk.bytes, last_chunk_size);
-            if (used && (chunk.timestamp_ms < last_bytes_ms ||
-                         chunk.timestamp_ms - last_bytes_ms > bench::remote.assembly_gap_ms))
-                used = 0;
-            last_bytes_ms = chunk.timestamp_ms;
-            for (std::size_t i = 0; i < chunk.size; ++i) {
-                pending[used++] = chunk.bytes[i];
-                if (used != sizeof(pending))
-                    continue;
-                if (decoder.decodeFrame(pending, sizeof(pending), chunk.timestamp_ms, state) == 0) {
-                    std::memcpy(last_frame, pending, sizeof(last_frame));
-                    used = 0;
-                }
-                else {
-                    --used;
-                    std::memmove(pending, pending + 1, used);
-                }
-            }
+            ++snapshot.rx_chunks;
+            service.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
         }
 
-        if (now >= next_log) {
-            next_log = now + 100;
-            const bool fresh = state.stamp.valid && now >= state.stamp.timestamp_ms &&
-                               now - state.stamp.timestamp_ms <= bench::remote.offline_timeout_ms;
-            LOG_INF("online=%d bytes=%u chunks=%u valid=%u rejected_windows=%u gaps=%u dropped=%u service=%d", fresh,
-                    rx_bytes, rx_chunks, decoder.validFrameCount(), decoder.invalidFrameCount(), discontinuities,
-                    static_cast<unsigned>(uart.droppedChunks()), service_error);
-            if (state.stamp.valid) {
-                // No deadband in this sample: adding center recovers raw CH0..CH3.
-                const auto &a = state.analog;
-                LOG_INF("CH0=%d CH1=%d CH2=%d CH3=%d d0=%d d1=%d d2=%d d3=%d",
-                        a.right_x + bench::decoder.channel_center, a.right_y + bench::decoder.channel_center,
-                        a.left_x + bench::decoder.channel_center, a.left_y + bench::decoder.channel_center, a.right_x,
-                        a.right_y, a.left_x, a.left_y);
-                LOG_INF("SW_HIGH=%u SW_LOW=%u TAIL16=%u mouse=%d/%d/%d buttons=%u/%u keys=%04x",
-                        unsigned((last_frame[5] >> 6) & 3), unsigned((last_frame[5] >> 4) & 3),
-                        unsigned(communication::wire::loadLe16(last_frame + 16)), state.mouse.x, state.mouse.y,
-                        state.mouse.z, unsigned(state.mouse.left), unsigned(state.mouse.right),
-                        unsigned(state.keyboard.bits));
-            }
-            if (!fresh && last_chunk_size) {
-                LOG_HEXDUMP_INF(last_chunk, last_chunk_size, "last RX chunk (not necessarily one frame)");
-            }
-        }
+        service.snapshot(now, snapshot.remote);
+        snapshot.dropped = static_cast<unsigned>(uart.droppedChunks());
+        latest.put(snapshot);
         k_sleep(K_MSEC(1));
     }
+}
+
+void vofaTask(void *, void *, void *) {
+    static Vofa vofa{};
+    const int init_ret = vofa_init(&vofa, bench::telemetry_uart);
+    LOG_INF("VOFA init=%d", init_ret);
+    if (init_ret < 0) {
+        LOG_ERR("VOFA telemetry UART initialization failed");
+        return;
+    }
+
+    BenchSnapshot snapshot{};
+    std::uint32_t last_resets = 0;
+    unsigned last_dropped = 0;
+    int last_uart_error = 0, last_send_error = 0;
+    for (;;) {
+        // Keep the previous snapshot on contention, then check its original age.
+        latest.get(snapshot);
+        const auto &state = snapshot.remote;
+        const auto &a = state.analog;
+        const auto now = static_cast<std::uint64_t>(k_uptime_get());
+        const bool fresh = state.online && robotics::isFresh(state.stamp, now, bench::remote.offline_timeout_ms);
+        const float channels[] = {
+            fresh ? 1.0f : 0.0f, float(a.right_x), float(a.right_y), float(a.left_x),
+            float(a.left_y), float(unsigned(state.left_switch)), float(unsigned(state.right_switch)),
+            float(a.wheel), float(state.mouse.x), float(state.mouse.y), float(state.mouse.z),
+            state.mouse.left ? 1.0f : 0.0f, state.mouse.right ? 1.0f : 0.0f,
+            float(state.keyboard.bits), float(state.stamp.sequence), float(snapshot.rx_chunks),
+        };
+        constexpr auto channel_count = sizeof(channels) / sizeof(channels[0]);
+        static_assert(channel_count <= VOFA_MAX_FLOATS);
+        const int send_ret = vofa_send(&vofa, channels, static_cast<std::uint8_t>(channel_count));
+        if (send_ret != last_send_error) {
+            if (send_ret < 0)
+                LOG_WRN("VOFA send failed: %d", send_ret);
+            last_send_error = send_ret;
+        }
+        if (snapshot.uart_error != last_uart_error) {
+            if (snapshot.uart_error < 0)
+                LOG_ERR("DR16 UART service failed: %d", snapshot.uart_error);
+            last_uart_error = snapshot.uart_error;
+        }
+        if (snapshot.resets != last_resets || snapshot.dropped != last_dropped) {
+            LOG_WRN("DR16 RX continuity: resets=%u dropped=%u", snapshot.resets, snapshot.dropped);
+            last_resets = snapshot.resets;
+            last_dropped = snapshot.dropped;
+        }
+        k_sleep(K_MSEC(100));
+    }
+}
+} // namespace
+
+K_THREAD_DEFINE(remote_thread, 3072, remoteTask, nullptr, nullptr, nullptr, 6, 0, 0);
+K_THREAD_DEFINE(vofa_thread, 4096, vofaTask, nullptr, nullptr, nullptr, 7, 0, 0);
+
+int main() {
+    LOG_INF("DR16 receive and VOFA telemetry threads started");
+    return 0;
 }
