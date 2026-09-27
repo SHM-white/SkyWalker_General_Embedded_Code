@@ -4,16 +4,18 @@
 
 ## 配置与接线
 
-电机型号、ID、限幅、零点、协议量程与总线绑定都在 `src/board_config.hpp`；`app.overlay` 不再声明电机设备节点。默认值是供核对的模板：
+电机型号、ID、限幅、零点、协议量程与总线绑定都在 `src/board_config.hpp`；`app.overlay` 不再声明电机设备节点。配置采用指定的 GM6020 小 yaw 与同一颗 DM-J4310 的调参结果：
 
-| 轴 | 电机 | 总线与 ID | 命令上限 |
-| --- | --- | --- | --- |
-| yaw | GM6020 电流模式 | CAN1 / 7 | 1.5 A |
-| pitch | J4310 MIT | CAN1 / 1、Master 0x00 | 1.0 N·m 前馈 |
+| 轴 | 电机与 CAN | 驱动限幅 | 控制器输出限幅 | 安全阈值 |
+| --- | --- | --- | --- | --- |
+| yaw | GM6020 电流模式，CAN1 / ID 7 | 1.5 A | ±1.2 A | 4 rad/s、70 °C |
+| pitch | J4310 MIT，CAN1 / ID 1、Master 0x11 | 1.0 N·m | ±0.5 N·m | 10 rad/s、60 °C |
 
-DM 的 PMAX、VMAX、TMAX 必须与驱动器配置一致。两轴的方向、机械限位和位置环参数也在配置文件中；pitch 的参数只供空载低限幅起步。MC02 的 DR16 UART5 接口来自板级 DTS。电机独立供电，样例没有应用层电源 GPIO；CAN 收发器由 CanBus.start 启动。
+yaw 编码器零点为 5670 tick，机械端点为 5670～7440 tick。两端各留 100 tick，实际目标与反馈允许范围为 5770～7340 tick，换算成零点相对角约为 0.0767～1.281 rad。yaw 位置环为 (20, 0.5, 1.48)，速度环为 (0.43, 0.55, 0.00005)；pitch 位置环为 (0.8, 0.1, 0)，速度环为 (0.03, 0.1, 0)。两个控制环均按 5 ms 更新，接受 1～20 ms 的实测周期。
 
-`connections_configured` 默认为 `false`，核对实物接线、GM6020 电流模式、编码器零点、DM 量程和机械支撑后才设为 `true`。改 `pitch_can` 为 CAN2 即展示跨 CAN Group：程序先 attach 两轴，再依次 start 两条 CAN，周期末分别 commit。改型号时同时改硬件工厂、控制输出单位与限幅，不能沿用另一品牌的单位。
+DM 的 PMAX 12.5 rad、VMAX 30 rad/s、TMAX 10 N·m 必须与驱动器实际配置一致；沿用该电机内部已保存的零点，不写软件 tick 零点。pitch 的 -0.5～0.5 rad 机械范围仍是待实测的样例值，不能据此启用实机。MC02 的 DR16 UART5 接口来自板级 DTS。电机独立供电，样例没有应用层电源 GPIO；CAN 收发器由 CanBus.start 启动。
+
+`connections_configured` 仍为 `false`，核对实物接线、两轴方向与机械限位、GM6020 电流模式和编码器零点、DM 的 Master ID / 量程 / 已保存零点及 pitch 机械支撑后才设为 `true`。改 `pitch_can` 为 CAN2 即展示跨 CAN Group：程序先 attach 两轴，再依次 start 两条 CAN，周期末分别 commit。改型号时同时改硬件工厂、控制输出单位与限幅，不能沿用另一品牌的单位。
 
 ## 调用与安全行为
 
