@@ -31,4 +31,6 @@ Limited 轴在禁用且反馈稳定后，使用 GM6020 校准的单圈绝对角�
 west build -b dm_mc02 samples/robotics/gimbal_control -d ../build/gimbal_rc_test
 ```
 
-当前默认禁用配置已在 MC02 编译链接通过；未刷写或实机验证。日志打印遥控有效性、组状态、成员状态、故障原因与 CAN 错误。
+运行状态每秒通过独立的 `telemetry-uart`（MC02 USART1）发送一帧 VOFA+ JustFloat；遥控接收仍使用 UART5，控制台日志仍使用 USART10。VOFA+ 串口设为 115200 baud、JustFloat 协议。按顺序为 11 个通道：遥控帧有效（0/1）、左拨杆位置、允许重新使能（0/1）、急停锁存（0/1）、联动组运行（0/1）、联动组等待使能（0/1）、yaw 电机状态、pitch 电机状态、联动组故障原因、yaw CAN 最近错误码、pitch CAN 最近错误码。同 CAN 配置下最后一个通道固定为 0。VOFA 初始化或发送失败时，错误写入控制台日志。
+
+本次 VOFA 改动已在 MC02 编译链接通过；未刷写或实机验证。

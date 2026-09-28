@@ -9,10 +9,17 @@
 #include <drivers/motor/can_bus.hpp>
 #include <drivers/motor/group.hpp>
 #include <latest.hpp>
+#include <lib/vofa/vofa.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 #include "board_config.hpp"
+
+#define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
+
+#if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
+#error "A ready telemetry-uart alias is required for VOFA"
+#endif
 
 LOG_MODULE_REGISTER(gimbal_rc, LOG_LEVEL_INF);
 using namespace skywalker;
@@ -134,6 +141,11 @@ void gimbalTask(void *, void *, void *) {
         LOG_ERR("hardware template disabled; check board_config.hpp");
         return;
     }
+    static Vofa vofa{};
+    const int vofa_ret = vofa_init(&vofa, DEVICE_DT_GET(VOFA_UART_NODE));
+    if (vofa_ret < 0)
+        LOG_ERR("VOFA telemetry UART initialization failed: %d", vofa_ret);
+
     const bool split_buses = board_config::yaw_can != board_config::pitch_can;
     int ret = split_buses ? yaw_bus.attach(yaw_drive) : yaw_bus.attach(yaw_drive, pitch_drive);
     if (ret == 0 && split_buses)
@@ -153,7 +165,7 @@ void gimbalTask(void *, void *, void *) {
     RemoteState remote{};
     bool estop_latched = false, rearm_allowed = false, enable_issued = false;
     auto previous_ms = k_uptime_get();
-    std::uint64_t next_log = 0;
+    std::uint64_t next_telemetry = 0;
     for (;;) {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const float dt = (now - previous_ms) / 1000.0f;
@@ -233,15 +245,31 @@ void gimbalTask(void *, void *, void *) {
             }
         }
 
-        if (now >= next_log) {
-            next_log = now + 1000;
+        if (now >= next_telemetry) {
+            next_telemetry = now + 1000;
             const auto status = gimbal.status();
             const auto ys = yaw_drive.snapshot();
             const auto ps = pitch_drive.snapshot();
-            LOG_INF("rc=%d switch=%u rearm=%d estop=%d group=%d/%d yaw=%u pitch=%u fault=%u bus=%d/%d", fresh,
-                    unsigned(remote.left_switch), rearm_allowed, estop_latched, status.active, status.enable_pending,
-                    unsigned(ys.state), unsigned(ps.state), unsigned(status.last_fault.reason),
-                    yaw_bus.status().last_error, split_buses ? pitch_bus.status().last_error : 0);
+            const float channels[] = {
+                fresh ? 1.0f : 0.0f,
+                static_cast<float>(unsigned(remote.left_switch)),
+                rearm_allowed ? 1.0f : 0.0f,
+                estop_latched ? 1.0f : 0.0f,
+                status.active ? 1.0f : 0.0f,
+                status.enable_pending ? 1.0f : 0.0f,
+                static_cast<float>(unsigned(ys.state)),
+                static_cast<float>(unsigned(ps.state)),
+                static_cast<float>(unsigned(status.last_fault.reason)),
+                static_cast<float>(yaw_bus.status().last_error),
+                static_cast<float>(split_buses ? pitch_bus.status().last_error : 0),
+            };
+            constexpr auto channel_count = sizeof(channels) / sizeof(channels[0]);
+            static_assert(channel_count <= VOFA_MAX_FLOATS);
+            if (vofa_ret == 0) {
+                const int send_ret = vofa_send(&vofa, channels, static_cast<std::uint8_t>(channel_count));
+                if (send_ret < 0)
+                    LOG_WRN("VOFA send failed: %d", send_ret);
+            }
         }
         k_sleep(K_MSEC(5));
     }
