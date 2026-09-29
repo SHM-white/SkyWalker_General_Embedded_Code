@@ -1,5 +1,7 @@
 # YawGimbal 单轴控制器说明
 
+> 历史源码解读：Axis 与 YawGimbal 现已合并为 GimbalAxis。当前接口与验证记录见 [GimbalAxis 单轴封装实施记录](GimbalAxis单轴封装实施记录.md)。
+
 依据 `include/robotics/gimbal/yaw_gimbal.hpp` 与 `lib/robotics/yaw_gimbal.cpp` 的静态阅读。本任务只解释现有代码，无业务修改、构建或硬件验证。
 
 ## 核心分工

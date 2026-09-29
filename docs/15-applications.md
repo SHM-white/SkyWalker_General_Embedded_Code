@@ -66,7 +66,7 @@ bench_effort_scale = 0.15f;
 - `refereeTask`：裁判 UART → `RefereeService` → `RefereeState`。
 - `commandTask`：Remote/Referee/Peer feedback → mapper → global safety → `CommandManager` → `CommandRouter`。
 - `linkTask`：板间接收并周期发送 heartbeat、约束和底盘控制。
-- `gimbalTask`：构造一台 `Motor` 与 `CanBus`，运行 `PositionMotor`、`YawGimbal` 和 `GimbalLocalSafety`，显式管理使能与故障清除。
+- `gimbalTask`：构造一台 `Motor` 与 `CanBus`，运行私有拥有 `PositionMotor` 的 `GimbalAxis` 和 `GimbalLocalSafety`，显式管理使能与故障清除。
 
 `commandTask` 保留自己的 `RemoteReceiver::Snapshot`，每轮读取全部输入快照后取当前时间。模块检查接收超时，命令层继续检查 `board_config::command_timeout_ms`。启动前或初始化失败时快照无效、离线，不能满足运动使能条件。
 

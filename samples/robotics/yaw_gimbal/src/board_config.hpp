@@ -2,7 +2,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <drivers/motor/dji_motor.hpp>
-#include <robotics/gimbal/yaw_gimbal.hpp>
+#include <robotics/gimbal/gimbal_axis.hpp>
 namespace bench {
 inline const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
 inline skywalker::motor::dji::Config motorHardware() {
@@ -13,13 +13,13 @@ inline skywalker::motor::dji::Config motorHardware() {
                                           .timing = {20, 20, 20, 100}});
 }
 // Limited topology requires calibrated DriverContinuous coordinates instead.
-inline constexpr skywalker::robotics::YawGimbalConfig yaw{skywalker::robotics::YawTopology::Continuous, -3.14159265f,
+inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Continuous, -3.14159265f,
                                                           3.14159265f, 0.5f, true};
 inline skywalker::control::PositionMotor::Config motorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::Ampere;
     c.safety = {12, 70};
-    c.reference = yaw.topology == skywalker::robotics::YawTopology::Continuous
+    c.reference = yaw.topology == skywalker::robotics::AxisTopology::Continuous
                       ? skywalker::control::PositionReference::AbsoluteNearest
                       : skywalker::control::PositionReference::DriverContinuous;
     c.loop.position = {3, 0, 0, 0, -3, 3, -6, 6, .01f, .001f, .02f};

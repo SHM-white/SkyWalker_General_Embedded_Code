@@ -4,10 +4,10 @@
 #include <cstdint>
 
 #include <communication/remote/remote_receiver.hpp>
-#include <control/position_motor.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <drivers/motor/group.hpp>
 #include <lib/vofa/vofa.h>
+#include <robotics/gimbal/gimbal_axis.hpp>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -33,79 +33,14 @@ float normalizeStick(std::int16_t raw) {
     return std::fabs(x) <= deadband ? 0.0f : std::copysign((std::fabs(x) - deadband) / (1.0f - deadband), x);
 }
 
-struct Axis {
-    motor::Motor &drive;
-    control::PositionMotor axis_motor;
-    YawGimbal controller;
-    const YawGimbalConfig config;
-    std::uint64_t ready_ms = 0;
-    bool was_ready = false;
-    bool reference_seeded = false;
-
-    Axis(motor::Motor &endpoint, const control::PositionMotor::Config &motor_config, const YawGimbalConfig &axis_config)
-        : drive(endpoint), axis_motor(endpoint, motor_config), controller(endpoint, axis_motor, axis_config),
-          config(axis_config) {
-    }
-
-    bool feedbackHealthy(bool require_reference = true) const {
-        const auto view = drive.snapshot();
-        const auto &feedback = view.feedback;
-        if (!view.feedback_fresh)
-            return false;
-        if (config.topology == YawTopology::Limited && !require_reference) {
-            return ((feedback.valid & motor::FeedbackAbsolutePosition) &&
-                    std::isfinite(feedback.absolute_position_rad)) ||
-                   (view.native_position_valid && std::isfinite(view.native_position_rad));
-        }
-        const std::uint32_t required = config.topology == YawTopology::Continuous ? motor::FeedbackAbsolutePosition
-                                                                                  : motor::FeedbackPosition;
-        if ((feedback.valid & required) == 0 ||
-            (config.topology == YawTopology::Limited && !view.position_reference_valid))
-            return false;
-        const float angle = config.topology == YawTopology::Continuous ? feedback.absolute_position_rad
-                                                                       : feedback.position_rad;
-        return std::isfinite(angle) && (config.topology != YawTopology::Limited ||
-                                        (angle >= config.min_angle_rad && angle <= config.max_angle_rad));
-    }
-
-    bool ready(std::uint64_t now) {
-        bool current = drive.ready() && feedbackHealthy(false);
-        if (current && config.topology == YawTopology::Limited) {
-            const auto view = drive.snapshot();
-            if (!reference_seeded || !view.position_reference_valid) {
-                const bool absolute = (view.feedback.valid & motor::FeedbackAbsolutePosition) != 0;
-                const double known = absolute ? view.feedback.absolute_position_rad : view.native_position_rad;
-                current = (absolute || view.native_position_valid) && drive.reseedPosition(known) == 0;
-                if (current)
-                    reference_seeded = true;
-            }
-        }
-        current = current && feedbackHealthy();
-        if (current && !was_ready)
-            ready_ms = now;
-        was_ready = current;
-        return current;
-    }
-
-    int update(float rate, const MessageStamp &stamp, float dt) {
-        GimbalCommand command{};
-        command.mode = GimbalMode::Rate;
-        command.source = ControlSource::Remote;
-        command.stamp = stamp;
-        // Both single-axis controllers consume yaw_rate_rad_s.
-        command.yaw_rate_rad_s = rate;
-        return controller.update(command, SafetyAction::Active, dt);
-    }
-};
-
 void gimbalTask(void *, void *, void *) {
     static motor::Motor yaw_drive(board_config::yawHardware());
     static motor::Motor pitch_drive(board_config::pitchHardware());
     static motor::Group gimbal(yaw_drive, pitch_drive);
     static motor::CanBus yaw_bus(board_config::yaw_can);
     static motor::CanBus pitch_bus(board_config::pitch_can);
-    static Axis yaw(yaw_drive, board_config::yawMotorConfig(), board_config::yaw);
-    static Axis pitch(pitch_drive, board_config::pitchMotorConfig(), board_config::pitch);
+    static GimbalAxis yaw(yaw_drive, board_config::yawMotorConfig(), board_config::yaw);
+    static GimbalAxis pitch(pitch_drive, board_config::pitchMotorConfig(), board_config::pitch);
 
     if (!board_config::connections_configured) {
         LOG_ERR("hardware template disabled; check board_config.hpp");
@@ -125,9 +60,9 @@ void gimbalTask(void *, void *, void *) {
     if (ret == 0 && split_buses)
         ret = pitch_bus.start();
     if (ret == 0)
-        ret = yaw.controller.begin();
+        ret = yaw.begin();
     if (ret == 0)
-        ret = pitch.controller.begin();
+        ret = pitch.begin();
     LOG_INF("configure=%d split_buses=%d", ret, split_buses);
     if (ret < 0)
         return;
@@ -160,12 +95,15 @@ void gimbalTask(void *, void *, void *) {
             rearm_allowed = false;
         }
 
-        const bool yaw_ready = yaw.ready(now);
-        const bool pitch_ready = pitch.ready(now);
-        const bool feedback_ok = yaw.feedbackHealthy() && pitch.feedbackHealthy();
+        const auto yaw_status = yaw.poll(now);
+        const auto pitch_status = pitch.poll(now);
+        const bool yaw_ready = yaw_status.ready_for_enable;
+        const bool pitch_ready = pitch_status.ready_for_enable;
+        const bool feedback_ok = yaw_status.feedback_healthy && pitch_status.feedback_healthy;
         const bool timing_ok = dt > 0.0f && dt <= 0.02f;
         const bool safe_switch = remote.left_switch == RcSwitch::Up || remote.left_switch == RcSwitch::Down;
-        const bool new_command = remote.stamp.timestamp_ms > std::max(yaw.ready_ms, pitch.ready_ms);
+        const bool new_command =
+            remote.stamp.timestamp_ms > std::max(yaw_status.ready_since_ms, pitch_status.ready_since_ms);
         const auto group = gimbal.status();
         if (enable_issued && !group.active && !group.enable_pending) {
             enable_issued = false;
@@ -185,9 +123,9 @@ void gimbalTask(void *, void *, void *) {
             }
         }
         else if (!enable_issued && gimbal.ready()) {
-            ret = yaw.controller.reset();
+            ret = yaw.reset();
             if (ret == 0)
-                ret = pitch.controller.reset();
+                ret = pitch.reset();
             if (ret == 0)
                 ret = gimbal.enable();
             enable_issued = ret == 0;
@@ -201,8 +139,8 @@ void gimbalTask(void *, void *, void *) {
                                    board_config::yaw.max_rate_rad_s;
             const float pitch_rate = board_config::pitch_direction * normalizeStick(remote.analog.right_y) *
                                      board_config::pitch.max_rate_rad_s;
-            const int yr = yaw.update(yaw_rate, remote.stamp, dt);
-            const int pr = yr == 0 ? pitch.update(pitch_rate, remote.stamp, dt) : 0;
+            const int yr = yaw.updateRate(yaw_rate, dt);
+            const int pr = yr == 0 ? pitch.updateRate(pitch_rate, dt) : 0;
             int submit = 0;
             if (yr == 0 && pr == 0)
                 submit = yaw_bus.commit().error;
