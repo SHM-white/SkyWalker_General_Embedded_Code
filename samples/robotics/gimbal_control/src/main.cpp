@@ -102,8 +102,8 @@ void gimbalTask(void *, void *, void *) {
         const bool feedback_ok = yaw_status.feedback_healthy && pitch_status.feedback_healthy;
         const bool timing_ok = dt > 0.0f && dt <= 0.02f;
         const bool safe_switch = remote.left_switch == RcSwitch::Up || remote.left_switch == RcSwitch::Down;
-        const bool new_command =
-            remote.stamp.timestamp_ms > std::max(yaw_status.ready_since_ms, pitch_status.ready_since_ms);
+        const bool new_command = remote.stamp.timestamp_ms >
+                                 std::max(yaw_status.ready_since_ms, pitch_status.ready_since_ms);
         const auto group = gimbal.status();
         if (enable_issued && !group.active && !group.enable_pending) {
             enable_issued = false;

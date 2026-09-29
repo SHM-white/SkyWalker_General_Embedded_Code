@@ -55,7 +55,7 @@ inline auto yawMotorConfig() {
 }
 
 inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Continuous, -3.14159265f,
-                                                          3.14159265f, 1.0f, true};
+                                                           3.14159265f, 1.0f, true};
 inline skywalker::control::PositionMotor::Config motorConfig(const skywalker::motor::MotorInfo &info) {
     skywalker::control::PositionMotor::Config c{};
     if ((info.capabilities & skywalker::motor::CommandCurrent) != 0u)

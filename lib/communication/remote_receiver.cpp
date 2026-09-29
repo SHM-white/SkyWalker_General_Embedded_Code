@@ -11,13 +11,13 @@ BUILD_ASSERT(CONFIG_SKYWALKER_REMOTE_RX_PRIORITY < CONFIG_NUM_PREEMPT_PRIORITIES
 int RemoteReceiver::start() {
     const auto &d = config_.decoder;
     if (d.channel_min < 0 || d.channel_max > 2047 || d.channel_min >= d.channel_center ||
-        d.channel_center >= d.channel_max || d.center_deadband < 0 ||
-        config_.remote.offline_timeout_ms == 0 || config_.remote.assembly_gap_ms == 0)
+        d.channel_center >= d.channel_max || d.center_deadband < 0 || config_.remote.offline_timeout_ms == 0 ||
+        config_.remote.assembly_gap_ms == 0)
         return -EINVAL;
     if (!atomic_cas(&started_, 0, 1))
         return -EALREADY;
-    k_thread_create(&thread_, thread_stack_, K_KERNEL_STACK_SIZEOF(thread_stack_), threadEntry,
-                    this, nullptr, nullptr, CONFIG_SKYWALKER_REMOTE_RX_PRIORITY, 0, K_NO_WAIT);
+    k_thread_create(&thread_, thread_stack_, K_KERNEL_STACK_SIZEOF(thread_stack_), threadEntry, this, nullptr, nullptr,
+                    CONFIG_SKYWALKER_REMOTE_RX_PRIORITY, 0, K_NO_WAIT);
     return 0;
 }
 

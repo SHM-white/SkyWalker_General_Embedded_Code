@@ -11,8 +11,7 @@ int main() {
     using namespace skywalker;
     using namespace skywalker::robotics;
     static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-    static communication::RemoteReceiver receiver(
-        bench::remote_uart, dma_buffers, {bench::decoder, bench::remote});
+    static communication::RemoteReceiver receiver(bench::remote_uart, dma_buffers, {bench::decoder, bench::remote});
     communication::RemoteReceiver::Snapshot rc{};
     ManualCommandMapper mapper({});
     CommandManager manager({});
@@ -29,7 +28,8 @@ int main() {
         return ret;
     }
     LOG_INF("RC -> intent -> safety -> command receiver start=%d. Bench mode; no motors. "
-            "Console ! estop, r explicit reset", ret);
+            "Console ! estop, r explicit reset",
+            ret);
     LOG_INF("Simulated chassis Ready: h toggles heartbeat, f toggles feedback");
     std::uint64_t next_log = 0;
     bool estop = false;

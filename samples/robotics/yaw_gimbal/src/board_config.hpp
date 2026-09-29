@@ -14,7 +14,7 @@ inline skywalker::motor::dji::Config motorHardware() {
 }
 // Limited topology requires calibrated DriverContinuous coordinates instead.
 inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Continuous, -3.14159265f,
-                                                          3.14159265f, 0.5f, true};
+                                                           3.14159265f, 0.5f, true};
 inline skywalker::control::PositionMotor::Config motorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::Ampere;

@@ -57,13 +57,20 @@ inline skywalker::motor::dm::Config pitchHardware() {
 inline constexpr float yaw_direction = -1.0f, pitch_direction = 1.0f;
 // Limited axes use calibrated driver coordinates, not a startup-relative zero.
 // Yaw uses the calibrated encoder range; replace the pitch placeholder with measured limits.
-inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Limited, yaw_min_angle_rad,
-                                                          yaw_max_angle_rad, 4.0f, true,
-                                                          skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
+inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Limited,
+                                                           yaw_min_angle_rad,
+                                                           yaw_max_angle_rad,
+                                                           4.0f,
+                                                           true,
+                                                           skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
 // Pitch mechanical limits are still placeholders until measured on the installed gimbal.
-inline constexpr skywalker::robotics::GimbalAxisConfig pitch{skywalker::robotics::AxisTopology::Limited, -0.5f, 0.5f,
-                                                            5.0f, true,
-                                                            skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
+inline constexpr skywalker::robotics::GimbalAxisConfig
+    pitch{skywalker::robotics::AxisTopology::Limited,
+          -0.5f,
+          0.5f,
+          5.0f,
+          true,
+          skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
 
 inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
