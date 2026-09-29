@@ -1,12 +1,6 @@
 zephyr_library()
-
-zephyr_library_sources(imu.c)
-
-zephyr_library_compile_options(
-  -O3
-  -fno-strict-overflow
-  -fno-common
-  -ffunction-sections
-  -fdata-sections
-  -ffreestanding
-  -fno-builtin)
+zephyr_library_sources(imu_state.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_IMU_BMI088 bmi088_imu.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_IMU_HEATER imu_heater.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_IMU_DM_PROTOCOL dm_imu_protocol.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_IMU_DM_RS485 dm_imu_rs485.cpp)

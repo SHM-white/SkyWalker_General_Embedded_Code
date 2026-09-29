@@ -8,7 +8,7 @@
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | 第一次构建和上板   | [快速开始](01-getting-started.md) → [板级支持](03-boards.md) → [样例索引](10-samples.md)                                                                                    | `samples/`                         |
 | 控制一台电机       | [架构](02-architecture.md) → [DJI](04-drivers-motor-dji.md) 或 [DM](05-drivers-motor-dm.md) → [速度/位置封装](09-motor-wrapper.md) → [电机工作链路](17-motor-workflow.md)    | `samples/motor/`                   |
-| 读 IMU 并解算姿态  | [IMU](06-drivers-imu.md) → [Kalman 与矩阵](07-kalman-matrix.md)                                                                                                             | `samples/imu_test/`                |
+| 读 IMU 并解算姿态  | [IMU](06-drivers-imu.md) → [双 IMU 样例](../samples/imu/dual_imu/README.md)                                                                                                             | `samples/imu/dual_imu/`                |
 | 从遥控命令走到云台 | [通信](13-communication.md) → [机器人命令与安全](14-robotics.md) → [模块联动](module-integration.md#遥控到双轴云台)                                                         | `samples/robotics/gimbal_control/` |
 | 连接两块主控       | [板间协议](13-communication.md#4-板间帧格式) → [机器人命令与安全](14-robotics.md) → [模块联动](module-integration.md#双主控命令与安全闭环) → [应用骨架](15-applications.md) | `applications/sentry_*/`           |
 | 定位问题           | [调试与观测](11-debugging.md) → [故障排查](12-troubleshooting.md)；UART DMA 问题再看 [专项说明](16-uart-dma-nocache.md)                                                      | 对应 sample 或 application           |

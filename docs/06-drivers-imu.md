@@ -1,115 +1,99 @@
-# 06 IMU 与姿态解算
+# 06 IMU 独立源、滤波和温控
 
-实现位置：`drivers/imu/imu.c`、`include/drivers/imu/imu.h`。IMU 通过设备树把加速度计、陀螺仪、加热 PWM 和滤波器组合成一个 Zephyr device。
+正式接口位于 include/drivers/imu/imu.hpp、imu_types.hpp。旧 imu.h/imu.c、skywalker,imu 聚合设备和 SKYWALKER_DRIVER_IMU 已移除，不提供兼容 wrapper。底层 Zephyr BMI08x sensor 驱动继续使用；新 EKF 不依赖旧 Kalman device 或矩阵设备树。
 
-## 1. 设备树结构
+## 数据流和类型
 
-```dts
-imu0: imu {
-    compatible = "skywalker,imu";
-    accel-dev = <&bmi08x_accel>;
-    gyro-dev = <&bmi08x_gyro>;
-    heat-dev = <&heat_pwm>;
-    filter-dev = <&ekf_filter>;
-    estimator = "ekf";
-    heat-kp = "6000000";
-    heat-ki = "0";
-    heat-kd = "0.02";
-    heat-integral-max = "10000000";
-    heat-output-max = "20000000";
-    heat-deadband = "0";
-    heat-derivative-tau-s = "0.1";
-    heat-dt-min-s = "0.001";
-    heat-dt-max-s = "0.2";
-    heat-feedforward-ns = "6750000";
-};
-```
+~~~text
+BMI088 sensor → Bmi088Imu → 可选 QuaternionEkf → ImuState → Snapshot
+DM RS485 → AsyncUart → DmImuParser → 单位/安装变换 → ImuState → Snapshot
+有效板载温度 → 独立 ImuHeater → PWM
+~~~
 
-`heat-*` binding 是 string，驱动在编译期转换为 float；不要写成 `<...>`。IMU 驱动固定使用 PWM 通道 4、周期 20 ms（50 Hz），输出单位是 ns，`heat-output-max` 不能超过周期。
+各实例拥有自己的状态，任意源均不绑定 base/head、云台角色或应用。温控不属于 ImuSource；外置设备的内部恒温不由 MCU PWM 控制。
 
-## 2. API
+Snapshot 包含 Sample、State、capabilities、fresh_mask 和 Diagnostics：
 
-```c
-void imu_fetch(const struct device *dev);
-void imu_estimate(const struct device *dev, float dt_s);
-int imu_heat_control(const struct device *dev, float target_temp_c, float dt_s);
-```
+| 数据 | 单位/语义 |
+|---|---|
+| accel_m_s2 | 传感器测得的加速度，包括静止时重力对应的比力；m/s² |
+| gyro_rad_s | 输出坐标 B 内角速度；rad/s |
+| orientation | Hamilton wxyz，q_WB 将 B 中向量转到局部参考 W |
+| temperature_c | 摄氏温度，仅支持时声明 Temperature |
+| reference | frame_id 和本地 epoch；参考重置后旧姿态失效 |
+| attitude_quality | Unavailable、Unknown、Initializing、Tracking、Degraded |
 
-`imu_fetch()` 读取 accel/gyro/temp；`imu_estimate()` 调用 estimator 的 predict → correct → get_angle；`imu_heat_control()` 用复合 PID 计算 PWM 脉宽，发生非法输入/输出时先把 PWM 置零。
+capabilities 是实现支持能力；stamp.valid 表示最后一份测量通过校验；fresh_mask 是本次读取时仍未过期的字段。三者不能混用。Running 仅表示接收/采样已初始化。外置质量 Unknown 表示设备未报告 EKF 收敛状态，不等于无有效数值。
 
-运行时数据 `imu_data` 包含：
+每字段有独立的 time_us 和本地 sequence。失败不改旧时间，读取快照不递增序号，收到 accel 不刷新 quat。Fault 时 fresh_mask=0。diagnostics.last_error 保留最近错误，计数用于排查，不因任意成功帧自动抹掉。
 
-- `accel[3]`：m/s²。
-- `gyro[3]`：rad/s。
-- `temp`：°C。
-- `angle[3]`：roll/pitch/yaw，单位 rad。
+## 接口与线程
 
-## 3. 最小调用示例
+~~~cpp
+// 一个所有者线程：
+const int init_ret = source.init();
+const int ret = source.service();  // 0 有进展，-EAGAIN 无新数据，其他负 errno
 
-以下顺序取自 [imu_test](../samples/imu_test/src/main.c)。`imu_fetch()` / `imu_estimate()` 返回 `void`，调用方不能把它们当作带错误码的采样 API；首次上板应同时观察设备就绪、角度变化和数据更新时间。
-
-```c
-#include <errno.h>
-#include <zephyr/device.h>
-#include <zephyr/devicetree.h>
-#include <zephyr/kernel.h>
-#include <drivers/imu/imu.h>
-
-int main(void) {
-    const struct device *imu_dev = DEVICE_DT_GET(DT_NODELABEL(imu));
-    if (!device_is_ready(imu_dev)) return -ENODEV;
-    uint32_t last_ms = k_uptime_get_32();
-    for (;;) {
-        uint32_t now_ms = k_uptime_get_32();
-        float dt_s = (now_ms - last_ms) / 1000.0f;
-        last_ms = now_ms;
-        imu_fetch(imu_dev);
-        imu_estimate(imu_dev, dt_s);
-        const imu_data *data = imu_dev->data;
-        float yaw_rad = data->angle[2];  // roll/pitch/yaw 均为 rad
-        (void)yaw_rad;                   // 在业务层消费或送往遥测
-        k_usleep(1000);
-    }
+// 任意读线程，无 I/O：
+const auto snapshot = source.snapshot();
+if (snapshot.fresh_mask & skywalker::imu::Orientation) {
+    const auto q = snapshot.sample.orientation.value;
 }
-```
+~~~
 
-温控是独立的低频调用：约每 100 ms 调用一次 `imu_heat_control(imu_dev, target_c, elapsed_s)`，检查负错误码。完整 UART 遥测和温控周期见样例。IMU 内部依赖 4 维状态、3 维观测的 [Kalman 设备和矩阵库](07-kalman-matrix.md)；上层若只需要姿态，不必直接调用矩阵函数。
+构造不做 I/O；init 不等于已经产生有效姿态。service 不等待下一个周期，但底层 SPI 传输本身可能阻塞。一个底层 sensor 或 UART 必须有唯一所有者。快照在短 spinlock 内复制，在锁外取当前时钟重新计算 freshness；锁内不读外设、滤波或解码。
 
-## 4. estimator 扩展
+ImuState 是具体发布核心，接收 Update.updated_mask 标识本次成功字段，校验后原子提交。一项非法则该 Update 整体拒绝；后端可把独立读取结果分次提交。倒退时间拒绝，初始单位四元数保持 invalid。
 
-驱动通过 `estimator` 字符串查找 `imu_filter_api`。当前实现只有 `"ekf"`。扩展新算法时需要提供 `init/predict/correct/get_angle`，并在 `imu_get_api()` 注册；应用侧不需要改变 `imu_fetch()` / `imu_estimate()` 调用。
+time_us 使用 MCU 同一单调时钟；微秒单位不保证微秒精度。当前 UART chunk 只有毫秒接收时间，不能把稍后的解码时刻当作传感器采样时刻。
 
-## 5. 当前 EKF
+## 板载 BMI088 与 EKF
 
-当前实现使用 4 维四元数状态和 3 维重力方向观测：
+Bmi088Imu 显式接收 accel/gyro device 指针、Config 和可选 QuaternionEkf 指针。没有估计器时只发布原始字段；启用估计器时还需开启 SKYWALKER_ATTITUDE_EKF。安装旋转 sensor_to_body 为 q_BS，算法在 S 内估计：
 
-1. 陀螺积分进行预测，同时传播协方差。
-2. 静止或低动态时估计陀螺零偏。
-3. 加速度低通后归一化，用重力方向校正。
-4. 使用卡方检验和自适应增益降低震动/冲击影响。
-5. 输出 Euler 角；yaw 对外仍是 `[-π, π)` 包角。
+~~~text
+accel_B = R(q_BS) accel_S
+gyro_B = R(q_BS) gyro_S
+q_WB = q_WS conjugate(q_BS)
+~~~
 
-EKF 内部维护连续 yaw 计数，但当前 `imu_data` 没有公开 `YawTotal`，需要连续 yaw 的应用应自行解包。
+加速度和角速度分别检查 fetch/get 返回值，读取失败不能用旧缓存冒充新样本。锁定版本的 BMI08x DIE_TEMP 会直接读取温度寄存器，因此温度可独立读取并标记时间；这里与“所有 channel_get 只读缓存”的泛化假设不同。
 
-## 6. Kconfig 与运行顺序
+QuaternionEkf 用固定数组持有四元数、4×4 协方差、低通和静止零偏状态。初始化要求连续 100 次近静止采样，以重力估计 roll/pitch、局部 yaw=0；长期 yaw 没有绝对观测。重力模长/新息异常时保留 Degraded 的 gyro 预测；协方差用 Joseph 形式更新。长采样间隔、数值异常重新初始化，Bmi088Imu 随 generation 变化递增 reference.epoch 并使旧姿态失效。
 
-```conf
-CONFIG_SKYWALKER_DRIVER_IMU=y
-CONFIG_SKYWALKER_DRIVER_KALMAN_FILTER=y
-CONFIG_SKYWALKER_LIB_MATRIX=y
-CONFIG_SKYWALKER_LIB_VOFA=y       # 仅在需要曲线时
-CONFIG_UART_ASYNC_API=y
-```
+默认按 1250µs 限速轮询，温度周期 10ms；实际速率取决于线程调度和 SPI。分别读取的 accel/gyro 不宣称硬件同步，也不宣称有 DRDY 去重。两次成功输入的时间差不得超过 max_input_skew_us。
 
-初始化时驱动会检查四个 phandle 设备是否 ready，并校验温控参数。应用应在循环中先 fetch，再 estimate；温控建议低频调用（约 10 Hz），姿态解算的 dt 使用真实采样周期。
+## 温控
 
-## 7. 样例与风险
+ImuHeater 显式传入 pwm_dt_spec 与温控配置。init 写零占空比，update 才开始输出；按 duty=0—1 的 PID 控制，不复用旧 API 中以纳秒为 PID 输出的参数。
 
-`samples/imu_test` 针对 `dm_mc02`，overlay 在 `samples/imu_test/boards/dm_mc02.overlay`，包含 BMI088、Kalman 和加热 PWM 的组合。
+双 IMU 样例使用 TIM3 CH4/PB1、周期 20ms、目标 50℃，测量达到 65℃时撤销输出。温度过期、非法、时间倒退或 PID/PWM 错误均尝试关 PWM，关闭失败保存在 disable_error。温控失败不会阻止 gyro 读取；控制线程需要持续调用 update，软件不是独立硬件热保护。
 
-常见风险：
+## DM-IMU-L1 RS485
 
-- 上电后 IMU 未静止，零偏和姿态难以收敛。
-- `filter-dev` 维度不是 4/3，EKF 会越界或产生错误结果。
-- 传感器 fetch 的错误不能被业务层忽略；首次运行要确认设备 ready 和数据更新时间。
-- 加热器是持续功耗源，先以低目标温度验证 PWM 和温控限幅。
+DmImuRs485Source 只接收主动模式，不自动配置、归零、校准或加热。先用厂家上位机设置并保存，实物重上电确认。
+
+- 固定头 55 AA，ID，type 01/02/03/04；三轴帧 19 字节，四元数帧 23 字节，float 小端，尾 0A。
+- 四类数据全开共 80 字节，但按四个独立帧解析。
+- CRC 初值 FFFF、0x1021 表、左移 1 位更新；从帧头覆盖到数据末尾，CRC 低字节先发。19 字节算法已有手册实帧依据。
+- Euler 仅校验/消耗，不覆盖权威四元数。首版没有温度能力。
+- UART overflow 丢弃半包，保留原测量时间；部分初始化失败保留对象，由 service 重试。对象、DMA 缓冲和设备必须覆盖回调寿命。
+- Config 可指定 ID、安装旋转、单位缩放和设备四元数方向。默认 SI 缩放 1、sensor→world，实物还须确认。
+- resetReference() 只在源所有者线程调用，用于已知设备归零/重启；它不会发送任何命令，也不能自动发现全部远端静默重启。
+
+CAN 只保留 DmImuCanSource 抽象接口/Config，未实现接收、映射或寄存器事务，不提供 CAN 开关。[最终规划](dev/视觉与IMU独立模块最终规划.md) 第 7 节保留手册证据、CRC 帧和 CAN 格式冲突。
+
+## 配置与样例
+
+| 配置 | 作用 |
+|---|---|
+| SKYWALKER_IMU | CPP 接口与具体状态核心，不强制总线/PWM |
+| SKYWALKER_IMU_BMI088 | SENSOR/BMI08X 采样 |
+| SKYWALKER_ATTITUDE_EKF | 实例化算法，固定数组，无 device/DSP 注册依赖 |
+| SKYWALKER_IMU_HEATER | 可选 PWM 和控制算法 |
+| SKYWALKER_IMU_DM_PROTOCOL | 主动串行流式解码 |
+| SKYWALKER_IMU_DM_RS485 | 协议加 UART_TRANSPORT 后端 |
+
+[双 IMU 样例](../samples/imu/dual_imu/README.md) 同时启用板载采样/滤波/温控和 485-2 外置模块，并给出 VOFA 通道。samples/imu_test 作为单板载入口已迁移新 API，输出 roll/pitch/yaw、温度、duty、fresh_mask 六通道。算法/协议/过期及模拟 PWM 的运行检查见 [主流程验收](../tests/vision_imu/README.md)。
+
+没有进行实物温控、SPI、RS485 或姿态方向验收。目标固件 23 字节四元数、单位、方向和实际可持续频率应上板核对。

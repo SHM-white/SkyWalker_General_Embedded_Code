@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker onboard and RS485 IMU with VOFA
+  description: BMI088 EKF and heater together with DM-IMU-L1 on rs485-2
+common:
+  tags: [skywalker, hardware, imu]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.imu.dual: {}

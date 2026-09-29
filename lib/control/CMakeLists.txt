@@ -13,3 +13,5 @@ zephyr_library_sources(
 if(CONFIG_SKYWALKER_LIB_MOTOR_CONTROL)
     zephyr_library_sources(motor_control.cpp)
 endif()
+
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ATTITUDE_EKF attitude_ekf.cpp)
