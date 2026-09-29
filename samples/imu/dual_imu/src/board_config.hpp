@@ -2,7 +2,10 @@
 #include <drivers/imu/bmi088_imu.hpp>
 #include <drivers/imu/dm_imu_rs485.hpp>
 #include <drivers/imu/imu_heater.hpp>
+#include <drivers/imu/imu_receiver.hpp>
 namespace bench {
+inline constexpr skywalker::imu::ImuReceiver::Config onboard_receiver{.poll_interval_us = 500, .priority = 5};
+inline constexpr skywalker::imu::ImuReceiver::Config external_receiver{.poll_interval_us = 1000, .priority = 6};
 inline const device *accel = DEVICE_DT_GET(DT_NODELABEL(bmi08x_accel));
 inline const device *gyro = DEVICE_DT_GET(DT_NODELABEL(bmi08x_gyro));
 inline const device *external_uart = DEVICE_DT_GET(DT_ALIAS(rs485_2));

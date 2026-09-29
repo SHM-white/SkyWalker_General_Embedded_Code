@@ -1,6 +1,14 @@
 # 板载与 RS485 外置 IMU 同时读取
 
-两条独立线程分别调用 Bmi088Imu 和 DmImuRs485Source，第三条线程通过 VOFA 输出两套测量。板载侧启用实例化四元数 EKF、加速度低通、静止零偏估计和独立 PWM 温控；外置侧直接采用设备输出四元数，不重复滤波，也不融合两套姿态。
+两个 ImuReceiver 实例分别管理 Bmi088Imu 和 DmImuRs485Source 的后台采集。样例调用 start() 启动，然后用 snapshot() 读取两套测量，只显式定义一条 VOFA 输出线程。板载侧启用实例化四元数 EKF、加速度低通、静止零偏估计和独立 PWM 温控；外置侧直接采用设备输出四元数，不重复滤波，也不融合两套姿态。
+
+## 接口与调度
+
+样例中的 onboard/external 是 ImuReceiver，onboard_source/external_source 是底层数据源。采集线程、初始化、轮询和温控推进都由 ImuReceiver 管理，snapshot 本身只读取，不触发采集。
+
+板载接收器每轮休眠 500µs、优先级 5，外置接收器每轮休眠 1ms、优先级 6；配置位于 src/board_config.hpp。开启 CONFIG_SKYWALKER_IMU_RECEIVER，每个接收器默认栈为 8192 字节。板载源仍保留自身采样限速，两个实例独立调度。温控作为板载接收器的可选依赖，VOFA 从 onboard.status().heater_duty 读取占空比。
+
+start 返回值仅表示线程启动结果；初始化结果和温控诊断用 status() 查看，测量是否有效用 snapshot().fresh_mask 判断。实例和依赖均为静态存储；运行期间不能销毁，应用不要再直接调用 source.init/service 或 heater.init/update/disable。
 
 ## 硬件与参数
 

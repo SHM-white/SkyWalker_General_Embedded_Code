@@ -1,9 +1,7 @@
 #include "board_config.hpp"
 #include <core/attitude.hpp>
-#include <core/clock.hpp>
 #include <lib/vofa/vofa.h>
 #include <zephyr/logging/log.h>
-#include <cerrno>
 #include <limits>
 LOG_MODULE_REGISTER(dual_imu_bench, LOG_LEVEL_INF);
 namespace imu = skywalker::imu;
@@ -11,49 +9,11 @@ namespace core = skywalker::core;
 namespace {
 static skywalker::communication::AsyncUart::DmaBuffers external_dma __nocache;
 skywalker::control::QuaternionEkf estimator(bench::estimator);
-imu::Bmi088Imu onboard(bench::accel, bench::gyro, bench::onboard, &estimator);
-imu::DmImuRs485Source external(bench::external_uart, external_dma, bench::external);
+imu::Bmi088Imu onboard_source(bench::accel, bench::gyro, bench::onboard, &estimator);
+imu::DmImuRs485Source external_source(bench::external_uart, external_dma, bench::external);
 imu::ImuHeater heater(bench::heater);
-void onboardTask(void *, void *, void *) {
-    const int hr = heater.init();
-    const int ir = onboard.init();
-    LOG_INF("Onboard IMU init=%d heater init=%d", ir, hr);
-    if (ir < 0) {
-        if (!hr)
-            heater.disable();
-        return;
-    }
-    int last_sensor = 0, last_heat = 0;
-    for (;;) {
-        const int r = onboard.service();
-        if (r != -EAGAIN && r != last_sensor) {
-            LOG_WRN("Onboard sample=%d", r);
-            last_sensor = r;
-        }
-        if (hr == 0) {
-            const auto s = onboard.snapshot();
-            const int h = heater.update(s.sample.temperature_c, core::monotonicTimeUs());
-            if (h != -EAGAIN && h != last_heat) {
-                LOG_WRN("Heater=%d", h);
-                last_heat = h;
-            }
-        }
-        k_usleep(500);
-    }
-}
-void externalTask(void *, void *, void *) {
-    const int init = external.init();
-    LOG_INF("External RS485 IMU init=%d", init);
-    int last = init;
-    for (;;) {
-        const int r = external.service();
-        if (r != -EAGAIN && r != last) {
-            LOG_WRN("External IMU=%d", r);
-            last = r;
-        }
-        k_sleep(K_MSEC(1));
-    }
-}
+imu::ImuReceiver onboard(onboard_source, bench::onboard_receiver, &heater);
+imu::ImuReceiver external(external_source, bench::external_receiver);
 void telemetryTask(void *, void *, void *) {
     static Vofa vofa{};
     const int init = vofa_init(&vofa, bench::telemetry_uart);
@@ -81,7 +41,7 @@ void telemetryTask(void *, void *, void *) {
                                 bv ? bg.y : invalid,
                                 bv ? bg.z : invalid,
                                 (a.fresh_mask & imu::Temperature) ? a.sample.temperature_c.value : invalid,
-                                heater.snapshot().duty,
+                                onboard.status().heater_duty,
                                 float(a.fresh_mask),
                                 float(b.fresh_mask)};
         static_assert(sizeof(values) / sizeof(float) == VOFA_MAX_FLOATS);
@@ -95,10 +55,11 @@ void telemetryTask(void *, void *, void *) {
     }
 }
 }
-K_THREAD_DEFINE(onboard_thread, 8192, onboardTask, nullptr, nullptr, nullptr, 5, K_FP_REGS, 0);
-K_THREAD_DEFINE(external_thread, 4096, externalTask, nullptr, nullptr, nullptr, 6, K_FP_REGS, 0);
 K_THREAD_DEFINE(telemetry_thread, 4096, telemetryTask, nullptr, nullptr, nullptr, 7, K_FP_REGS, 0);
 int main() {
     LOG_INF("Dual IMU bench: onboard EKF + 50 C heater; DM active RS485-2 at 1 Mbit/s");
-    return 0;
+    const int onboard_result = onboard.start();
+    const int external_result = external.start();
+    LOG_INF("IMU workers: onboard=%d external=%d", onboard_result, external_result);
+    return onboard_result < 0 ? onboard_result : external_result;
 }

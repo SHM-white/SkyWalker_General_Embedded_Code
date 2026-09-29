@@ -10,6 +10,7 @@
 |---|---|
 | 公共测量与坐标 | include/core/measurement.hpp、clock.hpp、attitude.hpp、byte_codec.hpp |
 | IMU 源与状态核心 | include/drivers/imu/imu.hpp、imu_types.hpp、imu_state.hpp；drivers/imu/imu_state.cpp |
+| IMU 后台采集 | ImuReceiver 每实例管理线程和可选温控；双 IMU 样例仅 start/snapshot/status |
 | 板载采样、滤波、温控 | Bmi088Imu、QuaternionEkf、ImuHeater；无全局 EKF 状态和聚合 device |
 | 外置 RS485 | DmImuParser + DmImuRs485Source，复用 AsyncUart，字段独立接收时间 |
 | CAN | dm_imu_can.hpp 抽象接口/Config；没有实现或 Kconfig 开关 |
@@ -28,7 +29,9 @@
 - 样例明确采用 USART1 输出 VOFA；用户已将板级 telemetry-uart 恢复为 USART1。两个新样例的硬件绑定保留在各自配置中，不再给旧样例额外添加遥测 overlay。
 - 下文保留规划时的接口示意与施工顺序，便于理解设计；新增的具体 codec、接收线程和反馈扩展详见正式接口文档。
 
-主流程运行验收已通过，覆盖双 EKF 实例、DM 已知 CRC 报文、合成四元数、AB 流式接收/反馈、独立过期及模拟 PWM 关断。真实 UART/SPI、温控硬件、外置固件和安装方向尚未实测。构建产物与日志位于 /tmp，本次未烧录设备。
+后续按用户要求新增 ImuReceiver 线程封装，双 IMU 样例移除手写采集任务；本次仅静态检查，未重新构建或运行，下面的验收记录属于此前实现。
+
+此前主流程运行验收已通过，覆盖双 EKF 实例、DM 已知 CRC 报文、合成四元数、AB 流式接收/反馈、独立过期及模拟 PWM 关断。真实 UART/SPI、温控硬件、外置固件和安装方向尚未实测。构建产物与日志位于 /tmp，本次未烧录设备。
 
 ## 1. 采用的结构
 
@@ -53,7 +56,7 @@ Heater 是独立可选组件。
 
 - BMI088 直接重构采样和 EKF，不再给旧 `imu_fetch/imu_estimate` 加 wrapper。
 - 通用 IMU 接口只定义数据、读取、状态；不定义 base/head、云台、安全、融合或故障回退。
-- 暂不增加 ImuService 和 AttitudeProvider 两层转发。多个实例由未来组装层命名和选择。
+- 不增加 ImuService 和 AttitudeProvider 两层数据转发。新增的 ImuReceiver 负责实际线程调度与可选温控，测量 snapshot 直接委托底层源，多个实例仍由组装层命名和选择。
 - 姿态以四元数为权威表示；Euler 由四元数推导，避免两个独立更新的姿态互相矛盾。
 - 视觉线协议现已由用户选定为 AB；其具体布局、CRC、无有效位和固定参考的处理见正式视觉文档。
 - 无兼容性要求允许改变内部 API；DM 等外部设备的真实帧格式仍须遵守。
