@@ -2,6 +2,8 @@
 
 实现位置：`drivers/motor/{motor,can_bus,group}.cpp`、`drivers/motor/dji/dji_protocol.cpp`，公开接口位于 `include/drivers/motor/{dji_motor,motor,can_bus,group}.hpp`。电机型号、ID、限幅和时序由 C++ 配置；设备树只提供物理 CAN 等板级设备。
 
+**调用路线：** `dji::Config` → `Motor` → 所属物理 `CanBus` → `attach/start` → `ready/enable` → `setCurrent` 或闭环控制器 `update` → 每周期 `commit`。Group 只用于需要联动停机的成员。完整异步时序见 [电机工作链路](17-motor-workflow.md)，与遥控/机器人层的联动见 [模块联动](module-integration.md)。
+
 ## 1. 型号与 CAN ID
 
 | 型号 | 反馈 ID | 命令 ID（ID 1–4 / 高 ID） | 电机 ID | 协议满幅电流 | 温度反馈 |

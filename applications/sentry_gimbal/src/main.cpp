@@ -5,7 +5,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/random/random.h>
 #include <communication/async_uart.hpp>
-#include <communication/remote/remote_service.hpp>
+#include <communication/remote/remote_receiver.hpp>
 #include <communication/referee/referee_service.hpp>
 #include <communication/interboard/interboard_link.hpp>
 #include <drivers/motor/can_bus.hpp>
@@ -20,7 +20,8 @@ LOG_MODULE_REGISTER(sentry_gimbal, LOG_LEVEL_INF);
 using namespace skywalker;
 using namespace skywalker::robotics;
 namespace {
-Latest<RemoteState> remote_state;
+static communication::AsyncUart::DmaBuffers remote_dma_buffers __nocache;
+communication::RemoteReceiver remote_receiver(board_config::remote_uart, remote_dma_buffers, {});
 Latest<RefereeState> referee_state;
 Latest<BoardHeartbeat> peer_heartbeat;
 Latest<ChassisFeedbackSummary> chassis_feedback;
@@ -42,32 +43,6 @@ std::uint32_t age(const MessageStamp &s, std::uint64_t now) {
     return s.valid && now >= s.timestamp_ms
                ? static_cast<std::uint32_t>(std::min<std::uint64_t>(now - s.timestamp_ms, UINT32_MAX))
                : UINT32_MAX;
-}
-void remoteTask(void *, void *, void *) {
-    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-    static communication::AsyncUart uart(board_config::remote_uart, dma_buffers);
-    communication::RemoteService service({}, {});
-    int ret = uart.init();
-    LOG_INF("remote UART init: %d", ret);
-    for (;;) {
-        const auto now = k_uptime_get();
-        uart.service(now);
-        communication::AsyncUart::RxChunk chunk{};
-        for (unsigned budget = 0; budget < 8; ++budget) {
-            ret = uart.read(chunk);
-            if (ret == -EOVERFLOW) {
-                service.discardPartial();
-                continue;
-            }
-            if (ret < 0)
-                break;
-            service.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
-        }
-        RemoteState state{};
-        service.snapshot(now, state);
-        remote_state.put(state);
-        k_sleep(K_MSEC(1));
-    }
 }
 void refereeTask(void *, void *, void *) {
     static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
@@ -106,17 +81,18 @@ void commandTask(void *, void *, void *) {
     safety_config.chassis_feedback_timeout_ms = board_config::chassis_feedback_timeout_ms;
     GlobalSafetyManager safety(safety_config);
     CommandRouter router(local_command, remote_command);
-    RemoteState remote{};
+    communication::RemoteReceiver::Snapshot rc{};
     RefereeState referee{};
     BoardHeartbeat peer{};
     ChassisFeedbackSummary feedback{};
     std::uint64_t next_log = 0;
     for (;;) {
-        const auto now = k_uptime_get();
-        remote_state.get(remote);
+        remote_receiver.snapshot(rc);
+        const auto &remote = rc.remote;
         referee_state.get(referee);
         peer_heartbeat.get(peer);
         chassis_feedback.get(feedback);
+        const auto now = k_uptime_get();
         OperatorIntent intent{};
         mapper.map(remote, intent);
         GlobalSafetyInputs input{};
@@ -340,12 +316,16 @@ void gimbalTask(void *, void *, void *) {
     }
 }
 }
-K_THREAD_DEFINE(remote_thread, 3072, remoteTask, nullptr, nullptr, nullptr, 6, 0, 0);
 K_THREAD_DEFINE(referee_thread, 6144, refereeTask, nullptr, nullptr, nullptr, 6, 0, 0);
 K_THREAD_DEFINE(link_thread, 8192, linkTask, nullptr, nullptr, nullptr, 5, 0, 0);
 K_THREAD_DEFINE(command_thread, 4096, commandTask, nullptr, nullptr, nullptr, 5, 0, 0);
 K_THREAD_DEFINE(gimbal_thread, 6144, gimbalTask, nullptr, nullptr, nullptr, 4, 0, 0);
 int main() {
+    const int ret = remote_receiver.start();
+    if (ret < 0) {
+        LOG_ERR("Remote receiver start failed: %d", ret);
+        return ret;
+    }
     LOG_INF("MC02 sentry gimbal: configured=%d referee_required=%d; edit app.overlay and src/board_config.hpp",
             board_config::connections_configured, board_config::require_referee_for_motion);
     return 0; // Worker threads and all callback-owned objects remain alive.

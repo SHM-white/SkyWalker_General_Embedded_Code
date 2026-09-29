@@ -1,5 +1,7 @@
 # 03 板级支持
 
+板卡层只描述物理外设、引脚和 alias；电机型号、ID、限幅、Group 与业务安全参数在 C++ 配置。完整顺序是“overlay 启用设备 → Kconfig 纳入模块 → 应用取得 `device` → `CanBus`/通信驱动初始化”，见 [架构](02-architecture.md)和[模块联动](module-integration.md)。
+
 ## 1. 板卡速览
 
 | board | SoC | RAM / Flash metadata | 主要外设 | 默认烧录 |

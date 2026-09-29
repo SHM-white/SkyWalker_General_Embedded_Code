@@ -33,7 +33,37 @@ PID 输入是 setpoint、measurement、dt。D 项对测量变化率计算并低�
 3. 再加 D 抑制响应，最后加 I 消除静差。
 4. 让 PID 输出限幅不超过后端设备树限幅。
 
-## 4. 前馈
+## 4. 最小 PID 调用
+
+纯 C API 不负责创建线程或发送 CAN。配置、复位、单步计算的顺序如下；失败时不要把上一次 `result.output` 再交给执行器：
+
+```c
+#include <control/pid.h>
+
+control_pid_config config = {
+    .kp = 1.0f, .ki = 0.0f, .kd = 0.0f,
+    .integral_min = -0.2f, .integral_max = 0.2f,
+    .output_min = -0.3f, .output_max = 0.3f,
+    .dt_min_s = 0.001f, .dt_max_s = 0.02f,
+};
+control_pid_state state = {0};
+control_pid_result result = {0};
+int ret = control_pid_validate(&config);
+if (ret == 0) ret = control_pid_reset(&state, measured_speed_rad_s);
+control_pid_input input = {
+    .setpoint = target_speed_rad_s,
+    .measurement = measured_speed_rad_s,
+    .dt_s = measured_dt_s,
+};
+if (ret == 0) ret = control_pid_step(&state, &config, &input, &result);
+if (ret == 0) {
+    // result.output 仅是数值结果；应用还要检查安全许可与电机限幅。
+}
+```
+
+多数电机应用直接用 [VelocityMotor / PositionMotor](09-motor-wrapper.md)，它们负责把该数值内核接到反馈快照和电机命令；`CanBus::commit()` 仍由应用调用。[模块联动](module-integration.md)展示完整上下游。
+
+## 5. 前馈
 
 前馈配置可以叠加：
 
@@ -47,7 +77,7 @@ output = bias
 
 静摩擦方向由速度/加速度阈值判断；gravity 支持 SIN/COS 模型。前馈不是安全限幅，最终仍需经过电机后端和 runtime 的边界校验。
 
-## 5. 速度与位置内核
+## 6. 速度与位置内核
 
 `control_motor_velocity`：
 
@@ -64,11 +94,11 @@ output = bias
 
 输出 effort 的单位不由 C 内核决定：DJI wrapper 使用 A，DM MIT wrapper 使用 N·m。
 
-## 6. 角度处理
+## 7. 角度处理
 
 `control_shortest_angle_error(target, actual, &error)` 将误差规约到 `[-π, π)`。连续角度解包适用于编码器跨越 ±π 的场景，但必须保证相邻采样间运动没有跨越不可判定的半圈。
 
-## 7. 启用与样例
+## 8. 启用与样例
 
 ```conf
 CONFIG_SKYWALKER_LIB_CONTROL=y
@@ -76,7 +106,7 @@ CONFIG_SKYWALKER_LIB_CONTROL=y
 
 `CONFIG_SKYWALKER_LIB_MOTOR_CONTROL=y` 会自动选择它。`samples/control` 用断言/打印验证复合前馈 PID、斜坡和角度工具；电机样例展示如何把内核接到 DJI/DM backend。
 
-## 8. 常见错误
+## 9. 常见错误
 
 - 把 rad 当 degree 传给位置目标。
 - 位置外环输出速度超过 velocity 内核上限。

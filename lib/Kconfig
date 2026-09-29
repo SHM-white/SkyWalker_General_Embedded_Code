@@ -65,6 +65,25 @@ config SKYWALKER_UART_TRANSPORT
     depends on SKYWALKER_LIB_COMMUNICATION && SERIAL
     select UART_ASYNC_API
 
+config SKYWALKER_REMOTE_RECEIVER
+    bool "Threaded DR16 receiver"
+    depends on SKYWALKER_REMOTE_DR16 && SKYWALKER_UART_TRANSPORT
+    help
+        Own an asynchronous UART receive task and publish coherent remote
+        snapshots with reader-side expiry and transport diagnostics.
+
+config SKYWALKER_REMOTE_RX_STACK_SIZE
+    int "Remote receiver stack size"
+    depends on SKYWALKER_REMOTE_RECEIVER
+    default 3072
+    range 1024 16384
+
+config SKYWALKER_REMOTE_RX_PRIORITY
+    int "Remote receiver thread priority"
+    depends on SKYWALKER_REMOTE_RECEIVER
+    default 6
+    range 0 15
+
 config SKYWALKER_LIB_ROBOTICS
     bool "Robot decision and subsystem algorithms"
     depends on CPP

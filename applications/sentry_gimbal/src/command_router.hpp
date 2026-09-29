@@ -1,5 +1,5 @@
 #pragma once
-#include "latest.hpp"
+#include <latest.hpp>
 #include <robotics/messages/safety.hpp>
 #include <robotics/messages/interboard.hpp>
 struct LocalGimbalCommand {

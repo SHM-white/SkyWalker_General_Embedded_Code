@@ -1,5 +1,7 @@
 # 遥控器右摇杆 → 小 yaw / pitch 双轴测试
 
+> 遥控接收现状更新：本文保留历史施工基线和步骤。当前 DR16、command_safety、gimbal_control 与 sentry_gimbal 已使用 RemoteReceiver，旧的 remoteTask/remote_state 不再是这些入口的实现。当前接口和接入方式以 [通信文档](../13-communication.md) 为准；底层 RemoteService 仍负责解析。
+
 ## 目标与当前状态
 
 用户已确认仅控制小 yaw 和 pitch，大 yaw 不参与。本指南只分析和指导修改；业务代码未修改，未运行构建或硬件测试。

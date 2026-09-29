@@ -42,7 +42,22 @@ CONFIG_SKYWALKER_LIB_MATRIX=y
 
 该选项会选择 CMSIS-DSP 和矩阵组件。IMU 驱动也会依赖相关能力。
 
-## 3. 可选 Flash 存储
+## 3. 矩阵调用示例
+
+`Matrix` 只是 CMSIS-DSP 的结构体别名；数据缓冲区由调用者持有，不能把局部数组的地址留给更长寿的对象。下面展示一个 2×2 对角矩阵，不涉及 Kalman 设备内部的 4/3 状态：
+
+```c
+#include <lib/matrix/matrix.h>
+
+float values[4] = {0};
+Matrix gain;
+Matrix_Init(&gain, 2, 2, values);
+Matrix_SetDiag(&gain, 1.0f);  // values = {1, 0, 0, 1}
+```
+
+IMU 调用方应使用 [IMU API](06-drivers-imu.md#3-最小调用示例)；`KalmanFilter_Predict/Correct` 由 IMU estimator 组织，直接调用时需自行保证 F/H/Q/R、观测维度和缓冲区生命周期。
+
+## 4. 可选 Flash 存储
 
 ```conf
 CONFIG_SKYWALKER_LIB_MATRIX=y
@@ -51,7 +66,7 @@ CONFIG_SKYWALKER_LIB_MATRIX_STORAGE=y
 
 存储选项会选择 FILE_SYSTEM、ZMS、FLASH_PAGE_LAYOUT 和 FLASH_MAP，`lib/matrix/matrix.c` 才会加入构建。它依赖板卡有可用的 flash driver 和 storage partition；不要仅在没有分区的板卡上打开。
 
-## 4. 调试建议
+## 5. 调试建议
 
 - n/m 较大时检查主线程/工作线程栈，不要用默认的小栈运行复杂 EKF。
 - 先打印矩阵尺寸和有限性，再查逆矩阵失败。

@@ -19,6 +19,8 @@ Zephyr device API / CAN / UART / SPI / PWM / CMSIS-DSP / STM32 HAL
 
 设计边界是：电机驱动负责 CAN 传输、端点状态、协议和 Group 联动；`lib/control` 负责数值控制与控制侧限幅；`lib/communication` 负责字节流到消息快照；`lib/robotics` 负责消息之间的策略和业务输出许可；应用负责线程、真实硬件绑定和最终安全决策。
 
+跨模块的完整调用次序见 [模块联动](module-integration.md)，电机驱动内部的异步时序见 [电机工作链路](17-motor-workflow.md)。
+
 ## 2. 仓库布局
 
 | 目录 | 责任 |
@@ -32,7 +34,7 @@ Zephyr device API / CAN / UART / SPI / PWM / CMSIS-DSP / STM32 HAL
 | `lib/robotics/` | 机器人决策、局部安全和运动学 |
 | `samples/` | 可单独 west build 的验证项目，各自拥有配置和入口 |
 | `applications/` | 双主控底盘/云台应用骨架，不是库的替代品 |
-| `application/` | 当前为空的历史占位目录 |
+| `tests/motor/regression/` | 电机软件回归测试；不能替代硬件验证 |
 
 ## 3. west module 关系
 
@@ -102,9 +104,10 @@ UART async callback
 ## 6. 线程与并发约定
 
 - `AsyncUart` 的 callback 只复制 RX chunk、维护 DMA buffer 和发送完成标志。
-- `InterBoardLink`、`RefereeParser`、`RemoteService` 规定由一个通信线程拥有。
+- 每个 `InterBoardLink`、`RefereeService`/`RefereeParser`、`RemoteService` 实例由单一通信线程拥有；遥控接收线程封装在 `RemoteReceiver` 中，业务线程通过 `snapshot()` 获取带原始时间戳的副本。
 - 业务控制线程总数由应用决定，可按底盘、云台及周期拆分；每台电机/控制器有明确的命令写入方，共享 CAN 的写入和 commit 必须协调。每条物理 CAN 默认一个 I/O 线程，CAN 回调只保存事件。详细调用图与规则见 [17 电机工作链路](17-motor-workflow.md)。
-- `applications/sentry_chassis` 将链路线程与底盘线程分开，通过 `Latest<T>` 交换值拷贝；`sentry_gimbal` 类似地拆分遥控、裁判、命令、板间和云台线程。
+- `applications/sentry_chassis` 将链路线程与底盘线程分开，通过 `Latest<T>` 交换值拷贝；`sentry_gimbal` 使用一个 `RemoteReceiver` 内部线程和裁判、命令、板间、云台四个应用线程，CAN I/O 线程另计。
+- `RemoteReceiver` 及其独占 `__nocache` DMA 缓冲区应静态存活，UART 初始化失败也不能销毁；读取快照时重算超时，不延长旧帧寿命。接口及配置见 [13 通信](13-communication.md)。
 - `CanBus`、`Motor`、`Group` 应静态存活到应用结束，因为 CAN callback 和 I/O 线程持有这些对象。
 
 ## 7. 单位与状态

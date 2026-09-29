@@ -20,7 +20,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/imu samples/imu_test
 
 | 样例 | 作用 | 操作/观察 |
 |---|---|---|
-| `samples/communication/dr16` | 18 字节 DR16 解码 | MC02 UART5，日志显示通道、拨杆、鼠标、键盘和 offline |
+| `samples/communication/dr16` | RemoteReceiver 接收与 18 字节 DR16 解码 | MC02 UART5 接收，独立 VOFA UART 显示 16 通道；console 查看初始化与异常 |
 | `samples/communication/referee` | 裁判串口 CRC 和状态解析 | MC02 USART1，观察权限、功率、buffer 和统计量 |
 | `samples/communication/interboard` | 两块板 UART 板间协议 | 一块默认 Gimbal role，另一块加 `chassis.conf` |
 
@@ -96,6 +96,8 @@ west build -p -b dm_mc02/stm32h723xx -d build/swerve \
   samples/robotics/swerve
 ```
 
+`dr16`、`command_safety`、`gimbal_control` 统一使用 `RemoteReceiver`；后两者分别保留 10 ms 命令循环和 5 ms 双轴控制循环。DMA 声明和协议参数由各 sample 提供，接收循环由库管理。接入与返回值见 [13 通信](13-communication.md)。
+
 键盘操作和默认 GPIO/CAN 配置见各 sample README 及 `src/board_config.hpp`。
 
 ## 6. applications 与 samples 的区别
@@ -105,6 +107,5 @@ west build -p -b dm_mc02/stm32h723xx -d build/swerve \
 | `samples/` | 独立小项目，目标是验证一个驱动/协议/算法 |
 | `applications/sentry_chassis` | 四轮舵底盘双线程应用骨架，默认连接未配置 |
 | `applications/sentry_gimbal` | 云台主控双主控应用骨架，默认连接未配置 |
-| `application/` | 空历史占位，不是当前推荐入口 |
 
-整机应用的配置和线程关系见 [15 应用骨架](15-applications.md)。
+整机应用的配置和线程关系见 [15 应用骨架](15-applications.md)；从遥控到执行器的调用顺序见 [模块联动](module-integration.md)。

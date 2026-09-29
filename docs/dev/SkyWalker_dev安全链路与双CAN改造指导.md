@@ -1,5 +1,7 @@
 # SkyWalker `dev` 分支安全链路与双 CAN 改造指导
 
+> 遥控接收现状更新：本文保留历史施工基线和步骤。当前 DR16、command_safety、gimbal_control 与 sentry_gimbal 已使用 RemoteReceiver，旧的 remoteTask/remote_state 不再是这些入口的实现。当前接口和接入方式以 [通信文档](../13-communication.md) 为准；底层 RemoteService 仍负责解析。
+
 > 目标：在**不推翻现有双主控架构**的前提下，补齐板间心跳参与安全判定、云台板对底盘健康状态的全局认知，并让底盘 `DjiChassisHardware` 同时兼容 1 条或 2 条物理 CAN。
 >
 > 基线仓库：`SHM-white/SkyWalker_General_Embedded_Code`

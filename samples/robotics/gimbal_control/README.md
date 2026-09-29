@@ -1,19 +1,21 @@
 # 遥控双轴电机样例
 
-本样例用一台 GM6020 电流模式 yaw 和一台 DM J4310 MIT pitch 展示跨品牌、同 CAN、一个联动 Group。DR16 接收和控制各有一个应用线程；每条已启动的 CanBus 自有 I/O 线程。
+本样例用一台 GM6020 电流模式 yaw 和一台 DM J4310 MIT pitch 展示跨品牌、同 CAN、一个联动 Group。DR16 接收由 `RemoteReceiver` 内部线程管理，控制使用独立应用线程；每条已启动的 CanBus 自有 I/O 线程。
 
 ## 配置与接线
 
-电机型号、ID、限幅、零点、协议量程与总线绑定都在 `src/board_config.hpp`；`app.overlay` 不再声明电机设备节点。默认值是供核对的模板：
+电机型号、ID、限幅、零点、协议量程与总线绑定都在 `src/board_config.hpp`；`app.overlay` 不再声明电机设备节点。配置采用指定的 GM6020 小 yaw 与同一颗 DM-J4310 的调参结果：
 
-| 轴 | 电机 | 总线与 ID | 命令上限 |
-| --- | --- | --- | --- |
-| yaw | GM6020 电流模式 | CAN1 / 7 | 1.5 A |
-| pitch | J4310 MIT | CAN1 / 1、Master 0x00 | 1.0 N·m 前馈 |
+| 轴 | 电机与 CAN | 驱动限幅 | 控制器输出限幅 | 安全阈值 |
+| --- | --- | --- | --- | --- |
+| yaw | GM6020 电流模式，CAN1 / ID 7 | 1.5 A | ±1.2 A | 4 rad/s、70 °C |
+| pitch | J4310 MIT，CAN1 / ID 1、Master 0x11 | 1.0 N·m | ±0.5 N·m | 10 rad/s、60 °C |
 
-DM 的 PMAX、VMAX、TMAX 必须与驱动器配置一致。两轴的方向、机械限位和位置环参数也在配置文件中；pitch 的参数只供空载低限幅起步。MC02 的 DR16 UART5 接口来自板级 DTS。电机独立供电，样例没有应用层电源 GPIO；CAN 收发器由 CanBus.start 启动。
+yaw 编码器零点为 5670 tick，机械端点为 5670～7440 tick。两端各留 100 tick，实际目标与反馈允许范围为 5770～7340 tick，换算成零点相对角约为 0.0767～1.281 rad。yaw 位置环为 (20, 0.5, 1.48)，速度环为 (0.43, 0.55, 0.00005)；pitch 位置环为 (0.8, 0.1, 0)，速度环为 (0.03, 0.1, 0)。两个控制环均按 5 ms 更新，接受 1～20 ms 的实测周期。
 
-`connections_configured` 默认为 `false`，核对实物接线、GM6020 电流模式、编码器零点、DM 量程和机械支撑后才设为 `true`。改 `pitch_can` 为 CAN2 即展示跨 CAN Group：程序先 attach 两轴，再依次 start 两条 CAN，周期末分别 commit。改型号时同时改硬件工厂、控制输出单位与限幅，不能沿用另一品牌的单位。
+DM 的 PMAX 12.5 rad、VMAX 30 rad/s、TMAX 10 N·m 必须与驱动器实际配置一致；沿用该电机内部已保存的零点，不写软件 tick 零点。pitch 的 -0.5～0.5 rad 机械范围仍是待实测的样例值，不能据此启用实机。MC02 的 DR16 UART5 接口来自板级 DTS。电机独立供电，样例没有应用层电源 GPIO；CAN 收发器由 CanBus.start 启动。
+
+`connections_configured` 仍为 `false`，核对实物接线、两轴方向与机械限位、GM6020 电流模式和编码器零点、DM 的 Master ID / 量程 / 已保存零点及 pitch 机械支撑后才设为 `true`。改 `pitch_can` 为 CAN2 即展示跨 CAN Group：程序先 attach 两轴，再依次 start 两条 CAN，周期末分别 commit。改型号时同时改硬件工厂、控制输出单位与限幅，不能沿用另一品牌的单位。
 
 ## 调用与安全行为
 
@@ -29,4 +31,6 @@ Limited 轴在禁用且反馈稳定后，使用 GM6020 校准的单圈绝对角�
 west build -b dm_mc02 samples/robotics/gimbal_control -d ../build/gimbal_rc_test
 ```
 
-当前默认禁用配置已在 MC02 编译链接通过；未刷写或实机验证。日志打印遥控有效性、组状态、成员状态、故障原因与 CAN 错误。
+运行状态每秒通过独立的 `telemetry-uart`（MC02 USART1）发送一帧 VOFA+ JustFloat；遥控接收仍使用 UART5，控制台日志仍使用 USART10。VOFA+ 串口设为 115200 baud、JustFloat 协议。按顺序为 11 个通道：遥控帧有效（0/1）、左拨杆位置、允许重新使能（0/1）、急停锁存（0/1）、联动组运行（0/1）、联动组等待使能（0/1）、yaw 电机状态、pitch 电机状态、联动组故障原因、yaw CAN 最近错误码、pitch CAN 最近错误码。同 CAN 配置下最后一个通道固定为 0。VOFA 初始化或发送失败时，错误写入控制台日志。
+
+本次 VOFA 改动已在 MC02 编译链接通过；未刷写或实机验证。

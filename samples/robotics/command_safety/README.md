@@ -28,3 +28,5 @@ C 板使用 `-b rm_typec/stm32f407xx` 和独立构建目录，无需添加 overl
 串口配置由各板 DTS 维护；本目录的 board_config.hpp 与 main.cpp 维护 mapper/manager/safety 配置，不读取正式应用配置。
 
 目前已做固件编译，未在此环境刷写或连接真实外设验证。
+
+遥控接收由 `RemoteReceiver` 独立线程管理，主循环每 10 ms 读取快照并执行原有业务逻辑。启动返回值表示线程创建，UART 初始化结果见 `Remote UART init` 日志；初始化失败或数据超时均保持离线。

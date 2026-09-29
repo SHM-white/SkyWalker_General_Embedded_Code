@@ -22,7 +22,40 @@ CommandManager → RobotCommand
 
 消息都带 `MessageStamp`：timestamp、sequence、valid。安全判断必须使用 `isFresh()`，不能仅看 `valid`。
 
-## 2. 指令层
+## 2. 模块职责与一次命令计算
+
+| 模块 | 输入 | 输出 | 运行位置 |
+|---|---|---|---|
+| `ManualCommandMapper` | `RemoteState` | `OperatorIntent` | 云台命令线程或无电机样例 |
+| `GlobalSafetyManager` | 新鲜度、权限、急停和对端状态 | 分域 `SafetyAction` 与原因 | 云台命令线程 |
+| `CommandManager` | 意图与全局安全决策 | 带物理单位的 `RobotCommand` | 云台命令线程 |
+| `CommandRouter` | 命令与安全决策 | 本地云台/远端底盘值拷贝 | 云台命令线程 |
+| `GimbalLocalSafety` / `ChassisLocalSafety` | 本地反馈、硬件和转发命令 | 本地执行许可 | 对应执行器线程 |
+| `YawGimbal` / `SwerveChassis` | 已授权的物理目标 | 电机控制器目标 | 对应执行器线程 |
+
+下面是 [command_safety 无电机样例](../samples/robotics/command_safety/src/main.cpp) 的核心顺序。`input` 还需填入急停、裁判权限和对端心跳/反馈；样例用模拟对端，整机应用使用真实板间快照。
+
+```cpp
+OperatorIntent intent{};
+int ret = mapper.map(remote, intent);
+GlobalSafetyInputs input{};
+input.now_ms = now_ms;
+input.command_source_fresh = remote.online;
+input.operator_motion_enabled = remote.stamp.valid &&
+    remote.left_switch == RcSwitch::Middle;
+// 同一周期还要填入 input 的权限、急停和对端状态。
+GlobalSafetyDecision decision{};
+if (ret == 0) ret = safety.evaluate(input, decision);
+RobotCommand command{};
+if (ret == 0) ret = manager.step(intent, decision, now_ms, command);
+if (ret < 0) {
+    // 应用撤销输出许可，并记录原因；不要复用旧 command。
+}
+```
+
+命令生成之后，云台板可经 `CommandRouter` 分发本地与底盘目标，但真正使能之前必须由本地安全层再次检查。完整板间闭环与执行调用见 [模块联动](module-integration.md#双主控命令与安全闭环)。
+
+## 3. 指令层
 
 `ManualCommandMapper` 把 `RemoteState` 转成 `OperatorIntent`：
 
@@ -41,7 +74,7 @@ input timeout 100 ms
 
 安全动作不是普通 mode：`Disable` 清零/关闭，`Hold` 保持，`Active` 才允许目标继续更新。
 
-## 3. 全局与局部安全
+## 4. 全局与局部安全
 
 ### GlobalSafetyManager
 
@@ -62,7 +95,7 @@ input timeout 100 ms
 
 跨板转发不能只依赖远端的 global decision；本地必须有独立的 disable 路径。
 
-## 4. 舵轮运动学
+## 5. 舵轮运动学
 
 `SwerveKinematics` 的模块顺序固定为 FL、FR、RL、RR，坐标约定为 +x 前、+y 左、+wz 逆时针。给定底盘 `vx/vy/wz` 和四个模块位置，计算每个模块的角度与轮速；当速度接近 0 时保持上一次角度，避免舵向抖动。
 
@@ -70,7 +103,7 @@ input timeout 100 ms
 
 当前 `samples/robotics/swerve` 只驱动一个物理模块做台架验证；`applications/sentry_chassis` 才是四模块硬件编排入口。
 
-## 5. Yaw 云台
+## 6. Yaw 云台
 
 `YawGimbal` 支持：
 
@@ -80,13 +113,13 @@ input timeout 100 ms
 
 `begin()` 只做配置，不等待电机供电或反馈；应用应循环 `poll()`，在权限和反馈都满足后才 update。发生 disable、非法 dt、超出机械限位或急停时应 suspend。
 
-## 6. 功率限幅
+## 7. 功率限幅
 
 `ChassisPowerLimiter` 是台架启发式，不是比赛功率合规证明。它根据实测功率、功率上限、buffer energy 和 reserve 计算 `effort_scale`，并以 `recovery_per_s` 限制恢复速度。
 
 当前底盘应用只有在 `power_model_calibrated=true` 且裁判功率数据新鲜时才使用它；校准前使用固定 `bench_effort_scale`，生产应用必须替换为真实标定模型和保护策略。
 
-## 7. 集成顺序
+## 8. 集成顺序
 
 1. 先用通信样例确认 Remote/Referee/InterBoard 状态。
 2. 用 `command_safety` 在无电机条件下观察 stale、急停和 reset。

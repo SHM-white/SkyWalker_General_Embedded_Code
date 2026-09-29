@@ -3,52 +3,29 @@
 #include <cmath>
 #include <cstdint>
 
-#include <communication/async_uart.hpp>
-#include <communication/remote/remote_service.hpp>
+#include <communication/remote/remote_receiver.hpp>
 #include <control/position_motor.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <drivers/motor/group.hpp>
-#include <latest.hpp>
+#include <lib/vofa/vofa.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 #include "board_config.hpp"
+
+#define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
+
+#if !DT_NODE_HAS_STATUS(VOFA_UART_NODE, okay)
+#error "A ready telemetry-uart alias is required for VOFA"
+#endif
 
 LOG_MODULE_REGISTER(gimbal_rc, LOG_LEVEL_INF);
 using namespace skywalker;
 using namespace skywalker::robotics;
 
 namespace {
-Latest<RemoteState> remote_state;
-
-void remoteTask(void *, void *, void *) {
-    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-    static communication::AsyncUart uart(board_config::remote_uart, dma_buffers);
-    communication::RemoteService service({}, {});
-    int ret = uart.init();
-    LOG_INF("remote UART init: %d", ret);
-    if (ret < 0)
-        return; // No valid snapshot is published; both axes stay disabled.
-    for (;;) {
-        const auto now = k_uptime_get();
-        uart.service(now);
-        communication::AsyncUart::RxChunk chunk{};
-        for (unsigned budget = 0; budget < 8; ++budget) {
-            ret = uart.read(chunk);
-            if (ret == -EOVERFLOW) {
-                service.discardPartial();
-                continue;
-            }
-            if (ret < 0)
-                break;
-            service.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
-        }
-        RemoteState state{};
-        service.snapshot(now, state);
-        remote_state.put(state);
-        k_sleep(K_MSEC(1));
-    }
-}
+static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+communication::RemoteReceiver receiver(board_config::remote_uart, dma_buffers, {});
 
 float normalizeStick(std::int16_t raw) {
     const float x = std::clamp(float(raw) / 660.0f, -1.0f, 1.0f);
@@ -134,6 +111,11 @@ void gimbalTask(void *, void *, void *) {
         LOG_ERR("hardware template disabled; check board_config.hpp");
         return;
     }
+    static Vofa vofa{};
+    const int vofa_ret = vofa_init(&vofa, DEVICE_DT_GET(VOFA_UART_NODE));
+    if (vofa_ret < 0)
+        LOG_ERR("VOFA telemetry UART initialization failed: %d", vofa_ret);
+
     const bool split_buses = board_config::yaw_can != board_config::pitch_can;
     int ret = split_buses ? yaw_bus.attach(yaw_drive) : yaw_bus.attach(yaw_drive, pitch_drive);
     if (ret == 0 && split_buses)
@@ -150,15 +132,16 @@ void gimbalTask(void *, void *, void *) {
     if (ret < 0)
         return;
 
-    RemoteState remote{};
+    communication::RemoteReceiver::Snapshot rc{};
     bool estop_latched = false, rearm_allowed = false, enable_issued = false;
     auto previous_ms = k_uptime_get();
-    std::uint64_t next_log = 0;
+    std::uint64_t next_telemetry = 0;
     for (;;) {
+        receiver.snapshot(rc);
+        const auto &remote = rc.remote;
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const float dt = (now - previous_ms) / 1000.0f;
         previous_ms = now;
-        remote_state.get(remote); // Retain the snapshot and its original age on contention.
         const bool fresh = remote.online && isFresh(remote.stamp, now, board_config::command_timeout_ms);
         const bool estop = board_config::emergencyStopRequested();
         if (estop && !estop_latched) {
@@ -233,24 +216,44 @@ void gimbalTask(void *, void *, void *) {
             }
         }
 
-        if (now >= next_log) {
-            next_log = now + 1000;
+        if (now >= next_telemetry) {
+            next_telemetry = now + 1000;
             const auto status = gimbal.status();
             const auto ys = yaw_drive.snapshot();
             const auto ps = pitch_drive.snapshot();
-            LOG_INF("rc=%d switch=%u rearm=%d estop=%d group=%d/%d yaw=%u pitch=%u fault=%u bus=%d/%d", fresh,
-                    unsigned(remote.left_switch), rearm_allowed, estop_latched, status.active, status.enable_pending,
-                    unsigned(ys.state), unsigned(ps.state), unsigned(status.last_fault.reason),
-                    yaw_bus.status().last_error, split_buses ? pitch_bus.status().last_error : 0);
+            const float channels[] = {
+                fresh ? 1.0f : 0.0f,
+                static_cast<float>(unsigned(remote.left_switch)),
+                rearm_allowed ? 1.0f : 0.0f,
+                estop_latched ? 1.0f : 0.0f,
+                status.active ? 1.0f : 0.0f,
+                status.enable_pending ? 1.0f : 0.0f,
+                static_cast<float>(unsigned(ys.state)),
+                static_cast<float>(unsigned(ps.state)),
+                static_cast<float>(unsigned(status.last_fault.reason)),
+                static_cast<float>(yaw_bus.status().last_error),
+                static_cast<float>(split_buses ? pitch_bus.status().last_error : 0),
+            };
+            constexpr auto channel_count = sizeof(channels) / sizeof(channels[0]);
+            static_assert(channel_count <= VOFA_MAX_FLOATS);
+            if (vofa_ret == 0) {
+                const int send_ret = vofa_send(&vofa, channels, static_cast<std::uint8_t>(channel_count));
+                if (send_ret < 0)
+                    LOG_WRN("VOFA send failed: %d", send_ret);
+            }
         }
         k_sleep(K_MSEC(5));
     }
 }
 } // namespace
 
-K_THREAD_DEFINE(remote_thread, 3072, remoteTask, nullptr, nullptr, nullptr, 6, 0, 0);
 K_THREAD_DEFINE(gimbal_thread, 6144, gimbalTask, nullptr, nullptr, nullptr, 4, 0, 0);
 int main() {
+    const int ret = receiver.start();
+    if (ret < 0) {
+        LOG_ERR("Remote receiver start failed: %d", ret);
+        return ret;
+    }
     LOG_INF("RC small yaw + pitch: configured=%d; check src/board_config.hpp", board_config::connections_configured);
     return 0;
 }

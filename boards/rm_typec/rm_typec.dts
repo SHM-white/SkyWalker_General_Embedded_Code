@@ -83,13 +83,15 @@
         usart1 = &usart6;
         usart2 = &usart1;
         telemetry-uart = &usart6;
+        remote-uart = &usart3;
+        can1 = &can1;
+        can2 = &can2;
         pwm-led0 = &red_pwm_led;
         pwm-led1 = &green_pwm_led;
         pwm-led2 = &blue_pwm_led;
         buzzer0 = &buzzer;
         accel0 = &bmi08x_accel;
         gyro0 = &bmi08x_gyro;
-        remote-uart = &usart3;
     };
 };
 

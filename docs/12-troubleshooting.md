@@ -54,6 +54,9 @@
 
 | 现象 | 检查 |
 |---|---|
+| Receiver 一直 NotStarted | main 是否调用 start，是否记录返回值，线程能否调度 |
+| Receiver InitFailed | 查 `Remote UART init` 和 `uart_error`：设备就绪、异步 UART 支持、nocache DMA、串口是否独占；修复后重启 |
+| Receiver snapshot 返回 0 但离线 | 0 只表示复制成功；检查 `remote.stamp.valid`、`remote.online` 和有效帧年龄 |
 | DR16 offline | UART 100000、8E1、实际电平反相链路、18 字节帧和 `offline_timeout_ms` |
 | 裁判 online 但没有权限 | `RefereeVersion` 是否明确为 `Rm2026V1_3`，权限帧 0x0201 是否通过 CRC |
 | 板间反复 offline | TX/RX 交叉、共地、460800、角色不同、CRC 和序列号 |

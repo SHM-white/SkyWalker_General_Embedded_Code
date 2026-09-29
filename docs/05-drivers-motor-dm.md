@@ -2,6 +2,8 @@
 
 实现位置：`drivers/motor/{motor,can_bus,group}.cpp`、`drivers/motor/dm/dm_protocol.cpp`；公开接口位于 `include/drivers/motor/{dm_motor,dm_protocol,motor,can_bus,group}.hpp`。当前支持 J4310-2EC-V1.1，电机配置在 C++ 中构造，设备树只提供物理 CAN、电源控制等板级设备。
 
+**调用路线：** `dm::Config` → `Motor` → 所属物理 `CanBus` → `attach/start` → 等待反馈、显式 `enable` → 原生 setter 或 MIT 软件闭环 `update` → 每周期 `commit`。需要共同停机的成员先建 Group。完整异步时序见 [电机工作链路](17-motor-workflow.md)，跨模块例子见 [模块联动](module-integration.md)。
+
 ## 1. 控制模式与 C++ 配置
 
 达妙电机有 MIT、位置-速度、速度三种持久化控制模式。固件中的模式必须与电机调试助手中的实际设置一致，分别用 `dm::j4310Mit()`、`dm::j4310PositionVelocity()`、`dm::j4310Velocity()` 创建 `dm::Config`：
