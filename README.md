@@ -19,14 +19,14 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 按任务选择入口，完整主题目录和资料使用说明见 [文档中心](docs/README.md)：
 
-| 要做什么 | 从这里开始 |
-|---|---|
-| 第一次配置、构建和烧录 | [快速开始](docs/01-getting-started.md) → [样例索引](docs/10-samples.md) |
-| 理解工程分层和硬件 | [架构与构建](docs/02-architecture.md) → [板级支持](docs/03-boards.md) |
-| 调电机与控制环 | [DJI](docs/04-drivers-motor-dji.md) / [达妙](docs/05-drivers-motor-dm.md) → [电机工作链路](docs/17-motor-workflow.md) |
-| 做遥控、板间通信和整机应用 | [通信](docs/13-communication.md) → [机器人算法](docs/14-robotics.md) → [应用骨架](docs/15-applications.md) |
-| 查现场问题 | [故障排查](docs/12-troubleshooting.md) |
-| 查设计记录和专题分析 | [开发专题索引](docs/dev/README.md) |
+| 要做什么                   | 从这里开始                                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 第一次配置、构建和烧录     | [快速开始](docs/01-getting-started.md) → [样例索引](docs/10-samples.md)                                              |
+| 理解工程分层和硬件         | [架构与构建](docs/02-architecture.md) → [板级支持](docs/03-boards.md)                                                |
+| 调电机与控制环             | [DJI](docs/04-drivers-motor-dji.md) / [达妙](docs/05-drivers-motor-dm.md) → [电机工作链路](docs/17-motor-workflow.md) |
+| 做遥控、板间通信和整机应用 | [通信](docs/13-communication.md) → [机器人算法](docs/14-robotics.md) → [应用骨架](docs/15-applications.md)           |
+| 查现场问题                 | [故障排查](docs/12-troubleshooting.md)                                                                               |
+| 查设计记录和专题分析       | [开发专题索引](docs/dev/README.md)                                                                                   |
 
 交互式架构图的本地打开方法见 [架构浏览器](docs/architecture-browser/README.md)。
 
@@ -34,10 +34,10 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 ### 板级支持
 
-| board | MCU | 当前仓库内主要用途 |
-|---|---|---|
-| `dm_mc02/stm32h723xx` | STM32H723，480 MHz | 达妙 MC02，三路 FDCAN、BMI088、遥控/板间串口、电机应用 |
-| `rm_typec` | STM32F407，168 MHz | RoboMaster Type-C C 板，CAN1/CAN2、BMI088、USB CDC、串口 |
+| board                   | MCU                | 当前仓库内主要用途                                       |
+| ----------------------- | ------------------ | -------------------------------------------------------- |
+| `dm_mc02/stm32h723xx` | STM32H723，480 MHz | 达妙 MC02，三路 FDCAN、BMI088、遥控/板间串口、电机应用   |
+| `rm_typec`            | STM32F407，168 MHz | RoboMaster Type-C C 板，CAN1/CAN2、BMI088、USB CDC、串口 |
 
 板卡、设备树和烧录器配置位于 `boards/`；详细外设和 runner 见 [03 板级支持](docs/03-boards.md)。
 
@@ -126,5 +126,4 @@ skywalker_code/
 
 ## 资料
 
-`docs/` 中同时保留了 DJI 电机/电调、达妙电机/开发板和 RoboMaster C 板的 PDF 手册；下载地址见 [docs/DOWNLOAD_LINKS.txt](docs/DOWNLOAD_LINKS.txt)。
-
+`docs/` 中同时保留了 DJI 电机/电调、达妙电机/开发板和 RoboMaster C 板的 PDF 手册；下载地址见 [docs/datasheets/DOWNLOAD_LINKS.txt](docs/datasheets/DOWNLOAD_LINKS.txt)。

@@ -35,8 +35,17 @@
 	aliases {
 		sw0 = &user_button;
 		led-strip = &rgb_led;
-		telemetry-uart = &usart1;
+		telemetry-uart = &cdc_acm_uart0;
 		remote-uart = &uart5;
+		usart1 = &usart1;
+		usart2 = &usart10;
+		uart1 = &uart7;
+		uart2 = &cdc_acm_uart0;
+		rs485-2 = &usart2;
+		rs485-3 = &usart3;
+		can1 = &can1;
+		can2 = &can2;
+		can3 = &can3;
 	};
 
 	power_en {
@@ -127,13 +136,13 @@
 &spi2 {
 	status = "okay";
 	clocks = <&rcc STM32_CLOCK(APB1, 14U)>,
-		 <&rcc STM32_SRC_PLL1_Q SPI123_SEL(0)>;
+			 <&rcc STM32_SRC_PLL1_Q SPI123_SEL(0)>;
 	pinctrl-0 = <&spi2_sck_pb13 &spi2_miso_pc2_c &spi2_mosi_pc1>;
 	pinctrl-names = "default";
 	cs-gpios = <&gpioc 0 GPIO_ACTIVE_LOW>,
-		   <&gpioc 3 GPIO_ACTIVE_LOW>;
+			   <&gpioc 3 GPIO_ACTIVE_LOW>;
 	dmas = <&dmamux1 2 2 STM32_DMA_PERIPH_TX>,
-	       <&dmamux1 1 1 STM32_DMA_PERIPH_RX>;
+		   <&dmamux1 1 1 STM32_DMA_PERIPH_RX>;
 	dma-names = "tx", "rx";
 
 	bmi08x_accel: bmi08x@0 {
@@ -168,7 +177,7 @@
 &spi6 {
 	status = "okay";
 	clocks = <&rcc STM32_CLOCK(APB4, 5U)>,
-		 <&rcc STM32_SRC_HSE SPI6_SEL(5)>;
+			 <&rcc STM32_SRC_HSE SPI6_SEL(5)>;
 	pinctrl-0 = <&spi6_sck_pa5 &spi6_mosi_pa7>;
 	pinctrl-names = "default";
 
@@ -183,8 +192,8 @@
 		spi-one-frame = <0x70>;
 		spi-zero-frame = <0x40>;
 		color-mapping = <LED_COLOR_ID_GREEN>,
-				<LED_COLOR_ID_RED>,
-				<LED_COLOR_ID_BLUE>;
+						<LED_COLOR_ID_RED>,
+						<LED_COLOR_ID_BLUE>;
 		reset-delay = <250>;
 	};
 };
@@ -202,14 +211,14 @@ zephyr_udc0: &usbotg_hs {
 	pinctrl-names = "default";
 	current-speed = <115200>;
 	dmas = <&dmamux1 3 42 STM32_DMA_PERIPH_TX>,
-	       <&dmamux1 4 41 STM32_DMA_PERIPH_RX>;
+		   <&dmamux1 4 41 STM32_DMA_PERIPH_RX>;
 	dma-names = "tx", "rx";
 };
 
 &usart2 {
 	// RS485
 	status = "okay";
-	pinctrl-0 = <&usart3_de_pb14 &usart2_rx_pd6 &usart2_tx_pd5>;
+	pinctrl-0 = <&usart2_de_pd4 &usart2_rx_pd6 &usart2_tx_pd5>;
 	pinctrl-names = "default";
 	de-enable;
 };
@@ -235,6 +244,13 @@ zephyr_udc0: &usbotg_hs {
 	dma-names = "rx";
 };
 
+&uart7 {
+	status = "okay";
+	pinctrl-0 = <&uart7_rx_pe7 &uart7_tx_pe8>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};
+
 &usart10 {
 	status = "okay";
 	pinctrl-0 = <&usart10_rx_pe2 &usart10_tx_pe3>;
@@ -245,7 +261,7 @@ zephyr_udc0: &usbotg_hs {
 can1: &fdcan1 {
 	status = "okay";
 	clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
-		 <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
+			 <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
 	pinctrl-0 = <&fdcan1_rx_pd0 &fdcan1_tx_pd1>;
 	pinctrl-names = "default";
 	bitrate = <1000000>;
@@ -254,7 +270,7 @@ can1: &fdcan1 {
 can2: &fdcan2 {
 	status = "okay";
 	clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
-		 <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
+			 <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
 	pinctrl-0 = <&fdcan2_rx_pb5 &fdcan2_tx_pb6>;
 	pinctrl-names = "default";
 	bitrate = <1000000>;
@@ -263,7 +279,7 @@ can2: &fdcan2 {
 can3: &fdcan3 {
 	status = "okay";
 	clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
-		 <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
+			 <&rcc STM32_SRC_PLL1_Q FDCAN_SEL(1)>;
 	pinctrl-0 = <&fdcan3_rx_pd12 &fdcan3_tx_pd13>;
 	pinctrl-names = "default";
 	bitrate = <1000000>;
@@ -290,5 +306,12 @@ can3: &fdcan3 {
 			label = "storage";
 			reg = <0x000c0000 DT_SIZE_K(256)>;
 		};
+	};
+};
+
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "VOFA";
 	};
 };
