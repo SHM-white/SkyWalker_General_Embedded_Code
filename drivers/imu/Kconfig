@@ -19,3 +19,20 @@ config SKYWALKER_IMU_DM_RS485
     bool "DM-IMU-L1 active RS485 source"
     depends on SKYWALKER_IMU && SKYWALKER_UART_TRANSPORT
     select SKYWALKER_IMU_DM_PROTOCOL
+
+config SKYWALKER_IMU_RECEIVER
+    bool "Threaded IMU acquisition and optional heater"
+    depends on SKYWALKER_IMU
+    depends on MULTITHREADING
+
+config SKYWALKER_IMU_RX_STACK_SIZE
+    int "IMU acquisition thread stack size"
+    depends on SKYWALKER_IMU_RECEIVER
+    default 8192
+    range 2048 16384
+
+config SKYWALKER_IMU_RX_PRIORITY
+    int "Default IMU acquisition thread priority"
+    depends on SKYWALKER_IMU_RECEIVER
+    default 6
+    range 0 15

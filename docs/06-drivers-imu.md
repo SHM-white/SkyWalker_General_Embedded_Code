@@ -29,19 +29,29 @@ capabilities 是实现支持能力；stamp.valid 表示最后一份测量通过�
 
 ## 接口与线程
 
+推荐使用 `include/drivers/imu/imu_receiver.hpp` 中的 ImuReceiver 管理后台采集：
+
 ~~~cpp
-// 一个所有者线程：
-const int init_ret = source.init();
-const int ret = source.service();  // 0 有进展，-EAGAIN 无新数据，其他负 errno
+// 静态/长生命周期实例；source、estimator、heater 和 DMA 同样需要长期存活。
+ImuReceiver receiver(source, {.poll_interval_us = 500, .priority = 5}, &heater);
+// 外置源不需要 heater，省略第三个参数即可。
+const int ret = receiver.start();
 
 // 任意读线程，无 I/O：
-const auto snapshot = source.snapshot();
+const auto snapshot = receiver.snapshot();
 if (snapshot.fresh_mask & skywalker::imu::Orientation) {
     const auto q = snapshot.sample.orientation.value;
 }
+const auto status = receiver.status();
 ~~~
 
-构造不做 I/O；init 不等于已经产生有效姿态。service 不等待下一个周期，但底层 SPI 传输本身可能阻塞。一个底层 sensor 或 UART 必须有唯一所有者。快照在短 spinlock 内复制，在锁外取当前时钟重新计算 freshness；锁内不读外设、滤波或解码。
+每个 ImuReceiver 拥有一条采集线程，负责一次初始化、周期调用 source.service，以及可选的 heater.update。滤波仍在 Bmi088Imu 内部执行。start 返回 0 只表示线程已启动；初始化结果查看 status.init_complete、init_error 和 heater_init_error，数据是否可用查看 snapshot.fresh_mask。重复 start 返回 -EALREADY；目前不提供 stop/restart，运行期间不能销毁实例或依赖对象。
+
+status 提供最近一次非 -EAGAIN 的 service_error，以及 heater_error、heater_disable_error 和 heater_duty；它与测量快照分别读取，不承诺跨接口原子一致。snapshot 直接委托 source 读取，不新增样本缓存；每次读取都会重新计算 freshness。初始化失败后线程仍调用 service，让 RS485 后端自行恢复，不重复注册回调。温控初始化失败不阻止采集；温控成功初始化后，即使本轮没有新测量也检查温度，源故障或温度失效时尝试关断 PWM。
+
+配置中的 poll_interval_us 是每次 service 后的休眠时间，不保证精确采样周期；priority 为抢占式线程优先级。每个实例拥有 CONFIG_SKYWALKER_IMU_RX_STACK_SIZE 字节配置的栈（默认 8192），使用硬件浮点共享时声明 K_FP_REGS。
+
+需要自行调度时仍可直接使用 ImuSource 的 init/service/snapshot。构造不做 I/O；init 不等于已经产生有效姿态。service 不等待下一个周期，但底层 SPI 传输本身可能阻塞。一个底层 sensor 或 UART 必须有唯一所有者；使用 ImuReceiver 后，应用不能再次调用该源的 init/service 或该 heater 的 init/update/disable。快照在短 spinlock 内复制，在锁外取当前时钟重新计算 freshness；锁内不读外设、滤波或解码。
 
 ImuState 是具体发布核心，接收 Update.updated_mask 标识本次成功字段，校验后原子提交。一项非法则该 Update 整体拒绝；后端可把独立读取结果分次提交。倒退时间拒绝，初始单位四元数保持 invalid。
 
@@ -67,7 +77,7 @@ QuaternionEkf 用固定数组持有四元数、4×4 协方差、低通和静止�
 
 ImuHeater 显式传入 pwm_dt_spec 与温控配置。init 写零占空比，update 才开始输出；按 duty=0—1 的 PID 控制，不复用旧 API 中以纳秒为 PID 输出的参数。
 
-双 IMU 样例使用 TIM3 CH4/PB1、周期 20ms、目标 50℃，测量达到 65℃时撤销输出。温度过期、非法、时间倒退或 PID/PWM 错误均尝试关 PWM，关闭失败保存在 disable_error。温控失败不会阻止 gyro 读取；控制线程需要持续调用 update，软件不是独立硬件热保护。
+双 IMU 样例使用 TIM3 CH4/PB1、周期 20ms、目标 50℃，测量达到 65℃时撤销输出。温度过期、非法、时间倒退或 PID/PWM 错误均尝试关 PWM，关闭失败保存在 disable_error。温控失败不会阻止 gyro 读取；ImuReceiver 会持续调用 update；自行调度时需由所有者线程完成，软件不是独立硬件热保护。
 
 ## DM-IMU-L1 RS485
 
@@ -88,6 +98,7 @@ CAN 只保留 DmImuCanSource 抽象接口/Config，未实现接收、映射或�
 | 配置 | 作用 |
 |---|---|
 | SKYWALKER_IMU | CPP 接口与具体状态核心，不强制总线/PWM |
+| SKYWALKER_IMU_RECEIVER | 每实例后台采集线程，可选驱动 heater；不强制 PWM |
 | SKYWALKER_IMU_BMI088 | SENSOR/BMI08X 采样 |
 | SKYWALKER_ATTITUDE_EKF | 实例化算法，固定数组，无 device/DSP 注册依赖 |
 | SKYWALKER_IMU_HEATER | 可选 PWM 和控制算法 |
