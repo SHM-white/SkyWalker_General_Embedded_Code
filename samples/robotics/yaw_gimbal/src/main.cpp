@@ -1,8 +1,7 @@
 #include <cstdint>
 
-#include <control/position_motor.hpp>
 #include <drivers/motor/can_bus.hpp>
-#include <robotics/gimbal/yaw_gimbal.hpp>
+#include <robotics/gimbal/gimbal_axis.hpp>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -17,8 +16,7 @@ int main() {
 
     static motor::Motor drive(bench::motorHardware());
     static motor::CanBus bus(bench::can);
-    static control::PositionMotor axis(drive, bench::motorConfig());
-    YawGimbal yaw(drive, axis, bench::yaw);
+    static GimbalAxis yaw(drive, bench::motorConfig(), bench::yaw);
 
     int ret = bus.attach(drive);
     if (ret == 0)
@@ -33,7 +31,7 @@ int main() {
     const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
     LOG_INF("e enable Hold, a/d +/- rate, h Hold, 0/1 absolute 0/0.5rad, space Disable, ! estop, r reset");
     bool requested = false, estop = false, enable_issued = false;
-    GimbalCommand command{};
+    AxisCommand command{};
     command.mode = GimbalMode::Hold;
     std::uint64_t next_log = 0;
     auto previous = k_uptime_get();
@@ -62,16 +60,17 @@ int main() {
             }
             if (key == 'a' || key == 'd') {
                 command.mode = GimbalMode::Rate;
-                command.yaw_rate_rad_s = key == 'a' ? .3f : -.3f;
+                command.rate_rad_s = key == 'a' ? .3f : -.3f;
             }
             if (key == 'h')
                 command.mode = GimbalMode::Hold;
             if (key == '0' || key == '1') {
                 command.mode = GimbalMode::AbsoluteAngle;
-                command.yaw_target_rad = key == '0' ? 0 : .5f;
+                command.target_rad = key == '0' ? 0 : .5f;
             }
         }
 
+        const auto axis_status = yaw.poll(now);
         const auto view = drive.snapshot();
         if (!requested || estop) {
             if (view.state == motor::MotorState::Active || view.state == motor::MotorState::Enabling) {
@@ -87,7 +86,7 @@ int main() {
             enable_issued = false;
         }
 
-        if (requested && !estop && !enable_issued && drive.ready()) {
+        if (requested && !estop && !enable_issued && axis_status.ready_for_enable) {
             ret = yaw.reset(); // Seed Hold from a fresh, disabled measurement.
             if (ret == 0)
                 ret = drive.enable();
@@ -113,7 +112,7 @@ int main() {
         if (now >= next_log) {
             next_log = now + 100;
             const auto snapshot = drive.snapshot();
-            const auto telemetry = axis.telemetry();
+            const auto telemetry = yaw.telemetry();
             LOG_INF("state=%u mode=%u gen=%llu target=%.3f absolute=%.3f velocity=%.3f effort=%.3f fault=%u err=%d",
                     unsigned(snapshot.state), unsigned(command.mode),
                     static_cast<unsigned long long>(snapshot.enable_generation), double(yaw.targetAngleRad()),

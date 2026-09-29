@@ -31,7 +31,7 @@ CommandManager → RobotCommand
 | `CommandManager` | 意图与全局安全决策 | 带物理单位的 `RobotCommand` | 云台命令线程 |
 | `CommandRouter` | 命令与安全决策 | 本地云台/远端底盘值拷贝 | 云台命令线程 |
 | `GimbalLocalSafety` / `ChassisLocalSafety` | 本地反馈、硬件和转发命令 | 本地执行许可 | 对应执行器线程 |
-| `YawGimbal` / `SwerveChassis` | 已授权的物理目标 | 电机控制器目标 | 对应执行器线程 |
+| `GimbalAxis` / `SwerveChassis` | 已授权的物理目标 | 电机控制器目标 | 对应执行器线程 |
 
 下面是 [command_safety 无电机样例](../samples/robotics/command_safety/src/main.cpp) 的核心顺序。`input` 还需填入急停、裁判权限和对端心跳/反馈；样例用模拟对端，整机应用使用真实板间快照。
 
@@ -103,15 +103,19 @@ input timeout 100 ms
 
 当前 `samples/robotics/swerve` 只驱动一个物理模块做台架验证；`applications/sentry_chassis` 才是四模块硬件编排入口。
 
-## 6. Yaw 云台
+## 6. 云台单轴 GimbalAxis
 
-`YawGimbal` 支持：
+`GimbalAxis` 支持：
 
 - `Continuous`：要求 `PositionReference::AbsoluteNearest`，目标走固定零点的最短路径。
 - `Limited`：要求 `PositionReference::DriverContinuous`，目标和实际都必须在机械限位内。
 - `Hold`、`Rate`、`AbsoluteAngle` 三种命令模式。
 
-`begin()` 只做配置，不等待电机供电或反馈；应用应循环 `poll()`，在权限和反馈都满足后才 update。发生 disable、非法 dt、超出机械限位或急停时应 suspend。
+`GimbalAxis` 私有拥有 `PositionMotor`。`begin()` 配置控制器；`poll(now_ms)` 返回可使能状态、反馈健康状态和最近就绪时间。`AxisReferenceInit::Preserve` 默认不改参考；Limited 轴显式选择 `CalibratedFeedback` 后，才在禁用且反馈稳定时使用校准绝对角/原生位置重建参考。
+
+单轴命令为 `AxisCommand{mode, target_rad, rate_rad_s}`，不再借用 yaw 字段；`updateRate(rate, dt)` 是已授权 Active 路径的便利方法。上层机器人消息 `GimbalCommand` 不变，应用在完成安全判断后投影到对应轴。
+
+应用负责 reset 后显式 enable，Active 后 update，并统一 commit。`ready_for_enable` 在 Active 时为 false，不能替代 `feedback_healthy`。反馈错误、非法 dt、越界或急停由调用方 disable 电机/Group；本类不自动启停或清故障。`telemetry()` 返回内部位置控制器的遥测副本。
 
 ## 7. 功率限幅
 

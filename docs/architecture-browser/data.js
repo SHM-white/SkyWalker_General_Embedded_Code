@@ -70,13 +70,13 @@ const nodes = [
   },
   {
     current: true,
-    id: "yaw_gimbal", lane: "gimbal", order: 7, status: "verify", kicker: "subsystem", title: "YawGimbal + PositionMotor",
+    id: "yaw_gimbal", lane: "gimbal", order: 7, status: "verify", kicker: "subsystem", title: "GimbalAxis（内含 PositionMotor）",
     summary: "200 Hz 小 Yaw 本地闭环",
-    description: "正式应用引用统一 Motor 和 PositionMotor，并通过 Group / CanBus 管理许可与发布，但零点、方向、限位与真实掉电恢复还需在机构上确认。",
-    interfaces: ["int update(const GimbalCommand&, SafetyAction, float dt_s)", "PositionMotor: configure / reset / update / telemetry"],
+    description: "GimbalAxis 引用统一 Motor 并私有拥有 PositionMotor，应用通过 Motor/Group 和 CanBus 管理许可与发布，但零点、方向、限位与真实掉电恢复还需在机构上确认。",
+    interfaces: ["int update(const AxisCommand&, SafetyAction, float dt_s)", "GimbalAxis: begin / poll / reset / updateRate / telemetry"],
     constraints: ["AbsoluteNearest 必须有固定零点单圈反馈能力", "Limited 模式必须使用已校准 DriverContinuous 坐标", "恢复时重置测量参考、PID 与轨迹目标"],
     dependsOn: ["gimbal_safety", "motor_layer"], provides: [],
-    sources: ["include/robotics/gimbal/yaw_gimbal.hpp", "lib/robotics/yaw_gimbal.cpp", "applications/sentry_gimbal/src/main.cpp"],
+    sources: ["include/robotics/gimbal/gimbal_axis.hpp", "lib/robotics/gimbal_axis.cpp", "applications/sentry_gimbal/src/main.cpp"],
   },
   {
     id: "vision_auto", lane: "gimbal", order: 8, status: "todo", kicker: "future producer", title: "Vision / Auto producer",

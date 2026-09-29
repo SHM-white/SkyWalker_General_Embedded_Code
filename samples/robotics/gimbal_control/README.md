@@ -19,7 +19,7 @@ DM 的 PMAX 12.5 rad、VMAX 30 rad/s、TMAX 10 N·m 必须与驱动器实际配�
 
 ## 调用与安全行为
 
-应用先 attach/start，再 configure 两个 PositionMotor。遥控左拨杆需先到上或下位，收到新的有效帧后拨到中位，程序才调用一次 `Group.enable()`。右摇杆横向/纵向分别给 yaw/pitch 角速度；两个控制器只暂存安培和牛·米目标，周期末由 CanBus.commit 发布。任一轴反馈、限位、遥控或控制周期异常会撤销整个 Group；故障后需重新经过安全拨杆动作。Group.disable 会立刻关闭软件输出许可，安全帧由 I/O 线程发送。
+应用先 attach/start，再通过两轴 `GimbalAxis::begin()` 配置各自私有的 PositionMotor。`poll(now)` 汇总参考准备、反馈健康和就绪时间，`reset()` 与 `updateRate()` 提供单轴操作。遥控左拨杆需先到上或下位，收到新的有效帧后拨到中位，程序才调用一次 `Group.enable()`。右摇杆横向/纵向分别给 yaw/pitch 角速度；两个控制器只暂存安培和牛·米目标，周期末由 CanBus.commit 发布。任一轴反馈、限位、遥控或控制周期异常会撤销整个 Group；故障后需重新经过安全拨杆动作。Group.disable 会立刻关闭软件输出许可，安全帧由 I/O 线程发送。
 
 Limited 轴在禁用且反馈稳定后，使用 GM6020 校准的单圈绝对角或 DM 原生保存零点的位置重建连续参考。切电机电源后重新建立参考，再允许位置控制。pitch 失能可能下坠，须支撑机构；首次测试先验证方向、限位和禁用动作。
 

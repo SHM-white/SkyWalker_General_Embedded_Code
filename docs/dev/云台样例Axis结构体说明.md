@@ -1,5 +1,7 @@
 # 云台样例 Axis 结构体说明
 
+> 历史源码解读：Axis 与 YawGimbal 现已合并为 GimbalAxis。当前接口与验证记录见 [GimbalAxis 单轴封装实施记录](GimbalAxis单轴封装实施记录.md)。
+
 本说明对应 `samples/robotics/gimbal_control/src/main.cpp:36`，仅解释现有代码，不需要修改业务源码。
 
 ## 作用

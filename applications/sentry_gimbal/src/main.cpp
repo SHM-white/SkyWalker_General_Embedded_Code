@@ -218,8 +218,7 @@ void linkTask(void *, void *, void *) {
 void gimbalTask(void *, void *, void *) {
     static motor::CanBus bus(board_config::yaw_can);
     static motor::Motor drive(board_config::yawMotorConfig());
-    static control::PositionMotor axis(drive, board_config::motorConfig(drive.info()));
-    YawGimbal yaw(drive, axis, board_config::yaw);
+    static GimbalAxis yaw(drive, board_config::motorConfig(drive.info()), board_config::yaw);
     GimbalLocalSafety local({board_config::command_timeout_ms});
     const int configured = [&]() {
         if (!board_config::connections_configured)
@@ -234,8 +233,7 @@ void gimbalTask(void *, void *, void *) {
     }();
     LocalGimbalCommand command{};
     RefereeState referee{};
-    std::uint64_t ready_ms = 0, last_log = 0;
-    bool was_ready = false;
+    std::uint64_t last_log = 0;
     auto previous_ms = k_uptime_get();
     atomic_val_t last_reset = 0;
     for (;;) {
@@ -254,12 +252,10 @@ void gimbalTask(void *, void *, void *) {
             last_reset = reset;
         }
         const bool powered = permission(referee.robot.gimbal_output, now);
+        const auto axis_status = yaw.poll(now);
         const auto before = drive.snapshot();
-        const bool ready = configured == 0 && drive.ready();
+        const bool ready = configured == 0 && axis_status.ready_for_enable;
         const bool active = configured == 0 && drive.active();
-        if (ready && !was_ready)
-            ready_ms = now;
-        was_ready = ready;
         LocalSafetyInputs input{};
         input.now_ms = now;
         input.config_valid = configured == 0;
@@ -267,7 +263,7 @@ void gimbalTask(void *, void *, void *) {
         input.emergency_stop_requested = estop;
         input.hardware_ready = ready || active;
         input.armed = active;
-        input.feedback_fresh = before.feedback_fresh;
+        input.feedback_fresh = axis_status.feedback_healthy;
         input.command_stamp = command.command.stamp;
         input.global_action = isFresh(command.safety.stamp, now, board_config::command_timeout_ms)
                                   ? command.safety.gimbal
@@ -281,7 +277,8 @@ void gimbalTask(void *, void *, void *) {
                     (void)drive.disable();
             }
             else if (active) {
-                GimbalCommand target = command.command;
+                AxisCommand target{command.command.mode, command.command.yaw_target_rad,
+                                   command.command.yaw_rate_rad_s};
                 if (decision.action == SafetyAction::Hold)
                     target.mode = GimbalMode::Hold;
                 const int ret = yaw.update(target, decision.action, dt);
@@ -290,7 +287,8 @@ void gimbalTask(void *, void *, void *) {
                     LOG_ERR("yaw update failed: %d", ret);
                 }
             }
-            else if (ready && command.command.stamp.valid && command.command.stamp.timestamp_ms >= ready_ms &&
+            else if (ready && command.command.stamp.valid &&
+                     command.command.stamp.timestamp_ms >= axis_status.ready_since_ms &&
                      isFresh(command.command.stamp, now, board_config::command_timeout_ms)) {
                 int ret = yaw.reset();
                 if (ret == 0)

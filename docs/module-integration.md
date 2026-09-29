@@ -8,7 +8,7 @@
 |---|---|---|
 | 设备和协议 | 设备树、`CanBus`、`AsyncUart`、传感器驱动 | 设备 ready，接收数据有原始时间戳 |
 | 消息和安全 | `RemoteReceiver`、裁判/板间解析、`GlobalSafetyManager`、本地安全 | 消息有效且未过期，权限与配置满足 |
-| 控制 | `YawGimbal` / `SwerveChassis`、`PositionMotor` / `VelocityMotor` | 反馈和位置参考可信，真实 `dt_s` 在范围内 |
+| 控制 | `GimbalAxis` / `SwerveChassis`、`PositionMotor` / `VelocityMotor` | 反馈和位置参考可信，真实 `dt_s` 在范围内 |
 | 输出 | `Motor`、`Group`、`CanBus` | 显式使能后进入 active；一次控制周期一次提交 |
 
 `ready` 表示执行器具备安全准备条件，`active` 才表示本代次允许运动。`Motor` setter 或控制器 `update()` 只暂存目标；`CanBus::commit()` 发布整条 CAN 的快照，I/O 线程随后异步发送。任何模块发现输入过期或错误，应撤销相应输出域，再由新的有效输入和显式使能恢复。完整状态图见 [电机工作链路](17-motor-workflow.md#5-停机故障和恢复)。
@@ -27,7 +27,7 @@ flowchart TD
     Gate --> Arm[Group 显式使能]
     Ready --> Arm
     Arm --> Active{Group active?}
-    Active -->|是| Axis[YawGimbal × 2]
+    Active -->|是| Axis[GimbalAxis × 2]
     Axis --> PID[PositionMotor × 2]
     PID --> Stage[Motor 暂存 A / N·m]
     Stage --> Commit[每条物理 CanBus commit 一次]
@@ -40,9 +40,9 @@ flowchart TD
 
 ### 初始化顺序
 
-1. 静态创建每轴的 `Motor`、`PositionMotor`、`YawGimbal`，以及共用的 `Group`；跨 CAN 时仍先建立完整 Group。
+1. 静态创建每轴的 `Motor`、私有拥有 `PositionMotor` 的 `GimbalAxis`，以及共用的 `Group`；跨 CAN 时仍先建立完整 Group。
 2. 给每台电机选择其物理 `CanBus`，先 `attach()` 全部端点，再 `start()`；同 CAN 只启动一个总线。
-3. 对两轴调用 `YawGimbal::begin()`，它会配置控制器；接收模块单独 `start()`。等待真实反馈、位置参考和安全条件，不把 `start()` 的返回值当作反馈已就绪。
+3. 对两轴调用 `GimbalAxis::begin()`，它会配置控制器；接收模块单独 `start()`。等待真实反馈、位置参考和安全条件，不把 `start()` 的返回值当作反馈已就绪。
 4. 在失能状态重建必要的连续位置参考，调用两轴 `reset()`，再请求 `Group::enable()`；收到 active 状态后才执行运动命令。
 
 关键调用关系与样例相同，省略对象构造和错误日志：
@@ -55,8 +55,8 @@ int ret = split_buses ? yaw_bus.attach(yaw_drive)
 if (ret == 0 && split_buses) ret = pitch_bus.attach(pitch_drive);
 if (ret == 0) ret = yaw_bus.start();
 if (ret == 0 && split_buses) ret = pitch_bus.start();
-if (ret == 0) ret = yaw.controller.begin();
-if (ret == 0) ret = pitch.controller.begin();
+if (ret == 0) ret = yaw.begin();
+if (ret == 0) ret = pitch.begin();
 ```
 
 ### 一个控制周期
@@ -64,9 +64,9 @@ if (ret == 0) ret = pitch.controller.begin();
 业务线程读取自己的 `RemoteReceiver::Snapshot`，再用 `remote.online` 和 `isFresh(remote.stamp, now, command_timeout_ms)` 检查有效期。左拨杆安全位先允许重新使能，中位才请求运行；急停、任一轴反馈失效、控制周期超限或组故障都撤销整个组。以下只展示 active 后的更新和提交，门控与复位过程请读实际主循环：
 
 ```cpp
-// yaw.update / pitch.update 内部构造 GimbalCommand 并调用 YawGimbal::update。
-const int yr = yaw.update(yaw_rate, remote.stamp, dt);
-const int pr = yr == 0 ? pitch.update(pitch_rate, remote.stamp, dt) : 0;
+// updateRate 内部构造中性 AxisCommand，并调用本轴 update。
+const int yr = yaw.updateRate(yaw_rate, dt);
+const int pr = yr == 0 ? pitch.updateRate(pitch_rate, dt) : 0;
 int submit = 0;
 if (yr == 0 && pr == 0) submit = yaw_bus.commit().error;
 if (yr == 0 && pr == 0 && submit == 0 && split_buses)
@@ -99,7 +99,7 @@ sequenceDiagram
     CAct-->>CLink: 执行状态和故障快照
     CLink->>GLink: ChassisFeedback + Heartbeat
     GLink-->>GCmd: 对端健康状态
-    GAct->>GAct: GimbalLocalSafety → YawGimbal → Motor/CanBus
+    GAct->>GAct: GimbalLocalSafety → GimbalAxis → Motor/CanBus
 ```
 
 ### 云台板如何生成命令

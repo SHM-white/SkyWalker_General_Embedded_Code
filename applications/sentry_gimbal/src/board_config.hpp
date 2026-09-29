@@ -5,7 +5,7 @@
 #include <drivers/motor/can_bus.hpp>
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/dm_motor.hpp>
-#include <robotics/gimbal/yaw_gimbal.hpp>
+#include <robotics/gimbal/gimbal_axis.hpp>
 #include <communication/referee/referee_protocol.hpp>
 namespace board_config {
 // Edit this application only; samples and the chassis app have their own configuration.
@@ -54,7 +54,7 @@ inline auto yawMotorConfig() {
     // Recheck the PID gains and effort cap in NewtonMeter before enabling motion.
 }
 
-inline constexpr skywalker::robotics::YawGimbalConfig yaw{skywalker::robotics::YawTopology::Continuous, -3.14159265f,
+inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Continuous, -3.14159265f,
                                                           3.14159265f, 1.0f, true};
 inline skywalker::control::PositionMotor::Config motorConfig(const skywalker::motor::MotorInfo &info) {
     skywalker::control::PositionMotor::Config c{};
@@ -63,7 +63,7 @@ inline skywalker::control::PositionMotor::Config motorConfig(const skywalker::mo
     else if ((info.capabilities & skywalker::motor::CommandTorque) != 0u)
         c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
     c.safety = {12, 0};
-    c.reference = yaw.topology == skywalker::robotics::YawTopology::Continuous
+    c.reference = yaw.topology == skywalker::robotics::AxisTopology::Continuous
                       ? skywalker::control::PositionReference::AbsoluteNearest
                       : skywalker::control::PositionReference::DriverContinuous;
     c.loop.position = {3, 0, 0, 0, -3, 3, -6, 6, 0.01f, 0.001f, 0.02f};

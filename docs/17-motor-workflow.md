@@ -18,7 +18,7 @@
 
 ```mermaid
 flowchart TD
-    App[应用控制任务] --> Robot[YawGimbal / Swerve 等业务算法]
+    App[应用控制任务] --> Robot[GimbalAxis / Swerve 等业务算法]
     Robot --> Ctrl[PositionMotor / VelocityMotor 或直接 effort]
     Ctrl -->|update 内部暂存 或 setter| Motor[Motor：每台电机一个端点]
     App -->|enable / disable / clearFault| Group[Group：共享许可与故障域]
@@ -251,8 +251,8 @@ if (ret == 0) ret = yaw_bus.start();
 if (ret == 0 && split_buses) ret = pitch_bus.start();
 // 检查 ret 后配置控制器、等待反馈、准备参考并显式 gimbal.enable()。
 // 在 active 控制周期中：
-ret = yaw.update(yaw_rate, remote.stamp, dt);
-if (ret == 0) ret = pitch.update(pitch_rate, remote.stamp, dt);
+ret = yaw.updateRate(yaw_rate, dt);
+if (ret == 0) ret = pitch.updateRate(pitch_rate, dt);
 if (ret == 0) ret = yaw_bus.commit().error;
 if (ret == 0 && split_buses) ret = pitch_bus.commit().error;
 if (ret < 0) gimbal.disable();

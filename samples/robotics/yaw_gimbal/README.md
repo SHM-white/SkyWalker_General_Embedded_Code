@@ -4,7 +4,7 @@
 
 ## 调用与操作
 
-应用先 `CanBus.attach/start`，再配置 PositionMotor。按 `e` 后待 Motor.ready 才显式请求 enable；只有 Motor.active 时 YawGimbal 才计算位置目标、PositionMotor 暂存电流，周期末由 CanBus.commit 提交。失联或控制错误后不会自动恢复运动，需再次按 `e`。
+应用先 `CanBus.attach/start`，再通过 `GimbalAxis::begin()` 配置私有 PositionMotor。按 `e` 后待 `poll()` 返回 ready_for_enable，才 reset 并显式请求 enable；只有 Motor.active 时 GimbalAxis 才计算位置目标、PositionMotor 暂存电流，周期末由 CanBus.commit 提交。失联或控制错误后不会自动恢复运动，需再次按 `e`。
 
 `a/d` 给正/负 0.3 rad/s；`h` 保持进入时角度；`0/1` 请求 0/0.5 rad。空格撤销输出，`!` 锁存急停，`r` 释放急停并请求清除可清故障。控制台为 USART10，115200 baud。Continuous 拓扑使用 AbsoluteNearest；若改 Limited，需使用已校准的 DriverContinuous 坐标和真实机械限位。上电前支撑机构并核对 GM6020 电流模式、零点与方向。
 
