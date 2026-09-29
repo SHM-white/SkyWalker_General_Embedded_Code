@@ -1,6 +1,6 @@
 # DR16 实机输入与 VOFA 回显
 
-这是独立的上机微型项目。接收线程使用正式 `RemoteService` 解析 DR16，另一个线程通过 VOFA+ JustFloat 输出遥控状态。
+这是独立的上机微型项目。接收线程由正式 `RemoteReceiver` 模块管理，内部使用 `RemoteService` 解析 DR16，另一个线程通过 VOFA+ JustFloat 输出遥控状态。
 
 ## 接线
 
@@ -19,7 +19,7 @@ C 板使用 `-b rm_typec/stm32f407xx` 和独立构建目录，无需添加 overl
 
 ## 操作与 VOFA 通道
 
-先在 console 确认 `DR16 init=0` 和 `VOFA init=0`。某一端初始化失败时，其线程会停止，另一端继续运行；应检查对应设备、引脚和串口配置。
+先在 console 确认 `Remote UART init: 0` 和 `VOFA init=0`。遥控初始化失败时，接收模块持续发布离线和失败状态；VOFA 初始化失败时其线程停止。两端独立运行；应检查对应设备、引脚和串口配置。
 
 在 VOFA+ 选择连接遥测串口、115200 baud、JustFloat 协议。监视线程约每 100 ms 发送一帧 16 通道，按下表顺序命名；JustFloat 帧不携带通道名称。
 
@@ -41,7 +41,9 @@ VOFA 口只输出二进制 JustFloat 数据；console 只输出初始化信息�
 
 ## 线程与解析边界
 
-接收线程独占 `AsyncUart` 和 `RemoteService`。`AsyncUart::read()` 提供带时间戳的数据块；发生 `-EOVERFLOW` 时调用 `RemoteService::discardPartial()`；其他数据交给 `processBytes()`，通过 `snapshot()` 得到 `RemoteState`。接收线程每 1 ms 将遥控状态与接收诊断写入 `Latest<BenchSnapshot>`。VOFA 线程每 100 ms 读取快照，并根据原始时间戳再次判断是否在线；若本次读取因短暂锁竞争失败，沿用上一快照。VOFA 线程独占遥测 UART，不与接收线程共享 UART 回调。
+`RemoteReceiver` 内部线程独占 `AsyncUart` 和 `RemoteService`，每轮最多读取 8 个数据块，1 ms 休眠。`-EOVERFLOW` 会丢弃解析半帧，其余字节按原始接收时间戳解析。模块发布 `Snapshot`，包含遥控状态、接收块数、重同步次数、丢块数和 UART 错误。VOFA 线程每 100 ms 调用 `receiver.snapshot()`，模块在读取时重新检查超时；锁竞争时保留旧快照但仍使过期数据离线。VOFA 独占遥测 UART。
+
+`receiver.start()` 返回 0 只表示线程已安排启动，UART 初始化结果见模块日志及快照的 `state/uart_error`。模块与独占的 `__nocache` DMA 缓冲区都采用静态存储；不支持停止、销毁或重复启动。
 
 DR16 没有明确帧头与 CRC，`RemoteService` 内部只能用范围检查启发式重同步，无法保证排除所有噪声候选。
 

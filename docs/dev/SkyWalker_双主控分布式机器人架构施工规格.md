@@ -1,5 +1,7 @@
 # SkyWalker 双主控分布式机器人架构施工规格
 
+> 遥控接收现状更新：本文保留历史施工基线和步骤。当前 DR16、command_safety、gimbal_control 与 sentry_gimbal 已使用 RemoteReceiver，旧的 remoteTask/remote_state 不再是这些入口的实现。当前接口和接入方式以 [通信文档](../13-communication.md) 为准；底层 RemoteService 仍负责解析。
+
 > 目标仓库：`SHM-white/SkyWalker_General_Embedded_Code`
 > 机器人：RoboMaster 哨兵
 > 主控拓扑：**云台主控板 + 底盘主控板**

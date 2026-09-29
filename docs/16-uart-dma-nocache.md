@@ -21,7 +21,7 @@
 
 检查由 `zephyr/soc/st/stm32/common/stm32_cache.c` 中的 `stm32_buf_in_nocache()` 完成，判断的是整个地址范围，而非只看指针是否对齐。关闭 `CONFIG_DCACHE` 时，本地头文件提供的检查实现直接返回 true。
 
-DR16 日志中的 `rc` 是遥控服务 `snapshot()` 的返回值，`-11` 表示 `-EAGAIN`，即还没有可用快照；它不是 UART 初始化返回值。应同时看开机的 `DR16 physical UART init=...`。没有有效帧时，`online=0`、`seq=0`、`rx_age_ms=0` 并不表示刚刚收到了一帧。
+上面的 `dr16_bench: online=0 rc=-11 ...` 是旧版本日志，rc 当时来自 RemoteService。当前 sample 使用 RemoteReceiver，应查看 `Remote UART init: ...` 与快照的 state/uart_error；遥控值通过 VOFA 输出。RemoteReceiver.snapshot 返回 0 仅表示复制成功，`-EAGAIN` 表示锁竞争，不沿用 RemoteService 的“尚无有效帧”含义。没有有效帧时 remote.online=false、stamp.valid=false。
 
 ## 2. 为什么 DMA 和 CPU 会看见不同的数据
 
@@ -57,7 +57,7 @@ alignas(32) std::uint8_t tx_[256]{};
 
 ### 为什么会反复出现，或者过一会儿才出现
 
-`AsyncUart::init()` 注册回调后启动 RX；首次 RX 失败后，`service()` 会继续重试，后续重试间隔为 100 ms。固定的错误地址不会因重试自行变好，所以日志持续重复。
+直接调用 AsyncUart 时，`init()` 注册回调后启动 RX；若调用方在首次 RX 失败后仍调用 `service()`，它会继续重试，后续重试间隔为 100 ms。当前 RemoteReceiver 遇到初始化失败则持续发布 InitFailed，不进入 service 重试循环；初始化成功后的 RX 恢复才由 service 负责。固定的错误地址不会因重试自行变好，所以日志持续重复。
 
 其他工程还可能只迁移了第一个 RX 缓冲区：启动正常，直到 `UART_RX_BUF_REQUEST` 换到普通内存里的第二个缓冲区才报错。若只修 RX，之后发送时仍可能遇到对应的 TX 报错。线程栈上的局部数组、普通堆分配、迁移板型或更换驱动版本也可能暴露原先未显现的问题；这些是排查方向，不能仅凭当前日志认定过去每次报错都是同一原因。
 
@@ -89,6 +89,10 @@ static AsyncUart uart(DEVICE_DT_GET(DT_ALIAS(remote_uart)), dma_buffers);
 
 每个 UART 实例必须使用自己独立的 `DmaBuffers`。云台应用的遥控器、裁判系统和板间串口各自分配一份，不能三路共享一个 DMA 数组。实例和缓冲区都必须存活至最后一次回调完成；当前应用使用静态对象，覆盖整个固件生命周期。同一个 UART 设备也不能同时交给多个 `AsyncUart` 管理。
 
+### 使用 RemoteReceiver 时
+
+遥控调用方保留同样的静态 `DmaBuffers ... __nocache` 声明，并将其引用传给 RemoteReceiver；不要再为同一个 UART 单独创建 AsyncUart。Receiver 内部管理 UART 和解析器，但不会自动把调用方提供的普通内存迁入 nocache。完整接入示例见 [13 通信](13-communication.md)。
+
 ### 首次 RX、续接 RX、TX 都改用专用存储
 
 `lib/communication/async_uart.cpp` 同时更新：
@@ -104,7 +108,7 @@ static AsyncUart uart(DEVICE_DT_GET(DT_ALIAS(remote_uart)), dma_buffers);
 
 编译期断言要求：启用 D-cache 时必须同时启用 `CONFIG_NOCACHE_MEMORY`。达妙板已满足；C 板未开启 D-cache 时，`__nocache` 可以退化为空属性。该断言只能防止漏开配置，不能替代变量上的 `__nocache`。
 
-已更新全部 8 个实例，覆盖 DR16、裁判系统、板间通信、command_safety、sentry_gimbal 和 sentry_chassis，以及通信文档的用法示例。外部代码若仍用单参数构造函数，需按上述方式迁移。
+当前 DMA 存储分离方式用于通信 sample、遥控 Receiver 及 sentry 应用中的 UART。遥控入口使用 Receiver 内部的 AsyncUart，其余 UART 仍由调用方持有。外部代码若仍用单参数构造函数，需按上述方式迁移。
 
 ## 4. 不建议采用的替代办法
 
@@ -140,7 +144,7 @@ west flash -d build/dr16_c
 
 首次验证使用独立 DR16 示例，仅连接开发板和接收机即可，不需要电机。RX 接线为达妙 UART5/PD2、C 板 USART3/PC11；接收机供电、电平、共地及 DBUS 反相通路仍须符合实际硬件。
 
-预期：初始化返回 0，不再打印 nocache 报错；遥控器已配对且信号正确时 `online=1`，`seq` 随有效帧增长。初始化成功但遥控器离线时，仍可能输出 `rc=-11`，不要把它误判为本问题未修复。
+预期：初始化返回 0，不再打印 nocache 报错；遥控器已配对且信号正确时 `online=1`，`seq` 随有效帧增长。初始化成功但尚无有效帧时，Receiver 可以处于 Running 而 remote.online=false；当前 VOFA 在线通道为 0，不再输出旧日志的 rc=-11。
 
 ## 6. 若仍报错，按这个顺序查
 
@@ -188,6 +192,6 @@ STM32 驱动地址检查失败的 `-EFAULT` 与缺少 RX DMA 时的 `-ENODEV` �
 | `applications/sentry_gimbal` | 通过 | 未执行 |
 | `applications/sentry_chassis` | 通过 | 未执行 |
 
-本次 MC02 DR16 的 `zephyr.map` 显示：DMA 存储对象占 `0x200`（512）字节，起始地址 `0x24000000`；不可缓存区域为 `[0x24000000, 0x24000400)`，整个对象位于其中。RX 两块数组及 TX 数组均包含在这一对象内。地址会随应用和链接布局变化，不应在代码中硬编码该地址。
+最初 DMA 修复时记录的 MC02 DR16 `zephyr.map` 显示（历史构建地址，不是本次 Receiver 构建的测量值）：DMA 存储对象占 `0x200`（512）字节，起始地址 `0x24000000`；不可缓存区域为 `[0x24000000, 0x24000400)`，整个对象位于其中。RX 两块数组及 TX 数组均包含在这一对象内。地址会随应用和链接布局变化，不应在代码中硬编码该地址。
 
 固件运行入口需要真实开发板；本环境未执行上板运行，因此最终仍需按第 5 节确认初始化日志和有效遥控帧。

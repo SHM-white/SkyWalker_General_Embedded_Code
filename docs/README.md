@@ -34,7 +34,7 @@
 | [10-samples.md](10-samples.md) | 所有当前 sample、用途、硬件前提和构建入口 |
 | [11-debugging.md](11-debugging.md) | VOFA+、日志、异步 UART 和实时调试 |
 | [12-troubleshooting.md](12-troubleshooting.md) | 构建、设备树、CAN、电机、通信、应用故障排查 |
-| [13-communication.md](13-communication.md) | DR16、裁判系统、板间协议、`AsyncUart` |
+| [13-communication.md](13-communication.md) | DR16、`RemoteReceiver` 接入、裁判系统、板间协议、`AsyncUart` |
 | [14-robotics.md](14-robotics.md) | 命令、安全、舵轮、Yaw、功率限幅 |
 | [15-applications.md](15-applications.md) | `sentry_chassis` / `sentry_gimbal` 双主控应用骨架 |
 | [16-uart-dma-nocache.md](16-uart-dma-nocache.md) | UART DMA 缓冲区、D-cache 报错原因、修复方式与实机排查 |
@@ -54,6 +54,10 @@
 | 机器人库 | `lib/robotics/`、`include/robotics/` |
 | 样例 | `samples/` |
 | 应用骨架 | `applications/sentry_chassis/`、`applications/sentry_gimbal/` |
+
+## 遥控接收模块
+
+DR16、命令安全和双轴云台 sample，以及 sentry_gimbal 应用已统一使用 `RemoteReceiver`。先读 [通信层接入说明](13-communication.md)，实现与迁移记录见 [遥控接收线程模块化指南](dev/遥控接收线程模块化实施指南.md)。四个入口均已通过 MC02 编译链接，实机掉线恢复和栈余量仍待验证。
 
 ## 原始手册
 

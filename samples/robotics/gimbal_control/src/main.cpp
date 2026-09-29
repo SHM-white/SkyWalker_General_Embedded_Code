@@ -3,12 +3,10 @@
 #include <cmath>
 #include <cstdint>
 
-#include <communication/async_uart.hpp>
-#include <communication/remote/remote_service.hpp>
+#include <communication/remote/remote_receiver.hpp>
 #include <control/position_motor.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <drivers/motor/group.hpp>
-#include <latest.hpp>
 #include <lib/vofa/vofa.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -26,36 +24,8 @@ using namespace skywalker;
 using namespace skywalker::robotics;
 
 namespace {
-Latest<RemoteState> remote_state;
-
-void remoteTask(void *, void *, void *) {
-    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-    static communication::AsyncUart uart(board_config::remote_uart, dma_buffers);
-    communication::RemoteService service({}, {});
-    int ret = uart.init();
-    LOG_INF("remote UART init: %d", ret);
-    if (ret < 0)
-        return; // No valid snapshot is published; both axes stay disabled.
-    for (;;) {
-        const auto now = k_uptime_get();
-        uart.service(now);
-        communication::AsyncUart::RxChunk chunk{};
-        for (unsigned budget = 0; budget < 8; ++budget) {
-            ret = uart.read(chunk);
-            if (ret == -EOVERFLOW) {
-                service.discardPartial();
-                continue;
-            }
-            if (ret < 0)
-                break;
-            service.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
-        }
-        RemoteState state{};
-        service.snapshot(now, state);
-        remote_state.put(state);
-        k_sleep(K_MSEC(1));
-    }
-}
+static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
+communication::RemoteReceiver receiver(board_config::remote_uart, dma_buffers, {});
 
 float normalizeStick(std::int16_t raw) {
     const float x = std::clamp(float(raw) / 660.0f, -1.0f, 1.0f);
@@ -162,15 +132,16 @@ void gimbalTask(void *, void *, void *) {
     if (ret < 0)
         return;
 
-    RemoteState remote{};
+    communication::RemoteReceiver::Snapshot rc{};
     bool estop_latched = false, rearm_allowed = false, enable_issued = false;
     auto previous_ms = k_uptime_get();
     std::uint64_t next_telemetry = 0;
     for (;;) {
+        receiver.snapshot(rc);
+        const auto &remote = rc.remote;
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const float dt = (now - previous_ms) / 1000.0f;
         previous_ms = now;
-        remote_state.get(remote); // Retain the snapshot and its original age on contention.
         const bool fresh = remote.online && isFresh(remote.stamp, now, board_config::command_timeout_ms);
         const bool estop = board_config::emergencyStopRequested();
         if (estop && !estop_latched) {
@@ -276,9 +247,13 @@ void gimbalTask(void *, void *, void *) {
 }
 } // namespace
 
-K_THREAD_DEFINE(remote_thread, 3072, remoteTask, nullptr, nullptr, nullptr, 6, 0, 0);
 K_THREAD_DEFINE(gimbal_thread, 6144, gimbalTask, nullptr, nullptr, nullptr, 4, 0, 0);
 int main() {
+    const int ret = receiver.start();
+    if (ret < 0) {
+        LOG_ERR("Remote receiver start failed: %d", ret);
+        return ret;
+    }
     LOG_INF("RC small yaw + pitch: configured=%d; check src/board_config.hpp", board_config::connections_configured);
     return 0;
 }

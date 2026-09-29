@@ -1,6 +1,6 @@
 # 遥控双轴电机样例
 
-本样例用一台 GM6020 电流模式 yaw 和一台 DM J4310 MIT pitch 展示跨品牌、同 CAN、一个联动 Group。DR16 接收和控制各有一个应用线程；每条已启动的 CanBus 自有 I/O 线程。
+本样例用一台 GM6020 电流模式 yaw 和一台 DM J4310 MIT pitch 展示跨品牌、同 CAN、一个联动 Group。DR16 接收由 `RemoteReceiver` 内部线程管理，控制使用独立应用线程；每条已启动的 CanBus 自有 I/O 线程。
 
 ## 配置与接线
 

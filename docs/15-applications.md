@@ -60,17 +60,21 @@ bench_effort_scale = 0.15f;
 
 线程职责：
 
-- `remoteTask`：DR16 UART → `RemoteService` → `RemoteState`。
+- `RemoteReceiver` 内部线程：DR16 UART → `AsyncUart` → `RemoteService` → `Snapshot`；由 main 调用 `remote_receiver.start()` 启动，应用不再定义 `remoteTask`。
 - `refereeTask`：裁判 UART → `RefereeService` → `RefereeState`。
 - `commandTask`：Remote/Referee/Peer feedback → mapper → global safety → `CommandManager` → `CommandRouter`。
 - `linkTask`：板间接收并周期发送 heartbeat、约束和底盘控制。
 - `gimbalTask`：构造一台 `Motor` 与 `CanBus`，运行 `PositionMotor`、`YawGimbal` 和 `GimbalLocalSafety`，显式管理使能与故障清除。
 
+`commandTask` 保留自己的 `RemoteReceiver::Snapshot`，每轮读取全部输入快照后取当前时间。模块检查接收超时，命令层继续检查 `board_config::command_timeout_ms`。启动前或初始化失败时快照无效、离线，不能满足运动使能条件。
+
+`start()` 返回 0 只代表安排线程，UART 结果见 `Remote UART init: ...` 日志和 `Snapshot::state/uart_error`。`prj.conf` 启用 `SKYWALKER_REMOTE_RECEIVER`；静态接收实例与 `__nocache` DMA 缓冲区存活整个固件周期。应用已移除本地重复的 `src/latest.hpp`，`CommandRouter` 使用公共 `include/latest.hpp`。
+
 默认 `app.overlay` 中：
 
 - interboard UART alias 已给出，但仅是建议端口。
 - Yaw 电机的型号、ID 和限幅位于 `src/board_config.hpp`，默认 `connections_configured=false`。
-- remote/referee alias 仍是注释，需要按真实 DMA 和电气链路启用。
+- remote-uart 与 RX DMA 由板级 DTS 提供；referee-uart 仍需按真实 DMA 和电气链路配置，不能与板间 UART 冲突。
 - `board_config::connections_configured=false`，所以命令层会进入 `ConfigBlocked`。
 
 ## 4. 构建

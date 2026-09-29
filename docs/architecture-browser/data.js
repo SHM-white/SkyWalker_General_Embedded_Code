@@ -15,13 +15,13 @@ const lanes = [
 
 const nodes = [
   {
-    id: "inputs", lane: "gimbal", order: 1, status: "verify", kicker: "UART inputs", title: "遥控 / 裁判输入",
-    summary: "RemoteService + RefereeParser",
-    description: "云台板汇聚 DR16 操作输入和裁判许可/功率字段。解析能力已实现，但 sentry_gimbal 默认未绑定真实 remote-uart 与 referee-uart。",
-    interfaces: ["RemoteState → OperatorIntent", "RefereeState → OutputPermission / PowerSnapshot"],
-    constraints: ["遥控与裁判 UART 不能复用板间串口或 DMA 通道", "默认裁判 profile 可显式选择 Rm2026V1_3", "已知许可过期必须暂停，不把未知状态当作允许"],
+    id: "inputs", current: true, lane: "gimbal", order: 1, status: "verify", kicker: "UART inputs", title: "遥控 / 裁判输入",
+    summary: "RemoteReceiver + RefereeService",
+    description: "云台板由 RemoteReceiver 内部线程接收 DR16，命令线程读取快照并检查有效期；裁判由独立 RefereeService 线程处理。remote-uart 由板级 DTS 提供，裁判串口仍需配置，真实硬件链路待验证。",
+    interfaces: ["RemoteReceiver.start() / snapshot(Snapshot&)", "Snapshot.remote → OperatorIntent", "RefereeState → OutputPermission / PowerSnapshot"],
+    constraints: ["start=0 仅表示安排线程；初始化结果看 state/uart_error", "读取快照重算超时，保留原始帧时间戳；业务命令超时仍独立检查", "静态 Receiver 与独占 nocache DMA 存活整个固件周期", "遥控与裁判 UART 不能复用板间串口或 DMA 通道", "默认裁判 profile 可显式选择 Rm2026V1_3", "已知许可过期必须暂停，不把未知状态当作允许"],
     dependsOn: [], provides: ["manual_mapper", "global_safety"],
-    sources: ["include/communication/remote/remote_service.hpp", "include/communication/referee/referee_service.hpp", "applications/sentry_gimbal/src/main.cpp"],
+    sources: ["include/communication/remote/remote_receiver.hpp", "lib/communication/remote_receiver.cpp", "include/communication/remote/remote_service.hpp", "include/communication/referee/referee_service.hpp", "applications/sentry_gimbal/src/main.cpp"],
   },
   {
     id: "manual_mapper", lane: "gimbal", order: 2, status: "done", kicker: "robotics/command", title: "ManualCommandMapper",
