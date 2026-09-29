@@ -12,8 +12,7 @@ using namespace skywalker;
 
 namespace {
 static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-communication::RemoteReceiver receiver(
-    bench::remote_uart, dma_buffers, {bench::decoder, bench::remote});
+communication::RemoteReceiver receiver(bench::remote_uart, dma_buffers, {bench::decoder, bench::remote});
 
 void vofaTask(void *, void *, void *) {
     static Vofa vofa{};
@@ -36,11 +35,22 @@ void vofaTask(void *, void *, void *) {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const bool fresh = state.online && robotics::isFresh(state.stamp, now, bench::remote.offline_timeout_ms);
         const float channels[] = {
-            fresh ? 1.0f : 0.0f, float(a.right_x), float(a.right_y), float(a.left_x),
-            float(a.left_y), float(unsigned(state.left_switch)), float(unsigned(state.right_switch)),
-            float(a.wheel), float(state.mouse.x), float(state.mouse.y), float(state.mouse.z),
-            state.mouse.left ? 1.0f : 0.0f, state.mouse.right ? 1.0f : 0.0f,
-            float(state.keyboard.bits), float(state.stamp.sequence), float(snapshot.rx_chunks),
+            fresh ? 1.0f : 0.0f,
+            float(a.right_x),
+            float(a.right_y),
+            float(a.left_x),
+            float(a.left_y),
+            float(unsigned(state.left_switch)),
+            float(unsigned(state.right_switch)),
+            float(a.wheel),
+            float(state.mouse.x),
+            float(state.mouse.y),
+            float(state.mouse.z),
+            state.mouse.left ? 1.0f : 0.0f,
+            state.mouse.right ? 1.0f : 0.0f,
+            float(state.keyboard.bits),
+            float(state.stamp.sequence),
+            float(snapshot.rx_chunks),
         };
         constexpr auto channel_count = sizeof(channels) / sizeof(channels[0]);
         static_assert(channel_count <= VOFA_MAX_FLOATS);
