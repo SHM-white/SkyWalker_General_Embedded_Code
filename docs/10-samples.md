@@ -8,7 +8,8 @@
 |---|---|---|
 | `samples/hello` | 最小启动、UART/VOFA 单通道 | 任一已支持板卡 |
 | `samples/control` | PID、前馈、角度、斜坡等控制算法自检 | 任一已支持板卡 |
-| `samples/imu_test` | BMI088、EKF、恒温 PWM、VOFA | `dm_mc02`，需按 overlay 接好 IMU/加热 |
+| `samples/imu_test` | 新接口的单板载 BMI088、EKF、温控、VOFA | MC02 板载传感器与 TIM3 CH4 加热 |
+| [samples/imu/dual_imu](../samples/imu/dual_imu/README.md) | 板载 EKF/温控与 485-2 外置 IMU 同时输出 VOFA | MC02 + 预配置的 DM-IMU-L1 |
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx -d build/hello samples/hello
@@ -21,6 +22,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/imu samples/imu_test
 | 样例 | 作用 | 操作/观察 |
 |---|---|---|
 | `samples/communication/dr16` | RemoteReceiver 接收与 18 字节 DR16 解码 | MC02 UART5 接收，独立 VOFA UART 显示 16 通道；console 查看初始化与异常 |
+| [samples/communication/vision](../samples/communication/vision/README.md) | AB 视觉指令独立接收与 VOFA 回显 | MC02 UART7 115200 输入，USART1 输出 |
 | `samples/communication/referee` | 裁判串口 CRC 和状态解析 | MC02 USART1，观察权限、功率、buffer 和统计量 |
 | `samples/communication/interboard` | 两块板 UART 板间协议 | 一块默认 Gimbal role，另一块加 `chassis.conf` |
 

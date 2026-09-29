@@ -6,3 +6,7 @@ if(CONFIG_SKYWALKER_INTERBOARD)
 endif()
 zephyr_library_sources_ifdef(CONFIG_SKYWALKER_UART_TRANSPORT async_uart.cpp)
 zephyr_library_sources_ifdef(CONFIG_SKYWALKER_REMOTE_RECEIVER remote_receiver.cpp)
+
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_VISION vision_link.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_VISION_AB vision_ab_protocol.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_VISION_RECEIVER vision_receiver.cpp)

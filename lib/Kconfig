@@ -108,4 +108,33 @@ config SKYWALKER_ROBOTICS_GIMBAL
     bool "Recoverable yaw gimbal"
     depends on SKYWALKER_LIB_ROBOTICS && SKYWALKER_LIB_MOTOR_CONTROL
 
+config SKYWALKER_ATTITUDE_EKF
+    bool "Instance-owned quaternion attitude EKF"
+    depends on CPP
+    select SKYWALKER_LIB_CONTROL
+
+config SKYWALKER_VISION
+    bool "Independent vision link"
+    depends on SKYWALKER_LIB_COMMUNICATION
+
+config SKYWALKER_VISION_AB
+    bool "RM2026 AutoAim AB protocol"
+    depends on SKYWALKER_VISION
+
+config SKYWALKER_VISION_RECEIVER
+    bool "Threaded vision UART receiver"
+    depends on SKYWALKER_VISION && SKYWALKER_UART_TRANSPORT
+
+config SKYWALKER_VISION_RX_STACK_SIZE
+    int "Vision receiver stack bytes"
+    depends on SKYWALKER_VISION_RECEIVER
+    default 4096
+    range 2048 16384
+
+config SKYWALKER_VISION_RX_PRIORITY
+    int "Vision receiver thread priority"
+    depends on SKYWALKER_VISION_RECEIVER
+    default 6
+    range 0 15
+
 endmenu

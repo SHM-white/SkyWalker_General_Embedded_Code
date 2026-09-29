@@ -35,7 +35,7 @@
 	aliases {
 		sw0 = &user_button;
 		led-strip = &rgb_led;
-		telemetry-uart = &cdc_acm_uart0;
+		telemetry-uart = &usart1;
 		remote-uart = &uart5;
 		usart1 = &usart1;
 		usart2 = &usart10;

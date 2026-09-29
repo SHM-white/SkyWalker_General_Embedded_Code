@@ -1,0 +1,15 @@
+/ {
+    aliases {
+        vision-uart = &uart7;
+        telemetry-uart = &usart1;
+    };
+};
+&uart7 {
+    current-speed = <115200>;
+    dmas = <&dmamux1 5 80 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 7 79 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
+};
+&usart1 {
+    current-speed = <115200>;
+};

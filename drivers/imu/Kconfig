@@ -1,0 +1,21 @@
+config SKYWALKER_IMU
+    bool "Independent IMU sources and snapshots"
+    depends on CPP
+
+config SKYWALKER_IMU_BMI088
+    bool "BMI088 sensor source"
+    depends on SKYWALKER_IMU && SENSOR && BMI08X
+
+config SKYWALKER_IMU_HEATER
+    bool "Independent IMU PWM heater"
+    depends on SKYWALKER_IMU && PWM
+    select SKYWALKER_LIB_CONTROL
+
+config SKYWALKER_IMU_DM_PROTOCOL
+    bool "DM-IMU-L1 active serial protocol"
+    depends on SKYWALKER_IMU
+
+config SKYWALKER_IMU_DM_RS485
+    bool "DM-IMU-L1 active RS485 source"
+    depends on SKYWALKER_IMU && SKYWALKER_UART_TRANSPORT
+    select SKYWALKER_IMU_DM_PROTOCOL

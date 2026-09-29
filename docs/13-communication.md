@@ -1,11 +1,12 @@
-# 13 通信层：UART、DR16、裁判与板间协议
+# 13 通信层：UART、视觉、DR16、裁判与板间协议
 
-实现位置：`lib/communication/`、`include/communication/`，消息类型位于 `include/robotics/messages/`。
+实现位置：`lib/communication/`、`include/communication/`，既有机器人消息位于 `include/robotics/messages/`；视觉的独立值类型位于 `include/communication/vision/`。
 
 | 模块 | 上游 | 下游 | 示例 |
 |---|---|---|---|
 | `AsyncUart` | Zephyr UART / DMA 回调 | 带原始时间戳的字节块 | [板间样例](../samples/communication/interboard/README.md) |
 | `RemoteReceiver` | `AsyncUart` + DR16 解码 | 可复制的遥控快照 | [DR16 样例](../samples/communication/dr16/README.md) |
+| `VisionReceiver` | `AsyncUart` + `VisionLink` + AB codec | 带有效期的视觉请求值 | [视觉样例](../samples/communication/vision/README.md) / [协议](18-vision.md) |
 | `RefereeService` | 裁判字节流 | 权限、功率与在线状态 | [裁判样例](../samples/communication/referee/README.md) |
 | `InterBoardLink` | 板间帧 | 心跳、控制、约束和反馈快照 | [双主控应用](15-applications.md) |
 
