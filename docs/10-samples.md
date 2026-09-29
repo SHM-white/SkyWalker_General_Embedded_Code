@@ -107,6 +107,5 @@ west build -p -b dm_mc02/stm32h723xx -d build/swerve \
 | `samples/` | 独立小项目，目标是验证一个驱动/协议/算法 |
 | `applications/sentry_chassis` | 四轮舵底盘双线程应用骨架，默认连接未配置 |
 | `applications/sentry_gimbal` | 云台主控双主控应用骨架，默认连接未配置 |
-| `application/` | 空历史占位，不是当前推荐入口 |
 
-整机应用的配置和线程关系见 [15 应用骨架](15-applications.md)。
+整机应用的配置和线程关系见 [15 应用骨架](15-applications.md)；从遥控到执行器的调用顺序见 [模块联动](module-integration.md)。

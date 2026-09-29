@@ -19,6 +19,8 @@ Zephyr device API / CAN / UART / SPI / PWM / CMSIS-DSP / STM32 HAL
 
 设计边界是：电机驱动负责 CAN 传输、端点状态、协议和 Group 联动；`lib/control` 负责数值控制与控制侧限幅；`lib/communication` 负责字节流到消息快照；`lib/robotics` 负责消息之间的策略和业务输出许可；应用负责线程、真实硬件绑定和最终安全决策。
 
+跨模块的完整调用次序见 [模块联动](module-integration.md)，电机驱动内部的异步时序见 [电机工作链路](17-motor-workflow.md)。
+
 ## 2. 仓库布局
 
 | 目录 | 责任 |
@@ -32,7 +34,7 @@ Zephyr device API / CAN / UART / SPI / PWM / CMSIS-DSP / STM32 HAL
 | `lib/robotics/` | 机器人决策、局部安全和运动学 |
 | `samples/` | 可单独 west build 的验证项目，各自拥有配置和入口 |
 | `applications/` | 双主控底盘/云台应用骨架，不是库的替代品 |
-| `application/` | 当前为空的历史占位目录 |
+| `tests/motor/regression/` | 电机软件回归测试；不能替代硬件验证 |
 
 ## 3. west module 关系
 

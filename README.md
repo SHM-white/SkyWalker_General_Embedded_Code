@@ -17,19 +17,18 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 ## 从哪里开始
 
-- 交互式查看双主控架构：[网页源码与本地打开说明](docs/architecture-browser/README.md) · [在线浏览（需访问权限）](https://skywalker-architecture-browser.docile-raven-1977.chatgpt.site/)
+按任务选择入口，完整主题目录和资料使用说明见 [文档中心](docs/README.md)：
 
-- 第一次配置环境： [docs/01-getting-started.md](docs/01-getting-started.md)
-- 想理解项目分层： [docs/02-architecture.md](docs/02-architecture.md)
-- 想先跑硬件： [docs/10-samples.md](docs/10-samples.md)
-- 调 DJI 电机： [docs/04-drivers-motor-dji.md](docs/04-drivers-motor-dji.md)
-- 调达妙电机： [docs/05-drivers-motor-dm.md](docs/05-drivers-motor-dm.md)
-- 做双主控通信： [docs/13-communication.md](docs/13-communication.md)
-- 做底盘 / 云台安全链路： [docs/14-robotics.md](docs/14-robotics.md)
-- 运行 `sentry_*` 应用骨架： [docs/15-applications.md](docs/15-applications.md)
-- 遇到问题： [docs/12-troubleshooting.md](docs/12-troubleshooting.md)
+| 要做什么 | 从这里开始 |
+|---|---|
+| 第一次配置、构建和烧录 | [快速开始](docs/01-getting-started.md) → [样例索引](docs/10-samples.md) |
+| 理解工程分层和硬件 | [架构与构建](docs/02-architecture.md) → [板级支持](docs/03-boards.md) |
+| 调电机与控制环 | [DJI](docs/04-drivers-motor-dji.md) / [达妙](docs/05-drivers-motor-dm.md) → [电机工作链路](docs/17-motor-workflow.md) |
+| 做遥控、板间通信和整机应用 | [通信](docs/13-communication.md) → [机器人算法](docs/14-robotics.md) → [应用骨架](docs/15-applications.md) |
+| 查现场问题 | [故障排查](docs/12-troubleshooting.md) |
+| 查设计记录和专题分析 | [开发专题索引](docs/dev/README.md) |
 
-完整文档索引在 [docs/README.md](docs/README.md)。
+交互式架构图的本地打开方法见 [架构浏览器](docs/architecture-browser/README.md)。
 
 ## 当前能力
 
@@ -107,7 +106,7 @@ skywalker_code/
 │   └── vofa/                   VOFA+ JustFloat
 ├── samples/                    单一功能和真实外设台架样例
 ├── applications/               sentry_chassis / sentry_gimbal 应用骨架
-├── application/                空的历史占位目录，不是当前应用入口
+├── tests/motor/regression/     电机软件回归测试
 ├── docs/                       当前文档与原始 PDF 手册
 ├── west.yml                    Zephyr 与依赖 revision
 └── zephyr/module.yml           module、board_root、dts_root 声明
@@ -121,7 +120,7 @@ skywalker_code/
 4. 同一物理 CAN 只创建一个 `CanBus`：各 `Motor` 暂存目标后，由总线 `commit()` 提交；只有机械联动的电机才放入同一个 `Group`。
 5. `disable()` 立即撤销软件输出许可，安全帧异步发送；这不等于机械制动，也不切断板上动力电源。反馈恢复后仍需新的显式 `enable()`。
 6. `samples/` 是已存在的验证入口；`applications/sentry_*` 是需要按真实机器人修改 overlay 和 `src/board_config.hpp` 的应用骨架，不应被描述为开箱即用整机固件。
-7. 当前仓库没有独立 `tests/` 测试树，控制、通信和安全链路主要通过样例与日志进行台架验证。
+7. `tests/motor/regression/` 有电机软件回归测试；控制、通信和安全链路仍需结合样例、日志与硬件台架验证。
 
 电机调试前必须让机构悬空或脱离负载，准备物理断电手段，并先从低限幅开始。完整的安全检查见 [12 故障排查](docs/12-troubleshooting.md)。
 

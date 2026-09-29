@@ -44,11 +44,42 @@ int imu_heat_control(const struct device *dev, float target_temp_c, float dt_s);
 - `temp`：°C。
 - `angle[3]`：roll/pitch/yaw，单位 rad。
 
-## 3. estimator 扩展
+## 3. 最小调用示例
+
+以下顺序取自 [imu_test](../samples/imu_test/src/main.c)。`imu_fetch()` / `imu_estimate()` 返回 `void`，调用方不能把它们当作带错误码的采样 API；首次上板应同时观察设备就绪、角度变化和数据更新时间。
+
+```c
+#include <errno.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/kernel.h>
+#include <drivers/imu/imu.h>
+
+int main(void) {
+    const struct device *imu_dev = DEVICE_DT_GET(DT_NODELABEL(imu));
+    if (!device_is_ready(imu_dev)) return -ENODEV;
+    uint32_t last_ms = k_uptime_get_32();
+    for (;;) {
+        uint32_t now_ms = k_uptime_get_32();
+        float dt_s = (now_ms - last_ms) / 1000.0f;
+        last_ms = now_ms;
+        imu_fetch(imu_dev);
+        imu_estimate(imu_dev, dt_s);
+        const imu_data *data = imu_dev->data;
+        float yaw_rad = data->angle[2];  // roll/pitch/yaw 均为 rad
+        (void)yaw_rad;                   // 在业务层消费或送往遥测
+        k_usleep(1000);
+    }
+}
+```
+
+温控是独立的低频调用：约每 100 ms 调用一次 `imu_heat_control(imu_dev, target_c, elapsed_s)`，检查负错误码。完整 UART 遥测和温控周期见样例。IMU 内部依赖 4 维状态、3 维观测的 [Kalman 设备和矩阵库](07-kalman-matrix.md)；上层若只需要姿态，不必直接调用矩阵函数。
+
+## 4. estimator 扩展
 
 驱动通过 `estimator` 字符串查找 `imu_filter_api`。当前实现只有 `"ekf"`。扩展新算法时需要提供 `init/predict/correct/get_angle`，并在 `imu_get_api()` 注册；应用侧不需要改变 `imu_fetch()` / `imu_estimate()` 调用。
 
-## 4. 当前 EKF
+## 5. 当前 EKF
 
 当前实现使用 4 维四元数状态和 3 维重力方向观测：
 
@@ -60,7 +91,7 @@ int imu_heat_control(const struct device *dev, float target_temp_c, float dt_s);
 
 EKF 内部维护连续 yaw 计数，但当前 `imu_data` 没有公开 `YawTotal`，需要连续 yaw 的应用应自行解包。
 
-## 5. Kconfig 与运行顺序
+## 6. Kconfig 与运行顺序
 
 ```conf
 CONFIG_SKYWALKER_DRIVER_IMU=y
@@ -72,7 +103,7 @@ CONFIG_UART_ASYNC_API=y
 
 初始化时驱动会检查四个 phandle 设备是否 ready，并校验温控参数。应用应在循环中先 fetch，再 estimate；温控建议低频调用（约 10 Hz），姿态解算的 dt 使用真实采样周期。
 
-## 6. 样例与风险
+## 7. 样例与风险
 
 `samples/imu_test` 针对 `dm_mc02`，overlay 在 `samples/imu_test/boards/dm_mc02.overlay`，包含 BMI088、Kalman 和加热 PWM 的组合。
 

@@ -2,6 +2,15 @@
 
 实现位置：`lib/communication/`、`include/communication/`，消息类型位于 `include/robotics/messages/`。
 
+| 模块 | 上游 | 下游 | 示例 |
+|---|---|---|---|
+| `AsyncUart` | Zephyr UART / DMA 回调 | 带原始时间戳的字节块 | [板间样例](../samples/communication/interboard/README.md) |
+| `RemoteReceiver` | `AsyncUart` + DR16 解码 | 可复制的遥控快照 | [DR16 样例](../samples/communication/dr16/README.md) |
+| `RefereeService` | 裁判字节流 | 权限、功率与在线状态 | [裁判样例](../samples/communication/referee/README.md) |
+| `InterBoardLink` | 板间帧 | 心跳、控制、约束和反馈快照 | [双主控应用](15-applications.md) |
+
+业务层消费快照并检查时间戳；通信回调本身不做机器人决策。遥控到电机、板间到本地安全的完整流程见 [模块联动](module-integration.md)。
+
 ## 1. `AsyncUart`
 
 `AsyncUart` 是所有异步串口协议的传输边界：
