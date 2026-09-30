@@ -6,6 +6,7 @@
 #include <zephyr/dt-bindings/spi/spi.h>
 #include <zephyr/dt-bindings/led/led.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
 
 / {
 	model = "Shenzhen Damiao Tech. MC-02 board";
@@ -32,6 +33,15 @@
 		};
 	};
 
+	// PWM wiring only; ImuHeater owns temperature control.
+	imu_heater_config {
+		compatible = "pwm-leds";
+
+		imu_heater: heater {
+			pwms = <&pwm_heat 4 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+		};
+	};
+
 	aliases {
 		sw0 = &user_button;
 		led-strip = &rgb_led;
@@ -46,6 +56,9 @@
 		can1 = &can1;
 		can2 = &can2;
 		can3 = &can3;
+		accel0 = &bmi08x_accel;
+		gyro0 = &bmi08x_gyro;
+		imu-heater = &imu_heater;
 	};
 
 	power_en {
@@ -131,6 +144,17 @@
 
 &digi_die_temp {
 	status = "okay";
+};
+
+&timers3 {
+	status = "okay";
+	st,prescaler = <99>;
+
+	pwm_heat: pwm {
+		status = "okay";
+		pinctrl-names = "default";
+		pinctrl-0 = <&tim3_ch4_pb1>;
+	};
 };
 
 &spi2 {

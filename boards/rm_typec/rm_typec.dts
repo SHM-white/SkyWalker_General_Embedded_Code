@@ -3,6 +3,7 @@
 #include <st/f4/stm32f407Xg.dtsi>
 #include <st/f4/stm32f407i(e-g)tx-pinctrl.dtsi>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
 
 / {
     model = "DJI RoboMaster Type-C Board";
@@ -74,6 +75,15 @@
         };
     };
 
+    // PWM wiring only; ImuHeater owns temperature control.
+    imu_heater_config {
+        compatible = "pwm-leds";
+
+        imu_heater: heater {
+            pwms = <&pwm_heat 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+        };
+    };
+
     aliases {
         led0 = &red_led;
         led1 = &green_led;
@@ -92,6 +102,7 @@
         buzzer0 = &buzzer;
         accel0 = &bmi08x_accel;
         gyro0 = &bmi08x_gyro;
+        imu-heater = &imu_heater;
     };
 };
 
@@ -206,6 +217,17 @@ zephyr_udc0: &usbotg_fs {
 
 &dma2 {
     status = "okay";
+};
+
+&timers10 {
+    status = "okay";
+    st,prescaler = <167>;
+
+    pwm_heat: pwm {
+        status = "okay";
+        pinctrl-names = "default";
+        pinctrl-0 = <&tim10_ch1_pf6>;
+    };
 };
 
 &timers5 {

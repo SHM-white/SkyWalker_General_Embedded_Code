@@ -36,7 +36,7 @@ west build -p always -b dm_mc02/stm32h723xx samples/imu/dual_imu -d build/dual_i
 west flash -d build/dual_imu
 ~~~
 
-串口、变换、单位缩放和温控参数集中在 src/board_config.hpp 与 app.overlay。开启 CONFIG_FPU 和 CONFIG_FPU_SHARING，避免用软浮点运行高频 EKF。
+板载传感器与温控硬件从默认板级 DTS 的 accel0、gyro0、imu-heater alias 获取；样例 overlay 不再定义加热节点。串口参数集中在 app.overlay，变换、单位缩放、目标温度与接收器调度参数在 src/board_config.hpp。两块板的 IMU alias 已统一，但此双 IMU 样例的外置 RS485 与 DMA 仍绑定 MC02。开启 CONFIG_FPU 和 CONFIG_FPU_SHARING，避免用软浮点运行高频 EKF。
 
 ## VOFA 通道
 

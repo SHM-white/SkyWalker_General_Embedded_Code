@@ -10,9 +10,8 @@ namespace imu = skywalker::imu;
 namespace core = skywalker::core;
 namespace {
 skywalker::control::QuaternionEkf estimator({});
-imu::Bmi088Imu source(DEVICE_DT_GET(DT_NODELABEL(bmi08x_accel)), DEVICE_DT_GET(DT_NODELABEL(bmi08x_gyro)), {},
-                      &estimator);
-imu::ImuHeater heater({.pwm = PWM_DT_SPEC_GET(DT_NODELABEL(imu_heater))});
+imu::Bmi088Imu source(DEVICE_DT_GET(DT_ALIAS(accel0)), DEVICE_DT_GET(DT_ALIAS(gyro0)), {}, &estimator);
+imu::ImuHeater heater({.pwm = PWM_DT_SPEC_GET(DT_ALIAS(imu_heater))});
 Vofa vofa{};
 }
 int main() {
