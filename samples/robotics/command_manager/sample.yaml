@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker three-source command manager bench
+  description: Observe remote, vision and referee command arbitration without actuators
+common:
+  tags: [skywalker, hardware]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.command_manager: {}

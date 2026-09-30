@@ -1,0 +1,5 @@
+mainmenu "Three-source command manager bench"
+source "Kconfig.zephyr"
+config COMMAND_MANAGER_VOFA
+    bool "Emit final commands through USB VOFA"
+    default n
