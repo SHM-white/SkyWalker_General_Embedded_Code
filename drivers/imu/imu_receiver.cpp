@@ -12,8 +12,8 @@ LOG_MODULE_REGISTER(imu_receiver, LOG_LEVEL_INF);
 namespace skywalker::imu {
 int ImuReceiver::start() {
     if (!config_.poll_interval_us ||
-        config_.poll_interval_us > std::uint32_t(std::numeric_limits<std::int32_t>::max()) ||
-        config_.priority < 0 || config_.priority >= CONFIG_NUM_PREEMPT_PRIORITIES)
+        config_.poll_interval_us > std::uint32_t(std::numeric_limits<std::int32_t>::max()) || config_.priority < 0 ||
+        config_.priority >= CONFIG_NUM_PREEMPT_PRIORITIES)
         return -EINVAL;
 #ifndef CONFIG_SKYWALKER_IMU_HEATER
     if (heater_)
@@ -29,8 +29,8 @@ int ImuReceiver::start() {
 #if defined(CONFIG_FPU) && defined(CONFIG_FPU_SHARING)
     options |= K_FP_REGS;
 #endif
-    k_thread_create(&thread_, stack_, K_KERNEL_STACK_SIZEOF(stack_), entry, this, nullptr, nullptr,
-                    config_.priority, options, K_NO_WAIT);
+    k_thread_create(&thread_, stack_, K_KERNEL_STACK_SIZEOF(stack_), entry, this, nullptr, nullptr, config_.priority,
+                    options, K_NO_WAIT);
     return 0;
 }
 
@@ -60,8 +60,7 @@ void ImuReceiver::run() {
     current.init_error = source_.init();
     current.service_error = current.init_error;
     current.init_complete = true;
-    LOG_INF("IMU %p init=%d heater init=%d", static_cast<void *>(this), current.init_error,
-            current.heater_init_error);
+    LOG_INF("IMU %p init=%d heater init=%d", static_cast<void *>(this), current.init_error, current.heater_init_error);
     // Keep servicing after an init error: RS485 can recover its UART internally.
     // Never re-run init here, which could register duplicate UART callbacks.
     for (;;) {
@@ -83,8 +82,7 @@ void ImuReceiver::run() {
             }
             const auto heat = heater_->snapshot();
             if (heat.last_error != current.heater_error || heat.disable_error != current.heater_disable_error)
-                LOG_WRN("IMU %p heater=%d disable=%d", static_cast<void *>(this), heat.last_error,
-                        heat.disable_error);
+                LOG_WRN("IMU %p heater=%d disable=%d", static_cast<void *>(this), heat.last_error, heat.disable_error);
             current.heater_error = heat.last_error;
             current.heater_disable_error = heat.disable_error;
             current.heater_duty = heat.duty;
