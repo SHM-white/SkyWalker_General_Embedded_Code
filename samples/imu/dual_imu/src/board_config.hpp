@@ -6,8 +6,8 @@
 namespace bench {
 inline constexpr skywalker::imu::ImuReceiver::Config onboard_receiver{.poll_interval_us = 500, .priority = 5};
 inline constexpr skywalker::imu::ImuReceiver::Config external_receiver{.poll_interval_us = 1000, .priority = 6};
-inline const device *accel = DEVICE_DT_GET(DT_NODELABEL(bmi08x_accel));
-inline const device *gyro = DEVICE_DT_GET(DT_NODELABEL(bmi08x_gyro));
+inline const device *accel = DEVICE_DT_GET(DT_ALIAS(accel0));
+inline const device *gyro = DEVICE_DT_GET(DT_ALIAS(gyro0));
 inline const device *external_uart = DEVICE_DT_GET(DT_ALIAS(rs485_2));
 inline const device *telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
 inline constexpr skywalker::control::QuaternionEkf::Config estimator{};
@@ -20,7 +20,7 @@ inline constexpr skywalker::imu::DmImuRs485Source::Config external{.protocol = {
                                                                    .device_quaternion_is_world_to_sensor = false,
                                                                    .acceleration_scale = 1,
                                                                    .angular_velocity_scale = 1};
-inline const skywalker::imu::ImuHeater::Config heater{.pwm = PWM_DT_SPEC_GET(DT_NODELABEL(imu_heater)),
+inline const skywalker::imu::ImuHeater::Config heater{.pwm = PWM_DT_SPEC_GET(DT_ALIAS(imu_heater)),
                                                       .target_c = 50,
                                                       .maximum_c = 65};
 }

@@ -75,6 +75,8 @@ QuaternionEkf 用固定数组持有四元数、4×4 协方差、低通和静止�
 
 ## 温控
 
+MC02 与 C 板默认 DTS 均提供 accel0、gyro0、imu-heater alias。样例分别通过 DEVICE_DT_GET(DT_ALIAS(accel0/gyro0)) 获取传感器，通过 PWM_DT_SPEC_GET(DT_ALIAS(imu_heater)) 获取温控 PWM；温控节点不再由样例 overlay 重复声明。MC02 使用 TIM3 CH4/PB1，C 板使用 TIM10 CH1/PF6，周期均为 20ms。目标温度和 PID 仍由应用配置。
+
 ImuHeater 显式传入 pwm_dt_spec 与温控配置。init 写零占空比，update 才开始输出；按 duty=0—1 的 PID 控制，不复用旧 API 中以纳秒为 PID 输出的参数。
 
 双 IMU 样例使用 TIM3 CH4/PB1、周期 20ms、目标 50℃，测量达到 65℃时撤销输出。温度过期、非法、时间倒退或 PID/PWM 错误均尝试关 PWM，关闭失败保存在 disable_error。温控失败不会阻止 gyro 读取；ImuReceiver 会持续调用 update；自行调度时需由所有者线程完成，软件不是独立硬件热保护。

@@ -11,7 +11,7 @@
 | 公共测量与坐标 | include/core/measurement.hpp、clock.hpp、attitude.hpp、byte_codec.hpp |
 | IMU 源与状态核心 | include/drivers/imu/imu.hpp、imu_types.hpp、imu_state.hpp；drivers/imu/imu_state.cpp |
 | IMU 后台采集 | ImuReceiver 每实例管理线程和可选温控；双 IMU 样例仅 start/snapshot/status |
-| 板载采样、滤波、温控 | Bmi088Imu、QuaternionEkf、ImuHeater；无全局 EKF 状态和聚合 device |
+| 板载采样、滤波、温控 | Bmi088Imu、QuaternionEkf、ImuHeater；MC02/C 板默认 DTS 统一 accel0、gyro0、imu-heater alias；无全局 EKF 状态和聚合 device |
 | 外置 RS485 | DmImuParser + DmImuRs485Source，复用 AsyncUart，字段独立接收时间 |
 | CAN | dm_imu_can.hpp 抽象接口/Config；没有实现或 Kconfig 开关 |
 | 视觉 | VisionLink + AbProtocol + VisionReceiver，按用户随后提供的 RM2026-AutoAim 协议实现 |
@@ -26,7 +26,7 @@
 - AB 没有参考与有效位，内部仍保留这些语义；缺少必要反馈数据时拒绝编码，反馈参考必须与固定 command_reference 一致。视觉接收样例不填造姿态解锁上位机。
 - 当前 BMI08x 的温度 channel_get 会独立读寄存器，可以独立检查读取成功，无须假定它只是前一次 fetch 的缓存。
 - EKF 使用实例内固定数组和普通浮点数学，不依赖 Kalman device、CMSIS 矩阵注册或旧设备树节点。
-- 样例明确采用 USART1 输出 VOFA；用户已将板级 telemetry-uart 恢复为 USART1。两个新样例的硬件绑定保留在各自配置中，不再给旧样例额外添加遥测 overlay。
+- 样例明确采用 USART1 输出 VOFA；用户已将板级 telemetry-uart 恢复为 USART1。两个新样例的串口参数保留在各自配置中，不再给旧样例额外添加遥测 overlay；板载 IMU 与加热 PWM 硬件映射已统一放入两块板默认 DTS。
 - 下文保留规划时的接口示意与施工顺序，便于理解设计；新增的具体 codec、接收线程和反馈扩展详见正式接口文档。
 
 后续按用户要求新增 ImuReceiver 线程封装，双 IMU 样例移除手写采集任务；本次仅静态检查，未重新构建或运行，下面的验收记录属于此前实现。

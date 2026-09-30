@@ -1,13 +1,6 @@
-#include <zephyr/dt-bindings/pwm/pwm.h>
 / {
     aliases {
         telemetry-uart = &usart1;
-    };
-    imu_heater_config {
-        compatible = "pwm-leds";
-        imu_heater: heater {
-            pwms = <&pwm_heat 4 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
-        };
     };
 };
 // Board alias rs485-2 already maps to this remapped USART2 (PD4/PD5/PD6).
@@ -19,13 +12,4 @@
 };
 &usart1 {
     current-speed = <115200>;
-};
-&timers3 {
-    status = "okay";
-    st,prescaler = <99>;
-    pwm_heat: pwm {
-        status = "okay";
-        pinctrl-names = "default";
-        pinctrl-0 = <&tim3_ch4_pb1>;
-    };
 };
