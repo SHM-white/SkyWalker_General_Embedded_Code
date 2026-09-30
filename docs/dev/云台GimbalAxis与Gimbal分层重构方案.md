@@ -1,10 +1,10 @@
 # 云台 GimbalAxis 与 Gimbal 分层重构方案
 
-> 当前实施范围已收敛：仅合并 GimbalAxis，Gimbal 与大小 yaw 协调暂缓。以 [GimbalAxis 单轴封装实施记录](GimbalAxis单轴封装实施记录.md) 为准，本文保留设计分析。
+> 实施状态：`GimbalAxis` 已在 `include/robotics/gimbal/gimbal_axis.hpp` 和 `lib/robotics/gimbal_axis.cpp` 实现。双轴 `Gimbal` 尚未实现；大小 yaw 协调仍需明确机械拓扑和反馈来源。本文保留双轴层及协调器的未完成方案，单轴设计章节仅作背景参考。
 
 ## 1. 状态与确定的方向
 
-基线：2026-09-29，提交 `3fd4af1`。本次只给方案，所有新接口均尚未实现，业务源码未修改，未执行构建或上机验证。
+方案基线：2026-09-29，提交 `3fd4af1`。该基线早于 `GimbalAxis` 实现。当前源码已有 `GimbalAxis`，但没有 `Gimbal` 或 `DualYawCoordinator`；本文后续实现步骤需据此跳过已完成部分。双轴方案及硬件行为仍未验证。
 
 采用两层库代码：
 
@@ -15,7 +15,7 @@ Motor 与 CanBus 由应用持有。应用负责连接设备、生成命令、决
 
 首版 Gimbal 固定为 yaw/pitch 两轴，直接消费现有 GimbalCommand。当前单轴台架和 sentry_gimbal 继续使用独立 GimbalAxis，不虚构第二台电机，不引入可选轴、动态轴列表或继承框架。
 
-相较 [前一版分析](云台Axis封装边界与整合方案.md)，这次明确把 Group 的拥有权与双轴编排移入 Gimbal。原单轴分析仍有效；“双轴协调留在应用层”的建议由本方案替代。
+本方案把 Group 的拥有权与双轴编排移入 Gimbal。单轴封装已完成；剩余设计围绕双轴生命周期、Group 协调和大小 yaw 目标分配展开。
 
 ## 2. 结构与对象归属
 
