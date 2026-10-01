@@ -90,9 +90,34 @@ config SKYWALKER_LIB_ROBOTICS
     select SKYWALKER_LIB_CONTROL
 
 config SKYWALKER_ROBOTICS_COMMAND
-    bool "Manual mapper and command manager"
+    bool "Manual mapper and command arbitration"
     default y
     depends on SKYWALKER_LIB_ROBOTICS
+
+config SKYWALKER_COMMAND_SERVICE
+    bool "Registered command sources and background arbitration"
+    depends on SKYWALKER_ROBOTICS_COMMAND
+    help
+        Own a command worker and publish non-consuming snapshots.
+        Register static-lifetime input and permission sources before start.
+
+config SKYWALKER_COMMAND_STACK_SIZE
+    int "Command service stack bytes"
+    depends on SKYWALKER_COMMAND_SERVICE
+    default 6144
+    range 2048 16384
+
+config SKYWALKER_COMMAND_PRIORITY
+    int "Command service priority"
+    depends on SKYWALKER_COMMAND_SERVICE
+    default 5
+    range 0 15
+
+config SKYWALKER_COMMAND_PERIOD_MS
+    int "Command arbitration period in milliseconds"
+    depends on SKYWALKER_COMMAND_SERVICE
+    default 10
+    range 1 1000
 
 config SKYWALKER_ROBOTICS_SWERVE
     bool "Four module swerve controller and bench power limiter"

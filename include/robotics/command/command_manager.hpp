@@ -1,41 +1,53 @@
 #pragma once
-#include <robotics/command/command_inputs.hpp>
-#include <robotics/command/manual_command_mapper.hpp>
-#include <robotics/messages/remote.hpp>
+#include <array>
+#include <robotics/command/command_arbiter.hpp>
+#include <robotics/command/command_source.hpp>
+#include <zephyr/kernel.h>
+
 namespace skywalker::robotics {
+// Static lifetime including on startup failure. No stop/restart/destruction.
+// One startup-thread owner registers/binds/starts. Multiple execution threads
+// independently read non-consuming snapshots. All public calls are thread-only.
 class CommandManager {
 public:
-    struct Config {
-        float max_chassis_vx_m_s = 3, max_chassis_vy_m_s = 3, max_chassis_wz_rad_s = 6;
-        float max_gimbal_yaw_rate_rad_s = 3, max_gimbal_pitch_rate_rad_s = 2;
-        std::uint32_t input_timeout_ms = 100;
-        ManualCommandMapper::Config mapper{};
-        std::uint32_t permission_timeout_ms = 300;
-        bool require_referee_for_motion = true;
-        bool allow_auto = true;
-        core::TimeUs vision_timeout_us = 100000;
-        core::OrientationReference expected_vision_reference{1, 1};
-        float max_vision_yaw_acceleration_rad_s2 = 30, max_vision_pitch_acceleration_rad_s2 = 20;
-        float requested_fire_rate_hz = 5;
-        float override_enter_norm = 0.15f, override_exit_norm = 0.05f;
-        core::TimeUs override_release_us = 200000;
-    };
+    using Config = CommandArbiter::Config;
     explicit CommandManager(const Config &config);
-    // One owner thread; inputs include the arbitration time. Results are owned values.
-    [[nodiscard]] int configError() const { return config_error_; }
-    [[nodiscard]] CommandDecision update(const CommandInputs &);
-    void reset();
-
+    CommandManager(const CommandManager &) = delete;
+    CommandManager &operator=(const CommandManager &) = delete;
+    // Before start only; one source per role. -EEXIST: duplicate, -EINVAL: role,
+    // -ENOSPC: capacity, -EBUSY: startup already attempted.
+    [[nodiscard]] int registerSource(ICommandSource &source);
+    [[nodiscard]] int bindPermissions(IPermissionSource &source);
+    // -EINVAL: config/missing operator; -ENODEV: required permission missing;
+    // -EALREADY: repeated attempt; otherwise propagates source startup errors.
+    [[nodiscard]] int start();
+    // 0 copies the current value, possibly the same sequence as a previous read.
+    // -EAGAIN before first publication; errors leave out unchanged. Reading never
+    // refreshes timestamps: consumers must still enforce command expiry.
+    int current(RobotCommand &out) const;
+    int snapshot(CommandSnapshot &out) const;
 private:
-    Config config_;
-    const int config_error_;
-    int validateConfig() const;
-    std::uint32_t sequence_ = 0;
-    OperatorMode previous_mode_ = OperatorMode::Safe;
-    core::TimeUs auto_entry_us_ = 0, last_step_us_ = 0, override_quiet_since_us_ = 0;
-    std::uint64_t auto_baseline_sequence_ = 0, last_seen_vision_sequence_ = 0;
-    bool have_vision_sequence_ = false, have_step_time_ = false;
-    bool manual_override_ = false, have_override_quiet_time_ = false;
-    void updateAutoOverride(OperatorIntent &, const CommandInputs &, core::TimeUs);
+    struct Slot {
+        ICommandSource *source = nullptr;
+        SourceRole role = SourceRole::Operator;
+        SourceSample cached{};
+    };
+    static void entry(void *self, void *, void *);
+    void run();
+    void publish(const CommandSnapshot &value);
+    int failStart(int error, std::uint32_t reason);
+    CommandArbiter arbiter_;
+    const bool require_permissions_;
+    std::array<Slot, 2> sources_{};
+    std::size_t source_count_ = 0;
+    IPermissionSource *permissions_ = nullptr;
+    RefereeState permission_cache_{};
+    SourceDiagnostics permission_diagnostics_{};
+    bool start_attempted_ = false;
+    mutable k_spinlock output_lock_{};
+    CommandSnapshot output_{};
+    bool have_output_ = false;
+    k_thread thread_{};
+    K_KERNEL_STACK_MEMBER(stack_, CONFIG_SKYWALKER_COMMAND_STACK_SIZE);
 };
 }

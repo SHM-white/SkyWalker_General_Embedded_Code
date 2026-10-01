@@ -2,6 +2,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(command_telemetry, LOG_LEVEL_INF);
 namespace bench {
+using namespace skywalker;
 namespace {
 const char *source(robotics::ControlSource s) {
     switch (s) {
@@ -43,7 +44,8 @@ int Telemetry::start(const device *uart) {
     return 0;
 #endif
 }
-void Telemetry::emit(const InputFrame &f, const robotics::CommandDecision &d) {
+void Telemetry::emit(const robotics::CommandSnapshot &f) {
+    const auto &d = f.decision;
     const auto now = static_cast<std::uint64_t>(k_uptime_get());
     const auto &c = d.command;
     if (now >= next_log_ms_) {
@@ -58,14 +60,16 @@ void Telemetry::emit(const InputFrame &f, const robotics::CommandDecision &d) {
             double(c.gimbal.yaw_target_rad), double(c.gimbal.pitch_target_rad), double(c.gimbal.yaw_rate_rad_s),
             double(c.gimbal.pitch_rate_rad_s), unsigned(c.shooter.mode), source(c.shooter.source),
             double(c.shooter.fire_rate_hz), double(c.shooter.requested_bullet_speed_m_s));
-        const auto &r = f.inputs.referee.robot;
-        const auto &v = f.inputs.vision.stamp;
+        const auto &r = f.observed.referee.robot;
+        const auto &v = f.observed.vision.stamp;
         const long long va = v.valid && now >= v.time_us / 1000 ? static_cast<long long>(now - v.time_us / 1000) : -1;
         LOG_INF(
-            "age_ms(-1=NA) rc=%lld vision=%lld permit(g/c/s)=%lld/%lld/%lld state(rc/v)=%u/%u uart=%d/%d/%d drop=%u/%u/%u ref_reset=%u vofa=%u/%d",
-            age(f.inputs.remote.stamp, now), va, age(r.gimbal_output.stamp, now), age(r.chassis_output.stamp, now),
-            age(r.shooter_output.stamp, now), unsigned(f.remote_state), unsigned(f.vision_state), f.remote_error,
-            f.vision_error, f.referee_error, f.remote_dropped, f.vision_dropped, f.referee_dropped, f.referee_resets,
+            "age_ms(-1=NA) rc=%lld vision=%lld permit(g/c/s)=%lld/%lld/%lld state(rc/v)=%u/%u uart=%d/%d/%d drop=%u/%u/%lld sample=%d/%d/%d vofa=%u/%d",
+            age(f.observed.remote.stamp, now), va, age(r.gimbal_output.stamp, now), age(r.chassis_output.stamp, now),
+            age(r.shooter_output.stamp, now), unsigned(f.remote.state), unsigned(f.vision.state), f.remote.error,
+            f.vision.error, f.permission.error, f.remote.dropped, f.vision.dropped,
+            f.permission.dropped_available ? static_cast<long long>(f.permission.dropped) : -1LL,
+            f.remote.sample_error, f.vision.sample_error, f.permission.sample_error,
             vofa_rejected_, last_vofa_error_);
         if (d.selected_vision.stamp.valid) {
             const auto &v = d.selected_vision.value;

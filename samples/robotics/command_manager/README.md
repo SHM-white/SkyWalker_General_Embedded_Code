@@ -3,12 +3,15 @@
 只接收命令并输出最终决策，不创建电机、CAN 或执行线程。支持 MC02。
 
 ```cpp
-const auto frame = sources.poll();
-const auto decision = manager.update(frame.inputs);
-telemetry.emit(frame, decision);
+// 启动时依次检查返回码：注册遥控、视觉，绑定裁判，然后 start()。
+robotics::CommandSnapshot frame{};
+if (manager.snapshot(frame) == 0)
+    telemetry.emit(frame);
 ```
 
-采集层填写 CommandInputs::now_us（微秒）。update() 按值返回完整决策，错误存入 decision.error；原始输入时间戳不刷新。一实例一线程，旧 step/validate/reset(now) 已移除。Down 禁用，恢复有效输入后自动继续，不锁存。
+CommandManager 内部线程完成采集和仲裁，默认周期 10 ms；同步算法位于 CommandArbiter。RemoteSource、VisionSource 与 RefereePermissionSource 在 main 中注册，所有对象和 DMA 存储保持静态生命周期。只支持启动前注册，每个角色一个来源，运行中不注销、不重启。
+
+snapshot() 复制最新完整帧，不消费消息；current() 只复制最终 RobotCommand。首次发布前返回 -EAGAIN 且不改输出。读取成功不代表新帧、在线或允许运动，命令序号、原因和原始时间戳仍需按用途处理。采集时间与 decision 在同一快照中，错误存入 decision.error；读取不会刷新时间。Down 禁用，恢复有效输入后自动继续，不锁存。
 
 ## 接线与构建
 
@@ -54,7 +57,7 @@ python3 samples/robotics/command_manager/send_referee.py --port /dev/ttyUSB_REFE
 7. 关闭遥控，100 ms 后全停。键鼠模式用右键授权、左键开火；视觉 mode=2 必须仍有右键授权，云台禁用时不允许开火。
 8. VOFA 不读取时丢帧计数可增长，仲裁继续。
 
-终端每 100 ms 输出最终模式、来源、速度、目标、开火频率、各机构原因、输入年龄和 UART 错误。年龄 -1 表示无效或未来时间。枚举：底盘 Disabled=0/BodyVelocity=1；云台 Disabled=0/Hold=1/Rate=2/AbsoluteAngle=3；发射 Disabled=0/Ready=1/FireSingle=2/FireContinuous=3。原因位见 `include/robotics/command/command_inputs.hpp`；ManualOverride、OverrideQuiet、ValueLimited 是信息位。
+终端每 100 ms 输出最终模式、来源、速度、目标、开火频率、各机构原因、输入年龄、UART 错误和 sample 返回状态。裁判 dropped=-1 表示 RefereeReceiver 未提供该计数；旧 ref_reset 列已移除。年龄 -1 表示无效或未来时间。枚举：底盘 Disabled=0/BodyVelocity=1；云台 Disabled=0/Hold=1/Rate=2/AbsoluteAngle=3；发射 Disabled=0/Ready=1/FireSingle=2/FireContinuous=3。原因位见 `include/robotics/command/command_inputs.hpp`；ManualOverride、OverrideQuiet、ValueLimited 是信息位。
 
 | VOFA 通道 | 最终决策内容 |
 | --- | --- |
@@ -66,6 +69,6 @@ python3 samples/robotics/command_manager/send_referee.py --port /dev/ttyUSB_REFE
 | 12,13 | 开火频率、目标弹速（0=未指定） |
 | 14,15 | 原因低/高 16 位 |
 
-原因重建为 `uint32(ch14) | (uint32(ch15) << 16)`。完整时间和序号留在终端。遥测从最终 command 输出；裁判否决后不会显示候选数值。接收器及 DMA 存储为静态生命周期，初始 UART 失败时检查日志和接线，再重启固件。
+原因重建为 `uint32(ch14) | (uint32(ch15) << 16)`。完整时间和序号留在终端。遥测从最终 command 输出；裁判否决后不会显示候选数值。接收器及 DMA 存储为静态生命周期，接收器自行推进 UART 重试；服务 start 返回负值时记录错误并停止启动，保持已启动接收器和 DMA 对象存活，不重复 start。
 
 纯仲裁完整流程的主机检查见 `tests/command_manager/README.md`。

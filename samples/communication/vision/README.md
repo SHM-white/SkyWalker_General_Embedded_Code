@@ -23,7 +23,7 @@ console 应出现 Vision receiver start=0 和 VOFA init=0。start 成功只表�
 
 ## 发送指令
 
-协议来自用户指定的 [RM2026-AutoAim gimbal.hpp](https://github.com/SHM-white/RM2026-AutoAim/blob/main/io/gimbal/gimbal.hpp)、[gimbal.cpp](https://github.com/SHM-white/RM2026-AutoAim/blob/main/io/gimbal/gimbal.cpp) 和 [crc.cpp](https://github.com/SHM-white/RM2026-AutoAim/blob/main/tools/crc.cpp)，核对日期 2026-09-30。完整偏移、反馈和参考约定见 [视觉协议说明](../../../docs/18-vision.md)。
+协议来自用户指定的 [RM2026-AutoAim gimbal.hpp](https://github.com/SHM-white/RM2026-AutoAim/blob/main/io/gimbal/gimbal.hpp)、[gimbal.cpp](https://github.com/SHM-white/RM2026-AutoAim/blob/main/io/gimbal/gimbal.cpp) 和 [crc.cpp](https://github.com/SHM-white/RM2026-AutoAim/blob/main/tools/crc.cpp)，核对日期 2026-09-30。完整偏移、反馈和参考约定见 [视觉协议说明](../../../docs/modules/communication/vision.md)。
 
 下行固定 29 字节：AB、mode、六个小端 float32、CRC16。mode=0 停止、1 控制但不射击、2 控制并请求射击；角度用 rad、角速度 rad/s、角加速度 rad/s²。CRC 覆盖前 27 字节，初值 FFFF、反射多项式 8408、无末尾异或，CRC 低字节先发。
 

@@ -1,12 +1,12 @@
 #pragma once
-#include "input_sources.hpp"
+#include <robotics/command/command_source.hpp>
 #include <lib/vofa/vofa.h>
 
 namespace bench {
 class Telemetry {
 public:
     int start(const device *vofa_uart);
-    void emit(const InputFrame &, const skywalker::robotics::CommandDecision &);
+    void emit(const skywalker::robotics::CommandSnapshot &);
 
 private:
     Vofa vofa_{};

@@ -6,4 +6,4 @@
 west build -b dm_mc02/stm32h723xx samples/robotics/command_safety -d build/command-insurance
 ```
 
-日志显示 online、操作模式、机构模式、原因、调用错误和生产者序号。配置与接线仍在 src/board_config.hpp 及 app.overlay。
+main 仅注册 RemoteSource 并启动 CommandManager；后台服务按默认 10 ms 周期调用内部 CommandArbiter，观察循环读取非消费式快照。来源与服务保持静态生命周期，遥控接收器由服务启动一次。日志显示 online、操作模式、机构模式、原因、调用错误和生产者序号。配置与接线仍在 src/board_config.hpp 及 app.overlay。

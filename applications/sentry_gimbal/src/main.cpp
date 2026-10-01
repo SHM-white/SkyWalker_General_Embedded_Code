@@ -1,9 +1,8 @@
 #include <core/clock.hpp>
-#include <communication/remote/remote_receiver.hpp>
-#include <communication/referee/referee_receiver.hpp>
+#include <communication/interboard/interboard_endpoint.hpp>
 #include <robotics/command/command_manager.hpp>
+#include <robotics/command/receiver_sources.hpp>
 #include <zephyr/logging/log.h>
-#include "command_router.hpp"
 #include "gimbal_executor.hpp"
 LOG_MODULE_REGISTER(sentry_gimbal, LOG_LEVEL_INF);
 using namespace skywalker;
@@ -16,56 +15,37 @@ communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, {});
 communication::InterBoardEndpoint link(board_config::interboard_uart, link_dma,
     {BoardRole::GimbalController, board_config::command_timeout_ms, board_config::chassis_heartbeat_timeout_ms});
 communication::RefereeReceiver referee(board_config::referee_uart, referee_dma, board_config::referee_version);
-Latest<RefereeState> referee_state;
-Latest<GimbalCommand> local_command;
-void refereeTask(void *, void *, void *) {
-    for (;;) {
-        const auto value = referee.poll(k_uptime_get());
-        (void)referee_state.put(value);
-        link.setReferee(value);
-        k_sleep(K_MSEC(1));
-    }
-}
+RemoteSource remote_source(remote);
+RefereePermissionSource permission_source(referee);
+CommandManager commands(board_config::command_policy);
+
 void linkTask(void *, void *, void *) {
-    for (;;) { link.poll(k_uptime_get()); k_sleep(K_MSEC(1)); }
-}
-void commandTask(void *, void *, void *) {
-    CommandManager::Config config{};
-    config.require_referee_for_motion = board_config::require_referee_for_motion;
-    config.permission_timeout_ms = board_config::permission_timeout_ms;
-    config.input_timeout_ms = board_config::command_timeout_ms;
-    config.allow_auto = false; // No vision receiver is assembled in this application.
-    CommandManager manager(config);
-    CommandRouter router(local_command, link);
-    communication::RemoteReceiver::Snapshot rc{};
-    RefereeState ref{};
+    CommandSnapshot frame{};
     std::uint64_t next_log = 0;
     for (;;) {
-        remote.snapshot(rc);
-        referee_state.get(ref);
-        CommandInputs inputs{};
-        inputs.remote = rc.remote;
-        inputs.referee = ref;
-        inputs.now_us = core::monotonicTimeUs();
-        const auto decision = manager.update(inputs);
-        const auto routed = router.route(decision.command);
-        if (inputs.now_us / 1000 >= next_log) {
-            next_log = inputs.now_us / 1000 + 1000;
-            LOG_INF("mode=%u reasons=%x error=%d publish=%d", unsigned(decision.operator_mode),
-                    decision.reasons(), decision.error, routed.local_gimbal_result);
+        const auto now_ms = static_cast<std::uint64_t>(k_uptime_get());
+        if (commands.snapshot(frame) == 0) {
+            link.submit(frame.decision.command.chassis);
+            link.setReferee(frame.observed.referee);
+            if (now_ms >= next_log) {
+                next_log = now_ms + 1000;
+                LOG_INF("mode=%u reasons=%x error=%d", unsigned(frame.decision.operator_mode),
+                        frame.decision.reasons(), frame.decision.error);
+            }
         }
-        k_sleep(K_MSEC(10));
+        link.poll(now_ms);
+        k_sleep(K_MSEC(1));
     }
 }
 void gimbalTask(void *, void *, void *) {
     static GimbalExecutor executor;
     (void)executor.begin();
-    GimbalCommand command{};
+    RobotCommand command{};
     std::uint64_t next_log = 0;
     for (;;) {
-        local_command.get(command);
+        (void)commands.current(command);
         const auto now = core::monotonicTimeUs();
-        const auto status = executor.update(command, now);
+        const auto status = executor.update(command.gimbal, now);
         link.setStatus(status);
         if (now / 1000 >= next_log) {
             next_log = now / 1000 + 1000;
@@ -76,13 +56,13 @@ void gimbalTask(void *, void *, void *) {
     }
 }
 }
-K_THREAD_DEFINE(referee_thread, 6144, refereeTask, nullptr, nullptr, nullptr, 6, 0, 0);
 K_THREAD_DEFINE(link_thread, 8192, linkTask, nullptr, nullptr, nullptr, 5, 0, 0);
-K_THREAD_DEFINE(command_thread, 4096, commandTask, nullptr, nullptr, nullptr, 5, 0, 0);
 K_THREAD_DEFINE(gimbal_thread, 6144, gimbalTask, nullptr, nullptr, nullptr, 4, 0, 0);
 int main() {
-    const int ret = remote.start();
-    LOG_INF("gimbal configured=%d referee_required=%d remote_start=%d", board_config::connections_configured,
+    int ret = commands.registerSource(remote_source);
+    if (ret == 0) ret = commands.bindPermissions(permission_source);
+    if (ret == 0) ret = commands.start();
+    LOG_INF("gimbal configured=%d referee_required=%d command_start=%d", board_config::connections_configured,
             board_config::require_referee_for_motion, ret);
     return ret;
 }

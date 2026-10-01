@@ -6,6 +6,7 @@
 #include <drivers/motor/dji_motor.hpp>
 #include <drivers/motor/dm_motor.hpp>
 #include <robotics/gimbal/gimbal_axis.hpp>
+#include <robotics/command/command_arbiter.hpp>
 #include <communication/referee/referee_protocol.hpp>
 namespace board_config {
 // Edit this application only; samples and the chassis app have their own configuration.
@@ -14,6 +15,14 @@ inline constexpr bool require_referee_for_motion = true;
 inline constexpr auto referee_version = skywalker::communication::RefereeVersion::Unspecified;
 inline constexpr std::uint32_t permission_timeout_ms = 300, command_timeout_ms = 100,
                                chassis_heartbeat_timeout_ms = 100, chassis_feedback_timeout_ms = 100;
+inline const skywalker::robotics::CommandArbiter::Config command_policy = [] {
+    skywalker::robotics::CommandArbiter::Config c{};
+    c.require_referee_for_motion = require_referee_for_motion;
+    c.permission_timeout_ms = permission_timeout_ms;
+    c.input_timeout_ms = command_timeout_ms;
+    c.allow_auto = false; // No vision receiver is assembled in this application.
+    return c;
+}();
 #if DT_NODE_HAS_STATUS(DT_ALIAS(interboard_uart), okay)
 inline const device *interboard_uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart));
 #else
