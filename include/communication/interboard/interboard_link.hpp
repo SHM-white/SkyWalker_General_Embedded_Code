@@ -12,6 +12,12 @@ public:
     void discardPartial() {
         parser_.discardPartial();
     }
+    void invalidateControl() {
+        parser_.discardPartial();
+        control_ = {};
+        constraint_ = {};
+        feedback_ = {};
+    }
     bool peerOnline(std::uint64_t now_ms, std::uint32_t timeout_ms = 200) const;
     int latestHeartbeat(robotics::BoardHeartbeat &) const;
     int latestChassisControl(robotics::RemoteChassisControl &) const;

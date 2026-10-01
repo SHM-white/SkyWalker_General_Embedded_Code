@@ -7,6 +7,7 @@
 namespace skywalker::robotics {
 
 struct CommandInputs {
+    core::TimeUs now_us = 0; // Arbitration time, independent of source stamps.
     RemoteState remote{};
     core::Measurement<communication::vision::AimCommand> vision{};
     RefereeState referee{};
@@ -32,9 +33,11 @@ enum ArbitrationReason : std::uint32_t {
     ClockRegression = 1u << 16,
     ManualOverride = 1u << 17,
     OverrideQuiet = 1u << 18,
+    AutoUnavailable = 1u << 19,
 };
 
 struct CommandDecision {
+    int error = 0;
     OperatorMode operator_mode = OperatorMode::Safe;
     bool manual_override = false;
     bool override_quiet = false;

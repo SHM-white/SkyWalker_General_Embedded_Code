@@ -16,7 +16,9 @@ int main() {
                                                                                      .shooter_output = permit;
     };
     const auto step = [&] {
-        assert(manager.step(input, now, out) == 0);
+        input.now_us = now;
+        out = manager.update(input);
+        assert(out.error == 0);
         assert(out.command.stamp.timestamp_ms == now / 1000);
     };
     step();
@@ -100,7 +102,9 @@ int main() {
     step();
     assert(out.command.chassis.mode == ChassisMode::Disabled && out.command.gimbal.mode == GimbalMode::Disabled);
     const auto seq = out.command.stamp.sequence;
-    assert(manager.step(input, now - 1, out) == -ESTALE);
+    input.now_us = now - 1;
+    out = manager.update(input);
+    assert(out.error == -ESTALE);
     assert(out.command.stamp.sequence == seq + 1 && (out.reasons() & ClockRegression));
     std::puts("command manager complete arbitration scenario: PASS");
 }

@@ -6,7 +6,7 @@ namespace bench {
 class Telemetry {
 public:
     int start(const device *vofa_uart);
-    void emit(const InputFrame &, const skywalker::robotics::CommandDecision &, int step_error);
+    void emit(const InputFrame &, const skywalker::robotics::CommandDecision &);
 
 private:
     Vofa vofa_{};

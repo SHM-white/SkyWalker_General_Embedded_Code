@@ -94,11 +94,6 @@ config SKYWALKER_ROBOTICS_COMMAND
     default y
     depends on SKYWALKER_LIB_ROBOTICS
 
-config SKYWALKER_ROBOTICS_SAFETY
-    bool "Global and local safety decisions"
-    default y
-    depends on SKYWALKER_LIB_ROBOTICS
-
 config SKYWALKER_ROBOTICS_SWERVE
     bool "Four module swerve controller and bench power limiter"
     default y

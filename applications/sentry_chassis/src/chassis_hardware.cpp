@@ -29,7 +29,7 @@ DjiChassisHardware::DjiChassisHardware(const std::array<ChassisMotorConnection, 
 
 int DjiChassisHardware::init() {
     if (initialized_)
-        return -EALREADY;
+        return 0;
     if (!board_config::connections_configured)
         return -ENODEV;
     if (can_devices_[0] == nullptr || !device_is_ready(can_devices_[0]))
@@ -71,19 +71,17 @@ int DjiChassisHardware::init() {
             config.modules[i].drive.effort_abs_max > descriptors_[i + 4].configured_current_limit_a)
             return -ERANGE;
 
-    // Group topology is checked when the first bus starts, so attach every
-    // member on both buses before starting either CAN controller.
-    for (std::size_t i = 0; i < motors_.size(); ++i) {
+    // Resume only unfinished initialization stages; never reattach live members.
+    while (attached_count_ < motors_.size()) {
+        const auto i = attached_count_;
         const int ret = buses_[motor_bus_index_[i]]->attach(motors_[i]);
-        if (ret < 0)
-            return ret;
+        if (ret < 0) return ret;
+        ++attached_count_;
     }
-    for (std::size_t i = 0; i < bus_count_; ++i) {
-        const int ret = buses_[i]->start();
-        if (ret < 0) {
-            group_.disable();
-            return ret;
-        }
+    while (started_count_ < bus_count_) {
+        const int ret = buses_[started_count_]->start();
+        if (ret < 0) return ret;
+        ++started_count_;
     }
     initialized_ = true;
     return 0;
@@ -185,10 +183,18 @@ int DjiChassisHardware::pollRecovery(std::uint64_t now) {
     }
     if (!group_.ready()) {
         ready_ = stable_ = false;
+        if (hasBlockingFault()) return -EIO;
+        bool fault = false;
+        bool fresh = true;
         for (const auto &motor : motors_) {
             const auto snapshot = motor.snapshot();
-            if (snapshot.state == motor::MotorState::Fault)
-                return snapshot.last_fault.error < 0 ? snapshot.last_fault.error : -EIO;
+            fault = fault || snapshot.state == motor::MotorState::Fault;
+            fresh = fresh && snapshot.feedback_fresh;
+        }
+        if (fault && fresh) {
+            next_retry_ms_ = now + board_config::recovery_retry_ms;
+            const int ret = group_.clearFault();
+            if (ret < 0 && ret != -EBUSY && ret != -EAGAIN) return ret;
         }
         return -EAGAIN;
     }
@@ -288,4 +294,14 @@ int DjiChassisHardware::clearFault() {
     if (!initialized_)
         return -EACCES;
     return group_.clearFault();
+}
+
+bool DjiChassisHardware::hasBlockingFault() const {
+    for (const auto &motor : motors_) {
+        const auto snapshot = motor.snapshot();
+        if (snapshot.state != motor::MotorState::Fault) continue;
+        if (snapshot.last_fault.reason != motor::FaultReason::UnexpectedDisabled &&
+            snapshot.last_fault.reason != motor::FaultReason::EnableTimeout) return true;
+    }
+    return false;
 }

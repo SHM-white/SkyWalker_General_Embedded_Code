@@ -4,12 +4,11 @@
 
 ```cpp
 const auto frame = sources.poll();
-CommandDecision decision{};
-const int ret = manager.step(frame.commands, core::monotonicTimeUs(), decision);
-telemetry.emit(frame, decision, ret);
+const auto decision = manager.update(frame.inputs);
+telemetry.emit(frame, decision);
 ```
 
-新入口时间单位为 **微秒**；旧的 intent/safety 入口仍为毫秒。一个实例由一个线程拥有，不交替调用两个入口。所有返回路径完整覆盖输出，错误时输出 Disabled；原始输入时间戳不刷新。
+采集层填写 CommandInputs::now_us（微秒）。update() 按值返回完整决策，错误存入 decision.error；原始输入时间戳不刷新。一实例一线程，旧 step/validate/reset(now) 已移除。Down 禁用，恢复有效输入后自动继续，不锁存。
 
 ## 接线与构建
 

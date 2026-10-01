@@ -14,7 +14,7 @@
 namespace board_config {
 
 inline constexpr bool connections_configured = false;
-inline constexpr bool require_referee_for_motion = true;
+inline constexpr bool require_power_budget = true;
 inline constexpr std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100, permission_timeout_ms = 300,
                                feedback_stable_ms = 30, recovery_retry_ms = 100;
 // The estimator is disabled until calibrated with this robot's power measurements.
@@ -91,43 +91,6 @@ inline skywalker::robotics::SwerveChassis::Config chassisConfig() {
         m.steer.position = {3, 0, 0, 0, -10, 10, -10, 10, 0.01f, 0.001f, 0.02f};
     }
     return c;
-}
-
-inline bool emergencyStopRequested() {
-    return false;
-}
-inline bool takeEmergencyResetRequest() {
-#if DT_NODE_HAS_STATUS(DT_ALIAS(sw0), okay)
-    static const gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
-    static bool configured = false, initialized = false;
-    static bool last_raw = false, stable = false;
-    static std::int64_t changed_ms = 0;
-    if (!configured) {
-        if (!gpio_is_ready_dt(&button) || gpio_pin_configure_dt(&button, GPIO_INPUT) < 0)
-            return false;
-        configured = true;
-    }
-    const int value = gpio_pin_get_dt(&button);
-    if (value < 0)
-        return false;
-    const bool raw = value != 0;
-    const auto now = k_uptime_get();
-    if (!initialized) {
-        last_raw = stable = raw;
-        changed_ms = now;
-        initialized = true;
-        return false;
-    }
-    if (raw != last_raw) {
-        last_raw = raw;
-        changed_ms = now;
-    }
-    if (raw != stable && now - changed_ms >= 30) {
-        stable = raw;
-        return stable; // One reset request per debounced press.
-    }
-#endif
-    return false;
 }
 
 } // namespace board_config

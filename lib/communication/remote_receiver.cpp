@@ -40,44 +40,34 @@ void RemoteReceiver::run() {
     Snapshot current{};
     current.state = State::Starting;
     latest_.put(current);
-    const int init_ret = uart_.init();
-    current.uart_error = init_ret;
-    current.state = init_ret < 0 ? State::InitFailed : State::Running;
-    LOG_INF("Remote UART init: %d", init_ret);
-
+    std::uint64_t retry_ms = 0;
     for (;;) {
-        if (init_ret == 0) {
-            const int sr = uart_.service(static_cast<std::uint64_t>(k_uptime_get()));
-            if (sr == 0)
-                current.uart_error = 0;
-            else if (sr != -EAGAIN)
-                current.uart_error = sr;
-
+        const auto now = static_cast<std::uint64_t>(k_uptime_get());
+        if (now >= retry_ms) {
+            int ret = uart_.service(now);
+            if (ret == -EACCES) ret = uart_.init();
+            if (ret == 0) { current.state = State::Running; current.uart_error = 0; }
+            else if (ret != -EAGAIN) {
+                current.state = State::InitFailed;
+                current.uart_error = ret;
+                retry_ms = now + 100;
+            }
             AsyncUart::RxChunk chunk{};
-            for (unsigned budget = 0; budget < 8; ++budget) {
+            for (unsigned budget = 0; budget < 8 && ret == 0; ++budget) {
                 const int rr = uart_.read(chunk);
-                if (rr == -EOVERFLOW) {
-                    service_.discardPartial();
-                    ++current.resets;
-                    continue;
-                }
-                if (rr == -EAGAIN)
-                    break;
-                if (rr < 0) {
-                    current.uart_error = rr;
-                    break;
-                }
+                if (rr == -EOVERFLOW) { service_.discardPartial(); ++current.resets; continue; }
+                if (rr == -EAGAIN) break;
+                if (rr < 0) { current.uart_error = rr; break; }
                 ++current.rx_chunks;
                 service_.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
             }
-            robotics::RemoteState remote{};
-            service_.snapshot(static_cast<std::uint64_t>(k_uptime_get()), remote);
-            current.remote = remote;
-            current.dropped = static_cast<unsigned>(uart_.droppedChunks());
         }
-        // Retry publication on contention, even after initialization failure.
+        robotics::RemoteState remote{};
+        service_.snapshot(static_cast<std::uint64_t>(k_uptime_get()), remote);
+        current.remote = remote;
+        current.dropped = static_cast<unsigned>(uart_.droppedChunks());
         latest_.put(current);
-        k_sleep(init_ret < 0 ? K_MSEC(100) : K_MSEC(1));
+        k_sleep(K_MSEC(1));
     }
 }
 } // namespace skywalker::communication

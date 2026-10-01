@@ -1,4 +1,5 @@
 #include "input_sources.hpp"
+#include <core/clock.hpp>
 #include <cerrno>
 #include <zephyr/kernel.h>
 
@@ -52,14 +53,14 @@ InputFrame InputSources::poll() {
     now_ms = static_cast<std::uint64_t>(k_uptime_get());
     referee_.processBytes(nullptr, 0, now_ms);
     // result 已清零；-EAGAIN 不写，-ESTALE 则写旧值并标 online=false。
-    const int fs = referee_.snapshot(now_ms, frame.commands.referee);
+    const int fs = referee_.snapshot(now_ms, frame.inputs.referee);
     if (fs != 0 && fs != -EAGAIN && fs != -ESTALE)
         referee_error_ = fs;
 
     (void)remote_.snapshot(rc_);
     const auto vs = vision_.snapshot();
-    frame.commands.remote = rc_.remote;
-    frame.commands.vision = vs.link.aim;
+    frame.inputs.remote = rc_.remote;
+    frame.inputs.vision = vs.link.aim;
     frame.remote_state = rc_.state;
     frame.vision_state = vs.state;
     frame.remote_error = remote_start_error_ < 0 ? remote_start_error_ : rc_.uart_error;
@@ -69,6 +70,7 @@ InputFrame InputSources::poll() {
     frame.vision_dropped = vs.dropped;
     frame.referee_dropped = referee_uart_.droppedChunks();
     frame.referee_resets = referee_resets_;
+    frame.inputs.now_us = core::monotonicTimeUs();
     return frame;
 }
 }
