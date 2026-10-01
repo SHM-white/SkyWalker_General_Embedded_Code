@@ -21,11 +21,11 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 | 要做什么                   | 从这里开始                                                                                                          |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 第一次配置、构建和烧录     | [快速开始](docs/01-getting-started.md) → [样例索引](docs/10-samples.md)                                              |
-| 理解工程分层和硬件         | [架构与构建](docs/02-architecture.md) → [板级支持](docs/03-boards.md)                                                |
-| 调电机与控制环             | [DJI](docs/04-drivers-motor-dji.md) / [达妙](docs/05-drivers-motor-dm.md) → [电机工作链路](docs/17-motor-workflow.md) |
-| 做遥控、板间通信和整机应用 | [通信](docs/13-communication.md) → [机器人算法](docs/14-robotics.md) → [应用骨架](docs/15-applications.md)           |
-| 查现场问题                 | [故障排查](docs/12-troubleshooting.md)                                                                               |
+| 第一次配置、构建和烧录     | [快速开始](docs/getting-started/quickstart.md) → [样例索引](docs/getting-started/samples.md)                                              |
+| 理解工程分层和硬件         | [架构与构建](docs/getting-started/architecture.md) → [板级支持](docs/getting-started/boards.md)                                                |
+| 调电机与控制环             | [DJI](docs/modules/drivers/motor-dji.md) / [达妙](docs/modules/drivers/motor-dm.md) → [电机工作链路](docs/guides/motor-workflow.md) |
+| 做遥控、板间通信和整机应用 | [通信](docs/modules/communication/communication.md) → [机器人算法](docs/modules/robotics/robotics.md) → [应用骨架](docs/applications/dual-controller.md)           |
+| 查现场问题                 | [故障排查](docs/guides/troubleshooting.md)                                                                               |
 | 查设计记录和专题分析       | [开发专题索引](docs/dev/README.md)                                                                                   |
 
 交互式架构图的本地打开方法见 [架构浏览器](docs/architecture-browser/README.md)。
@@ -39,7 +39,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 | `dm_mc02/stm32h723xx` | STM32H723，480 MHz | 达妙 MC02，三路 FDCAN、BMI088、遥控/板间串口、电机应用   |
 | `rm_typec`            | STM32F407，168 MHz | RoboMaster Type-C C 板，CAN1/CAN2、BMI088、USB CDC、串口 |
 
-板卡、设备树和烧录器配置位于 `boards/`；详细外设和 runner 见 [03 板级支持](docs/03-boards.md)。
+板卡、设备树和烧录器配置位于 `boards/`；详细外设和 runner 见 [03 板级支持](docs/getting-started/boards.md)。
 
 ### 驱动与控制
 
@@ -122,7 +122,7 @@ skywalker_code/
 6. `samples/` 是已存在的验证入口；`applications/sentry_*` 是需要按真实机器人修改 overlay 和 `src/board_config.hpp` 的应用骨架，不应被描述为开箱即用整机固件。
 7. `tests/motor/regression/` 有电机软件回归测试；控制、通信和安全链路仍需结合样例、日志与硬件台架验证。
 
-电机调试前必须让机构悬空或脱离负载，准备物理断电手段，并先从低限幅开始。完整的安全检查见 [12 故障排查](docs/12-troubleshooting.md)。
+电机调试前必须让机构悬空或脱离负载，准备物理断电手段，并先从低限幅开始。完整的安全检查见 [12 故障排查](docs/guides/troubleshooting.md)。
 
 ## 资料
 

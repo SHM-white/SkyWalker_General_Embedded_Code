@@ -1,11 +1,11 @@
-#include <robotics/command/command_manager.hpp>
+#include <robotics/command/command_arbiter.hpp>
 #include <cassert>
 #include <cerrno>
 #include <cstdio>
 using namespace skywalker;
 using namespace robotics;
 int main() {
-    CommandManager manager(CommandManager::Config{});
+    CommandArbiter manager(CommandArbiter::Config{});
     CommandInputs input{};
     CommandDecision out{};
     core::TimeUs now = 1000000;

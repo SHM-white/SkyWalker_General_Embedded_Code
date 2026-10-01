@@ -1,10 +1,19 @@
 #pragma once
-#include "input_sources.hpp"
+#include <robotics/command/receiver_sources.hpp>
+#include <communication/vision/ab_protocol.hpp>
 #include <robotics/command/command_manager.hpp>
 #include <zephyr/devicetree.h>
 
 namespace bench {
-inline const InputSources::Config inputs{
+struct InputConfig {
+    const device *remote_uart = nullptr, *vision_uart = nullptr, *referee_uart = nullptr;
+    skywalker::communication::RemoteReceiver::Config remote{};
+    skywalker::communication::vision::AbProtocol::Config protocol{};
+    skywalker::communication::vision::VisionReceiver::Config vision{};
+    skywalker::communication::RefereeVersion referee_version = skywalker::communication::RefereeVersion::Rm2026V1_3;
+    std::uint32_t referee_timeout_ms = 500;
+};
+inline const InputConfig inputs{
     .remote_uart = DEVICE_DT_GET(DT_ALIAS(remote_uart)),
     .vision_uart = DEVICE_DT_GET(DT_ALIAS(vision_uart)),
     .referee_uart = DEVICE_DT_GET(DT_ALIAS(referee_uart)),

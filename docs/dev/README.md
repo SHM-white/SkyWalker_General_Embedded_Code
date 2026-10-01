@@ -10,4 +10,4 @@
 | [多品牌电机驱动架构与手工实施指南](多品牌电机驱动重构架构与手工实施指南.md) | 保留架构目标与行为契约；核心对象已落地，当前未完成项以复核指南列出的修复为准。 |
 | [电机驱动审查复核与线程弹性实施指南](电机驱动审查复核与线程弹性实施指南.md) | F1–F6 修复、并发行为验证及目标板测量仍待完成。 |
 
-现行接口和配置入口见 [主题文档](../README.md)、[应用骨架](../15-applications.md)、[通信层](../13-communication.md)、[机器人算法](../14-robotics.md) 和 [电机工作链路](../17-motor-workflow.md)。
+现行接口和配置入口见 [主题文档](../README.md)、[应用骨架](../applications/dual-controller.md)、[通信层](../modules/communication/communication.md)、[机器人算法](../modules/robotics/robotics.md) 和 [电机工作链路](../guides/motor-workflow.md)。

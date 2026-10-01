@@ -2,10 +2,10 @@
 #include <cmath>
 #include <cerrno>
 #include <robotics/command/manual_command_mapper.hpp>
-#include <robotics/command/command_manager.hpp>
+#include <robotics/command/command_arbiter.hpp>
 namespace skywalker::robotics {
 namespace {
-void fillManualMotion(const OperatorIntent &i, const CommandManager::Config &c, RobotCommand &out) {
+void fillManualMotion(const OperatorIntent &i, const CommandArbiter::Config &c, RobotCommand &out) {
     const auto scale = [](float v, float limit) { return std::clamp(v, -1.0f, 1.0f) * limit; };
     out.chassis.mode = ChassisMode::BodyVelocity;
     out.chassis.source = i.source;
@@ -60,8 +60,8 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     out = n;
     return 0;
 }
-CommandManager::CommandManager(const Config &config) : config_(config), config_error_(validateConfig()) {}
-void CommandManager::reset() {
+CommandArbiter::CommandArbiter(const Config &config) : config_(config), config_error_(validateConfig()) {}
+void CommandArbiter::reset() {
     sequence_ = 0;
     previous_mode_ = OperatorMode::Safe;
     auto_entry_us_ = last_step_us_ = override_quiet_since_us_ = 0;
@@ -81,7 +81,7 @@ std::uint32_t permissionReason(const OutputPermission &p, std::uint64_t now, std
     return p.enabled ? 0u : PermissionDenied;
 }
 }
-int CommandManager::validateConfig() const {
+int CommandArbiter::validateConfig() const {
     const float nonnegative[] = {config_.max_chassis_vx_m_s, config_.max_chassis_vy_m_s, config_.max_chassis_wz_rad_s,
                                  config_.max_gimbal_yaw_rate_rad_s, config_.max_gimbal_pitch_rate_rad_s};
     for (float v : nonnegative)
@@ -101,7 +101,7 @@ int CommandManager::validateConfig() const {
     OperatorIntent unused{};
     return ManualCommandMapper(config_.mapper).map(RemoteState{}, unused);
 }
-void CommandManager::updateAutoOverride(OperatorIntent &i, const CommandInputs &in, core::TimeUs now) {
+void CommandArbiter::updateAutoOverride(OperatorIntent &i, const CommandInputs &in, core::TimeUs now) {
     const float magnitude = std::max(std::fabs(i.gimbal_yaw_rate_norm), std::fabs(i.gimbal_pitch_rate_norm));
     if (!manual_override_ && magnitude >= config_.override_enter_norm) {
         manual_override_ = true;
@@ -124,7 +124,7 @@ void CommandManager::updateAutoOverride(OperatorIntent &i, const CommandInputs &
         auto_baseline_sequence_ = in.vision.stamp.valid ? in.vision.stamp.sequence : 0;
     }
 }
-CommandDecision CommandManager::update(const CommandInputs &in) {
+CommandDecision CommandArbiter::update(const CommandInputs &in) {
     const auto now = in.now_us;
     CommandDecision n{};
     const MessageStamp stamp{now / 1000, sequence_ + 1u, true};

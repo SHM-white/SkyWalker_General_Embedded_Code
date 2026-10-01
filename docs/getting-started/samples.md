@@ -1,0 +1,113 @@
+# 10 样例索引
+
+`samples/` 中的每个目录都是独立 Zephyr 应用，拥有自己的 `CMakeLists.txt`、`prj.conf`、overlay 和入口。样例用于功能验证和台架观察，不等同于完整机器人固件。
+
+## 1. 基础与算法
+
+| 样例 | 作用 | 主要前提 |
+|---|---|---|
+| `samples/hello` | 最小启动、UART/VOFA 单通道 | 任一已支持板卡 |
+| `samples/control` | PID、前馈、角度、斜坡等控制算法自检 | 任一已支持板卡 |
+| `samples/imu_test` | 新接口的单板载 BMI088、EKF、温控、VOFA | MC02 板载传感器与 TIM3 CH4 加热 |
+| [samples/imu/dual_imu](../../samples/imu/dual_imu/README.md) | 板载 EKF/温控与 485-2 外置 IMU 同时输出 VOFA | MC02 + 预配置的 DM-IMU-L1 |
+
+```bash
+west build -p -b dm_mc02/stm32h723xx -d build/hello samples/hello
+west build -p -b dm_mc02/stm32h723xx -d build/control samples/control
+west build -p -b dm_mc02/stm32h723xx -d build/imu samples/imu_test
+```
+
+## 2. 通信样例
+
+| 样例 | 作用 | 操作/观察 |
+|---|---|---|
+| `samples/communication/dr16` | RemoteReceiver 接收与 18 字节 DR16 解码 | MC02 UART5 接收，独立 VOFA UART 显示 16 通道；console 查看初始化与异常 |
+| [samples/communication/vision](../../samples/communication/vision/README.md) | AB 视觉指令独立接收与 VOFA 回显 | MC02 UART7 115200 输入，USART1 输出 |
+| `samples/communication/referee` | 裁判串口 CRC 和状态解析 | MC02 USART1，观察权限、功率、buffer 和统计量 |
+| `samples/communication/interboard` | 两块板 UART 板间协议 | 一块默认 Gimbal role，另一块加 `chassis.conf` |
+
+通信样例都只验证消息链路，不自动控制电机。样例级说明还在各自的 `README.md`。
+
+```bash
+west build -p -b dm_mc02/stm32h723xx -d build/dr16 samples/communication/dr16
+west build -p -b dm_mc02/stm32h723xx -d build/referee samples/communication/referee
+west build -p -b dm_mc02/stm32h723xx -d build/interboard-gimbal samples/communication/interboard
+west build -p -b dm_mc02/stm32h723xx -d build/interboard-chassis \
+  -DEXTRA_CONF_FILE=samples/communication/interboard/chassis.conf \
+  samples/communication/interboard
+```
+
+两块板互连时使用 TX→RX、RX→TX 和共地；不要把两个板的同名 TX 直接并联。
+
+## 3. DJI 电机
+
+| 样例 | 作用 |
+|---|---|
+| `samples/motor/can_smoke` | 只接收 CAN 帧并输出观察信息，不发送命令 |
+| `samples/motor/dji_unified` | GM6020 `Motor`/`CanBus` 低电流台架 |
+| `samples/motor/dji_speed_control` | DJI `VelocityMotor` 速度闭环 |
+| `samples/motor/dji_position_control` | DJI `PositionMotor` 位置-速度串级，推荐参考 |
+| `samples/motor/m2006_speed_control` | M2006 + C610，含 36:1 减速比示例 |
+
+```bash
+west build -p -b dm_mc02/stm32h723xx -d build/can-smoke samples/motor/can_smoke
+west build -p -b dm_mc02/stm32h723xx -d build/dji-speed samples/motor/dji_speed_control
+west build -p -b rm_typec -d build/dji-position samples/motor/dji_position_control
+```
+
+上机前必须核对 `src/main.cpp` 中的 motor ID、CAN、零点、减速比和限流；GM6020 还必须确认 current loop。先悬空、低电流，再验证正负方向。
+
+## 4. 达妙电机
+
+| 样例 | 控制层 |
+|---|---|
+| `samples/motor/dm_mit_control` | 原生 MIT 力矩 |
+| `samples/motor/dm_velocity_control` | 电机内置速度模式 |
+| `samples/motor/dm_position_control` | 电机内置位置-速度模式 |
+| `samples/motor/dm_mit_velocity_control` | MIT + SkyWalker 软件速度环 |
+| `samples/motor/dm_mit_position_control` | MIT + SkyWalker 软件位置-速度环 |
+| `samples/motor/recovery` | DJI 或 DM MIT 掉电/总线恢复台架 |
+| `samples/motor/mixed_topology` | DJI 同帧独立组、DM 共用 Master ID、跨 CAN 联动组与独立组故障隔离 |
+
+```bash
+west build -p -b dm_mc02/stm32h723xx -d build/dm-mit \
+  samples/motor/dm_mit_control
+west build -p -b dm_mc02/stm32h723xx -d build/dm-position \
+  samples/motor/dm_mit_position_control
+```
+
+DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致。掉电恢复样例只切电机动力，不切 MCU 电源；反馈恢复后还需再次按 `e` 显式使能。
+
+## 5. 机器人算法台架
+
+| 样例 | 作用 | 是否驱动电机 |
+|---|---|---|
+| `samples/robotics/command_safety` | DR16 → intent → global safety → command | 否，模拟底盘心跳/反馈 |
+| `samples/robotics/yaw_gimbal` | GM6020 Yaw，Hold/Rate/AbsoluteAngle | 是，单电机 |
+| `samples/robotics/swerve` | 单物理舵轮：GM6020 舵向 + M3508 驱动 | 是，单模块 |
+| `samples/robotics/gimbal_control` | DJI + DM 双轴 Group 云台台架 | 是，双轴联动，默认连接未配置 |
+
+典型构建：
+
+```bash
+west build -p -b dm_mc02/stm32h723xx -d build/command-safety \
+  samples/robotics/command_safety
+west build -p -b dm_mc02/stm32h723xx -d build/yaw \
+  samples/robotics/yaw_gimbal
+west build -p -b dm_mc02/stm32h723xx -d build/swerve \
+  samples/robotics/swerve
+```
+
+`dr16`、`command_safety`、`gimbal_control` 统一使用 `RemoteReceiver`；后两者分别保留 10 ms 命令循环和 5 ms 双轴控制循环。DMA 声明和协议参数由各 sample 提供，接收循环由库管理。接入与返回值见 [13 通信](../modules/communication/communication.md)。
+
+键盘操作和默认 GPIO/CAN 配置见各 sample README 及 `src/board_config.hpp`。
+
+## 6. applications 与 samples 的区别
+
+| 路径 | 状态 |
+|---|---|
+| `samples/` | 独立小项目，目标是验证一个驱动/协议/算法 |
+| `applications/sentry_chassis` | 四轮舵底盘双线程应用骨架，默认连接未配置 |
+| `applications/sentry_gimbal` | 云台主控双主控应用骨架，默认连接未配置 |
+
+整机应用的配置和线程关系见 [15 应用骨架](../applications/dual-controller.md)；从遥控到执行器的调用顺序见 [模块联动](../applications/module-integration.md)。
