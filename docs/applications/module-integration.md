@@ -1,99 +1,84 @@
 # 模块联动与调用路线
 
-本文对照当前 samples 与 applications，串起两条常用路径：遥控器到双轴云台，以及云台板到舵轮底盘。公共模块完成数据采集、解析、决策和控制计算；应用负责线程安排、板级对象和本地恢复策略。
+本文按当前源码串起遥控双轴云台样例和双主控应用。公共模块负责收发、仲裁和控制计算；应用持有设备对象、线程和执行恢复逻辑。
 
-## 共同调用约定
+## 公共对象的调用顺序
 
-| 阶段 | 主要对象 | 调用方要负责 |
+| 阶段 | 当前对象 | 调用方责任 |
 |---|---|---|
-| 输入采集 | RemoteReceiver、RefereeReceiver、VisionReceiver、InterBoardEndpoint | 保留原始 stamp，检查有效期和 receiver 状态 |
-| 命令决策 | CommandManager | 单一所有者线程，填好 CommandInputs.now_us |
-| 轴/底盘计算 | GimbalAxis、SwerveChassis、PositionMotor、VelocityMotor | 提供真实 dt_s 和有效反馈 |
-| 电机输出 | Motor、Group、CanBus | 显式使能，周期末提交，每个物理 CAN 一个 CanBus |
+| 输入 | RemoteReceiver、RefereeReceiver、VisionReceiver | 以 source adapter 保留原始 stamp |
+| 采样与仲裁 | RemoteSource、VisionSource、RefereePermissionSource、CommandManager、CommandArbiter | start 前注册；唯一 worker 周期采样 |
+| 输出快照 | CommandSnapshot、RobotCommand | 非消费式读取；消费者自行检查命令时间 |
+| 子系统计算 | GimbalAxis、SwerveChassis、PositionMotor | 有效反馈、实际 dt_s 和明确授权 |
+| 执行与传输 | Motor、Group、CanBus、InterBoardEndpoint | 应用负责使能、撤销、恢复和总线提交 |
 
-CommandManager 不替代本地执行器检查。GimbalAxis 和 SwerveChassis 也不创建线程、不自动 enable、不提交 CAN。任何应用仍须定义何时撤销输出、如何清故障以及哪些新输入允许恢复。
+CommandManager 是后台服务，CommandArbiter 是同步算法。当前接口没有 GlobalSafetyManager 或本地 SafetyManager 类。公共决策负责来源、策略与权限；本地执行器还要检查目标机构的反馈和恢复条件。
 
-## 遥控到双轴云台
+## 遥控到双轴云台台架
 
-独立验证入口为 samples/robotics/gimbal_control。样例中的 RemoteReceiver 负责 UART 和 DR16 解码；一个控制线程读取快照、检查拨杆和时间戳，GimbalAxis 将授权角速度转换为 PositionMotor 目标，Group 负责两轴共同使能与停机。
+samples/robotics/gimbal_control 使用 RemoteReceiver 内部 worker 和一个控制线程，直接消费遥控值；它演示 GimbalAxis、Group 和异品牌/跨 CAN 提交，不走三源 CommandManager 服务。
 
 ~~~text
-DR16 UART → RemoteReceiver → RemoteState + stamp
-                                 │
-                       freshness / switch / estop
-                                 │
-                   GimbalAxis × 2 → PositionMotor × 2
-                                 │
-                    Motor staged command values
-                                 │
-             one CanBus.commit() per physical CAN bus
+DR16 UART → RemoteReceiver → 遥控快照 + 原始时间
+                                │
+                  新鲜度 / 拨杆 / 急停门控
+                                │
+                    GimbalAxis × 2
+                                │
+                     PositionMotor × 2
+                                │
+              Group + 每条物理 CAN 一次 commit
 ~~~
 
-初始化顺序为：静态构造 DMA 与接收器，启动 RemoteReceiver；静态构造 Motor、Group、CanBus 和 GimbalAxis；先 attach 所有组成员，再 start 每条物理 CAN；调用每轴 begin()；待反馈和参考准备完成后 reset 控制器，再由新的明确授权请求 Group::enable()。
+初始化依次构造静态 Receiver/DMA、Motor、Group、CanBus 与各 GimbalAxis；启动接收器，attach 全部 Group 成员，再 start 每条物理 CAN 并调用各轴 begin。反馈与参考 ready 后 reset 控制器，由新授权请求 Group::enable；只有 active 后才周期 update 并 commit。若同一 CAN 控制两个轴，一次 commit；跨 CAN 则每条总线分别提交。
 
-控制周期只在 Group active 后更新目标并提交：
+完整遥控门控和恢复代码见 samples/robotics/gimbal_control/src/main.cpp 与[封装模块调用示例](../modules/call-examples.md)。
 
-~~~cpp
-const int yaw_result = yaw.updateRate(yaw_rate_rad_s, dt_s);
-const int pitch_result =
-    yaw_result == 0 ? pitch.updateRate(pitch_rate_rad_s, dt_s) : 0;
+## sentry_gimbal 命令服务
 
-int commit_result = 0;
-if (yaw_result == 0 && pitch_result == 0)
-    commit_result = yaw_bus.commit().error;
-if (yaw_result == 0 && pitch_result == 0 && commit_result == 0 && split_buses)
-    commit_result = pitch_bus.commit().error;
-
-if (yaw_result < 0 || pitch_result < 0 || commit_result < 0)
-    group.disable();
-~~~
-
-同一 CAN 的两轴一次 commit；跨 CAN 各提交一次。提交只表示命令批次已发布，不表示两条总线同时完成发送。完整门控、重置和遥测见 samples/robotics/gimbal_control/src/main.cpp。
-
-## 双主控命令与执行
-
-当前整机应用由 sentry_gimbal 的命令线程调用 CommandManager。它读取 RemoteReceiver、RefereeReceiver 发布的值和底盘对端状态，输出 RobotCommand。CommandRouter 把云台命令交给本地 GimbalExecutor，并把底盘命令提交到 InterBoardEndpoint。
+当前整机云台应用在启动线程注册 RemoteSource，绑定 RefereePermissionSource，再启动 CommandManager。命令 worker 通过 CommandArbiter 发布 CommandSnapshot。linkTask 读取 snapshot，提交底盘命令和裁判状态到 InterBoardEndpoint；gimbalTask 读取 current() 并交给 GimbalExecutor。
 
 ~~~cpp
-robotics::CommandInputs inputs{};
-inputs.now_us = core::monotonicTimeUs();
-inputs.remote = rc_snapshot.remote;
-inputs.referee = referee_snapshot;
-const auto decision = manager.update(inputs);
+int ret = commands.registerSource(remote_source);
+if (ret == 0) ret = commands.bindPermissions(permission_source);
+if (ret == 0) ret = commands.start();
 
-if (decision.error == 0) {
-    router.route(decision.command); // 本地 GimbalCommand + InterBoardEndpoint::submit
-} else {
-    // 记录错误和 reasons，并让执行器收到 Disabled/无效命令。
+// link task
+CommandSnapshot frame{};
+if (commands.snapshot(frame) == 0) {
+    link.submit(frame.decision.command.chassis);
+    link.setReferee(frame.observed.referee);
 }
+link.poll(k_uptime_get());
+
+// gimbal task
+RobotCommand command{};
+if (commands.current(command) == 0)
+    executor.update(command.gimbal, core::monotonicTimeUs());
 ~~~
 
-sentry_gimbal 的 link 线程单独拥有 InterBoardEndpoint::poll()。底盘端由另一个 InterBoardEndpoint 接收快照；ChassisExecutor 检查 peer heartbeat、命令时间戳、接收方 boot ID、resume generation 和功率约束，再调用 SwerveChassis 与 DjiChassisHardware。该板在本地撤销电机输出，不依赖云台板及时发送停机包。
+当前 sentry_gimbal 没有注册 VisionSource，设置 allow_auto=false；裁判 profile 默认 Unspecified、硬件连接门禁关闭。三源台架 samples/robotics/command_manager 则注册 RemoteSource、VisionSource 和 RefereePermissionSource。
+
+## sentry_chassis 执行链
+
+底盘 linkTask 独占 InterBoardEndpoint::poll()。ChassisExecutor 在控制线程读取 endpoint snapshot，检查 heartbeat、命令原始时间、接收方 boot ID、resume generation 和功率约束；准备完成后调用 SwerveChassis 和 DjiChassisHardware 更新八台 Motor。停机和恢复由本地执行器推进，不依赖远端下一帧及时送达。
 
 ~~~text
-sentry_gimbal
-  Remote / Referee / peer snapshots
-       → CommandManager → CommandRouter
-       → GimbalExecutor → GimbalAxis → Motor / CanBus
-       → InterBoardEndpoint.submit(ChassisCommand)
-
-sentry_chassis
-  InterBoardEndpoint.poll() → endpoint snapshot
-       → ChassisExecutor freshness / boot / generation / power checks
-       → SwerveChassis → DjiChassisHardware
-       → Motor / Group / CanBus
+InterBoardEndpoint → ChassisExecutor local checks
+  → SwerveChassis → DjiChassisHardware
+  → Motor / Group / CanBus → status returned through endpoint
 ~~~
 
-模块调用代码见[封装模块调用示例](../modules/call-examples.md)，应用线程和配置细节见[双主控应用](dual-controller.md)。
+线程与配置细节见[双主控应用](dual-controller.md)，命令来源合同见[后台仲裁服务](../modules/robotics/command-service.md)。
 
-## 验证入口与范围
+## 当前样例边界
 
-| 想验证 | 样例 |
+| 要验证 | 工程 |
 |---|---|
 | DR16 / 裁判 / 板间协议 | samples/communication/dr16、referee、interboard |
-| 多输入命令仲裁 | samples/robotics/command_manager |
-| 安全输入变化 | samples/robotics/command_safety |
+| CommandManager 三源服务 | samples/robotics/command_manager |
+| 命令输入恢复策略 | samples/robotics/command_safety |
 | 单轴或异品牌双轴 | samples/robotics/yaw_gimbal、gimbal_control |
-| 舵轮运动学和执行映射 | samples/robotics/swerve、applications/sentry_chassis |
+| 舵轮算法与硬件映射 | samples/robotics/swerve、applications/sentry_chassis |
 
-台架样例和日志只能显示软件行为。实机还需按目标电机、供电、接线、负载和机械停机方式确认方向、限幅、失联响应与恢复策略。
+应用仍需按真实负载、供电、接线和机械结构核对输出方向、限幅、失联响应与停机行为。

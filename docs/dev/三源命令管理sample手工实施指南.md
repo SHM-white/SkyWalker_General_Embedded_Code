@@ -1,5 +1,7 @@
 # 三源命令管理 sample 手工实施指南
 
+> 状态说明：本指南的 sample 实施工作已完成。当前入口为 [samples/robotics/command_manager/README.md](../../samples/robotics/command_manager/README.md)，实现接口见[命令来源注册与后台仲裁服务记录](命令来源注册与后台仲裁服务实施指南.md)。本文保留原设计决策和逐步施工材料；其中“尚未写入源码”等语句是当时状态，不是当前状态。
+
 日期：2026-09-30。目标目录建议为 `samples/robotics/command_manager/`。
 
 本文安排一个专门观察命令管理的独立 sample：真实遥控器、视觉 AB 串口和裁判串口输入，终端或 VOFA 输出最终仲裁结果。本文是手工实施指南；以下新增接口、文件与代码尚未写入业务源码，也未构建或刷写。

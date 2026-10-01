@@ -220,35 +220,11 @@ void visionTick() {
 
 若启用反馈上行，先把带独立时间戳和 reference 的有效 Feedback 交给 setFeedback；不符合协议字段、有效期或时间偏差时，编码会返回错误，不会填造数据。具体 AB 帧语义见[视觉协议](communication/vision.md)。
 
-## 8. CommandManager
+## 8. 命令服务与同步仲裁
 
-CommandManager 是单写入者仲裁对象。输入使用不同来源的真实 stamp；构造后先检查 configError，周期调用 update，错误时不要发布上轮 command。
+当前 CommandManager 不提供 update(inputs)。它在 start() 后启动后台 worker，通过注册的 ICommandSource 和 IPermissionSource 采样并调用 CommandArbiter；执行/遥测线程读取 snapshot() 或 current()。具体注册代码、生命周期和错误语义见[命令来源与后台仲裁服务](robotics/command-service.md)。
 
-~~~cpp
-robotics::CommandManager::Config manager_config{};
-manager_config.require_referee_for_motion = true;
-manager_config.allow_auto = true;
-robotics::CommandManager manager(manager_config);
-if (manager.configError() < 0) {
-    // 阻止启动并记录配置错误。
-}
-
-robotics::CommandInputs inputs{};
-inputs.now_us = core::monotonicTimeUs();
-inputs.remote = remote_snapshot.remote;
-inputs.vision = vision_snapshot.link.aim;
-inputs.referee = referee_state;
-
-const robotics::CommandDecision decision = manager.update(inputs);
-if (decision.error == 0) {
-    const auto &command = decision.command;
-    // 将命令发给本地执行层和/或板间端点。
-} else {
-    // 用 error 和 reasons() 更新诊断，不转发旧决策。
-}
-~~~
-
-没有组装视觉接收器时设 allow_auto=false。自动模式、手动覆盖、视觉 reference 与裁判许可的完整条件见 samples/robotics/command_manager/src/board_config.hpp 和[机器人模块文档](robotics/robotics.md)。
+若应用自行采集并调度，可直接使用 CommandArbiter::update(CommandInputs)。CommandInputs、CommandDecision 和 CommandArbiter 的同步调用入口也在上述页面。
 
 ## 9. GimbalAxis
 

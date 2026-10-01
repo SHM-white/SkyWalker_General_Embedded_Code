@@ -1,73 +1,19 @@
-# 交互式架构与电机工作链路
+# 交互式架构浏览器
 
-> 命令与安全架构已迁移：[现行命令保险与局部恢复](../modules/robotics/command-recovery.md)。下文旧全局/局部安全链路属于历史说明。
+本地浏览器展示双主控数据流、模块关系和电机异步链路。用 docs/architecture-browser/run.sh 启动本地静态服务器，再打开 http://127.0.0.1:8000。页面没有 npm、CDN 或后台依赖。
 
-[本地页面](index.html) 展示双主控总览、模块目录、实现状态筛选与 [电机详细链路](index.html#motor-workflow)。本轮同步到 `main` 快照 `fcf2c7fbcda02ee1083b8da19c9e2b19f63b837c`，并补入视觉 AB 通信与独立 IMU 架构。页面是软件说明，不连接硬件，不代表实机遥测或机械安全验收。
+架构图由 data.js 的模块基线、app.js 的交互逻辑和 architecture-refresh.js 的更新层组成。当前更新层显示注册式命令来源服务：RemoteSource / VisionSource / RefereePermissionSource → CommandManager worker → CommandArbiter → 非消费式 CommandSnapshot。全量 API、配置和应用状态以[文档中心](../README.md)及当前源码为准。
 
-## 打开
+## 当前代码状态
 
-从仓库根目录执行：
+- CommandManager 是来源注册和后台仲裁服务；同步策略核心是 CommandArbiter。启动前注册 Operator/Aim 来源并绑定许可源，之后消费者用 snapshot() 或 current() 读结果。
+- samples/robotics/command_manager 已接入遥控、视觉和裁判来源；command_safety 只接入遥控。
+- applications/sentry_gimbal 当前只注册 RemoteSource 和 RefereePermissionSource，没有注册 VisionSource，allow_auto=false。board_config 的 RefereeVersion 仍为 Unspecified，connections_configured=false。
+- GimbalExecutor、ChassisExecutor 是应用内部执行封装。旧 GlobalSafetyManager、GimbalLocalSafety、ChassisLocalSafety 和 CommandRouter 类不属于当前源码接口。
+- BMI088、DM-IMU-L1 RS485、ImuReceiver、VisionReceiver 和 AB 协议各自已实现；正式 sentry_gimbal 目前没有将 IMU 或视觉接入命令与姿态反馈主链。外设方向、时序和机械响应仍需实机核验。
 
-```bash
-bash docs/architecture-browser/run.sh
-# 端口可选：bash docs/architecture-browser/run.sh 4174
-```
+交互视图用于解释模块关系，不能替代源文件核对、构建或硬件验收。点击节点查看的源码链接固定到 architecture-refresh.js 中的代码快照；更新源码接口后需同时更新该快照和本说明。
 
-打开 <http://127.0.0.1:4173/architecture-browser/#motor-workflow>，Ctrl+C 结束服务。脚本服务整个 `docs` 目录，因此详情中的 Markdown 链接也能访问；Markdown 可能由浏览器直接显示为文本或下载。
+## 更新边界
 
-也可直接打开 `index.html`。页面无 npm 构建步骤、无 CDN、无后台；GitHub 文件页本身不会执行交互脚本。
-
-## 双主控与感知视图
-
-顶部总览保留三条原有场景，并新增“视觉 / IMU”：
-
-- **正常控制**：DR16 → `CommandManager` → 本地小 Yaw / 板间底盘命令。
-- **视觉 / IMU**：`ImuReceiver`、`VisionReceiver` 的已实现边界，以及 `sentry_gimbal` 仍缺的应用装配与 Manual/Auto 仲裁。
-- **串口掉线**：底盘本地停输出，云台独立降级。
-- **电机掉电恢复**：反馈恢复、generation、连续新命令与重新使能。
-
-模块目录现包含 19 个节点。视觉和 IMU 被明确拆成“模块已实现、主应用未装配”，避免把协议/驱动完成误写成整车自瞄已经可用。
-
-## 当前实现边界
-
-### IMU
-
-`Bmi088Imu`、`DmImuRs485Source`、`ImuState`、`ImuReceiver`、可选 `QuaternionEkf` / `ImuHeater` 已实现。板载 BMI088 与外置 DM-IMU-L1 可发布统一快照，但正式 `sentry_gimbal` 目前没有实例化 `ImuReceiver`，因此姿态尚未进入正式云台控制或视觉反馈链路。RS485 单位、安装方向、四元数方向、持续频率和温控仍需实机确认。
-
-### 视觉
-
-`VisionProtocol` / `VisionLink` / `VisionReceiver` 与 AB 协议已实现：115200 8N1，下行 29 B、上行 43 B。通信层只表达目标和反馈，不持有 IMU、不直接生成 `RobotCommand`。正式 `sentry_gimbal` 尚未实例化 Receiver，也没有完成 Manual/Auto 仲裁；`CommandManager` 当前入口仍是 `OperatorIntent`。
-
-### 电机
-
-统一多品牌核心继续使用 `Motor`、`CanBus`、`Group`、`PositionMotor` / `VelocityMotor`。六种详细场景覆盖目标发送、启动使能、反馈超时、停机竞态、CAN 恢复和锁存故障；`DjiChassisHardware` 使用 1/2 个共享 `CanBus` 管理八台 DJI 电机。
-
-## 文件职责
-
-| 文件 | 职责 |
-| --- | --- |
-| `index.html` | 双板总览、模块详情、电机链路与示例区域；装载 v4 增量脚本 |
-| `data.js` | v3 模块、依赖、接口、源码路径与实现状态基线 |
-| `app.js` | v3 场景讲解、目录筛选与详情面板 |
-| `architecture-refresh.js` | v4 增量：视觉 / IMU 节点、感知场景、应用装配边界与更新基线源码链接 |
-| `styles.css` | 总览与模块浏览器样式 |
-| `motor-flow.js` / `motor-flow.css` | 电机六场景步骤链路、调用示例与交互 |
-| `run.sh` | 仅监听本机的 docs 静态服务器 |
-
-v4 详情中的源码链接固定到上述更新快照，避免文档随 `main` 后续移动而悄悄改变语义。下一次架构、接口或正式应用装配发生变化时，应更新 `architecture-refresh.js` 中的 `UPDATED_COMMIT`、对应节点描述/依赖与本 README；若改动规模继续扩大，再把增量内容折回 `data.js` / `app.js`。
-
-## 检查
-
-```bash
-node --check docs/architecture-browser/data.js
-node --check docs/architecture-browser/app.js
-node --check docs/architecture-browser/architecture-refresh.js
-node --check docs/architecture-browser/motor-flow.js
-bash -n docs/architecture-browser/run.sh
-```
-
-浏览器检查重点：四个总览场景、19 个模块、状态筛选、视觉/IMU 模块详情、六种电机链路、示例复制，以及窄屏布局。页面只在主动点击播放时定时切换，并尊重系统减少动画偏好。
-
-## 发布
-
-既有在线入口：<https://skywalker-architecture-browser.docile-raven-1977.chatgpt.site/>。仓库改动不会自动同步该站点；发布时需一起部署本目录 HTML/CSS/JS 并保留原访问设置，不要提交凭据或访问名单。
+data.js 与 app.js 保留原始图布局。architecture-refresh.js 提供后来加入的模块和当前命令链更新。若更新层与源码冲突，以源码和正式主题文档为准；调整交互场景时同步更新本文件中的当前状态说明。
