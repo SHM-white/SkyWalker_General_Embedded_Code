@@ -15,7 +15,7 @@ lib/control: 纯数值控制、VelocityMotor / PositionMotor
 lib/communication: UART transport、解析器、接收器、消息快照
                  │
                  ▼
-lib/robotics: CommandManager、GimbalAxis、SwerveChassis
+lib/robotics: CommandManager / CommandArbiter、GimbalAxis、SwerveChassis
                  │
                  ▼
 applications / samples: 线程所有权、真实板级绑定、本地执行与恢复

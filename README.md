@@ -47,7 +47,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - 达妙：DM-J4310-2EC V1.1；支持 MIT、位置-速度、速度三种原生 CAN 模式，以及 Enable/Disable/ClearError/SaveZero。
 - 统一 CAN 电机驱动：`CanBus` 管物理传输，`Motor` 管端点，`Group` 声明联动停机；`VelocityMotor`、`PositionMotor` 复用纯 C 控制算法并暂存目标。
 - 纯 C 控制库：PID、前馈、复合前馈 PID、斜坡限幅、角度工具、速度环和位置-速度串级。
-- IMU：BMI088 + `skywalker,imu` + 四元数 EKF + 恒温 PWM；底层使用 Kalman 设备和 CMSIS-DSP。
+- IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM-IMU-L1 通过主动 RS485 帧接入统一快照。
 
 ### 通信与机器人算法
 
@@ -55,7 +55,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - DR16：18 字节帧解码、摇杆死区、拨杆、鼠标/键盘和在线判断。
 - 裁判系统：RM2026 V1.3 profile、CRC8/CRC16、权限和功率快照。
 - 板间协议：固定帧格式、CRC16、序列号、boot_id、resume generation 和四类底盘消息。
-- 机器人算法：人工指令映射、命令管理、全局/局部安全、四轮舵向运动学、Yaw 云台和台架功率限幅。
+- 机器人算法：CommandArbiter 同步仲裁；CommandManager 注册来源并后台发布快照；GimbalAxis、SwerveChassis 和应用私有执行器分别完成子系统计算与本地恢复。
 
 ## 构建一个样例
 
@@ -94,7 +94,7 @@ skywalker_code/
 ├── boards/                     本仓库维护的 Zephyr boards
 ├── dts/bindings/               IMU、Kalman 等设备 binding
 ├── drivers/
-│   ├── imu/                    IMU 设备驱动
+│   ├── imu/                    独立 IMU source 与采集封装
 │   ├── kalman_filter/          通用 Kalman 设备
 │   └── motor/                  共享 CAN I/O、DJI / 达妙协议
 ├── include/                    公共头文件，按 drivers/lib 对应组织

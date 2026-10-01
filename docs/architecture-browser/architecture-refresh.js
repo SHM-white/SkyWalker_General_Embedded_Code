@@ -1,8 +1,8 @@
 'use strict';
 
-// v4 overlay: synchronize the browser with main@fcf2c7f without duplicating the
-// original v3 data/app implementation. Loaded after app.js, then re-renders it.
-const UPDATED_COMMIT = 'fcf2c7fbcda02ee1083b8da19c9e2b19f63b837c';
+// v5 overlay: align command-source service and current application wiring with main@e1ac0a1.
+// The older base nodes are retained where useful, but their current labels are replaced below.
+const UPDATED_COMMIT = 'e1ac0a1';
 const updatedSourceUrl = path =>
   `https://github.com/SHM-white/SkyWalker_General_Embedded_Code/blob/${UPDATED_COMMIT}/${path.split('/').map(encodeURIComponent).join('/')}`;
 
@@ -13,7 +13,7 @@ const imuNode = {
   interfaces: ['ImuReceiver.start() / snapshot() / status()', 'ImuSource: init / service / snapshot', 'Snapshot { sample, fresh_mask, reference, diagnostics }'],
   constraints: ['每个 Source 只有一个采集所有者；使用 Receiver 后应用不得并发调用 init/service', 'Receiver、Source、估计器、Heater 与 DMA 必须覆盖工作线程寿命', '外置 RS485 源不由 MCU PWM 温控', 'DM-IMU 单位、安装方向、四元数方向与持续频率仍需实机确认', '当前正式 sentry_gimbal 没有消费该快照'],
   dependsOn: [], provides: ['vision_auto'],
-  sources: ['include/drivers/imu/imu.hpp', 'include/drivers/imu/imu_receiver.hpp', 'include/drivers/imu/bmi088_imu.hpp', 'include/drivers/imu/dm_imu_rs485.hpp', 'drivers/imu/imu_receiver.cpp', 'drivers/imu/bmi088_imu.cpp', 'drivers/imu/dm_imu_rs485.cpp', 'docs/06-drivers-imu.md'],
+  sources: ['include/drivers/imu/imu.hpp', 'include/drivers/imu/imu_receiver.hpp', 'include/drivers/imu/bmi088_imu.hpp', 'include/drivers/imu/dm_imu_rs485.hpp', 'drivers/imu/imu_receiver.cpp', 'drivers/imu/bmi088_imu.cpp', 'drivers/imu/dm_imu_rs485.cpp', 'docs/modules/drivers/imu.md'],
 };
 const visionNode = {
   id: 'vision_link', lane: 'gimbal', order: 9, status: 'verify', kicker: 'vision UART', title: 'VisionReceiver / AB 协议',
@@ -22,7 +22,7 @@ const visionNode = {
   interfaces: ['VisionReceiver.start() / snapshot() / setFeedback()', 'VisionLink.processRxBytes() / encodeFeedback()', 'AbProtocol: VisionToGimbal 29 B / GimbalToVision 43 B'],
   constraints: ['AB 固定 115200 8N1；CRC 与 DM-IMU 算法不同', 'mode=0 是合法停止消息，会清空 active 目标', 'fire_requested 是电平请求，不是可靠离散发射事件队列', '反馈字段必须按各自时间戳和 reference 校验，过期时不得填造发送', 'Receiver、Protocol 与独占 nocache DMA 必须长期存活', '真实 UART、上位机配置和坐标约定仍待实机验证'],
   dependsOn: [], provides: ['vision_auto'],
-  sources: ['include/communication/vision/vision_protocol.hpp', 'include/communication/vision/vision_link.hpp', 'include/communication/vision/vision_receiver.hpp', 'include/communication/vision/ab_protocol.hpp', 'lib/communication/vision_link.cpp', 'lib/communication/vision_receiver.cpp', 'lib/communication/vision_ab_protocol.cpp', 'docs/18-vision.md'],
+  sources: ['include/communication/vision/vision_protocol.hpp', 'include/communication/vision/vision_link.hpp', 'include/communication/vision/vision_receiver.hpp', 'include/communication/vision/ab_protocol.hpp', 'lib/communication/vision_link.cpp', 'lib/communication/vision_receiver.cpp', 'lib/communication/vision_ab_protocol.cpp', 'docs/modules/communication/vision.md'],
 };
 for (const node of [imuNode, visionNode]) {
   if (!byId[node.id]) {
@@ -33,7 +33,7 @@ for (const node of [imuNode, visionNode]) {
 
 Object.assign(byId.command_manager, {
   description: '统一生成 chassis、gimbal、shooter 命令快照和 producer sequence。当前 step() 入口仍是 OperatorIntent；正式应用只接入 ManualCommandMapper，视觉 Auto 尚未装配。',
-  sources: ['include/robotics/command/command_manager.hpp', 'include/robotics/messages/command.hpp', 'lib/robotics/command.cpp', 'applications/sentry_gimbal/src/main.cpp'],
+  sources: ['include/robotics/command/command_manager.hpp', 'include/robotics/command/command_arbiter.hpp', 'include/robotics/command/command_source.hpp', 'include/robotics/command/receiver_sources.hpp', 'lib/robotics/command_manager.cpp', 'applications/sentry_gimbal/src/main.cpp'],
 });
 if (!byId.command_manager.constraints.includes('不存在可直接提交 VisionTarget 的 AutonomousIntent API'))
   byId.command_manager.constraints.push('不存在可直接提交 VisionTarget 的 AutonomousIntent API');
@@ -49,12 +49,12 @@ Object.assign(byId.vision_auto, {
   constraints: ['视觉目标不能绕过 GlobalSafetyManager / GimbalLocalSafety', '必须按 aim_fresh、IMU fresh_mask 与 reference 判断数据时效', '需要明确人工/自瞄切换和失联回退策略', 'fire_requested 不能直接当成不会丢失的单发事件', '不要把通信模块已实现等同于 sentry_gimbal 已接入'],
   dependsOn: ['vision_link', 'imu_stack'],
   provides: [],
-  sources: ['docs/18-vision.md', 'docs/06-drivers-imu.md', 'docs/dev/视觉与IMU独立模块最终规划.md', 'applications/sentry_gimbal/src/main.cpp', 'include/robotics/command/command_manager.hpp'],
+  sources: ['docs/modules/communication/vision.md', 'docs/modules/drivers/imu.md', 'applications/sentry_gimbal/src/main.cpp', 'include/robotics/command/command_manager.hpp'],
 });
 byId.shooter.order = 11;
 byId.shooter.sources = ['include/robotics/messages/command.hpp', 'docs/dev/双主控框架使用说明.md'];
 byId.reset_event.sources = ['docs/dev/双主控框架使用说明.md', 'include/communication/interboard/interboard_protocol.hpp'];
-if (!byId.async_uart.sources.includes('docs/16-uart-dma-nocache.md')) byId.async_uart.sources.push('docs/16-uart-dma-nocache.md');
+if (!byId.async_uart.sources.includes('docs/guides/uart-dma.md')) byId.async_uart.sources.push('docs/guides/uart-dma.md');
 if (!byId.motor_layer.sources.includes('drivers/motor/group.cpp')) byId.motor_layer.sources.splice(-1, 0, 'drivers/motor/group.cpp');
 
 plain.command_manager = ['决定机器人要做什么', '把人工 OperatorIntent 变成带单位的目标，再交给 Router 分发。当前正式入口还没有视觉专用命令类型。', 'OperatorIntent + GlobalSafetyDecision', 'RobotCommand：底盘、云台、发射机构目标与序号'];
@@ -107,5 +107,113 @@ const readiness=document.querySelector('.readiness-grid article:nth-child(1) p')
 const todoTitle=document.querySelector('.readiness-grid article:nth-child(3) h3');if(todoTitle)todoTitle.textContent='应用装配与离散事件扩展';
 const footer=document.querySelector('footer span');if(footer)footer.textContent='架构阅读视图 · v4 · 同步视觉 / IMU 与统一电机层';
 
+renderCatalog();
+setScene('manual');
+
+// Current command path overlay.
+const commandSourcesNode = {
+  id: 'command_sources', lane: 'gimbal', order: 3.5, status: 'done',
+  kicker: 'robotics/command', title: 'Registered input sources',
+  summary: 'Operator / Aim / Permission adapters',
+  description: 'RemoteSource、VisionSource 与 RefereePermissionSource 将 receiver 快照适配到统一来源接口。每个角色最多一个来源；启动后来源与 receiver 保持静态生命周期。',
+  interfaces: ['ICommandSource::role / start / sample', 'IPermissionSource::start / sample', 'SourceDiagnostics'],
+  constraints: ['CommandManager::start 前注册来源', '读取保留原始 stamp，不刷新来源有效期', 'RefereePermissionSource 在仲裁 worker 中轮询 RefereeReceiver'],
+  dependsOn: ['inputs'], provides: ['command_manager'],
+  sources: ['include/robotics/command/command_source.hpp', 'include/robotics/command/receiver_sources.hpp', 'lib/robotics/receiver_sources.cpp'],
+};
+if (!byId.command_sources) {
+  nodes.push(commandSourcesNode);
+  byId.command_sources = commandSourcesNode;
+}
+Object.assign(byId.global_safety, {
+  title: 'CommandArbiter',
+  kicker: 'robotics/command',
+  summary: '同步决策核心',
+  description: 'GlobalSafetyManager 已移除。CommandArbiter 接收 CommandInputs，按操作者模式、来源 freshness、视觉 reference 和裁判许可生成 CommandDecision；应用执行器仍负责本地硬件条件与恢复。',
+  interfaces: ['CommandArbiter::update(const CommandInputs&)', 'CommandArbiter::configError / reset'],
+  constraints: ['单线程所有者调用 update/reset', '来源时间戳不可在拷贝时刷新', '不是完整的电机执行安全管理器'],
+  dependsOn: ['manual_mapper', 'inputs'], provides: ['command_manager'],
+  sources: ['include/robotics/command/command_arbiter.hpp', 'include/robotics/command/command_inputs.hpp', 'lib/robotics/command.cpp'],
+});
+Object.assign(byId.command_manager, {
+  title: 'CommandManager service',
+  kicker: 'robotics/command',
+  summary: '注册来源 → 仲裁 worker → snapshots',
+  description: 'CommandManager 管来源注册、启动与后台采样；worker 调用 CommandArbiter 并发布完整 CommandSnapshot。它不是同步 update(inputs) 接口，不操作电机。',
+  interfaces: ['registerSource / bindPermissions / start', 'current(RobotCommand&) / snapshot(CommandSnapshot&)'],
+  constraints: ['start 前注册，至少一个 Operator 来源', '最多一个 Operator 与一个 Aim 来源', 'snapshot/current 非消费式且不刷新时间', '无 stop/restart；sources 和 receivers 静态存活'],
+  dependsOn: ['command_sources', 'global_safety'], provides: ['command_router'],
+  sources: ['include/robotics/command/command_manager.hpp', 'include/robotics/command/command_source.hpp', 'lib/robotics/command_manager.cpp'],
+});
+Object.assign(byId.command_router, {
+  title: 'CommandSnapshot consumers',
+  kicker: 'application threads',
+  summary: 'linkTask / gimbalTask consume independent copies',
+  description: '当前 sentry_gimbal 没有 CommandRouter 类。linkTask 读取 CommandSnapshot 并发布板间消息；gimbalTask 读取 current() 并调用 GimbalExecutor。',
+  interfaces: ['CommandManager::snapshot', 'CommandManager::current', 'InterBoardEndpoint::submit / poll'],
+  constraints: ['读取不消费结果、不延长命令 stamp', '不同线程的两次读取可能不是同一 sequence', '消费者仍需执行本地超时与状态检查'],
+  dependsOn: ['command_manager'], provides: ['gimbal_safety', 'interboard_codec'],
+  sources: ['applications/sentry_gimbal/src/main.cpp', 'include/communication/interboard/interboard_endpoint.hpp'],
+});
+Object.assign(byId.gimbal_safety, {
+  title: 'GimbalExecutor (application)',
+  kicker: 'application execution',
+  summary: '单 yaw 初始化、执行与恢复',
+  description: 'GimbalLocalSafety 已移除。应用私有 GimbalExecutor 组合 CanBus、Motor 与 GimbalAxis，执行命令 freshness、反馈准备、显式使能和本地恢复。',
+  interfaces: ['GimbalExecutor::begin / update', 'GimbalAxis::poll / reset / update'],
+  constraints: ['board_config::connections_configured 默认为 false', '当前没有注册 VisionSource', '急停硬件输入仍需按机器人接入'],
+  dependsOn: ['command_router', 'motor_layer'], provides: ['yaw_gimbal'],
+  sources: ['applications/sentry_gimbal/src/gimbal_executor.hpp', 'applications/sentry_gimbal/src/gimbal_executor.cpp', 'include/robotics/gimbal/gimbal_axis.hpp'],
+});
+Object.assign(byId.chassis_safety, {
+  title: 'ChassisExecutor (application)',
+  kicker: 'application execution',
+  summary: '板间上下文、本地底盘恢复与功率门控',
+  description: 'ChassisLocalSafety 已移除。ChassisExecutor 读取 InterBoardEndpoint 快照，检查命令年龄、boot/generation、反馈和功率条件，再协调 SwerveChassis 与 DjiChassisHardware。',
+  interfaces: ['ChassisExecutor::begin / update', 'InterBoardEndpoint::snapshot'],
+  constraints: ['connections_configured 默认为 false', 'power_model_calibrated 默认为 false', '本地执行器自行撤销输出'],
+  dependsOn: ['async_uart', 'swerve', 'chassis_hardware'], provides: ['power_limiter'],
+  sources: ['applications/sentry_chassis/src/chassis_executor.hpp', 'applications/sentry_chassis/src/chassis_executor.cpp', 'applications/sentry_chassis/src/chassis_hardware.cpp'],
+});
+plain.global_safety = ['仲裁命令输入与许可', '当前由同步 CommandArbiter 处理命令策略；旧 GlobalSafetyManager 不在源码中。', 'CommandInputs', 'CommandDecision'];
+plain.command_manager = ['采样来源并发布完整决策', 'CommandManager 启动来源和后台 worker，调用 CommandArbiter，再发布可重复读取的 CommandSnapshot。', 'ICommandSource / IPermissionSource', 'CommandSnapshot / RobotCommand'];
+plain.command_sources = ['适配通信来源', 'RemoteSource、VisionSource 与 RefereePermissionSource 保留底层接收器的原始测量时间。', 'Receiver snapshots', 'SourceSample + SourceDiagnostics'];
+plain.command_router = ['应用线程读取命令', '当前没有独立 CommandRouter 类；linkTask 和 gimbalTask 分别读 snapshot/current 并调用本地接口。', 'CommandSnapshot', 'InterBoardEndpoint / GimbalExecutor'];
+plain.gimbal_safety = ['本地云台执行', 'GimbalExecutor 是应用私有封装，负责反馈、命令年龄和执行器恢复；旧 GimbalLocalSafety 已删除。', 'RobotCommand::gimbal + Motor snapshot', 'GimbalAxis → Motor / CanBus'];
+plain.chassis_safety = ['本地底盘执行', 'ChassisExecutor 在本机检查 peer、命令时间和恢复代次；旧 ChassisLocalSafety 已删除。', 'InterBoardEndpoint::Snapshot', 'SwerveChassis / DjiChassisHardware'];
+plain.vision_auto = ['视觉输入进入命令仲裁', '三源台架已注册 VisionSource；正式 sentry_gimbal 仍未注册 VisionSource，也没有装配 IMU 反馈与云台视觉闭环。', 'VisionReceiver → VisionSource(Aim)', 'CommandArbiter → CommandSnapshot'];
+stageMap.command_sources = 'inputs';
+stageMap.global_safety = 'command';
+stageMap.command_router = 'command';
+stageMap.gimbal_safety = 'yaw';
+stageMap.chassis_safety = 'safety';
+byId.vision_auto.description = 'CommandArbiter 与 VisionSource 已支持台架级 Aim 输入；samples/robotics/command_manager 已接线。正式 sentry_gimbal 只注册 RemoteSource 和 RefereePermissionSource，未注册 VisionSource，因此自动瞄准仍未接入应用。';
+byId.vision_auto.interfaces = ['current sample: VisionSource → CommandManager worker', 'current application: RemoteSource + RefereePermissionSource', 'future: IMU feedback producer → vision protocol feedback'];
+byId.vision_auto.constraints = ['正式应用 allow_auto=false', '必须配置新的 Aim 来源并核对 reference 与超时', '视觉模块已实现不代表自瞄执行已接入', 'fire_requested 不是可靠的单发事件队列'];
+byId.vision_auto.sources = ['include/robotics/command/receiver_sources.hpp', 'samples/robotics/command_manager/src/main.cpp', 'applications/sentry_gimbal/src/main.cpp', 'docs/modules/robotics/command-service.md'];
+plain.vision_auto = ['接入正式自瞄流程', '仲裁核心和视觉 source adapter 已存在，缺口在正式应用装配、姿态反馈生产者和最终轴控制闭环。', 'VisionSource + policy + optional IMU feedback', '新鲜且 reference 合法的云台目标'];
+scenes.manual = {title:'看命令服务',summary:'来源在启动前注册；后台 CommandManager 调用 CommandArbiter 并发布非消费式快照。',steps:[
+  ['command_sources','RemoteSource、VisionSource 和 RefereePermissionSource 适配 receiver，不重置原始时间戳。'],
+  ['command_manager','启动线程先注册至少一个 Operator 来源，按策略绑定权限源，再调用 start。'],
+  ['global_safety','CommandManager worker 周期采样并调用同步 CommandArbiter，执行来源时效、Auto/Manual 与许可策略。'],
+  ['command_router','消费者调用 snapshot/current 取得副本；读快照不会推进输入时间或消费本次输出。'],
+  ['gimbal_safety','应用 GimbalExecutor 将最终云台命令与本地 Motor 反馈和恢复条件结合。'],
+  ['chassis_safety','底盘 ChassisExecutor 在本地检查板间上下文、命令新鲜度和输出准备。']
+]};
+scenes.timeout = {title:'看输入过期',summary:'来源使用原始 stamp；过期输入不能通过重复读取或重新发布而续命。',steps:[
+  ['command_sources','来源错误和 receiver 状态写入 diagnostics；无新帧时仍保留原始时间。'],
+  ['command_manager','后台 worker 持续调用 CommandArbiter，按各自 timeout 生成 Disabled / Hold 决策。'],
+  ['command_router','snapshot/current 只是非消费式读取，不会刷新 command stamp。'],
+  ['gimbal_safety','GimbalExecutor 检查本地命令期限和反馈；无效时撤销云台输出。'],
+  ['chassis_safety','ChassisExecutor 独立检查 peer heartbeat、命令时间、boot 与恢复代次。']
+]};
+scenes.recovery = {title:'看恢复边界',summary:'输入恢复与电机重新运动是两个阶段；应用须验证本地反馈并等待新的合法命令。',steps:[
+  ['command_sources','新的有效来源样本沿用新的生产时间与序号。'],
+  ['command_manager','worker 发布新决策；读取者可观察 sequence 与来源诊断。'],
+  ['gimbal_safety','执行器重新检查参考与反馈，按新授权 reset 后显式 enable。'],
+  ['chassis_safety','底盘确认当前 peer boot/generation 与本地恢复上下文匹配后再准备电机。'],
+  ['motor_layer','CanBus 异步提交和安全帧结果不等于机械停止或立即恢复。']
+]};
+nodes.sort((a,b)=>lanes.findIndex(l=>l.id===a.lane)-lanes.findIndex(l=>l.id===b.lane)||a.order-b.order);
 renderCatalog();
 setScene('manual');

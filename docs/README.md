@@ -11,7 +11,7 @@
 | 控制 DJI / 达妙电机 | [DJI](modules/drivers/motor-dji.md) 或 [达妙](modules/drivers/motor-dm.md) → [统一电机控制器](modules/control/motor-control.md) → [电机工作流](guides/motor-workflow.md) |
 | 读取 IMU 或姿态 | [IMU](modules/drivers/imu.md) → [Kalman 与矩阵](modules/drivers/kalman-matrix.md) → [双 IMU 样例](../samples/imu/dual_imu/README.md) |
 | 接收遥控、裁判或板间消息 | [通信模块](modules/communication/communication.md) → [调用示例](modules/call-examples.md) |
-| 从命令走到云台或底盘 | [机器人模块](modules/robotics/robotics.md) → [模块联动](applications/module-integration.md) |
+| 从命令走到云台或底盘 | [命令来源服务](modules/robotics/command-service.md) → [机器人模块](modules/robotics/robotics.md) → [模块联动](applications/module-integration.md) |
 | 配置双主控应用 | [双主控应用](applications/dual-controller.md) → [模块联动](applications/module-integration.md) |
 | 查现场问题 | [调试与观测](guides/debugging.md) → [故障排查](guides/troubleshooting.md)；UART DMA 专项见 [说明](guides/uart-dma.md) |
 
@@ -32,7 +32,7 @@
 | drivers/imu、kalman_filter | [IMU](modules/drivers/imu.md)、[Kalman 与矩阵](modules/drivers/kalman-matrix.md) | ImuSource、ImuReceiver、QuaternionEkf |
 | lib/control | [控制算法](modules/control/algorithms.md)、[电机控制器](modules/control/motor-control.md) | C PID、VelocityMotor、PositionMotor |
 | lib/communication | [UART、遥控、裁判、板间](modules/communication/communication.md)、[视觉](modules/communication/vision.md) | AsyncUart、RemoteReceiver、RefereeReceiver、InterBoardEndpoint、VisionReceiver |
-| lib/robotics | [命令、云台、舵轮](modules/robotics/robotics.md)、[命令恢复](modules/robotics/command-recovery.md) | CommandManager、GimbalAxis、SwerveChassis |
+| lib/robotics | [命令来源服务](modules/robotics/command-service.md)、[云台与舵轮](modules/robotics/robotics.md)、[恢复](modules/robotics/command-recovery.md) | CommandManager、CommandArbiter、GimbalAxis、SwerveChassis |
 | 所有封装对象 | [调用示例手册](modules/call-examples.md) | 初始化、快照、周期更新与错误路径 |
 
 ### 工作流与应用
