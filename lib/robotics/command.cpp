@@ -60,48 +60,15 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     out = n;
     return 0;
 }
-int CommandManager::reset(std::uint64_t) {
+CommandManager::CommandManager(const Config &config) : config_(config), config_error_(validateConfig()) {}
+void CommandManager::reset() {
     sequence_ = 0;
     previous_mode_ = OperatorMode::Safe;
     auto_entry_us_ = last_step_us_ = override_quiet_since_us_ = 0;
     auto_baseline_sequence_ = last_seen_vision_sequence_ = 0;
     have_vision_sequence_ = have_step_time_ = manual_override_ = have_override_quiet_time_ = false;
-    return 0;
 }
-int CommandManager::step(const OperatorIntent &i, const GlobalSafetyDecision &s, std::uint64_t now, RobotCommand &out) {
-    const float values[] = {i.chassis_vx_norm, i.chassis_vy_norm, i.chassis_wz_norm, i.gimbal_yaw_rate_norm,
-                            i.gimbal_pitch_rate_norm};
-    for (float v : values)
-        if (!std::isfinite(v))
-            return -EINVAL;
-    const float limits[] = {config_.max_chassis_vx_m_s, config_.max_chassis_vy_m_s, config_.max_chassis_wz_rad_s,
-                            config_.max_gimbal_yaw_rate_rad_s, config_.max_gimbal_pitch_rate_rad_s};
-    for (float v : limits)
-        if (!std::isfinite(v) || v < 0)
-            return -EINVAL;
-    if (i.mode > OperatorMode::Auto || i.source > ControlSource::Autonomous || s.chassis > SafetyAction::Active ||
-        s.gimbal > SafetyAction::Active || s.shooter > SafetyAction::Active)
-        return -EINVAL;
-    RobotCommand n{};
-    n.stamp = {now, sequence_ + 1, true};
-    n.chassis.stamp = n.gimbal.stamp = n.shooter.stamp = n.stamp;
-    const bool fresh = isFresh(i.stamp, now, config_.input_timeout_ms) &&
-                       isFresh(s.stamp, now, config_.input_timeout_ms);
-    // Autonomous and discrete shooter events require a separate future producer.
-    if (fresh && i.mode == OperatorMode::Manual) {
-        fillManualMotion(i, config_, n);
-        if (s.chassis != SafetyAction::Active)
-            n.chassis = {};
-        if (s.gimbal != SafetyAction::Active)
-            n.gimbal = {};
-    }
-    if (fresh && s.gimbal == SafetyAction::Hold)
-        n.gimbal.mode = GimbalMode::Hold;
-    n.chassis.stamp = n.gimbal.stamp = n.shooter.stamp = n.stamp;
-    out = n;
-    ++sequence_;
-    return 0;
-}
+
 }
 
 namespace skywalker::robotics {
@@ -114,7 +81,7 @@ std::uint32_t permissionReason(const OutputPermission &p, std::uint64_t now, std
     return p.enabled ? 0u : PermissionDenied;
 }
 }
-int CommandManager::validate() const {
+int CommandManager::validateConfig() const {
     const float nonnegative[] = {config_.max_chassis_vx_m_s, config_.max_chassis_vy_m_s, config_.max_chassis_wz_rad_s,
                                  config_.max_gimbal_yaw_rate_rad_s, config_.max_gimbal_pitch_rate_rad_s};
     for (float v : nonnegative)
@@ -157,15 +124,16 @@ void CommandManager::updateAutoOverride(OperatorIntent &i, const CommandInputs &
         auto_baseline_sequence_ = in.vision.stamp.valid ? in.vision.stamp.sequence : 0;
     }
 }
-int CommandManager::step(const CommandInputs &in, core::TimeUs now, CommandDecision &out) {
+CommandDecision CommandManager::update(const CommandInputs &in) {
+    const auto now = in.now_us;
     CommandDecision n{};
     const MessageStamp stamp{now / 1000, sequence_ + 1u, true};
     const auto finish = [&](int ret) {
         n.requested.stamp = n.requested.chassis.stamp = n.requested.gimbal.stamp = n.requested.shooter.stamp = stamp;
         n.command.stamp = n.command.chassis.stamp = n.command.gimbal.stamp = n.command.shooter.stamp = stamp;
         sequence_ = stamp.sequence;
-        out = n;
-        return ret;
+        n.error = ret;
+        return n;
     };
     const auto disable = [&](std::uint32_t reason, int ret) {
         previous_mode_ = OperatorMode::Safe;
@@ -173,7 +141,7 @@ int CommandManager::step(const CommandInputs &in, core::TimeUs now, CommandDecis
         n.chassis_reasons = n.gimbal_reasons = n.shooter_reasons = reason;
         return finish(ret);
     };
-    if (validate() < 0)
+    if (config_error_ < 0)
         return disable(InvalidManagerConfig, -EINVAL);
     if (have_step_time_ && now < last_step_us_)
         return disable(ClockRegression, -ESTALE);
@@ -195,6 +163,8 @@ int CommandManager::step(const CommandInputs &in, core::TimeUs now, CommandDecis
     n.operator_mode = i.mode;
     if (i.mode == OperatorMode::Safe)
         return disable(SafeRequested, 0);
+    if (i.mode == OperatorMode::Auto && !config_.allow_auto)
+        return disable(AutoUnavailable, 0);
     if (i.mode == OperatorMode::Auto) {
         if (previous_mode_ != OperatorMode::Auto) {
             auto_entry_us_ = now;
@@ -279,9 +249,9 @@ int CommandManager::step(const CommandInputs &in, core::TimeUs now, CommandDecis
     }
     n.command = n.requested;
     const auto &robot = in.referee.robot;
-    const auto cr = permissionReason(robot.chassis_output, ms, config_.permission_timeout_ms);
-    const auto gr = permissionReason(robot.gimbal_output, ms, config_.permission_timeout_ms);
-    const auto sr = permissionReason(robot.shooter_output, ms, config_.permission_timeout_ms);
+    const auto cr = config_.require_referee_for_motion ? permissionReason(robot.chassis_output, ms, config_.permission_timeout_ms) : 0u;
+    const auto gr = config_.require_referee_for_motion ? permissionReason(robot.gimbal_output, ms, config_.permission_timeout_ms) : 0u;
+    const auto sr = config_.require_referee_for_motion ? permissionReason(robot.shooter_output, ms, config_.permission_timeout_ms) : 0u;
     n.chassis_reasons |= cr;
     n.gimbal_reasons |= gr;
     n.shooter_reasons |= sr;

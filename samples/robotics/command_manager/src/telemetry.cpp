@@ -43,13 +43,13 @@ int Telemetry::start(const device *uart) {
     return 0;
 #endif
 }
-void Telemetry::emit(const InputFrame &f, const robotics::CommandDecision &d, int error) {
+void Telemetry::emit(const InputFrame &f, const robotics::CommandDecision &d) {
     const auto now = static_cast<std::uint64_t>(k_uptime_get());
     const auto &c = d.command;
     if (now >= next_log_ms_) {
         next_log_ms_ = now + 100;
         LOG_INF("seq=%u mode=%s override=%u quiet=%u error=%d reasons(c/g/s)=%08x/%08x/%08x", c.stamp.sequence,
-                mode(d.operator_mode), unsigned(d.manual_override), unsigned(d.override_quiet), error,
+                mode(d.operator_mode), unsigned(d.manual_override), unsigned(d.override_quiet), d.error,
                 d.chassis_reasons, d.gimbal_reasons, d.shooter_reasons);
         LOG_INF(
             "chassis[%u %s] v=%.2f/%.2f/%.2f gimbal[%u %s] q=%.2f/%.2f rate=%.2f/%.2f shooter[%u %s] hz=%.2f speed=%.2f",
@@ -58,12 +58,12 @@ void Telemetry::emit(const InputFrame &f, const robotics::CommandDecision &d, in
             double(c.gimbal.yaw_target_rad), double(c.gimbal.pitch_target_rad), double(c.gimbal.yaw_rate_rad_s),
             double(c.gimbal.pitch_rate_rad_s), unsigned(c.shooter.mode), source(c.shooter.source),
             double(c.shooter.fire_rate_hz), double(c.shooter.requested_bullet_speed_m_s));
-        const auto &r = f.commands.referee.robot;
-        const auto &v = f.commands.vision.stamp;
+        const auto &r = f.inputs.referee.robot;
+        const auto &v = f.inputs.vision.stamp;
         const long long va = v.valid && now >= v.time_us / 1000 ? static_cast<long long>(now - v.time_us / 1000) : -1;
         LOG_INF(
             "age_ms(-1=NA) rc=%lld vision=%lld permit(g/c/s)=%lld/%lld/%lld state(rc/v)=%u/%u uart=%d/%d/%d drop=%u/%u/%u ref_reset=%u vofa=%u/%d",
-            age(f.commands.remote.stamp, now), va, age(r.gimbal_output.stamp, now), age(r.chassis_output.stamp, now),
+            age(f.inputs.remote.stamp, now), va, age(r.gimbal_output.stamp, now), age(r.chassis_output.stamp, now),
             age(r.shooter_output.stamp, now), unsigned(f.remote_state), unsigned(f.vision_state), f.remote_error,
             f.vision_error, f.referee_error, f.remote_dropped, f.vision_dropped, f.referee_dropped, f.referee_resets,
             vofa_rejected_, last_vofa_error_);

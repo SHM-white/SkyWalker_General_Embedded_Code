@@ -10,7 +10,7 @@ using namespace skywalker;
 namespace vision = communication::vision;
 
 struct InputFrame {
-    robotics::CommandInputs commands{};
+    robotics::CommandInputs inputs{};
     communication::RemoteReceiver::State remote_state{};
     vision::VisionReceiver::State vision_state{};
     int remote_error = 0, vision_error = 0, referee_error = 0;

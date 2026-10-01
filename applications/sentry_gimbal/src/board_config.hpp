@@ -73,11 +73,4 @@ inline skywalker::control::PositionMotor::Config motorConfig(const skywalker::mo
     c.loop.velocity.effort_abs_max = 0.3f;
     return c;
 }
-// Wire a physical estop/reset input here. Safe on the RC is a recoverable disable.
-inline bool emergencyStopRequested() {
-    return false;
-}
-inline bool takeEmergencyResetRequest() {
-    return false;
-}
-}
+} // namespace board_config

@@ -27,6 +27,7 @@ public:
     int arm();
     int apply(const skywalker::robotics::ChassisOutput &output, float effort_scale);
     int clearFault();
+    bool hasBlockingFault() const;
 
     bool ready() const {
         return ready_;
@@ -59,7 +60,7 @@ private:
     std::array<skywalker::motor::dji::Descriptor, 8> descriptors_{};
     std::array<std::uint64_t, 8> stamps_{}, first_stamps_{}, references_{};
     std::array<std::uint8_t, 8> motor_bus_index_{};
-    std::size_t bus_count_ = 0;
+    std::size_t bus_count_ = 0, attached_count_ = 0, started_count_ = 0;
     bool initialized_ = false, ready_ = false, stable_ = false, stopped_ = true;
     std::uint64_t stable_since_ms_ = 0, next_retry_ms_ = 0;
     float estimated_power_w_ = 0;

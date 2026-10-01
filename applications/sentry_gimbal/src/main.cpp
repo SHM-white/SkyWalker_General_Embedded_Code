@@ -1,314 +1,76 @@
-#include <algorithm>
-#include <cerrno>
-#include <limits>
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
-#include <zephyr/random/random.h>
-#include <communication/async_uart.hpp>
+#include <core/clock.hpp>
 #include <communication/remote/remote_receiver.hpp>
-#include <communication/referee/referee_service.hpp>
-#include <communication/interboard/interboard_link.hpp>
-#include <drivers/motor/can_bus.hpp>
-#include <drivers/motor/motor.hpp>
-#include <robotics/command/manual_command_mapper.hpp>
+#include <communication/referee/referee_receiver.hpp>
 #include <robotics/command/command_manager.hpp>
-#include <robotics/safety/global_safety_manager.hpp>
-#include <robotics/safety/gimbal_local_safety.hpp>
-#include "board_config.hpp"
+#include <zephyr/logging/log.h>
 #include "command_router.hpp"
+#include "gimbal_executor.hpp"
 LOG_MODULE_REGISTER(sentry_gimbal, LOG_LEVEL_INF);
 using namespace skywalker;
 using namespace skywalker::robotics;
 namespace {
-static communication::AsyncUart::DmaBuffers remote_dma_buffers __nocache;
-communication::RemoteReceiver remote_receiver(board_config::remote_uart, remote_dma_buffers, {});
+communication::AsyncUart::DmaBuffers remote_dma __nocache;
+communication::AsyncUart::DmaBuffers link_dma __nocache;
+communication::AsyncUart::DmaBuffers referee_dma __nocache;
+communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, {});
+communication::InterBoardEndpoint link(board_config::interboard_uart, link_dma,
+    {BoardRole::GimbalController, board_config::command_timeout_ms, board_config::chassis_heartbeat_timeout_ms});
+communication::RefereeReceiver referee(board_config::referee_uart, referee_dma, board_config::referee_version);
 Latest<RefereeState> referee_state;
-Latest<BoardHeartbeat> peer_heartbeat;
-Latest<ChassisFeedbackSummary> chassis_feedback;
-Latest<LocalGimbalCommand> local_command;
-Latest<RemoteChassisControl> remote_command;
-struct GimbalStatus {
-    ExecutionState state = ExecutionState::Waiting;
-    std::uint32_t generation = 0, reasons = 0;
-};
-Latest<GimbalStatus> gimbal_status;
-atomic_t reset_generation = 0;
-
-bool permission(const OutputPermission &p, std::uint64_t now) {
-    if (p.valid)
-        return p.enabled && isFresh(p.stamp, now, board_config::permission_timeout_ms);
-    return !board_config::require_referee_for_motion;
-}
-std::uint32_t age(const MessageStamp &s, std::uint64_t now) {
-    return s.valid && now >= s.timestamp_ms
-               ? static_cast<std::uint32_t>(std::min<std::uint64_t>(now - s.timestamp_ms, UINT32_MAX))
-               : UINT32_MAX;
-}
+Latest<GimbalCommand> local_command;
 void refereeTask(void *, void *, void *) {
-    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-    static communication::AsyncUart uart(board_config::referee_uart, dma_buffers);
-    communication::RefereeService service(board_config::referee_version);
-    int ret = uart.init();
-    LOG_INF("referee UART init: %d, protocol profile: %d", ret, int(board_config::referee_version));
     for (;;) {
-        const auto now = k_uptime_get();
-        uart.service(now);
-        communication::AsyncUart::RxChunk chunk{};
-        for (unsigned budget = 0; budget < 8; ++budget) {
-            ret = uart.read(chunk);
-            if (ret == -EOVERFLOW) {
-                service.discardPartial();
-                continue;
-            }
-            if (ret < 0)
-                break;
-            service.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
-        }
-        service.processBytes(nullptr, 0, now);
-        RefereeState state{};
-        service.snapshot(now, state);
-        referee_state.put(state);
+        const auto value = referee.poll(k_uptime_get());
+        (void)referee_state.put(value);
+        link.setReferee(value);
         k_sleep(K_MSEC(1));
     }
 }
+void linkTask(void *, void *, void *) {
+    for (;;) { link.poll(k_uptime_get()); k_sleep(K_MSEC(1)); }
+}
 void commandTask(void *, void *, void *) {
-    ManualCommandMapper mapper({});
-    CommandManager manager({});
-    GlobalSafetyManager::Config safety_config{};
-    safety_config.require_referee_for_motion = board_config::require_referee_for_motion;
-    safety_config.permission_timeout_ms = board_config::permission_timeout_ms;
-    safety_config.chassis_heartbeat_timeout_ms = board_config::chassis_heartbeat_timeout_ms;
-    safety_config.chassis_feedback_timeout_ms = board_config::chassis_feedback_timeout_ms;
-    GlobalSafetyManager safety(safety_config);
-    CommandRouter router(local_command, remote_command);
+    CommandManager::Config config{};
+    config.require_referee_for_motion = board_config::require_referee_for_motion;
+    config.permission_timeout_ms = board_config::permission_timeout_ms;
+    config.input_timeout_ms = board_config::command_timeout_ms;
+    config.allow_auto = false; // No vision receiver is assembled in this application.
+    CommandManager manager(config);
+    CommandRouter router(local_command, link);
     communication::RemoteReceiver::Snapshot rc{};
-    RefereeState referee{};
-    BoardHeartbeat peer{};
-    ChassisFeedbackSummary feedback{};
+    RefereeState ref{};
     std::uint64_t next_log = 0;
     for (;;) {
-        remote_receiver.snapshot(rc);
-        const auto &remote = rc.remote;
-        referee_state.get(referee);
-        peer_heartbeat.get(peer);
-        chassis_feedback.get(feedback);
-        const auto now = k_uptime_get();
-        OperatorIntent intent{};
-        mapper.map(remote, intent);
-        GlobalSafetyInputs input{};
-        input.now_ms = now;
-        input.command_source_fresh = remote.online && isFresh(remote.stamp, now, board_config::command_timeout_ms);
-        input.operator_motion_enabled = remote.stamp.valid && remote.left_switch == RcSwitch::Middle;
-        input.emergency_stop_requested = board_config::emergencyStopRequested();
-        input.gimbal_power = referee.robot.gimbal_output;
-        input.chassis_power = referee.robot.chassis_output;
-        input.shooter_power = referee.robot.shooter_output;
-        input.chassis_heartbeat_stamp = peer.stamp;
-        input.chassis_feedback_stamp = feedback.stamp;
-        input.chassis_execution_state = feedback.execution_state;
-        input.chassis_active_reasons = feedback.active_reasons;
-        if (board_config::takeEmergencyResetRequest() &&
-            safety.clearEmergencyStop(!input.emergency_stop_requested) == 0)
-            atomic_inc(&reset_generation);
-        GlobalSafetyDecision decision{};
-        safety.evaluate(input, decision);
-        if (!board_config::connections_configured && decision.state != SafetyState::EmergencyStop) {
-            decision.gimbal = decision.chassis = decision.shooter = SafetyAction::Disable;
-            decision.state = SafetyState::ConfigBlocked;
-            decision.active_reasons |= InvalidConfiguration;
-        }
-        RobotCommand command{};
-        if (manager.step(intent, decision, now, command) == 0) {
-            auto routed_decision = decision;
-            // On the existing wire protocol EmergencyStop is a request, not just a diagnostic.
-            // Do not echo a chassis-local latch back as a new global request, blocking its reset.
-            if (decision.state != SafetyState::EmergencyStop)
-                routed_decision.active_reasons &= ~EmergencyStop;
-            router.route(command, routed_decision, peer);
-        }
-        if (input.now_ms >= next_log) {
-            next_log = input.now_ms + 1000;
-            LOG_INF("global=%u gimbal=%u chassis=%u peer_age=%u online=%d feedback=%u reasons=%x",
-                    unsigned(decision.state), unsigned(decision.gimbal), unsigned(decision.chassis),
-                    age(peer.stamp, now), isFresh(peer.stamp, now, board_config::chassis_heartbeat_timeout_ms),
-                    unsigned(feedback.execution_state), decision.active_reasons);
+        remote.snapshot(rc);
+        referee_state.get(ref);
+        CommandInputs inputs{};
+        inputs.remote = rc.remote;
+        inputs.referee = ref;
+        inputs.now_us = core::monotonicTimeUs();
+        const auto decision = manager.update(inputs);
+        const auto routed = router.route(decision.command);
+        if (inputs.now_us / 1000 >= next_log) {
+            next_log = inputs.now_us / 1000 + 1000;
+            LOG_INF("mode=%u reasons=%x error=%d publish=%d", unsigned(decision.operator_mode),
+                    decision.reasons(), decision.error, routed.local_gimbal_result);
         }
         k_sleep(K_MSEC(10));
     }
 }
-void linkTask(void *, void *, void *) {
-    static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-    static communication::AsyncUart uart(board_config::interboard_uart, dma_buffers);
-    communication::InterBoardLink link(BoardRole::GimbalController);
-    int ret = uart.init();
-    LOG_INF("interboard UART init: %d", ret);
-    const std::uint64_t boot_id = sys_rand64_get() | 1ULL;
-    std::uint32_t heartbeat_sequence = 0, control_sequence = 0, constraint_sequence = 0;
-    std::uint64_t next_tx_ms = 0, next_heartbeat_ms = 0;
-    RemoteChassisControl command{};
-    RefereeState referee{};
-    GimbalStatus status{};
-    for (;;) {
-        const auto now = static_cast<std::uint64_t>(k_uptime_get());
-        uart.service(now);
-        communication::AsyncUart::RxChunk chunk{};
-        for (unsigned budget = 0; budget < 8; ++budget) {
-            ret = uart.read(chunk);
-            if (ret == -EOVERFLOW) {
-                link.discardPartial();
-                continue;
-            }
-            if (ret < 0)
-                break;
-            link.processRxBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
-        }
-        link.processRxBytes(nullptr, 0, now);
-        BoardHeartbeat peer{};
-        link.latestHeartbeat(peer);
-        peer_heartbeat.put(peer);
-        ChassisFeedbackSummary feedback{};
-        link.latestChassisFeedback(feedback);
-        chassis_feedback.put(feedback);
-        if (now >= next_tx_ms && !uart.txBusy()) {
-            next_tx_ms = now + 10;
-            remote_command.get(command);
-            referee_state.get(referee);
-            gimbal_status.get(status);
-            std::uint8_t bytes[256]{};
-            std::size_t used = 0;
-            auto append = [&](int n) {
-                if (n > 0)
-                    used += n;
-            };
-            if (now >= next_heartbeat_ms) {
-                next_heartbeat_ms = now + 20;
-                BoardHeartbeat h{};
-                h.role = BoardRole::GimbalController;
-                h.sender_boot_id = boot_id;
-                h.sender_uptime_ms = now;
-                h.resume_generation = status.generation;
-                h.ready = status.state == ExecutionState::Ready || status.state == ExecutionState::Active;
-                h.safety_state = status.state == ExecutionState::ConfigBlocked ? SafetyState::ConfigBlocked
-                                 : h.ready                                     ? SafetyState::Ready
-                                                                               : SafetyState::Waiting;
-                h.active_reasons = status.reasons;
-                h.sync_requested = !link.peerOnline(now);
-                append(communication::InterBoardCodec::encodeHeartbeat(h, ++heartbeat_sequence, bytes + used,
-                                                                       sizeof(bytes) - used));
-                ChassisConstraint constraint{};
-                constraint.output = referee.robot.chassis_output;
-                constraint.output_age_ms = age(constraint.output.stamp, now);
-                constraint.power_valid = referee.power.limit_stamp.valid && referee.power.stamp.valid;
-                constraint.power_limit_w = referee.power.chassis_power_limit_w;
-                constraint.buffer_energy_j = referee.power.buffer_energy_j;
-                constraint.power_age_ms = std::max(age(referee.power.limit_stamp, now), age(referee.power.stamp, now));
-                append(communication::InterBoardCodec::encodeChassisConstraint(constraint, ++constraint_sequence,
-                                                                               bytes + used, sizeof(bytes) - used));
-            }
-            // Preserve producer sequence/context. TX must never refresh an old command.
-            if (command.stamp.valid)
-                append(communication::InterBoardCodec::encodeChassisControl(command, ++control_sequence, bytes + used,
-                                                                            sizeof(bytes) - used));
-            if (used)
-                uart.send(bytes, used);
-        }
-        k_sleep(K_MSEC(1));
-    }
-}
 void gimbalTask(void *, void *, void *) {
-    static motor::CanBus bus(board_config::yaw_can);
-    static motor::Motor drive(board_config::yawMotorConfig());
-    static GimbalAxis yaw(drive, board_config::motorConfig(drive.info()), board_config::yaw);
-    GimbalLocalSafety local({board_config::command_timeout_ms});
-    const int configured = [&]() {
-        if (!board_config::connections_configured)
-            return -ENODEV;
-        int ret = bus.attach(drive);
-        if (ret < 0)
-            return ret;
-        ret = bus.start();
-        if (ret < 0)
-            return ret;
-        return yaw.begin();
-    }();
-    LocalGimbalCommand command{};
-    RefereeState referee{};
-    std::uint64_t last_log = 0;
-    auto previous_ms = k_uptime_get();
-    atomic_val_t last_reset = 0;
+    static GimbalExecutor executor;
+    (void)executor.begin();
+    GimbalCommand command{};
+    std::uint64_t next_log = 0;
     for (;;) {
-        const auto now = k_uptime_get();
-        const float dt = (now - previous_ms) / 1000.0f;
-        previous_ms = now;
         local_command.get(command);
-        referee_state.get(referee);
-        // Aggregated reasons can include a chassis-only EStop; only the global latch stops local Yaw.
-        const bool estop = board_config::emergencyStopRequested() || command.safety.state == SafetyState::EmergencyStop;
-        const auto reset = atomic_get(&reset_generation);
-        if (reset != last_reset) {
-            if (local.clearEmergencyStop(!estop) == 0 && configured == 0 &&
-                drive.snapshot().state == motor::MotorState::Fault)
-                (void)drive.clearFault();
-            last_reset = reset;
-        }
-        const bool powered = permission(referee.robot.gimbal_output, now);
-        const auto axis_status = yaw.poll(now);
-        const auto before = drive.snapshot();
-        const bool ready = configured == 0 && axis_status.ready_for_enable;
-        const bool active = configured == 0 && drive.active();
-        LocalSafetyInputs input{};
-        input.now_ms = now;
-        input.config_valid = configured == 0;
-        input.power_allowed = powered;
-        input.emergency_stop_requested = estop;
-        input.hardware_ready = ready || active;
-        input.armed = active;
-        input.feedback_fresh = axis_status.feedback_healthy;
-        input.command_stamp = command.command.stamp;
-        input.global_action = isFresh(command.safety.stamp, now, board_config::command_timeout_ms)
-                                  ? command.safety.gimbal
-                                  : SafetyAction::Disable;
-        LocalSafetyDecision decision{};
-        if (local.evaluate(input, decision) < 0)
-            decision = {SafetyAction::Disable, ExecutionState::ConfigBlocked, InvalidConfiguration};
-        if (configured == 0) {
-            if (decision.action == SafetyAction::Disable) {
-                if (before.state == motor::MotorState::Active || before.state == motor::MotorState::Enabling)
-                    (void)drive.disable();
-            }
-            else if (active) {
-                AxisCommand target{command.command.mode, command.command.yaw_target_rad,
-                                   command.command.yaw_rate_rad_s};
-                if (decision.action == SafetyAction::Hold)
-                    target.mode = GimbalMode::Hold;
-                const int ret = yaw.update(target, decision.action, dt);
-                if (ret < 0) {
-                    (void)drive.disable();
-                    LOG_ERR("yaw update failed: %d", ret);
-                }
-            }
-            else if (ready && command.command.stamp.valid &&
-                     command.command.stamp.timestamp_ms >= axis_status.ready_since_ms &&
-                     isFresh(command.command.stamp, now, board_config::command_timeout_ms)) {
-                int ret = yaw.reset();
-                if (ret == 0)
-                    ret = drive.enable();
-                if (ret < 0 && ret != -EAGAIN)
-                    LOG_ERR("yaw enable failed: %d", ret);
-            }
-            const auto submit = bus.commit();
-            if (submit.error < 0 && submit.error != -EAGAIN)
-                LOG_ERR("yaw commit failed: %d", submit.error);
-        }
-        const auto after = drive.snapshot();
-        const auto generation = static_cast<std::uint32_t>(after.enable_generation);
-        gimbal_status.put(
-            {configured < 0 ? ExecutionState::ConfigBlocked : decision.state, generation, decision.active_reasons});
-        if (std::uint64_t(now) >= last_log + 1000) {
-            last_log = now;
-            LOG_INF("uptime=%lld yaw=%d reasons=%x gen=%u error=%d", now,
-                    configured < 0 ? int(ExecutionState::ConfigBlocked) : int(decision.state), decision.active_reasons,
-                    generation, configured < 0 ? configured : after.last_fault.error);
+        const auto now = core::monotonicTimeUs();
+        const auto status = executor.update(command, now);
+        link.setStatus(status);
+        if (now / 1000 >= next_log) {
+            next_log = now / 1000 + 1000;
+            LOG_INF("yaw=%u wait=%u ready=%d error=%d", unsigned(status.state), unsigned(status.reason),
+                    status.ready, status.error);
         }
         k_sleep(K_MSEC(5));
     }
@@ -319,12 +81,8 @@ K_THREAD_DEFINE(link_thread, 8192, linkTask, nullptr, nullptr, nullptr, 5, 0, 0)
 K_THREAD_DEFINE(command_thread, 4096, commandTask, nullptr, nullptr, nullptr, 5, 0, 0);
 K_THREAD_DEFINE(gimbal_thread, 6144, gimbalTask, nullptr, nullptr, nullptr, 4, 0, 0);
 int main() {
-    const int ret = remote_receiver.start();
-    if (ret < 0) {
-        LOG_ERR("Remote receiver start failed: %d", ret);
-        return ret;
-    }
-    LOG_INF("MC02 sentry gimbal: configured=%d referee_required=%d; edit app.overlay and src/board_config.hpp",
-            board_config::connections_configured, board_config::require_referee_for_motion);
-    return 0; // Worker threads and all callback-owned objects remain alive.
+    const int ret = remote.start();
+    LOG_INF("gimbal configured=%d referee_required=%d remote_start=%d", board_config::connections_configured,
+            board_config::require_referee_for_motion, ret);
+    return ret;
 }
