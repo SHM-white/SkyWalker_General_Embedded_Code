@@ -30,7 +30,7 @@ sentry_chassis
 
 - main.cpp 静态构造 RemoteReceiver、RefereeReceiver、InterBoardEndpoint、RemoteSource、RefereePermissionSource 和 CommandManager。
 - main() 依次注册遥控来源、绑定裁判许可、启动命令服务；默认 referee_version=Unspecified，需按实际裁判 profile 和 UART 完成板级配置后才会产生有效权限。
-- linkTask 读取完整 CommandSnapshot，将最终底盘命令和裁判状态提交给 InterBoardEndpoint，再调用 poll 推进 UART 收发。
+- linkTask 读取完整 CommandSnapshot，将最终底盘命令和裁判状态提交给 InterBoardEndpoint，再调用 poll 推进所选传输后端。两侧 `board_config.hpp` 的 `interboard_transport.kind` 可选择 UART、RS485 或 CAN；默认 UART，RS485 使用 USART2，CAN 使用独占 CAN3，详见[传输配置](../modules/communication/interboard-transports.md)。
 - gimbalTask 读取 CommandManager::current()，交给应用私有 GimbalExecutor。
 - GimbalExecutor 管理单轴 Motor、CanBus、GimbalAxis、恢复与提交。
 

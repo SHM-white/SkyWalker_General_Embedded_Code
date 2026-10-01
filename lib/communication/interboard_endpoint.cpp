@@ -33,22 +33,28 @@ InterBoardEndpoint::Snapshot InterBoardEndpoint::snapshot() const {
     return result;
 }
 void InterBoardEndpoint::poll(std::uint64_t now) {
+    if ((config_.role != BoardRole::GimbalController && config_.role != BoardRole::ChassisController) ||
+        !config_.command_timeout_ms || !config_.heartbeat_timeout_ms ||
+        !config_.tx_timeout_ms || config_.tx_timeout_ms > 1000) {
+        const auto key = k_spin_lock(&lock_);
+        published_ = {};
+        published_.transport = transport_.kind();
+        published_.error = -EINVAL;
+        k_spin_unlock(&lock_, key);
+        return;
+    }
     if (!boot_id_) boot_id_ = sys_rand64_get() | 1ULL;
-    if (now >= retry_ms_) {
-        int ret = uart_.service(now);
-        if (ret == -EACCES) ret = uart_.init();
-        if (ret < 0 && ret != -EAGAIN) { error_ = ret; retry_ms_ = now + 100; }
-        if (ret == 0) {
-            error_ = 0;
-            AsyncUart::RxChunk chunk{};
-            for (unsigned budget = 0; budget < 8; ++budget) {
-                ret = uart_.read(chunk);
-                if (ret == -EOVERFLOW) { link_.discardPartial(); continue; }
-                if (ret == -EAGAIN) break;
-                if (ret < 0) { error_ = ret; break; }
-                link_.processRxBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
-            }
-        }
+    // Backends own recovery deadlines; never starve in-flight I/O after an error.
+    const int serviced = transport_.service(now);
+    bool transport_ready = serviced == 0;
+    if (serviced != -EAGAIN) error_ = serviced;
+    InterBoardTransport::RxChunk chunk{};
+    for (unsigned budget = 0; budget < 8; ++budget) {
+        const int ret = transport_.read(chunk);
+        if (ret == -EOVERFLOW) { link_.discardPartial(); continue; }
+        if (ret == -EAGAIN) break;
+        if (ret < 0) { error_ = ret; transport_ready = false; break; }
+        link_.processRxBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
     }
     link_.processRxBytes(nullptr, 0, now);
     Outgoing outgoing{};
@@ -58,6 +64,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
         k_spin_unlock(&lock_, key);
     }
     Snapshot next{};
+    next.transport = transport_.kind();
     next.local_boot_id = boot_id_;
     link_.latestHeartbeat(next.peer);
     next.online = link_.peerOnline(now, config_.heartbeat_timeout_ms);
@@ -76,16 +83,16 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
         link_.latestChassisConstraint(next.constraint);
         link_.latestChassisFeedback(next.feedback);
     }
-    if (now >= next_tx_ms_ && !uart_.txBusy()) {
-        next_tx_ms_ = now + 10;
-        std::uint8_t bytes[256]{};
+    if (transport_ready && now >= next_tx_ms_ && !transport_.txBusy()) {
+        std::uint8_t bytes[InterBoardTransport::kTxCapacity]{};
         std::size_t used = 0;
+        int encode_error = 0;
+        const bool heartbeat_due = now >= next_heartbeat_ms_;
         const auto append = [&](int length) {
             if (length > 0) used += static_cast<std::size_t>(length);
-            else if (length < 0) error_ = length;
+            else if (length < 0) encode_error = length;
         };
-        if (now >= next_heartbeat_ms_) {
-            next_heartbeat_ms_ = now + 20;
+        if (heartbeat_due) {
             const auto feedback = wireFeedback(outgoing.status);
             BoardHeartbeat heartbeat{};
             heartbeat.role = config_.role;
@@ -122,12 +129,18 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
             control.global_action = control.command.mode == ChassisMode::Disabled ? SafetyAction::Disable : SafetyAction::Active;
             append(InterBoardCodec::encodeChassisControl(control, ++control_sequence_, bytes + used, sizeof(bytes) - used));
         }
-        if (used) {
-            const int ret = uart_.send(bytes, used);
-            if (ret < 0) error_ = ret;
+        if (encode_error < 0) error_ = encode_error;
+        else if (used) {
+            const int ret = transport_.send(bytes, used, config_.tx_timeout_ms);
+            if (ret == 0) {
+                next_tx_ms_ = now + 10;
+                if (heartbeat_due) next_heartbeat_ms_ = now + 20;
+            } else if (ret != -EAGAIN) error_ = ret;
         }
     }
     next.error = error_;
+    next.parser_stats = link_.stats();
+    next.rejected_frames = link_.rejectedFrames();
     const auto key = k_spin_lock(&lock_);
     published_ = next;
     k_spin_unlock(&lock_, key);

@@ -85,6 +85,9 @@ void AsyncUart::event(uart_event &e) {
         atomic_set(&rx_disabled_, 1);
         break;
     case UART_TX_ABORTED:
+        atomic_set(&tx_error_, -ECANCELED);
+        atomic_clear(&tx_busy_);
+        break;
     case UART_TX_DONE:
         atomic_clear(&tx_busy_);
         break;
@@ -116,11 +119,14 @@ int AsyncUart::send(const std::uint8_t *p, std::size_t n, std::uint32_t timeout)
         return -EINVAL;
     if (!atomic_cas(&tx_busy_, 0, 1))
         return -EAGAIN;
+    atomic_clear(&tx_error_);
     tx_deadline_ms_ = static_cast<std::uint64_t>(k_uptime_get()) + timeout;
     std::memcpy(dma_.tx, p, n);
     const int ret = uart_tx(uart_, dma_.tx, n, timeout * 1000);
-    if (ret < 0)
+    if (ret < 0) {
+        atomic_set(&tx_error_, ret);
         atomic_clear(&tx_busy_);
+    }
     return ret;
 }
 }

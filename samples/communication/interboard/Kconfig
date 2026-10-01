@@ -1,5 +1,16 @@
-mainmenu "Interboard UART bench"
+mainmenu "Interboard UART / RS485 / CAN bench"
 source "Kconfig.zephyr"
 config BENCH_CHASSIS_ROLE
     bool "Use the chassis peer role"
     default n
+
+choice BENCH_TRANSPORT
+    prompt "Interboard transport selected at initialization"
+    default BENCH_TRANSPORT_UART
+config BENCH_TRANSPORT_UART
+    bool "UART"
+config BENCH_TRANSPORT_RS485
+    bool "Two-wire RS485"
+config BENCH_TRANSPORT_CAN
+    bool "Classic CAN on dedicated CAN3"
+endchoice

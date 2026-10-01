@@ -5,9 +5,18 @@
 / {
     aliases {
         interboard-uart = &usart1;
+        interboard-rs485 = &usart2;
+        interboard-can = &can3;
     };
 };
 &usart1 { current-speed = <460800>; };
+&usart2 {
+    current-speed = <460800>;
+    dmas = <&dmamux1 0 44 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 5 43 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
+};
+&can3 { bitrate = <1000000>; };
 
 /* Hardware entropy supplies a new interboard boot context after every reset. */
 &rng { status = "okay"; };

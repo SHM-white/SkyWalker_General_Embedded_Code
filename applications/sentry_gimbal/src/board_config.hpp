@@ -8,6 +8,7 @@
 #include <robotics/gimbal/gimbal_axis.hpp>
 #include <robotics/command/command_arbiter.hpp>
 #include <communication/referee/referee_protocol.hpp>
+#include <communication/interboard/configured_interboard_transport.hpp>
 namespace board_config {
 // Edit this application only; samples and the chassis app have their own configuration.
 inline constexpr bool connections_configured = false;
@@ -28,6 +29,23 @@ inline const device *interboard_uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart));
 #else
 inline const device *interboard_uart = nullptr;
 #endif
+// Change only kind to select the physical link; both boards must agree.
+inline const skywalker::communication::ConfiguredInterBoardTransport::Config interboard_transport = [] {
+    using namespace skywalker::communication;
+    ConfiguredInterBoardTransport::Config c{};
+    c.kind = InterBoardTransportKind::Uart;
+    c.uart = interboard_uart;
+#if DT_NODE_HAS_STATUS(DT_ALIAS(interboard_rs485), okay)
+    c.rs485.uart = DEVICE_DT_GET(DT_ALIAS(interboard_rs485));
+#endif
+    c.rs485.role = Rs485InterBoardTransport::Role::Coordinator;
+#if DT_NODE_HAS_STATUS(DT_ALIAS(interboard_can), okay)
+    c.can.can = DEVICE_DT_GET(DT_ALIAS(interboard_can));
+#endif
+    c.can.tx_id = 0x600;
+    c.can.rx_id = 0x601;
+    return c;
+}();
 #if DT_NODE_HAS_STATUS(DT_ALIAS(remote_uart), okay)
 inline const device *remote_uart = DEVICE_DT_GET(DT_ALIAS(remote_uart));
 #else
