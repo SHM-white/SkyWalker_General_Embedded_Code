@@ -36,6 +36,8 @@ public:
     bool txBusy() const {
         return atomic_get(&tx_busy_) != 0;
     }
+    // Most recent transmission result, stable after txBusy() becomes false.
+    int txError() const { return static_cast<int>(atomic_get(&tx_error_)); }
     atomic_val_t droppedChunks() const {
         return atomic_get(&dropped_);
     }
@@ -49,6 +51,7 @@ private:
     alignas(4) char queue_storage_[8 * sizeof(RxChunk)]{};
     k_msgq queue_{};
     atomic_t in_use_ = 0, rx_disabled_ = 1, tx_busy_ = 0, generation_ = 0, dropped_ = 0;
+    atomic_t tx_error_ = 0;
     atomic_val_t observed_generation_ = 0;
     std::uint64_t retry_ms_ = 0, tx_deadline_ms_ = 0;
     bool initialized_ = false;

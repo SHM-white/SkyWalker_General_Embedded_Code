@@ -12,7 +12,8 @@ communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::AsyncUart::DmaBuffers link_dma __nocache;
 communication::AsyncUart::DmaBuffers referee_dma __nocache;
 communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, {});
-communication::InterBoardEndpoint link(board_config::interboard_uart, link_dma,
+communication::ConfiguredInterBoardTransport link_transport(board_config::interboard_transport, &link_dma);
+communication::InterBoardEndpoint link(link_transport,
     {BoardRole::GimbalController, board_config::command_timeout_ms, board_config::chassis_heartbeat_timeout_ms});
 communication::RefereeReceiver referee(board_config::referee_uart, referee_dma, board_config::referee_version);
 RemoteSource remote_source(remote);

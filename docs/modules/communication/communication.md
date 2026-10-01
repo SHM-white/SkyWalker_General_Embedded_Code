@@ -1,5 +1,7 @@
 # 13 通信层：UART、视觉、DR16、裁判与板间协议
 
+板间通信支持初始化时选择 UART、两线 RS485 或经典 CAN，业务调用统一使用 InterBoardEndpoint。接口、两种传输封装协议和 MC02 接线见[板间三种传输方式](interboard-transports.md)。
+
 实现位置：`lib/communication/`、`include/communication/`，既有机器人消息位于 `include/robotics/messages/`；视觉的独立值类型位于 `include/communication/vision/`。
 
 | 模块 | 上游 | 下游 | 示例 |

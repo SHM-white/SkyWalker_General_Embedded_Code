@@ -5,7 +5,8 @@ LOG_MODULE_REGISTER(sentry_chassis, LOG_LEVEL_INF);
 using namespace skywalker;
 namespace {
 communication::AsyncUart::DmaBuffers link_dma __nocache;
-communication::InterBoardEndpoint link(board_config::interboard_uart, link_dma,
+communication::ConfiguredInterBoardTransport link_transport(board_config::interboard_transport, &link_dma);
+communication::InterBoardEndpoint link(link_transport,
     {robotics::BoardRole::ChassisController, board_config::command_timeout_ms, board_config::heartbeat_timeout_ms});
 void linkTask(void *, void *, void *) {
     for (;;) { link.poll(k_uptime_get()); k_sleep(K_MSEC(1)); }

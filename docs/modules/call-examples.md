@@ -162,12 +162,18 @@ void refereeTick() {
 
 ## 6. InterBoardEndpoint
 
-InterBoardEndpoint 将 UART、板间 V1 编解码、peer 会话和线程安全值拷贝封装在一起。恰有一个通信线程调用 poll；生产者可通过短锁接口提交发送值，消费者取得 Snapshot 副本。
+InterBoardEndpoint 将可选择的传输后端、板间 V1 编解码、peer 会话和线程安全值拷贝封装在一起。恰有一个通信线程调用 poll；生产者可通过短锁接口提交发送值，消费者取得 Snapshot 副本。UART、RS485 和 CAN 的初始化配置见[三种传输方式](communication/interboard-transports.md)。
 
 ~~~cpp
+#include <communication/interboard/configured_interboard_transport.hpp>
+#include <communication/interboard/interboard_endpoint.hpp>
+
 static communication::AsyncUart::DmaBuffers link_dma __nocache;
+static communication::ConfiguredInterBoardTransport transport(
+    {.kind = communication::InterBoardTransportKind::Uart,
+     .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))}, &link_dma);
 static communication::InterBoardEndpoint link(
-    DEVICE_DT_GET(DT_ALIAS(interboard_uart)), link_dma,
+    transport,
     {robotics::BoardRole::GimbalController, 100, 100});
 
 void linkTask() {
