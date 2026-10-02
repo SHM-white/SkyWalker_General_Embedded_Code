@@ -36,7 +36,7 @@ west build -p always -b dm_mc02/stm32h723xx samples/imu/dual_imu -d build/dual_i
 west flash -d build/dual_imu
 ~~~
 
-板载传感器与温控硬件从默认板级 DTS 的 accel0、gyro0、imu-heater alias 获取；样例 overlay 不再定义加热节点。串口参数集中在 app.overlay，变换、单位缩放、目标温度与接收器调度参数在 src/board_config.hpp。两块板的 IMU alias 已统一，但此双 IMU 样例的外置 RS485 与 DMA 仍绑定 MC02。开启 CONFIG_FPU 和 CONFIG_FPU_SHARING，避免用软浮点运行高频 EKF。
+板载传感器与温控硬件从默认板级 DTS 的 accel0、gyro0、imu-heater alias 获取；样例 overlay 不再定义加热节点。串口参数集中在 app.overlay，三处安装变换与参考 ID 从 `include/robotics/vehicle/calibration.hpp` 读取；单位缩放、目标温度与接收器调度参数在 src/board_config.hpp。两块板的 IMU alias 已统一，但此双 IMU 样例的外置 RS485 与 DMA 仍绑定 MC02。开启 CONFIG_FPU 和 CONFIG_FPU_SHARING，避免用软浮点运行高频 EKF。
 
 ## VOFA 通道
 
@@ -54,7 +54,7 @@ west flash -d build/dual_imu
 
 没有有效姿态或字段已过期时，对应图表数据输出 NaN，不能把初始化单位四元数误认成真实姿态。板载全部字段新鲜时 mask=15，外置首版没有温度输出能力，全部基础字段新鲜时 mask=7。外置质量为 Unknown，表示模块没有公开内部 EKF 收敛标志。
 
-默认云台板配置的板载 frame_id=2，对应大 Yaw 载体；头部外置 frame_id=3，对应随 Pitch 运动的头部。底盘板配置的板载 frame_id=1，对应底盘车体。frame_id 标识安装位置，epoch 标识该位置的参考会话；三者 yaw 各自有初始化参考，不能据此认定零点相同。默认安装旋转是单位四元数，只表示传感器自身坐标；按实际安装修改 sensor_to_body。外置单位缩放默认为 1，姿态方向默认为 sensor→world，仍须用实物确认。
+默认云台板配置使用中央 `carrier_reference`（frame_id=2）及 `carrier_sensor_to_body`，对应大 Yaw 载体；头部外置使用 `head_reference`（frame_id=3）及 `head_sensor_to_body`，对应随 Pitch 运动的头部。底盘板配置使用 `chassis_reference`（frame_id=1）及 `chassis_sensor_to_body`，对应底盘车体。frame_id 标识安装位置，epoch 标识该位置的参考会话；三者 yaw 各自有初始化参考，不能据此认定零点相同。中央默认安装旋转是单位四元数，只表示传感器自身坐标。TODO(标定)：记录并更新三处安装变换、参考会话、正方向和原始数据年龄，验收后再将中央 `imu_mounting_confirmed` 设为 true。该确认开关不会阻止此观测样例采集，也不会授权电机输出。外置单位缩放默认为 1，姿态方向默认为 sensor→world，仍须用实物确认。
 
 ## 三个实际安装位置的观测
 

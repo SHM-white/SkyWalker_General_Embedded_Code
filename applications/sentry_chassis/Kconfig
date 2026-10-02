@@ -1,0 +1,3 @@
+mainmenu "SkyWalker sentry_chassis vehicle role"
+rsource "../../samples/robotics/common/vehicle.Kconfig"
+source "Kconfig.zephyr"

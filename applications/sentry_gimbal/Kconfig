@@ -1,0 +1,3 @@
+mainmenu "SkyWalker sentry_gimbal vehicle role"
+rsource "../../samples/robotics/common/vehicle.Kconfig"
+source "Kconfig.zephyr"

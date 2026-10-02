@@ -1,0 +1,8 @@
+mainmenu "Dual Yaw centering bench"
+source "Kconfig.zephyr"
+config DUAL_YAW_CHASSIS_ROLE
+    bool "Build the dedicated big-Yaw chassis peer"
+    default n
+config INERTIAL_GIMBAL_LOCK_PITCH
+    bool "Keep pitch inertial target locked for initial head-hold bench"
+    default y

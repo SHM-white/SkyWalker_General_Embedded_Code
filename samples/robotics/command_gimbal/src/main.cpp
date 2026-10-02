@@ -8,6 +8,9 @@
 #include <lib/vofa/vofa.h>
 #include <robotics/command/receiver_sources.hpp>
 #include <robotics/execution/snapshot_cache.hpp>
+#if defined(CONFIG_COMMAND_GIMBAL_VISION_OBSERVE) || defined(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE)
+#include <communication/vision/ab_protocol.hpp>
+#endif
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
 
@@ -20,6 +23,7 @@ using namespace skywalker::robotics;
 namespace {
 atomic_t input_paused = 0, execution_paused = 0, status_paused = 0;
 atomic_t emergency_stop = 0, clear_requested = 0;
+atomic_t vision_paused = 0, permission_paused = 0, head_paused = 0;
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, {});
 RemoteSource remote_source(remote);
@@ -33,6 +37,48 @@ public:
         return atomic_get(&input_paused) ? -EAGAIN : remote_source.sample(out);
     }
 } pausable_source;
+#ifdef CONFIG_COMMAND_GIMBAL_REFEREE
+communication::AsyncUart::DmaBuffers referee_dma __nocache;
+const device *const referee_uart = DEVICE_DT_GET(DT_ALIAS(referee_uart));
+communication::RefereeReceiver referee(referee_uart, referee_dma, communication::RefereeVersion::Rm2026V1_3, 500);
+RefereePermissionSource referee_source(referee);
+class PausablePermissions final : public IPermissionSource {
+public:
+    int start() override { return referee_source.start(); }
+    int sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) override {
+        return atomic_get(&permission_paused) ? -EAGAIN : referee_source.sample(now_ms, out, diagnostics);
+    }
+} permission_source;
+#endif
+#if defined(CONFIG_COMMAND_GIMBAL_VISION_OBSERVE) || defined(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE)
+communication::AsyncUart::DmaBuffers vision_dma __nocache;
+communication::vision::AbProtocol vision_protocol({.command_reference = vehicle::head_reference});
+communication::vision::VisionReceiver::Config visionConfig() {
+    communication::vision::VisionReceiver::Config c{};
+    // AB requires genuine projectile speed/count as well as head measurements.
+    // TODO(vision-feedback): connect those measurements before enabling TX;
+    // this gimbal-only bench already publishes real head data to setFeedback.
+    c.feedback_period_us = 0;
+    return c;
+}
+communication::vision::VisionReceiver vision(DEVICE_DT_GET(DT_ALIAS(vision_uart)), vision_dma,
+                                             vision_protocol, visionConfig());
+VisionSource vision_source(vision);
+class PausableVision final : public ICommandSource {
+public:
+    SourceRole role() const override { return vision_source.role(); }
+    int start() override { return vision_source.start(); }
+    int sample(SourceSample &out) override {
+        return atomic_get(&vision_paused) ? -EAGAIN : vision_source.sample(out);
+    }
+} pausable_vision;
+#endif
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+communication::AsyncUart::DmaBuffers head_dma __nocache;
+imu::DmImuRs485Source head_source(board_config::head_uart, head_dma, board_config::headSensor());
+imu::ImuReceiver head(head_source, board_config::head_receiver);
+InertialGimbalAdapter inertial_adapter(board_config::inertialPolicy());
+#endif
 CommandManager commands(board_config::command_policy);
 motor::Motor yaw_drive(board_config::yawHardware()), pitch_drive(board_config::pitchHardware());
 motor::Group gimbal_group(yaw_drive, pitch_drive);
@@ -44,6 +90,10 @@ struct Observation {
     double yaw_target = 0, pitch_target = 0;
     core::TimeUs duration_us = 0;
     std::uint32_t cycle_overruns = 0;
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+    InertialGimbalOutput inertial{};
+    core::Stamp head_stamp{};
+#endif
 };
 SnapshotCache<Observation> execution_observation;
 K_SEM_DEFINE(telemetry_ready, 0, 1);
@@ -62,6 +112,12 @@ void onTelemetryCommand(const char *key, float value) {
         atomic_set(&emergency_stop, set);
     else if (std::strcmp(key, "clear") == 0 && set)
         atomic_set(&clear_requested, 1);
+    else if (std::strcmp(key, "vision_pause") == 0)
+        atomic_set(&vision_paused, set);
+    else if (std::strcmp(key, "permission_pause") == 0)
+        atomic_set(&permission_paused, set);
+    else if (std::strcmp(key, "head_pause") == 0)
+        atomic_set(&head_paused, set);
 }
 
 float age(const MessageStamp &stamp, std::uint64_t now_ms) {
@@ -77,7 +133,14 @@ void telemetryTask(void *, void *, void *) {
     k_sem_take(&telemetry_ready, K_FOREVER);
     static Vofa vofa{};
     static std::uint8_t rx_buffer[80];
-    const int vofa_ret = vofa_init(&vofa, DEVICE_DT_GET(DT_ALIAS(telemetry_uart)));
+    const device *const telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
+    bool telemetry_available = true;
+#ifdef CONFIG_COMMAND_GIMBAL_REFEREE
+    telemetry_available = telemetry_uart != referee_uart;
+#endif
+    // USART1 has exactly one owner. With the referee profile, console logs and
+    // debugger atomic flags remain available while VOFA RX/TX stays unstarted.
+    const int vofa_ret = telemetry_available ? vofa_init(&vofa, telemetry_uart) : -EBUSY;
     const int rx_ret = vofa_ret == 0 ? vofa_set_handler(&vofa, rx_buffer, sizeof(rx_buffer), onTelemetryCommand) : vofa_ret;
     LOG_INF("VOFA start=%d controls=%d", vofa_ret, rx_ret);
     CommandSnapshot frame{};
@@ -110,6 +173,25 @@ void telemetryTask(void *, void *, void *) {
                     unsigned(observed.run.reason), observed.run.generation,
                     isFresh(observed.run.stamp, now_ms, board_config::command_timeout_ms), feedback.ready,
                     observed.run.error, unsigned(observed.duration_us), observed.cycle_overruns);
+#if defined(CONFIG_COMMAND_GIMBAL_VISION_OBSERVE) || defined(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE)
+            const auto &aim = frame.observed.vision;
+            LOG_INF("vision_seq=%llu age_us=%llu control=%d source=%u ref=%u/%u reasons=%x auto=%d",
+                aim.stamp.sequence, aim.stamp.valid && now_ms * 1000 >= aim.stamp.time_us
+                    ? now_ms * 1000 - aim.stamp.time_us : UINT64_MAX,
+                aim.value.control_requested, unsigned(command.source), aim.value.reference.frame_id,
+                aim.value.reference.epoch, frame.decision.gimbal_reasons, board_config::command_policy.allow_auto);
+#endif
+#ifdef CONFIG_COMMAND_GIMBAL_REFEREE
+            LOG_INF("referee_online=%d gimbal_allowed=%d permission_age_ms=%d",
+                frame.observed.referee.online, frame.observed.referee.robot.gimbal_output.enabled,
+                int(age(frame.observed.referee.robot.gimbal_output.stamp, now_ms)));
+#endif
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+            LOG_INF("head_seq=%llu inertial_session=%u stable=%d head_yaw_mrad=%d head_pitch_mrad=%d",
+                observed.head_stamp.sequence, observed.inertial.status.generation,
+                observed.inertial.stabilization_valid && observed.run.state == RunState::Active,
+                int(observed.inertial.head_yaw_rad * 1000), int(observed.inertial.head_pitch_rad * 1000));
+#endif
         }
         k_sleep(K_MSEC(50));
     }
@@ -120,6 +202,15 @@ K_THREAD_DEFINE(telemetry_thread, 4096, telemetryTask, nullptr, nullptr, nullptr
 
 int main() {
     int ret = commands.registerSource(pausable_source);
+#if defined(CONFIG_COMMAND_GIMBAL_VISION_OBSERVE) || defined(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE)
+    if (ret == 0) ret = commands.registerSource(pausable_vision);
+#endif
+#ifdef CONFIG_COMMAND_GIMBAL_REFEREE
+    if (ret == 0) ret = commands.bindPermissions(permission_source);
+#endif
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+    if (ret == 0) ret = head.start();
+#endif
     if (ret == 0)
         ret = commands.start();
     k_sem_give(&telemetry_ready);
@@ -148,6 +239,9 @@ int main() {
     CommandSnapshot frame{};
     Observation observation{};
     core::TimeUs previous_cycle_us = 0;
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+    imu::Snapshot head_cache{};
+#endif
     for (;;) {
         if (atomic_get(&execution_paused)) {
             // Deliberately freeze the execution producer while command and
@@ -186,13 +280,46 @@ int main() {
         (void)commands.snapshot(frame);
         GimbalExecutionInputs inputs{};
         inputs.command = frame.decision.command.gimbal;
+#ifndef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
         inputs.command.yaw_rate_rad_s *= board_config::yaw_command_sign;
         inputs.command.pitch_rate_rad_s *= board_config::pitch_command_sign;
+#endif
         inputs.source_stamp = sourceStamp(frame, inputs.command.source);
         inputs.transport_ready = buses_started && yaw_bus.status().state == motor::BusState::Running &&
                                  (!split_buses || pitch_bus.status().state == motor::BusState::Running);
         inputs.emergency_stop = atomic_get(&emergency_stop) || board_config::emergencyStopRequested();
         inputs.clear_fault = atomic_set(&clear_requested, 0) || board_config::takeEmergencyResetRequest();
+#ifdef CONFIG_COMMAND_GIMBAL_REFEREE
+        inputs.require_permission = true;
+        inputs.permission = frame.observed.referee.robot.gimbal_output;
+#endif
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+        if (!atomic_get(&head_paused)) head_cache = head.snapshot();
+        InertialGimbalInputs inertial{};
+        inertial.head = head_cache;
+        inertial.yaw = yaw_drive.snapshot();
+        inertial.pitch = pitch_drive.snapshot();
+        inertial.command = inputs.command;
+        inertial.source_stamp = inputs.source_stamp;
+        inertial.prerequisites_ready = inputs.transport_ready && vehicle::imu_mounting_confirmed &&
+            !inputs.emergency_stop && !inputs.clear_fault;
+        const bool vision_reference = inputs.command.source != ControlSource::Vision ||
+            frame.decision.selected_vision.value.reference == head_cache.sample.reference;
+        observation.inertial = vision_reference ? inertial_adapter.update(inertial, now_us)
+            : inertial_adapter.suspend(now_us, WaitReason::Reference, -ESTALE);
+        inputs.command = observation.inertial.command;
+        inputs.source_stamp = observation.inertial.source_stamp;
+        observation.head_stamp = head_cache.sample.orientation.stamp;
+        communication::vision::Feedback feedback{};
+        feedback.mode = frame.decision.operator_mode == OperatorMode::Auto
+            ? communication::vision::Mode::AutoAim : communication::vision::Mode::Idle;
+        feedback.reference = head_cache.sample.reference;
+        feedback.orientation = head_cache.sample.orientation;
+        feedback.gyro_rad_s = head_cache.sample.gyro_rad_s;
+        // No shooting sensor exists on this bench; unset measurements remain invalid.
+        (void)vision.setFeedback(feedback);
+        const auto previous_run = observation.run;
+#endif
         observation.run = executor_started ? executor.update(inputs, now_us)
             : executor.suspend(now_us, setup_blocked ? WaitReason::Configuration : WaitReason::Transport,
                                 setup_error, setup_blocked);
@@ -204,6 +331,13 @@ int main() {
             if (error < 0)
                 observation.run = executor.suspend(core::monotonicTimeUs(), WaitReason::Transport, error);
         }
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+        if (observation.run.generation != previous_run.generation ||
+            (previous_run.state == RunState::Active && observation.run.state != RunState::Active))
+            observation.inertial = inertial_adapter.suspend(now_us, WaitReason::Reference, -ESTALE);
+        observation.inertial.stabilization_valid = observation.inertial.stabilization_valid &&
+            observation.run.state == RunState::Active;
+#endif
         observation.yaw_target = executor.yawTargetRad();
         observation.pitch_target = executor.pitchTargetRad();
         observation.duration_us = core::monotonicTimeUs() - now_us;

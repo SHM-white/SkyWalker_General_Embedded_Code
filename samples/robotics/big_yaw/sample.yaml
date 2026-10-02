@@ -1,0 +1,9 @@
+sample:
+  name: Big Yaw continuous velocity bench
+  description: Independent DM4310 velocity inner loop, production expiry and recovery context
+common:
+  tags: [robotics, motor, can]
+  platform_allow: [dm_mc02]
+  build_only: true
+tests:
+  sample.robotics.big_yaw: {}

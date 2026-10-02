@@ -85,3 +85,24 @@ VOFA 50 ms 一帧，16 通道依次为：原始源序号、源年龄 ms、最终
 | 编译通过 / 实板通过 / 待验证及操作者 | |
 
 本入口只控制机械小云台。头部惯性参考、外置 IMU、视觉指向、大 Yaw 回中、共享摩擦轮/拨盘及实际发射仍属于后续独立阶段。
+
+## 分阶段消息源配置
+
+机械电机标定、连接确认、ID、方向、零点、独立中心、行程与限幅统一读取 `include/robotics/vehicle/calibration.hpp`，确认开关默认关闭。台架控制参数仍需实际调参，TODO 留在配置和参考会话接口处。
+
+| 配置 | 接入链路 | 执行行为 |
+|---|---|---|
+| 默认 | 遥控 → CommandManager | 机械双轴控制 |
+| `referee.conf` | 遥控 + RefereePermissionSource | 云台权限必须有效且新鲜 |
+| `vision_observe.conf` | 遥控 + 裁判 + VisionSource | 接收、观测视觉；自动执行保持关闭 |
+| `vision_execute.conf` | 遥控 + 裁判 + 视觉 + 头部 RS485 IMU | 所有云台目标通过 InertialGimbalAdapter，再进入机械执行器 |
+
+```sh
+west build -b dm_mc02/stm32h723xx samples/robotics/command_gimbal -d build/command_gimbal_referee -- -DEXTRA_CONF_FILE=referee.conf
+west build -b dm_mc02/stm32h723xx samples/robotics/command_gimbal -d build/command_gimbal_vision_observe -- -DEXTRA_CONF_FILE=vision_observe.conf
+west build -b dm_mc02/stm32h723xx samples/robotics/command_gimbal -d build/command_gimbal_vision_execute -- -DEXTRA_CONF_FILE=vision_execute.conf
+```
+
+MC02 的 USART1 接裁判、UART7 接视觉、RS485-2 接头部 IMU。裁判配置占用 USART1 时，VOFA 不初始化该串口，控制台继续输出源年龄、来源、仲裁原因、权限、参考及执行恢复代次；原有暂停/急停/清除变量可通过调试器操作。新增 `vision_pause`、`permission_pause`、`head_pause` 与原有 `input_pause`、`execution_pause`、`status_pause` 的含义分别为冻结该生产链路，原始时间不会刷新。USART2 RX 使用 DMA 通道 8，保留板载 SPI2 的通道 1/2，并避开遥控 UART5 的通道 6 和视觉 UART7 的通道 5/7。
+
+TODO(实板验收)：先完成机械云台及头部 IMU 安装标定，再验收 `inertial_gimbal`；确认人工接管、目标过期、权限断流、参考变化和恢复后新输入边界。AB 协议没有参考代次字段，目前以明确的本地 `head_reference` 约定解码，IMU 参考变化后的旧视觉会话被撤销；需要与视觉端建立新会话后才能恢复。云台台架没有真实弹速/弹数测量，AB 反馈要求完整实测字段，因此反馈 TX 默认关闭，头部真实反馈已接入缓存，TODO 留待发射测量链路补齐。

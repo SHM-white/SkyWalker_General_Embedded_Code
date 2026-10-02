@@ -1,0 +1,12 @@
+/* MC02: small Yaw on CAN1, Pitch on CAN2, RC on UART5.
+ * External head IMU owns RS485-2 / USART2 RX DMA8; VOFA owns USART1.
+ * Reserve DMA1/2 for board SPI2, 5/7 for vision and 6 for remote UART5.
+ */
+&usart2 {
+    current-speed = <1000000>;
+    dmas = <&dmamux1 8 43 STM32_DMA_PERIPH_RX>;
+    dma-names = "rx";
+};
+&usart1 {
+    current-speed = <115200>;
+};

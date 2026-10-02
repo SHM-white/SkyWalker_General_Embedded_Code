@@ -1,0 +1,10 @@
+sample:
+  name: Friction and dial staged shooter bench
+common:
+  tags: [skywalker, hardware, shooter]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.shooter_bench: {}
+  sample.skywalker.robotics.shooter_bench.loaded:
+    extra_args: EXTRA_CONF_FILE=loaded.conf

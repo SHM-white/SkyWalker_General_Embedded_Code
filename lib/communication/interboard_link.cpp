@@ -21,6 +21,9 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
             control_ = {};
             constraint_ = {};
             feedback_ = {};
+            capabilities_ = {};
+            big_yaw_request_ = {};
+            big_yaw_feedback_ = {};
         }
     }
     else if (!heartbeat_.stamp.valid) {
@@ -49,6 +52,23 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
         break;
     case MessageId::ChassisFeedback:
         ret = InterBoardCodec::decodeChassisFeedback(m, p, n, feedback_);
+        break;
+    case MessageId::CapabilitiesV2: {
+        InterBoardCapabilities c{};
+        ret = InterBoardCodec::decodeCapabilities(m, p, n, c);
+        if (ret == 0 && c.sender_boot_id == heartbeat_.sender_boot_id) capabilities_ = c;
+        else if (ret == 0) ret = -ESTALE;
+        break;
+    }
+    case MessageId::BigYawRequestV2: {
+        BigYawRequest r{};
+        ret = InterBoardCodec::decodeBigYawRequest(m, p, n, r);
+        if (ret == 0 && (!big_yaw_request_.stamp.valid ||
+            sequenceAfter(r.stamp.sequence, big_yaw_request_.stamp.sequence))) big_yaw_request_ = r;
+        break;
+    }
+    case MessageId::BigYawFeedbackV2:
+        ret = InterBoardCodec::decodeBigYawFeedback(m, p, n, big_yaw_feedback_);
         break;
     default:
         return;
@@ -103,5 +123,18 @@ int InterBoardLink::latestChassisFeedback(ChassisFeedbackSummary &out) const {
         return -EAGAIN;
     out = feedback_;
     return 0;
+}
+
+int InterBoardLink::latestCapabilities(InterBoardCapabilities &out) const {
+    if (!capabilities_.stamp.valid) return -EAGAIN;
+    out = capabilities_; return 0;
+}
+int InterBoardLink::latestBigYawRequest(BigYawRequest &out) const {
+    if (!big_yaw_request_.stamp.valid) return -EAGAIN;
+    out = big_yaw_request_; return 0;
+}
+int InterBoardLink::latestBigYawFeedback(BigYawFeedback &out) const {
+    if (!big_yaw_feedback_.stamp.valid) return -EAGAIN;
+    out = big_yaw_feedback_; return 0;
 }
 }

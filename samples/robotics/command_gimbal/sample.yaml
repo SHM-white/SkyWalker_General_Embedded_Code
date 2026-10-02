@@ -7,3 +7,9 @@ common:
   build_only: true
 tests:
   sample.skywalker.robotics.command_gimbal: {}
+  sample.skywalker.robotics.command_gimbal.referee:
+    extra_args: EXTRA_CONF_FILE=referee.conf
+  sample.skywalker.robotics.command_gimbal.vision_observe:
+    extra_args: EXTRA_CONF_FILE=vision_observe.conf
+  sample.skywalker.robotics.command_gimbal.vision_execute:
+    extra_args: EXTRA_CONF_FILE=vision_execute.conf

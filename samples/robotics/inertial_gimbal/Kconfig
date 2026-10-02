@@ -1,0 +1,10 @@
+mainmenu "Head inertial gimbal bench"
+
+config INERTIAL_GIMBAL_LOCK_PITCH
+    bool "Hold Pitch in its prepared mechanical position"
+    default y
+    help
+        First validate yaw compensation while manually rotating the carrier.
+        Release Pitch only after directions, IMU transform and limits are measured.
+
+source "Kconfig.zephyr"

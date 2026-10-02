@@ -1,0 +1,18 @@
+mainmenu "Arbitrated gimbal with staged command sources"
+
+config COMMAND_GIMBAL_REFEREE
+    bool "Require actual referee gimbal permission"
+    default n
+    depends on SKYWALKER_REFEREE
+
+config COMMAND_GIMBAL_VISION_OBSERVE
+    bool "Receive vision goals while retaining manual execution"
+    default n
+    depends on SKYWALKER_VISION_RECEIVER
+
+config COMMAND_GIMBAL_VISION_EXECUTE
+    bool "Execute vision inertial goals through the head IMU adapter"
+    default n
+    depends on SKYWALKER_VISION_RECEIVER && SKYWALKER_IMU_DM_RS485 && SKYWALKER_IMU_RECEIVER
+
+source "Kconfig.zephyr"

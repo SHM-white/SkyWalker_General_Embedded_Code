@@ -1,0 +1,8 @@
+sample:
+  name: Shared CAN gimbal and unloaded shooter
+common:
+  tags: [skywalker, hardware, motor]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.gimbal_shared_can: {}

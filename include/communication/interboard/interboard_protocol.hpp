@@ -11,7 +11,10 @@ enum class MessageId : std::uint16_t {
     ChassisFeedback = 0x0103,
     ChassisFault = 0x0104,
     GimbalFeedback = 0x0201,
-    SystemEvent = 0x0301
+    SystemEvent = 0x0301,
+    CapabilitiesV2 = 0x0401,
+    BigYawRequestV2 = 0x0402,
+    BigYawFeedbackV2 = 0x0403
 };
 constexpr std::size_t kMaxPayload = 128, kMaxFrame = 142;
 struct FrameMeta {
@@ -19,6 +22,7 @@ struct FrameMeta {
     MessageId message_id = MessageId::Heartbeat;
     std::uint32_t frame_sequence = 0;
     std::uint64_t local_receive_ms = 0;
+    std::uint8_t version = 1;
 };
 struct InterBoardFrame {
     FrameMeta meta{};
@@ -27,4 +31,6 @@ struct InterBoardFrame {
 };
 std::uint16_t interboardCrc16(const std::uint8_t *data, std::size_t size);
 int messageIndex(MessageId id);
+std::uint8_t messageVersion(MessageId id);
+constexpr std::size_t kMessageCount = 7;
 }

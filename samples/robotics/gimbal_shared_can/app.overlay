@@ -1,0 +1,2 @@
+/* TODO(wiring): verify shared CAN1 IDs and independent Pitch CAN2. */
+/ {};

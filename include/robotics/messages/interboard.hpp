@@ -53,6 +53,44 @@ struct ChassisConstraint {
     // 板间底盘约束消息的时间戳与序号。
     MessageStamp stamp{};
 };
+// V2 extension. V1 heartbeat and chassis messages retain their original layout.
+inline constexpr std::uint16_t kBigYawContractVersion = 2;
+inline constexpr std::uint32_t kBigYawCapability = 1u << 0;
+struct InterBoardCapabilities {
+    std::uint16_t contract_version = kBigYawContractVersion;
+    std::uint32_t features = kBigYawCapability;
+    std::uint64_t sender_boot_id = 0;
+    MessageStamp stamp{};
+};
+enum class BigYawMode : std::uint8_t { Disabled, FollowCenter };
+struct BigYawRequest {
+    BigYawMode mode = BigYawMode::Disabled;
+    float target_rate_rad_s = 0;
+    // Original producer identity/age, never renewed by communication retries.
+    std::uint32_t source_sequence = 0;
+    std::uint32_t source_age_ms = 0;
+    std::uint32_t command_age_ms = 0;
+    std::uint64_t receiver_boot_id = 0;
+    // Independent big-Yaw recovery context, unrelated to wheel heartbeat context.
+    std::uint32_t resume_generation = 0;
+    OutputPermission permission{};
+    std::uint32_t permission_age_ms = 0;
+    MessageStamp stamp{};
+};
+struct BigYawFeedback {
+    ExecutionState execution_state = ExecutionState::Waiting;
+    bool ready = false;
+    bool armed = false;
+    bool valid = false;
+    float actual_rate_rad_s = 0;
+    std::uint32_t active_reasons = 0;
+    std::uint32_t resume_generation = 0;
+    std::uint32_t last_command_sequence = 0;
+    std::uint32_t source_sequence = 0;
+    std::uint32_t production_age_ms = 0;
+    // Produced by the execution owner; RX decoding stores local receive time.
+    MessageStamp stamp{};
+};
 inline bool forwardedFresh(const MessageStamp &s, std::uint32_t age_ms, std::uint64_t now_ms,
                            std::uint32_t timeout_ms) {
     return isFresh(s, now_ms, timeout_ms) && age_ms <= timeout_ms && now_ms - s.timestamp_ms <= timeout_ms - age_ms;

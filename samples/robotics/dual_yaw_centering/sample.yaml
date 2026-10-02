@@ -1,0 +1,11 @@
+sample:
+  name: Dual Yaw centering
+  description: Head inertial hold and independent V2 big-Yaw velocity peer
+common:
+  tags: [robotics, motor, interboard, imu]
+  platform_allow: [dm_mc02]
+  build_only: true
+tests:
+  sample.robotics.dual_yaw_centering.gimbal: {}
+  sample.robotics.dual_yaw_centering.chassis:
+    extra_args: EXTRA_CONF_FILE=chassis.conf

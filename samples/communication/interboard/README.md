@@ -52,3 +52,10 @@ west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/inte
 日志 `transport` 的 0/1/2 分别表示 UART/RS485/CAN，`error` 为负 errno。`-ENODEV` 优先定位设备/别名；RS485 的 `-ENOTSUP` 检查硬件 DE 和 8N1；CAN `-EBUSY` 检查控制器是否已被占用；超时检查两端模式、接线、供电、速率、CAN ID 和 poll 周期。Parser 的 CRC 计数仅针对内部 V1 帧，不包含下层 RS485/CAN 封装丢包。
 
 完整接口、线上封装、缓冲限制和恢复行为见[板间传输文档](../../../docs/modules/communication/interboard-transports.md)。本次没有执行实际刷写或双板收发验证。
+
+
+## 大 Yaw V2 契约观测（无电机输出）
+
+默认双方声明 V2 能力，同时保留 V1 底盘字段。`g` 仅改变轮控恢复代次，`b` 仅改变大 Yaw 恢复代次；`p` 停命令生产，`s` 停执行状态生产但保留心跳。通信线程不能刷新旧状态的生产年龄。大 Yaw 反馈、请求原始源年龄和目标板 boot/context 在日志单独记录。
+
+用 `version_mismatch.conf` 构建任一端可声明不同契约版本，另一端 `bigYaw compatible=0`，新增轴请求保持禁用。底盘角色组合配置为 `-DEXTRA_CONF_FILE="chassis.conf;version_mismatch.conf"`。TODO(hardware)：实际双板单板重启、执行停更、原始输入停更和 UART 断流验收记录。

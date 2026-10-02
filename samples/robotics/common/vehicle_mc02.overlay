@@ -1,0 +1,37 @@
+/* Physical owner map: USART1 link, UART5 RC, UART7 vision,
+ * USART2 head RS485 IMU, USART3 referee through an actual electrical adapter.
+ * SPI2 DMA1 channels 1/2 remain reserved for the board IMU.
+ */
+/ {
+    aliases {
+        interboard-uart = &usart1;
+        vision-uart = &uart7;
+        referee-uart = &usart3;
+    };
+};
+&usart1 { current-speed = <460800>; };
+&uart7 {
+    current-speed = <115200>;
+    dmas = <&dmamux1 5 80 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 7 79 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
+};
+&usart2 {
+    current-speed = <1000000>;
+    dmas = <&dmamux1 8 43 STM32_DMA_PERIPH_RX>;
+    dma-names = "rx";
+};
+&usart3 {
+    /* TODO(electrical): this board connector is RS485. Referee User UART is
+     * TTL; connect a real TTL/RS485 bridge or remap to a spare TTL connector.
+     * Do not connect incompatible signaling merely because baud matches.
+     */
+    current-speed = <115200>;
+    dmas = <&dmamux1 9 46 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 10 45 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
+};
+&can1 { status = "okay"; bitrate = <1000000>; };
+&can2 { status = "okay"; bitrate = <1000000>; };
+&can3 { status = "okay"; bitrate = <1000000>; };
+&rng { status = "okay"; };

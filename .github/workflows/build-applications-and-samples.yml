@@ -108,25 +108,25 @@ jobs:
 
           echo 'All applications and samples built successfully.'
 
-      - name: Build registered first-package configuration variants
+      - name: Build registered staged hardware configurations
         shell: bash
         run: |
           set -euo pipefail
           west twister --build-only \
-            -T skywalker_code/samples/robotics/execution_skeleton \
-            -T skywalker_code/samples/robotics/command_gimbal \
+            -T skywalker_code/samples/robotics \
             -T skywalker_code/samples/imu/dual_imu \
+            -T skywalker_code/samples/communication/interboard \
             -p dm_mc02/stm32h723xx --inline-logs --jobs 2 \
-            -O build/first-package-variants
+            -O build/staged-hardware-variants
 
-      - name: Upload first-package variant build reports
+      - name: Upload staged hardware variant build reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: first-package-mc02-builds
+          name: staged-hardware-mc02-builds
           path: |
-            build/first-package-variants/*.json
-            build/first-package-variants/*.xml
-            build/first-package-variants/**/*.log
+            build/staged-hardware-variants/*.json
+            build/staged-hardware-variants/*.xml
+            build/staged-hardware-variants/**/*.log
           if-no-files-found: warn
           retention-days: 14

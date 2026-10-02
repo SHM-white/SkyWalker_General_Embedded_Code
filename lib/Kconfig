@@ -156,6 +156,23 @@ config SKYWALKER_ROBOTICS_GIMBAL
     bool "Recoverable yaw gimbal"
     depends on SKYWALKER_LIB_ROBOTICS && SKYWALKER_LIB_MOTOR_CONTROL
 
+config SKYWALKER_ROBOTICS_INERTIAL_GIMBAL
+    bool "Head inertial reference adapter and dual-yaw centering"
+    default y
+    depends on SKYWALKER_ROBOTICS_GIMBAL
+    help
+        Consume stamped IMU snapshots without owning acquisition or CAN.
+        Installation transforms and quality acceptance require bench calibration.
+
+config SKYWALKER_ROBOTICS_BIG_YAW
+    bool "Independent continuous big-yaw velocity executor"
+    depends on SKYWALKER_LIB_ROBOTICS && SKYWALKER_LIB_MOTOR_CONTROL && SKYWALKER_MOTOR_DM
+
+config SKYWALKER_ROBOTICS_SHOOTER
+    bool "Independent friction and indexed-feed shooter executor"
+    depends on SKYWALKER_LIB_ROBOTICS && SKYWALKER_LIB_MOTOR_CONTROL && SKYWALKER_MOTOR_DJI
+
+
 config SKYWALKER_ATTITUDE_EKF
     bool "Instance-owned quaternion attitude EKF"
     depends on CPP

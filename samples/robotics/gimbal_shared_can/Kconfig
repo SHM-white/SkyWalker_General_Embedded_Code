@@ -1,0 +1,8 @@
+mainmenu "Shared CAN mechanical bench"
+config SHOOTER_UNLOADED_FEED
+    bool "Permit unloaded dial indexing"
+    default y
+    help
+        Empty mechanism only. Loaded shooting requires live heat and permission
+        sources; these must be wired before disabling this bench bypass.
+source "Kconfig.zephyr"

@@ -22,9 +22,15 @@ int messageIndex(MessageId id) {
         return 2;
     case MessageId::ChassisFeedback:
         return 3;
+    case MessageId::CapabilitiesV2: return 4;
+    case MessageId::BigYawRequestV2: return 5;
+    case MessageId::BigYawFeedbackV2: return 6;
     default:
         return -1;
     }
+}
+std::uint8_t messageVersion(MessageId id) {
+    return id == MessageId::CapabilitiesV2 || id == MessageId::BigYawRequestV2 || id == MessageId::BigYawFeedbackV2 ? 2 : 1;
 }
 int InterBoardParser::reset() {
     used_ = head_ = count_ = 0;
@@ -52,7 +58,7 @@ void InterBoardParser::scan(std::uint64_t now) {
         }
         if (used_ < 12)
             break;
-        if (p[2] != 1 || p[3] < 1 || p[3] > 2) {
+        if ((p[2] != 1 && p[2] != 2) || p[3] < 1 || p[3] > 2) {
             ++stats_.version_errors;
             discard(1);
             continue;
@@ -74,6 +80,7 @@ void InterBoardParser::scan(std::uint64_t now) {
         const auto id = static_cast<MessageId>(wire::loadLe16(p + 4));
         if (messageIndex(id) < 0)
             ++stats_.unknown_messages;
+        else if (p[2] != messageVersion(id)) ++stats_.version_errors;
         else {
             if (count_ == queue_.size()) {
                 head_ = (head_ + 1) % queue_.size();
@@ -81,7 +88,7 @@ void InterBoardParser::scan(std::uint64_t now) {
                 ++stats_.queue_overflows;
             }
             auto &f = queue_[(head_ + count_) % queue_.size()];
-            f.meta = {static_cast<BoardRole>(p[3]), id, wire::loadLe32(p + 8), receive_ms_[total - 1]};
+            f.meta = {static_cast<BoardRole>(p[3]), id, wire::loadLe32(p + 8), receive_ms_[total - 1], p[2]};
             f.size = size;
             std::memcpy(f.payload.data(), p + 12, size);
             ++count_;
