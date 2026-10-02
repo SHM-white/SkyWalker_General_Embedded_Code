@@ -35,7 +35,7 @@ InterBoardEndpoint::Snapshot InterBoardEndpoint::snapshot() const {
 void InterBoardEndpoint::poll(std::uint64_t now) {
     if ((config_.role != BoardRole::GimbalController && config_.role != BoardRole::ChassisController) ||
         !config_.command_timeout_ms || !config_.heartbeat_timeout_ms ||
-        !config_.tx_timeout_ms || config_.tx_timeout_ms > 1000) {
+        !config_.tx_timeout_ms || config_.tx_timeout_ms > 1000 || !config_.status_timeout_ms) {
         const auto key = k_spin_lock(&lock_);
         published_ = {};
         published_.transport = transport_.kind();
@@ -93,7 +93,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
             else if (length < 0) encode_error = length;
         };
         if (heartbeat_due) {
-            const auto feedback = wireFeedback(outgoing.status);
+            const auto feedback = wireFeedback(outgoing.status, now, config_.status_timeout_ms);
             BoardHeartbeat heartbeat{};
             heartbeat.role = config_.role;
             heartbeat.sender_boot_id = boot_id_;

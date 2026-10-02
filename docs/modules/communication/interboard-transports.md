@@ -28,6 +28,8 @@ static communication::InterBoardEndpoint link(
 
 底盘端使用 `ChassisController`、RS485 `Responder`，CAN 的 TX/RX ID 对调。两板选择相同传输方式。业务线程提交值、复制快照；唯一通信线程持续调用 `link.poll(k_uptime_get())`，建议间隔 1 ms，包括故障期间。
 
+执行线程在每次真实生产时填 `RunStatus.stamp={now_ms, sequence, true}` 再调用 setStatus。Config 第五个字段 `status_timeout_ms` 默认 100 ms；发送心跳和底盘反馈前检查该年龄。状态无效、过期或来自未来时间时，V1 就绪和使能信息撤销并报告 FeedbackStale，心跳依然正常发送。setStatus 与 poll 都不重盖执行生产时间；停止执行线程时，通信线程不能继续宣布旧 Ready/Active。默认无状态生产者的 endpoint 会报告未就绪。
+
 `ConfiguredInterBoardTransport` 通过 `std::variant` 在对象内部构造一个后端，不分配堆内存，不启动未选择的设备。也可以直接构造 `UartInterBoardTransport`、`Rs485InterBoardTransport` 或 `CanInterBoardTransport` 并传给 Endpoint。纯 CAN 构造不需要传 DMA 指针。对象不能在运行中移动、复制或销毁。
 
 在 `applications/sentry_gimbal`、`applications/sentry_chassis` 中，只需修改各自 `src/board_config.hpp` 的 `interboard_transport.kind`；现有 overlay 已提供三种设备别名。默认仍是 UART。

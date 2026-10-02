@@ -10,6 +10,7 @@
 #include <drivers/motor/can_bus.hpp>
 #include <drivers/motor/group.hpp>
 #undef private
+#include <robotics/gimbal/gimbal_executor.hpp>
 
 using namespace skywalker::motor;
 namespace {
@@ -312,6 +313,235 @@ ZTEST(motor, test_multiple_groups_share_one_authorized_frame) {
     zassert_true(bus.in_flight_.busy);
     zassert_equal(bus.in_flight_.stop_generations[0], 0);
     zassert_equal(bus.in_flight_.stop_generations[1], 0);
+}
+
+namespace {
+using skywalker::robotics::GimbalExecutionInputs;
+using skywalker::robotics::GimbalExecutor;
+using skywalker::robotics::GimbalMode;
+using skywalker::robotics::RunState;
+using skywalker::robotics::WaitReason;
+
+// The controller, driver, group and both buses are production objects. As in the
+// existing CAN regressions, only protocol completion and received feedback are
+// injected; no worker timing or external CAN hardware is required.
+const device second_fake_can = [] {
+    device d{};
+    d.api = &api;
+    return d;
+}();
+
+skywalker::control::PositionMotor::Config gimbalLoop(bool torque) {
+    skywalker::control::PositionMotor::Config config{};
+    config.effort_unit = torque ? skywalker::control::EffortUnit::NewtonMeter
+                               : skywalker::control::EffortUnit::Ampere;
+    config.safety = {2.0f, 80.0f};
+    config.reference = skywalker::control::PositionReference::DriverContinuous;
+    config.loop.position = {.kp = 1.0f,
+                            .integral_min = -0.1f,
+                            .integral_max = 0.1f,
+                            .output_min = -1.0f,
+                            .output_max = 1.0f,
+                            .dt_min_s = 0.001f,
+                            .dt_max_s = 0.02f};
+    config.loop.velocity.regulator.feedback = {.kp = 0.1f,
+                                               .integral_min = -0.1f,
+                                               .integral_max = 0.1f,
+                                               .output_min = -0.5f,
+                                               .output_max = 0.5f,
+                                               .dt_min_s = 0.001f,
+                                               .dt_max_s = 0.02f};
+    config.loop.velocity.reference_slew = {10.0f, 10.0f};
+    config.loop.velocity.requested_velocity_abs_max_rad_s = 1.0f;
+    config.loop.velocity.effort_abs_max = 0.5f;
+    return config;
+}
+
+skywalker::robotics::GimbalAxisConfig limitedAxis() {
+    return {skywalker::robotics::AxisTopology::Limited, -1.0f, 1.0f, 1.0f, true,
+            skywalker::robotics::AxisReferenceInit::Preserve};
+}
+
+struct GimbalFixture {
+    Motor yaw{djiConfig(1)}, pitch{dmConfig()};
+    CanBus yaw_bus{&fake_can}, pitch_bus{&second_fake_can};
+    Group group{yaw, pitch};
+    GimbalExecutor executor{yaw, pitch, group, gimbalLoop(false), limitedAxis(),
+                            gimbalLoop(true), limitedAxis(), GimbalExecutor::Config{.fault_retry_ms = 1}};
+    GimbalExecutionInputs inputs{};
+    std::uint64_t clock_us = 0;
+    std::uint32_t sequence = 0;
+
+    void ready(Motor &motor, bool dm) {
+        motor.started_ = true;
+        motor.snapshot_.state = MotorState::Disabled;
+        motor.snapshot_.output_permitted = false;
+        motor.snapshot_.position_reference_valid = true;
+        if (motor.snapshot_.reference_generation == 0) motor.snapshot_.reference_generation = 1;
+        motor.snapshot_.feedback.position_rad = 0;
+        motor.snapshot_.feedback.velocity_rad_s = 0;
+        motor.snapshot_.feedback.temperature_c = 25;
+        motor.snapshot_.feedback.valid = FeedbackPosition | FeedbackVelocity | FeedbackTemperature;
+        motor.snapshot_.feedback.timestamp_ms = now();
+        motor.feedback_stable_since_ms_ = now() - 5;
+        motor.safe_prepared_ = true;
+        motor.safe_pending_ = false;
+        if (dm) {
+            motor.snapshot_.native_drive_status_valid = true;
+            motor.snapshot_.native_drive_status = static_cast<std::uint32_t>(dm::DriveStatus::Disabled);
+            motor.snapshot_.native_temperatures_valid = true;
+            motor.snapshot_.native_mos_temperature_c = 25;
+            motor.snapshot_.native_rotor_temperature_c = 25;
+        }
+    }
+
+    void setup() {
+        k_sleep(K_MSEC(10)); // Driver readiness requires a nonzero stable-time origin.
+        zassert_ok(yaw_bus.attach(yaw));
+        zassert_ok(pitch_bus.attach(pitch));
+        yaw_bus.status_.state = pitch_bus.status_.state = BusState::Running;
+        yaw_bus.units_[0] = {CanBus::UnitKind::Dji, 0x200, 0};
+        pitch_bus.units_[0] = {CanBus::UnitKind::Dm, 1, 0};
+        yaw_bus.unit_count_ = pitch_bus.unit_count_ = 1;
+        ready(yaw, false);
+        ready(pitch, true);
+        zassert_ok(executor.begin());
+        inputs.transport_ready = true;
+        inputs.command.mode = GimbalMode::Rate;
+        inputs.command.yaw_rate_rad_s = 0.1f;
+        inputs.command.pitch_rate_rad_s = -0.1f;
+        clock_us = now() * 1000;
+    }
+
+    skywalker::robotics::RunStatus tick(bool new_source = true) {
+        clock_us += 5000;
+        yaw.snapshot_.feedback.timestamp_ms = pitch.snapshot_.feedback.timestamp_ms = now();
+        inputs.command.stamp = {clock_us / 1000, ++sequence, true};
+        if (new_source) inputs.source_stamp = {clock_us, sequence, true};
+        return executor.update(inputs, clock_us);
+    }
+
+    void prepare() {
+        zassert_equal(tick().reason, WaitReason::Cycle);
+        const auto prepared = tick();
+        zassert_equal(prepared.state, RunState::Recovering);
+        zassert_equal(prepared.reason, WaitReason::Command);
+        zassert_true(prepared.ready);
+        zassert_equal(prepared.generation, 1);
+        zassert_false(group.status().enable_pending);
+    }
+
+    std::uint64_t requestEnable() {
+        const auto status = tick();
+        zassert_equal(status.state, RunState::Recovering);
+        zassert_true(group.status().enable_pending, "state=%u reason=%u error=%d",
+                     unsigned(status.state), unsigned(status.reason), status.error);
+        zassert_false(yaw.snapshot().output_permitted);
+        zassert_false(pitch.snapshot().output_permitted);
+        return group.status().enable_generation;
+    }
+
+    void completeEnable(std::uint64_t generation) {
+        yaw.markPrepared(generation);
+        pitch.markPrepared(generation);
+    }
+
+    void activate() {
+        prepare();
+        completeEnable(requestEnable());
+        zassert_equal(tick().state, RunState::Active);
+        zassert_true(yaw.copyStaged().valid);
+        zassert_true(pitch.copyStaged().valid);
+    }
+
+    void stopped() {
+        zassert_false(group.status().active);
+        zassert_false(group.status().enable_pending);
+        zassert_false(yaw.snapshot().output_permitted);
+        zassert_false(pitch.snapshot().output_permitted);
+        zassert_false(yaw.copyStaged().valid);
+        zassert_false(pitch.copyStaged().valid);
+    }
+};
+} // namespace
+
+ZTEST(motor, test_gimbal_two_can_fault_recovery_waits_for_new_source) {
+    static GimbalFixture fixture;
+    fixture.setup();
+    fixture.activate();
+    zassert_not_equal(fixture.yaw.bus_, fixture.pitch.bus_);
+    const auto old_source = fixture.inputs.source_stamp;
+    fixture.yaw.raiseFault({FaultReason::TransportError, -EIO, &fixture.yaw, now()});
+    fixture.stopped(); // A yaw fault closes the shared group on both physical CANs.
+    zassert_equal(fixture.tick().state, RunState::Recovering);
+    // Communication loss is an Offline transition, not an acknowledged drive
+    // fault. Recovery requires fresh feedback, safe stop and a new reference.
+    zassert_equal(fixture.yaw.snapshot().state, MotorState::Offline);
+    zassert_false(fixture.yaw.snapshot().position_reference_valid);
+    zassert_false(fixture.yaw.clear_pending_);
+    fixture.ready(fixture.yaw, false);
+    fixture.ready(fixture.pitch, true);
+    const auto recovered = fixture.tick();
+    zassert_equal(recovered.generation, 2);
+    zassert_true(recovered.ready);
+    fixture.inputs.source_stamp = old_source;
+    zassert_equal(fixture.tick(false).reason, WaitReason::Command);
+    fixture.stopped(); // Fresh arbitration must not authorize a pre-recovery input.
+    fixture.completeEnable(fixture.requestEnable());
+    zassert_equal(fixture.tick().state, RunState::Active);
+    zassert_equal(fixture.yaw.copyStaged().command.kind, CommandKind::Current);
+    zassert_equal(fixture.pitch.copyStaged().command.kind, CommandKind::Torque);
+    // Application-owned publication is distinct for the two physical buses.
+    zassert_ok(fixture.yaw_bus.commit().error);
+    zassert_ok(fixture.pitch_bus.commit().error);
+}
+
+ZTEST(motor, test_gimbal_command_cancels_pending_two_can_enable) {
+    static GimbalFixture fixture;
+    fixture.setup();
+    fixture.prepare();
+    const auto cancelled_generation = fixture.requestEnable();
+    fixture.inputs.command.mode = GimbalMode::Disabled;
+    zassert_not_equal(fixture.tick().state, RunState::Active);
+    fixture.stopped();
+    fixture.completeEnable(cancelled_generation);
+    fixture.stopped(); // A late protocol callback cannot resurrect canceled output.
+    zassert_false(fixture.yaw.enable_pending_);
+    zassert_false(fixture.pitch.enable_pending_);
+}
+
+ZTEST(motor, test_gimbal_permission_cancels_pending_two_can_enable) {
+    static GimbalFixture fixture;
+    fixture.setup();
+    fixture.prepare();
+    const auto cancelled_generation = fixture.requestEnable();
+    fixture.inputs.require_permission = true;
+    fixture.inputs.permission.valid = true;
+    fixture.inputs.permission.enabled = false;
+    fixture.inputs.permission.stamp = {fixture.clock_us / 1000, 1, true};
+    zassert_equal(fixture.tick().reason, WaitReason::Power);
+    fixture.stopped();
+    fixture.completeEnable(cancelled_generation);
+    fixture.stopped();
+    // Restoring a permit prepares a new context but does not restore the old target.
+    fixture.ready(fixture.yaw, false);
+    fixture.ready(fixture.pitch, true);
+    fixture.inputs.permission.enabled = true;
+    fixture.inputs.permission.stamp = {fixture.clock_us / 1000, 2, true};
+    zassert_equal(fixture.tick(false).reason, WaitReason::Command);
+    fixture.stopped();
+}
+
+ZTEST(motor, test_gimbal_reference_change_stops_both_can_axes) {
+    static GimbalFixture fixture;
+    fixture.setup();
+    fixture.activate();
+    ++fixture.pitch.snapshot_.reference_generation;
+    const auto changed = fixture.tick();
+    zassert_equal(changed.state, RunState::Recovering);
+    zassert_equal(changed.reason, WaitReason::Reference);
+    fixture.stopped();
+    zassert_equal(changed.generation, 1); // No new context before preparation completes.
 }
 
 ZTEST_SUITE(motor, nullptr, nullptr, nullptr, nullptr, nullptr);

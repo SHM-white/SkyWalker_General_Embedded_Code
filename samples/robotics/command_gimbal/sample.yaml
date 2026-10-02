@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker arbitrated dual-axis command gimbal
+  description: MC02 RemoteSource and CommandManager controlling a cross-CAN GM6020 and DM4310 group
+common:
+  tags: [skywalker, hardware, motor]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.command_gimbal: {}

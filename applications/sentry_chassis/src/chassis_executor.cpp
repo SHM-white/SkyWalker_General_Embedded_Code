@@ -26,6 +26,7 @@ RunStatus ChassisExecutor::update(core::TimeUs now_us) {
         status_.error = error;
         status_.ready = prepared_ && (hardware_.ready() || hardware_.armed() || hardware_.enabling());
         status_.generation = generation_;
+        status_.stamp = {now, status_.stamp.sequence + 1, true};
         return status_;
     };
     if (!checked_) {

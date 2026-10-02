@@ -28,6 +28,17 @@ Coverage:
 - Ignore stale DM callback order without creating a false gap fault.
 - Continue queued work, shorten waits to deadlines, and avoid spinning while
   waiting for a recovery retry or for another Group member to prepare.
+- Run the real GimbalExecutor with DJI yaw and DM pitch on distinct fake CAN
+  controllers: one-axis transport fault stops both, automatic recovery creates
+  a new context, and old source input cannot authorize it.
+- Cancel both pending gimbal enables when a command is disabled or permission
+  is withdrawn; reject late protocol completion after cancellation.
+- Revoke both axes when a mechanical reference generation changes.
+
+The gimbal fixture also links the real GimbalAxis and PositionMotor loops.
+Protocol-safe preparation and received feedback are injected through the same
+private-state fixture convention as the other regressions. It does not start CAN
+worker threads or claim to qualify physical enable-handshake latency.
 
 These are deterministic software regressions, not a hardware timing, bus-off,
 CAN cancellation, stack-headroom, or mechanical-stop qualification.

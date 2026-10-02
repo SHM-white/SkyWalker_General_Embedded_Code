@@ -1,0 +1,5 @@
+tests:
+  skywalker.execution.contracts:
+    platform_allow: [native_sim/native/64]
+    tags: [robotics, execution, recovery, interboard]
+    harness: ztest

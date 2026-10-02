@@ -5,6 +5,10 @@ on:
     paths:
       - 'tests/algorithms/**'
       - 'tests/command_manager/**'
+      - 'tests/command_service/**'
+      - 'tests/execution/**'
+      - 'tests/motor/regression/**'
+      - 'tests/vision_imu/**'
       - 'tests/common/**'
       - 'include/**'
       - 'lib/**'
@@ -20,6 +24,10 @@ on:
     paths:
       - 'tests/algorithms/**'
       - 'tests/command_manager/**'
+      - 'tests/command_service/**'
+      - 'tests/execution/**'
+      - 'tests/motor/regression/**'
+      - 'tests/vision_imu/**'
       - 'tests/common/**'
       - 'include/**'
       - 'lib/**'
@@ -89,6 +97,10 @@ jobs:
           west twister \
             -T skywalker_code/tests/algorithms \
             -T skywalker_code/tests/command_manager \
+            -T skywalker_code/tests/command_service \
+            -T skywalker_code/tests/execution \
+            -T skywalker_code/tests/motor/regression \
+            -T skywalker_code/tests/vision_imu \
             -p native_sim/native/64 \
             --inline-logs \
             --jobs 2 \

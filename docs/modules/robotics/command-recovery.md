@@ -15,7 +15,13 @@
 
 ## 应用侧恢复责任
 
-GimbalExecutor 与 ChassisExecutor 是应用私有封装，不是 lib/robotics 的通用接口。它们处理配置检查、初始化重试、命令超时、本地反馈、可信参考、显式使能和 CAN 提交。RunStatus 汇报 Disabled、Recovering、Active、Blocked 及等待原因。
+applications 内的 GimbalExecutor 与 ChassisExecutor 是应用私有封装。它们处理配置检查、初始化重试、命令超时、本地反馈、可信参考、显式使能和 CAN 提交。RunStatus 汇报 Disabled、Recovering、Active、Blocked 及等待原因；stamp 必须标记执行状态的真实生产时间。
+
+`include/robotics/gimbal/gimbal_executor.hpp` 另提供 `skywalker::robotics::GimbalExecutor` 双轴机械执行器，供 `command_gimbal` 与后续共享 CAN 组合复用。应用创建并 attach/start 两个 Motor、专属 Group 和物理 CanBus，然后调用 begin；执行器 update 只暂存电机输出，应用在周期末统一 commit。`GimbalExecutionInputs` 包含最终命令、原始 source_stamp、可选许可、总线有效性、急停和显式清除。commit 失败时应用调用 suspend，立即撤销双轴。
+
+`RecoveryGate` 对每个机构维护独立恢复代次和准备边界。复位控制历史后调用 prepared；accept 必须同时检查最终命令和原始输入的生产时间严格晚于边界，并在 Enabling/Active 的每轮继续检查年龄。最终仲裁序号变新不表示原始输入已更新。暂态撤销清掉授权，准备完成后等待新的原始输入；急停和硬故障按显式清除边界处理。
+
+`SnapshotCache<T>` 提供独立消费者的完整快照复制，保留原始生产时间。`execution_skeleton` 演练来源停产、单消费者停产、控制周期停顿和参考失效；不驱动电机。三个 IMU 安装位置的观测、后续惯性适配与双 Yaw 路线见[逐级整车指南](../../dev/项目优化与逐级整车验证样例实施指南.md)。
 
 sentry_gimbal 目前只注册 RemoteSource 和 RefereePermissionSource，未注册 VisionSource；board_config 将 allow_auto 设为 false，裁判版本仍为 Unspecified，且 connections_configured=false。sentry_chassis 同样保持 connections_configured=false，power_model_calibrated=false。当前默认配置是防止未核对硬件输出的门禁，不代表接口缺失。
 

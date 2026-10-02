@@ -1,0 +1,12 @@
+mainmenu "Dual-controller IMU observation bench"
+
+config DUAL_IMU_CHASSIS_BOARD
+    bool "Onboard IMU is mounted on the chassis"
+    default n
+    help
+        Select the chassis board observation profile. The default is the
+        gimbal board mounted on the large-Yaw carrier, with an external IMU
+        on the pitching head. This labels mechanical frames; it does not
+        fuse orientations or establish a shared inertial reference.
+
+source "Kconfig.zephyr"

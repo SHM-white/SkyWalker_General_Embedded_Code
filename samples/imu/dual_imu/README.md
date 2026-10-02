@@ -54,7 +54,31 @@ west flash -d build/dual_imu
 
 没有有效姿态或字段已过期时，对应图表数据输出 NaN，不能把初始化单位四元数误认成真实姿态。板载全部字段新鲜时 mask=15，外置首版没有温度输出能力，全部基础字段新鲜时 mask=7。外置质量为 Unknown，表示模块没有公开内部 EKF 收敛标志。
 
-两套 frame_id 分别为 1 和 2，yaw 都是各自初始化参考，不要求两者零点相同。默认安装旋转是单位四元数，只表示传感器自身坐标；若希望比较同一机械坐标，按实际安装修改 sensor_to_body。外置单位缩放默认为 1，姿态方向默认为 sensor→world，仍须用实物确认。
+默认云台板配置的板载 frame_id=2，对应大 Yaw 载体；头部外置 frame_id=3，对应随 Pitch 运动的头部。底盘板配置的板载 frame_id=1，对应底盘车体。frame_id 标识安装位置，epoch 标识该位置的参考会话；三者 yaw 各自有初始化参考，不能据此认定零点相同。默认安装旋转是单位四元数，只表示传感器自身坐标；按实际安装修改 sensor_to_body。外置单位缩放默认为 1，姿态方向默认为 sensor→world，仍须用实物确认。
+
+## 三个实际安装位置的观测
+
+同一入口包含两种配置。底盘板只启动板载接收器和温控；云台板同时启动载体板载与头部外置 IMU。底盘配置的 VOFA 外置通道为 NaN，fresh_mask=0。
+
+```sh
+west build -p always -b dm_mc02/stm32h723xx samples/imu/dual_imu \
+  -d build/imu_chassis -- -DEXTRA_CONF_FILE=chassis.conf
+west build -p always -b dm_mc02/stm32h723xx samples/imu/dual_imu \
+  -d build/imu_gimbal -- -DEXTRA_CONF_FILE=gimbal.conf
+```
+
+每 200 ms 的 console 观测行同时记录安装位置、`frame_id/epoch`、质量、fresh_mask、姿态与角速度各自的原始序号、生产时间与年龄，以及初始化/传输错误。无有效时间或未来时间时年龄为 UINT64_MAX。VOFA 失败不阻止 console 观测；16 个原 VOFA 通道的顺序保持不变。
+
+断开电机动力，用人工缓慢转动各级：
+
+| 操作 | 底盘板载 | 载体板载 | 头部外置 |
+|---|---|---|---|
+| 转整个底盘，关节相对位置固定 | 变化 | 变化 | 变化 |
+| 底盘固定，只转大 Yaw | 不变 | yaw 变化 | yaw 变化 |
+| 载体固定，只转小 Yaw | 不变 | 不变 | yaw 变化 |
+| 小 Yaw 固定，只转 Pitch | 不变 | 不变 | pitch 变化 |
+
+这里的 yaw/pitch 指安装变换标定后的机械轴；初始默认变换未标定时应先记录三轴实际符号，再校准。姿态质量为 Unknown 的外置设备需要实物确认，不能直接作为自动惯性使能依据。断开头部 IMU后只有头部字段过期；此样例不包含电机控制、大小 Yaw 回中或姿态融合。已知参考变化应由 source 的采集所有者更新 epoch，不要从观测线程调用归零函数。
 
 串行解析器的 19 字节 CRC 已用手册截图报文验证；23 字节四元数采用同一算法，并有合成流转验证，尚不能替代目标固件实帧验证。字段分别盖接收时间，收到 accel 不会给旧 quat 续期。已知外置归零/校准后，拥有 source 的线程调用 resetReference() 更新本地 epoch；协议无法自动识别全部静默重启。
 

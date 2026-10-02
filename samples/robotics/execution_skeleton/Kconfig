@@ -1,0 +1,9 @@
+mainmenu "Execution skeleton on-board exercise"
+source "Kconfig.zephyr"
+
+config EXECUTION_SKELETON_AUTORUN
+    bool "Repeat the documented input, status, cycle and reference failures"
+    default y
+    help
+        Simulate faults in a 20 second cycle without connecting any motors.
+        Disable this option to observe continuous healthy operation.
