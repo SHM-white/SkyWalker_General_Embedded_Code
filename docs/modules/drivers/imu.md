@@ -1,6 +1,6 @@
 # 06 IMU 独立源、滤波和温控
 
-正式接口位于 include/drivers/imu/imu.hpp、imu_types.hpp。旧 imu.h/imu.c、skywalker,imu 聚合设备和 SKYWALKER_DRIVER_IMU 已移除，不提供兼容 wrapper。底层 Zephyr BMI08x sensor 驱动继续使用；新 EKF 不依赖旧 Kalman device 或矩阵设备树。
+正式接口位于 include/drivers/imu/imu.hpp、imu_types.hpp。旧 imu.h/imu.c、skywalker,imu 聚合设备和 SKYWALKER_DRIVER_IMU 已移除，不提供兼容 wrapper。底层 Zephyr BMI08x sensor 驱动继续使用；姿态 EKF 不依赖通用线性 Kalman 或 Matrix 库；线性 Kalman 也已改为普通算法实例。
 
 ## 数据流和类型
 

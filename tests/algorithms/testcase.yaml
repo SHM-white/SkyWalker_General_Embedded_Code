@@ -1,0 +1,5 @@
+tests:
+  skywalker.algorithms.unit:
+    platform_allow: [native_sim/native/64]
+    tags: [algorithms, control, ekf, kalman, matrix, robotics, benchmark]
+    timeout: 120

@@ -1,0 +1,5 @@
+tests:
+  skywalker.command_manager.algorithms:
+    platform_allow: [native_sim/native/64]
+    tags: [robotics, command, algorithms, benchmark]
+    harness: ztest

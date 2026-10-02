@@ -32,6 +32,14 @@ config SKYWALKER_LIB_CONTROL
     help
         Enable allocation-free PID, feedforward and reference helpers.
 
+config SKYWALKER_LIB_KALMAN_FILTER
+    bool "Linear Kalman filter"
+    select SKYWALKER_LIB_CONTROL
+    select SKYWALKER_LIB_MATRIX
+    help
+        Enable the CMSIS-DSP linear Kalman algorithm with caller-owned
+        buffers and explicit initialization. No devicetree node is needed.
+
 config SKYWALKER_LIB_MOTOR_CONTROL
     bool "C++ velocity and position motor control"
     depends on CPP && SKYWALKER_DRIVER_MOTOR

@@ -1,1 +1,0 @@
-# 文档路径已调整：14-robotics\n\n本主题已归入新的文档目录：[打开现行文档](modules/robotics/robotics.md)。\n\n从[文档中心](README.md)按任务查找其他主题。\n

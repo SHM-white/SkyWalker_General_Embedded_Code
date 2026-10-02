@@ -1,0 +1,145 @@
+name: Unit tests
+
+on:
+  push:
+    paths:
+      - 'tests/algorithms/**'
+      - 'tests/command_manager/**'
+      - 'tests/common/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'drivers/**'
+      - 'boards/**'
+      - 'dts/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/unit-tests.yml'
+  pull_request:
+    paths:
+      - 'tests/algorithms/**'
+      - 'tests/command_manager/**'
+      - 'tests/common/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'drivers/**'
+      - 'boards/**'
+      - 'dts/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/unit-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-unit-tests:
+    name: Unit tests (native_sim 64-bit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+      ZEPHYR_TOOLCHAIN_VARIANT: host/gnu
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Match manifest.self.path in west.yml.
+          path: skywalker_code
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install native build tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build device-tree-compiler gperf
+
+      - name: Set up Zephyr workspace
+        run: |
+          set -euo pipefail
+          python -m pip install 'west==1.5.0'
+          west init -l skywalker_code
+          west update --narrow -o=--depth=1
+          west zephyr-export
+          python -m pip install \
+            -r zephyr/scripts/requirements-base.txt \
+            -r zephyr/scripts/requirements-build-test.txt \
+            -r zephyr/scripts/requirements-run-test.txt
+
+      - name: Build and run unit tests
+        run: |
+          set -euo pipefail
+          west twister \
+            -T skywalker_code/tests/algorithms \
+            -T skywalker_code/tests/command_manager \
+            -p native_sim/native/64 \
+            --inline-logs \
+            --jobs 2 \
+            -O build/unit-tests
+
+      - name: Summarize results and timings
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path('build/unit-tests')
+          report = output / 'twister.json'
+          with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+              summary.write('## Unit tests\n\n')
+              if report.exists():
+                  suites = json.loads(report.read_text()).get('testsuites', [])
+                  summary.write('| Suite | Status | Passed | Total |\n')
+                  summary.write('| --- | --- | ---: | ---: |\n')
+                  for suite in suites:
+                      cases = suite.get('testcases', [])
+                      passed = sum(case.get('status') == 'passed' for case in cases)
+                      summary.write(
+                          f"| {suite['name']} | {suite.get('status', 'unknown')} "
+                          f"| {passed} | {len(cases)} |\n"
+                      )
+              else:
+                  summary.write('No Twister report was generated. See the setup and test step logs.\n')
+
+              timings = []
+              for log in sorted(output.rglob('handler.log')):
+                  timings.extend(line for line in log.read_text(errors='replace').splitlines()
+                                 if line.startswith('BENCH '))
+              if timings:
+                  summary.write('\n### Algorithm timings\n\n')
+                  summary.write('Host execution time; batch min/max are batch means.\n\n')
+                  summary.write('```text\n' + '\n'.join(timings) + '\n```\n')
+          PY
+
+      - name: Upload test reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-tests-native-sim-64
+          path: |
+            build/unit-tests/*.json
+            build/unit-tests/*.xml
+            build/unit-tests/*.log
+            build/unit-tests/**/build.log
+            build/unit-tests/**/handler.log
+          if-no-files-found: warn
+          retention-days: 14

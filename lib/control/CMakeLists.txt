@@ -15,3 +15,4 @@ if(CONFIG_SKYWALKER_LIB_MOTOR_CONTROL)
 endif()
 
 zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ATTITUDE_EKF attitude_ekf.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_LIB_KALMAN_FILTER kalman_filter.c)

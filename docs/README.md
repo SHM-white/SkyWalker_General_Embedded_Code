@@ -29,8 +29,8 @@
 | 源码区域 | 文档 | 核心调用对象 |
 |---|---|---|
 | drivers/motor | [DJI](modules/drivers/motor-dji.md)、[达妙](modules/drivers/motor-dm.md) | Motor、Group、CanBus |
-| drivers/imu、kalman_filter | [IMU](modules/drivers/imu.md)、[Kalman 与矩阵](modules/drivers/kalman-matrix.md) | ImuSource、ImuReceiver、QuaternionEkf |
-| lib/control | [控制算法](modules/control/algorithms.md)、[电机控制器](modules/control/motor-control.md) | C PID、VelocityMotor、PositionMotor |
+| drivers/imu | [IMU](modules/drivers/imu.md) | ImuSource、ImuReceiver |
+| lib/control、lib/matrix | [控制算法](modules/control/algorithms.md)、[电机控制器](modules/control/motor-control.md)、[Kalman 与矩阵](modules/drivers/kalman-matrix.md) | C PID、KalmanFilter、QuaternionEkf、VelocityMotor、PositionMotor |
 | lib/communication | [UART、遥控、裁判、板间](modules/communication/communication.md)、[视觉](modules/communication/vision.md) | AsyncUart、RemoteReceiver、RefereeReceiver、InterBoardEndpoint、VisionReceiver |
 | lib/robotics | [命令来源服务](modules/robotics/command-service.md)、[云台与舵轮](modules/robotics/robotics.md)、[恢复](modules/robotics/command-recovery.md) | CommandManager、CommandArbiter、GimbalAxis、SwerveChassis |
 | 所有封装对象 | [调用示例手册](modules/call-examples.md) | 初始化、快照、周期更新与错误路径 |
