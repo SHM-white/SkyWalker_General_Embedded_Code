@@ -11,7 +11,7 @@ Zephyr device / CAN / SPI / UART / PWM
 drivers: 设备采集、协议驱动、Motor / CanBus / Group
                  │
                  ▼
-lib/control: 纯数值控制、VelocityMotor / PositionMotor
+lib/control: 纯数值控制、线性 Kalman / QuaternionEkf、VelocityMotor / PositionMotor
 lib/communication: UART transport、解析器、接收器、消息快照
                  │
                  ▼

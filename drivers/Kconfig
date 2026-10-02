@@ -1,10 +1,5 @@
 menu "Skywalker Device Drivers"
 
-config SKYWALKER_DRIVER_KALMAN_FILTER
-    bool "Skywalker Kalman Filter"
-    help
-        Enable the Kalman Filter driver.
-
 rsource "imu/Kconfig"
 
 config SKYWALKER_DRIVER_MOTOR

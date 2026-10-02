@@ -92,14 +92,13 @@ west build -p -b rm_typec -d build/dji_position samples/motor/dji_position_contr
 ```text
 skywalker_code/
 ├── boards/                     本仓库维护的 Zephyr boards
-├── dts/bindings/               IMU、Kalman 等设备 binding
+├── dts/bindings/               本地设备 binding
 ├── drivers/
 │   ├── imu/                    独立 IMU source 与采集封装
-│   ├── kalman_filter/          通用 Kalman 设备
 │   └── motor/                  共享 CAN I/O、DJI / 达妙协议
 ├── include/                    公共头文件，按 drivers/lib 对应组织
 ├── lib/
-│   ├── control/                纯 C 控制与 C++ 电机封装
+│   ├── control/                纯 C 控制、线性 Kalman、姿态 EKF 与电机封装
 │   ├── communication/          UART、DR16、裁判、板间协议
 │   ├── robotics/               命令、安全、舵轮、云台算法
 │   ├── matrix/                 CMSIS-DSP 矩阵封装和可选 Flash 存储

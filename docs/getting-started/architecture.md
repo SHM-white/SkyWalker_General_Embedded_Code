@@ -11,10 +11,10 @@ lib/robotics
 lib/communication
   AsyncUart、接收器、协议解析和带时间戳的消息
 lib/control
-  纯 C 控制内核、VelocityMotor、PositionMotor
+  纯 C 控制内核、线性 Kalman、QuaternionEkf、VelocityMotor、PositionMotor
         │
 drivers/
-  CAN 电机、独立 IMU sources、Kalman device
+  CAN 电机、独立 IMU sources
         │
 Zephyr device API / CAN / UART / SPI / PWM / CMSIS-DSP / STM32 HAL
 ~~~
@@ -30,7 +30,7 @@ Zephyr device API / CAN / UART / SPI / PWM / CMSIS-DSP / STM32 HAL
 | drivers/motor/ | DJI / 达妙 CAN 电机协议与统一总线 |
 | drivers/imu/ | BMI088、DM-IMU RS485、ImuState、ImuReceiver 与可选 EKF/温控 |
 | include/ | 对应 drivers/lib 的公共 C / C++ 头文件 |
-| lib/control/ | 数值控制算法和速度/位置电机封装 |
+| lib/control/ | 数值控制算法、线性 Kalman、姿态 EKF 和速度/位置电机封装 |
 | lib/communication/ | UART 传输、DR16、裁判、板间、视觉协议与 receiver |
 | lib/robotics/ | 命令来源服务、仲裁、云台轴、舵轮和功率 limiter |
 | samples/ | 独立 west build 的台架与算法入口 |
@@ -59,12 +59,13 @@ SKYWALKER_IMU
   SKYWALKER_ATTITUDE_EKF
 ~~~
 
-SKYWALKER_DRIVER_KALMAN_FILTER 是独立 Zephyr Kalman device。当前 BMI088 QuaternionEkf 是实例对象算法，不依赖旧的 skywalker,imu 聚合设备；SKYWALKER_DRIVER_IMU 已不是当前选项。
+通用线性 Kalman 位于 lib/control，由调用者提供缓冲并显式初始化，不需要设备树节点。当前 BMI088 QuaternionEkf 是另一套独立的实例对象算法，不调用线性 Kalman。旧 Kalman 驱动开关及 binding 已移除。
 
 常用库选项：
 
 ~~~text
 SKYWALKER_LIB_CONTROL
+SKYWALKER_LIB_KALMAN_FILTER（自动选择 CONTROL、MATRIX 和 CMSIS-DSP）
 SKYWALKER_LIB_MOTOR_CONTROL
 SKYWALKER_LIB_COMMUNICATION
   SKYWALKER_UART_TRANSPORT

@@ -1,1 +1,0 @@
-# 文档路径已调整：19-command-recovery\n\n本主题已归入新的文档目录：[打开现行文档](modules/robotics/command-recovery.md)。\n\n从[文档中心](README.md)按任务查找其他主题。\n
