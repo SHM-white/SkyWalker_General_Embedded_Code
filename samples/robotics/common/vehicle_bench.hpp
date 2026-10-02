@@ -311,13 +311,13 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
     core::TimeUs previous_cycle_us = 0;
     std::uint32_t observation_sequence = 0;
 #if defined(CONFIG_VEHICLE_CHASSIS_ROLE)
-    static samples::chassis::Hardware hardware(DEVICE_DT_GET(DT_NODELABEL(can1)), DEVICE_DT_GET(DT_NODELABEL(can2)));
+    static samples::chassis::Hardware hardware(samples::chassis::steer_can, samples::chassis::drive_can);
     auto chassis_policy = samples::chassis::executorConfig(IS_ENABLED(CONFIG_VEHICLE_POWER_BUDGET));
     // TODO(power): only allow the separately tagged estimate after model and
     // tracking acceptance; no estimated source is enabled in the vehicle default.
     static ChassisExecutor chassis(hardware.adapter, samples::chassis::controllerConfig(), chassis_policy);
     static motor::Motor big_drive(calibration::bigYawHardware());
-    static motor::CanBus big_bus(DEVICE_DT_GET(DT_NODELABEL(can3)));
+    static motor::CanBus big_bus(samples::chassis::big_yaw_can);
     static BigYawExecutor big_axis(big_drive, calibration::bigYawMotorConfig(), calibration::bigYawExecutionConfig());
     static PendingPowerSource pending_power;
     if (!power_source) power_source = &pending_power;
@@ -330,6 +330,7 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
     printk("chassis setup=%d control=%d bigYaw=%d rail=%d\n", topology_error, chassis_error, big_error, power_error);
     std::uint64_t peer_boot = 0;
     PowerMeasurement measurement{};
+    samples::chassis::PeriodicDeadline deadline;
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto rx = endpoint.snapshot();
@@ -399,7 +400,7 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                 (void)observations.publish(observation);
             }
         }
-        k_sleep(K_MSEC(5));
+        deadline.wait();
     }
 #else
     static samples::shooter::Hardware hardware(DEVICE_DT_GET(DT_NODELABEL(can1)), DEVICE_DT_GET(DT_NODELABEL(can2)), false);

@@ -32,7 +32,10 @@ public:
         bool power_model_calibrated = false, allow_estimated_power = false;
         bool power_control_calibrated = false;
         float estimate_idle_power_w = 0, estimate_w_per_abs_amp = 0;
-        float bench_effort_scale = 0.15f;
+        // Independent bench scales; explicit ampere ceilings replace the old
+        // blanket 15% rule while power_control_calibrated remains false.
+        float bench_effort_scale = 0.15f, bench_steer_effort_scale = 0.15f;
+        float bench_drive_current_limit_a = 0.3f, bench_steer_current_limit_a = 0.3f;
         ChassisPowerLimiter::Config limiter{};
     };
     ChassisExecutor(SwerveHardware &hardware, const SwerveChassis::Config &chassis, const Config &config)
@@ -44,6 +47,7 @@ public:
     const ChassisOutput &output() const { return output_; }
     const ChassisFeedback &feedback() const { return feedback_; }
     float effortScale() const { return effort_scale_; }
+    float steerEffortScale() const { return steer_effort_scale_; }
     const PowerMeasurement &powerMeasurement() const { return selected_power_; }
 private:
     void withdraw(WaitReason reason, int error = 0, bool blocked = false);
@@ -61,7 +65,7 @@ private:
     core::TimeUs previous_us_ = 0;
     std::uint64_t retry_ms_ = 0;
     std::uint32_t production_sequence_ = 0;
-    float effort_scale_ = 0;
+    float effort_scale_ = 0, steer_effort_scale_ = 0;
     int config_error_ = 0, hard_error_ = 0;
     WaitReason hard_reason_ = WaitReason::Drive;
     bool begin_attempted_ = false, configured_ = false, have_time_ = false, emergency_latched_ = false;

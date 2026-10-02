@@ -107,16 +107,17 @@ void SwerveHardware::suspend() {
     absolute_current_sum_a_ = 0;
 }
 
-int SwerveHardware::stage(const ChassisOutput &out, float scale) {
-    if (!ready_ || !group_.active()) return -EACCES;
-    if (!std::isfinite(scale) || scale < 0 || scale > 1) return -EINVAL;
+int SwerveHardware::stage(const ChassisOutput &out, float steer_scale, float drive_scale) {
+    if (!ready_ || !group_.active()) { suspend(); return -EACCES; }
+    if (!std::isfinite(steer_scale) || steer_scale < 0 || steer_scale > 1 ||
+        !std::isfinite(drive_scale) || drive_scale < 0 || drive_scale > 1) { suspend(); return -EINVAL; }
     std::array<float, 8> current{};
     for (std::size_t i = 0; i < 4; ++i) {
-        current[i] = out.module[i].steer_effort * scale * config_.directions[i];
-        current[i + 4] = out.module[i].drive_effort * scale * config_.directions[i + 4];
+        current[i] = out.module[i].steer_effort * steer_scale * config_.directions[i];
+        current[i + 4] = out.module[i].drive_effort * drive_scale * config_.directions[i + 4];
     }
     for (std::size_t i = 0; i < motors_.size(); ++i)
-        if (!std::isfinite(current[i]) || std::fabs(current[i]) > motors_[i]->info().current_limit_a) return -ERANGE;
+        if (!std::isfinite(current[i]) || std::fabs(current[i]) > motors_[i]->info().current_limit_a) { suspend(); return -ERANGE; }
     for (std::size_t i = 0; i < motors_.size(); ++i) {
         const int ret = motors_[i]->setCurrent(current[i]);
         if (ret < 0) { suspend(); return ret; }
@@ -132,7 +133,10 @@ int ChassisExecutor::begin() {
         !config_.permission_timeout_ms || !config_.fault_retry_ms || !config_.recovery.command_timeout_ms ||
         !config_.recovery.source_timeout_us || !std::isfinite(config_.bench_effort_scale) ||
         config_.bench_effort_scale < 0 || config_.bench_effort_scale > 1 ||
-        (!config_.power_control_calibrated && config_.bench_effort_scale > 0.15f) ||
+        !std::isfinite(config_.bench_steer_effort_scale) || config_.bench_steer_effort_scale < 0 ||
+        config_.bench_steer_effort_scale > 1 || !std::isfinite(config_.bench_drive_current_limit_a) ||
+        config_.bench_drive_current_limit_a <= 0 || !std::isfinite(config_.bench_steer_current_limit_a) ||
+        config_.bench_steer_current_limit_a <= 0 ||
         !std::isfinite(config_.estimate_idle_power_w) || config_.estimate_idle_power_w < 0 ||
         !std::isfinite(config_.estimate_w_per_abs_amp) || config_.estimate_w_per_abs_amp < 0 ||
         (config_.allow_estimated_power && (!config_.power_model_calibrated || config_.estimate_w_per_abs_amp <= 0))))
@@ -148,7 +152,7 @@ void ChassisExecutor::withdraw(WaitReason reason, int error, bool blocked) {
     recovery_.withdraw(reason, error, blocked);
     (void)limiter_.reset();
     output_ = {};
-    effort_scale_ = 0;
+    effort_scale_ = steer_effort_scale_ = 0;
     status_.ready = false;
     if (blocked) { hard_error_ = error == 0 ? -EIO : error; hard_reason_ = reason; }
 }
@@ -167,6 +171,7 @@ RunStatus ChassisExecutor::suspend(core::TimeUs now_us, WaitReason reason, int e
 
 int ChassisExecutor::power(const ChassisExecutionInputs &inputs, core::TimeUs now_us, float dt_s) {
     effort_scale_ = config_.bench_effort_scale;
+    steer_effort_scale_ = config_.bench_steer_effort_scale;
     selected_power_ = inputs.measured_power;
     const auto valid_measurement = [&] {
         return selected_power_.valid && selected_power_.source != PowerMeasurementSource::None &&
@@ -191,7 +196,12 @@ int ChassisExecutor::power(const ChassisExecutionInputs &inputs, core::TimeUs no
         budget.limit_stamp.timestamp_ms * 1000 <= recovery_.boundaryUs() || !valid_measurement()) return -ESTALE;
     ChassisPowerDecision decision{};
     const int ret = limiter_.step({selected_power_.power_w, budget.chassis_power_limit_w, budget.buffer_energy_j}, dt_s, decision);
-    if (ret == 0) effort_scale_ *= decision.effort_scale;
+    if (ret == 0) {
+        // Measurement includes steering. Total-budget reduction must also
+        // constrain it; independent bench scales never exempt steering power.
+        effort_scale_ *= decision.effort_scale;
+        steer_effort_scale_ *= decision.effort_scale;
+    }
     return ret;
 }
 
@@ -279,7 +289,7 @@ RunStatus ChassisExecutor::update(const ChassisExecutionInputs &inputs, core::Ti
     const auto previous_stage = recovery_.stage();
     if (!recovery_.accept(inputs.command.stamp, inputs.source_stamp, now_ms)) {
         if (previous_stage == RecoveryGate::Stage::Active || previous_stage == RecoveryGate::Stage::Enabling) {
-            hardware_.suspend(); output_ = {}; effort_scale_ = 0; status_.ready = false; (void)limiter_.reset();
+            hardware_.suspend(); output_ = {}; effort_scale_ = steer_effort_scale_ = 0; status_.ready = false; (void)limiter_.reset();
         }
         return publish(now_us, RunState::Recovering, WaitReason::Command, -ESTALE);
     }
@@ -291,7 +301,19 @@ RunStatus ChassisExecutor::update(const ChassisExecutionInputs &inputs, core::Ti
     if (!hardware_.group().active()) return publish(now_us, RunState::Recovering, WaitReason::Drive);
     recovery_.enabled();
     int ret = chassis_.step(inputs.command, feedback_, dt_s, output_);
-    if (ret == 0) ret = hardware_.stage(output_, effort_scale_);
+    if (ret == 0) {
+        auto staged = output_;
+        if (!config_.power_control_calibrated) {
+            for (auto &m : staged.module) {
+                m.steer_effort = std::clamp(m.steer_effort, -config_.bench_steer_current_limit_a,
+                                           config_.bench_steer_current_limit_a);
+                m.drive_effort = std::clamp(m.drive_effort, -config_.bench_drive_current_limit_a,
+                                           config_.bench_drive_current_limit_a);
+            }
+        }
+        ret = hardware_.stage(staged, steer_effort_scale_, effort_scale_);
+        if (ret == 0) output_ = staged;
+    }
     if (ret < 0) return suspend(now_us, WaitReason::Drive, ret, ret == -EINVAL || ret == -ERANGE);
     status_.last_command_sequence = inputs.command.stamp.sequence;
     return publish(now_us, RunState::Active, WaitReason::None);

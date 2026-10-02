@@ -20,7 +20,7 @@
   执行线程（5 ms）
     底盘命令 → ChassisExecutor → SwerveChassis → 八电机
     大 Yaw 请求 → BigYawExecutor → DM 速度内环
-    CAN1 舵向 / CAN2 轮驱动 / CAN3 大 Yaw 各提交一次
+    CAN1 舵向 / CAN3 轮驱动 / CAN2 大 Yaw 各提交一次
     轮控与大 Yaw 独立状态 → 快照缓存
 ~~~
 
@@ -36,7 +36,7 @@
 
 ## 底盘板组合
 
-`ChassisExecutor` 注入应用持有的 `SwerveHardware`；四舵向共用 CAN1，四轮驱动共用 CAN2。大 Yaw 使用独立 DM 电机与 CAN3，通过速度控制允许连续旋转，无需固定绝对机械零点。
+`ChassisExecutor` 注入应用持有的 `SwerveHardware`；四舵向共用 CAN1，四轮驱动共用 CAN3。大 Yaw 使用独立 DM 电机与 CAN2，通过速度控制允许连续旋转，无需固定绝对机械零点。
 
 `VEHICLE_POWER_BUDGET` 接入裁判预算，但预算不是实测功率。现有 V1 约束没有实测功率字段；整车框架预留 `IPowerMeasurementSource`，实际传感器与功率模型完成标定后才能开放完整功率控制。独立 `chassis_power` 样例提供测量与缩放观察入口。
 

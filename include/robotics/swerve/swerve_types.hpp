@@ -15,6 +15,9 @@ struct ModuleFeedback {
 struct ModuleOutput {
     float optimized_angle_rad = 0, optimized_wheel_velocity_m_s = 0;
     float steer_continuous_target_rad = 0, drive_target_rad_s = 0, steer_effort = 0, drive_effort = 0;
+    // Final optimized target and rate-limited controller reference are distinct.
+    float steer_reference_rad = 0, alignment_error_rad = 0;
+    bool flipped = false, drive_ready = false, drive_enabled = false, coasting = false;
 };
 struct ChassisFeedback {
     std::array<ModuleFeedback, 4> module{};

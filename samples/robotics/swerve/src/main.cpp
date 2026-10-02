@@ -27,11 +27,12 @@ int main() {
     if (ret == 0) ret = drive_bus.start();
     const int topology_error = ret;
     const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    LOG_INF("split-CAN suspended single module init=%d: e enable, space disable, w/s x, a/d y, q/z yaw, 0 zero, p input pause, ! estop, r clear", ret);
+    LOG_INF("split-CAN suspended single module init=%d: e enable, space disable, w/s x, a/d y, q/z yaw, u/j x+yaw, 0 coast, p input pause, ! estop, r clear", ret);
     bool requested = false, estop = false, paused = false, seeded = false, ready = false, hard_fault = false;
     std::uint64_t stable_since = 0, first_steer = 0, first_drive = 0, next_log = 0, retry_ms = 0;
     std::uint64_t steer_reference = 0, drive_reference = 0;
-    core::TimeUs previous_us = 0, next_input_us = 0;
+    core::TimeUs previous_us = 0, next_input_us = 0, lease_until_us = 0;
+    samples::chassis::PeriodicDeadline deadline;
     core::Stamp source{};
     ChassisCommand command{};
     command.source = ControlSource::Autonomous;
@@ -56,15 +57,25 @@ int main() {
         bool clear = false;
         unsigned char key;
         while (uart_poll_in(console, &key) == 0) {
-            if (key == 'e' && !estop) requested = true;
+            if (key == 'e' && !estop) {
+                requested = true;
+                command.vx_m_s = command.vy_m_s = command.wz_rad_s = 0;
+                lease_until_us = now_us + vehicle::bench_command_lease_us;
+            }
             if (key == ' ' || key == '!') { requested = false; estop = estop || key == '!'; }
             if (key == 'p') paused = !paused;
             if (key == 'r') { clear = true; requested = false; }
-            if (key == 'w' || key == 's' || key == 'a' || key == 'd' || key == 'q' || key == 'z' || key == '0') {
-                command.vx_m_s = key == 'w' ? bench::test_speed_m_s : key == 's' ? -bench::test_speed_m_s : 0;
+            if (key == 'w' || key == 's' || key == 'a' || key == 'd' || key == 'q' || key == 'z' || key == 'u' || key == 'j' || key == '0') {
+                command.vx_m_s = (key == 'w' || key == 'u' || key == 'j') ? bench::test_speed_m_s : key == 's' ? -bench::test_speed_m_s : 0;
                 command.vy_m_s = key == 'a' ? bench::test_speed_m_s : key == 'd' ? -bench::test_speed_m_s : 0;
-                command.wz_rad_s = key == 'q' ? .2f : key == 'z' ? -.2f : 0;
+                command.wz_rad_s = (key == 'q' || key == 'u') ? .2f : (key == 'z' || key == 'j') ? -.2f : 0;
+                lease_until_us = now_us + vehicle::bench_command_lease_us;
             }
+        }
+        if (requested && now_us >= lease_until_us) requested = false;
+        if (!requested) {
+            command.mode = ChassisMode::Disabled;
+            command.vx_m_s = command.vy_m_s = command.wz_rad_s = 0;
         }
         if (!paused && now_us >= next_input_us) {
             next_input_us = now_us + 10000;
@@ -156,8 +167,8 @@ int main() {
                             bench::drive_direction * dv.feedback.velocity_rad_s};
                         ret = kinematics.solve(command, targets);
                         if (ret == 0) ret = module.step(targets[0], feedback, dt, output);
-                        if (ret == 0) ret = steer.setCurrent(bench::steer_direction * output.steer_effort * .15f);
-                        if (ret == 0) ret = drive.setCurrent(bench::drive_direction * output.drive_effort * .15f);
+                        if (ret == 0) ret = steer.setCurrent(bench::steer_direction * output.steer_effort * vehicle::chassis_steer_scale);
+                        if (ret == 0) ret = drive.setCurrent(bench::drive_direction * output.drive_effort * vehicle::chassis_drive_scale);
                         if (ret < 0) suspend(WaitReason::Drive, ret, ret == -ERANGE || ret == -EINVAL);
                     }
                 }
@@ -175,7 +186,12 @@ int main() {
                 recovery.generation(), unsigned(recovery.reason()), ret, unsigned(steer_bus.status().state),
                 unsigned(drive_bus.status().state), double(output.optimized_angle_rad),
                 double(feedback.steer_absolute_rad), double(feedback.drive_velocity_rad_s));
+            LOG_INF("ramp=%.3f align=%.3f ready=%d drive_on=%d flip=%d coast=%d current=%.3f/%.3f",
+                double(output.steer_reference_rad), double(output.alignment_error_rad), output.drive_ready,
+                output.drive_enabled, output.flipped, output.coasting,
+                double(output.steer_effort * vehicle::chassis_steer_scale),
+                double(output.drive_effort * vehicle::chassis_drive_scale));
         }
-        k_sleep(K_MSEC(5));
+        deadline.wait();
     }
 }

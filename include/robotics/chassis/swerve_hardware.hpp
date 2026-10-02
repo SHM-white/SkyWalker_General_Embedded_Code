@@ -25,7 +25,8 @@ public:
     // members before the controller can reset and establish a recovery boundary.
     int prepare(std::uint64_t now_ms, ChassisFeedback &out);
     void suspend();
-    int stage(const ChassisOutput &output, float effort_scale);
+    int stage(const ChassisOutput &output, float steer_scale, float drive_scale);
+    int stage(const ChassisOutput &output, float effort_scale) { return stage(output, effort_scale, effort_scale); }
     motor::Group &group() { return group_; }
     motor::Motor &motorAt(std::size_t index) { return *motors_[index]; }
     bool ready() const { return ready_; }

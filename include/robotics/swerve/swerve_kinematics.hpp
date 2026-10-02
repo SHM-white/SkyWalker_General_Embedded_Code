@@ -7,6 +7,7 @@ public:
     struct Config {
         std::array<ModuleLocation, 4> locations{};
         float max_wheel_velocity_m_s = 0, stationary_epsilon_m_s = 0.01f;
+        float resume_velocity_m_s = 0.02f;
     };
     explicit SwerveKinematics(const Config &config) : config_(config) {
     }
@@ -17,6 +18,7 @@ public:
 private:
     Config config_;
     std::array<float, 4> last_angle_rad_{};
+    std::array<bool, 4> moving_{};
     bool initialized_ = false;
 };
 }
