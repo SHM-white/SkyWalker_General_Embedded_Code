@@ -2,6 +2,10 @@
 
 浏览器负责把已有文字文档和当前源码组织成可阅读的整车视图。`docs/getting-started`、`docs/modules`、`docs/applications`、`docs/guides` 和 `docs/dev` 目录继续保留；正文在页面内直接读取，源码也直接读取本地工作区。
 
+## Github Pages 在线部署链接
+
+[https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/](https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/)
+
 ## 启动
 
 在仓库根目录运行：
@@ -10,21 +14,21 @@
 bash docs/architecture-browser/run.sh
 ```
 
-打开 <http://127.0.0.1:4173/docs/architecture-browser/#overview>。脚本只启动 Python 静态服务器，按 Ctrl+C 停止。自定义端口可运行 `bash docs/architecture-browser/run.sh 8000`；从任意工作目录运行该脚本，都以仓库根目录提供文件。
+打开 [http://127.0.0.1:4173/docs/architecture-browser/#overview](http://127.0.0.1:4173/docs/architecture-browser/#overview)。脚本只启动 Python 静态服务器，按 Ctrl+C 停止。自定义端口可运行 `bash docs/architecture-browser/run.sh 8000`；从任意工作目录运行该脚本，都以仓库根目录提供文件。
 
 页面无需 npm、CDN 或后台服务。使用服务器打开，才能通过 `fetch` 读取 Markdown 和源码；直接双击 `index.html` 不适合文件阅读。旧服务器若仍在以 `docs/` 为根目录运行，先停止，再用新脚本启动。
 
 ## 怎么阅读
 
-| 入口 | 解决的问题 |
-|---|---|
-| 整车架构 → 当前实际接入 | 现在源码真正连通了什么？两板如何分工？哪些配置仍阻断输出？ |
-| 整车架构 → 最终上车蓝图 | 视觉、IMU、双轴、底盘、发射和观测最终应如何装配？哪些部分仍待实现？ |
-| 模块关系 | 谁依赖谁？点击节点高亮直接上游和消费者，并进入详细接口。 |
-| 接口与示例 | 18 个逻辑模块的职责、主要 API、参数、返回、错误、线程边界、调用顺序、配置和真实用法。 |
-| 端到端调用链 | 遥控、视觉、板间底盘、IMU 和异常恢复，每一步由谁推进？ |
-| Markdown 文档 | 保留已有目录结构，内嵌阅读模块正文、指南、开发记录及样例 README。 |
-| 变更来历 | Git 中何时加入增量覆盖层，注明的目的是什么？ |
+| 入口                     | 解决的问题                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| 整车架构 → 当前实际接入 | 现在源码真正连通了什么？两板如何分工？哪些配置仍阻断输出？                            |
+| 整车架构 → 最终上车蓝图 | 视觉、IMU、双轴、底盘、发射和观测最终应如何装配？哪些部分仍待实现？                   |
+| 模块关系                 | 谁依赖谁？点击节点高亮直接上游和消费者，并进入详细接口。                              |
+| 接口与示例               | 18 个逻辑模块的职责、主要 API、参数、返回、错误、线程边界、调用顺序、配置和真实用法。 |
+| 端到端调用链             | 遥控、视觉、板间底盘、IMU 和异常恢复，每一步由谁推进？                                |
+| Markdown 文档            | 保留已有目录结构，内嵌阅读模块正文、指南、开发记录及样例 README。                     |
+| 变更来历                 | Git 中何时加入增量覆盖层，注明的目的是什么？                                          |
 
 顶部搜索支持模块说明、接口签名、参数、示例、配置，以及文档标题和路径。按 `/` 聚焦搜索框；示例提供复制按钮。模块页的右侧目录可以直接跳到接口或示例，页面路由可收藏和分享给使用同一份本地服务器的人。
 
@@ -54,17 +58,17 @@ bash docs/architecture-browser/run.sh
 
 ## 维护文件
 
-| 文件 | 维护内容 |
-|---|---|
-| `index.html` / `styles.css` | 页面骨架、导航、排版及图形外观 |
-| `app.js` | 路由、页面渲染、关系高亮、搜索、示例复制、Markdown / 源码读取 |
-| `data.js` | 模块分类、依赖图布局、正式应用与执行器接口 |
-| `modules-hardware.js` | 板级、DJI/DM、IMU、Kalman、控制算法与电机控制器 |
-| `modules-systems.js` | UART、遥控、裁判、板间、视觉、命令服务、云台、底盘与观测 |
-| `architecture-data.js` | Git 历史、当前调用路径、缺口、上车蓝图、场景与启动顺序 |
-| `vehicle-diagram.js` | 当前与目标主图的节点、物理分区、显式数据连线及标签 |
-| `docs-index.js` | Markdown / 样例的标题、路径与分组索引；不复制正文 |
-| `run.sh` | 以仓库根目录启动本地静态服务器 |
+| 文件                            | 维护内容                                                      |
+| ------------------------------- | ------------------------------------------------------------- |
+| `index.html` / `styles.css` | 页面骨架、导航、排版及图形外观                                |
+| `app.js`                      | 路由、页面渲染、关系高亮、搜索、示例复制、Markdown / 源码读取 |
+| `data.js`                     | 模块分类、依赖图布局、正式应用与执行器接口                    |
+| `modules-hardware.js`         | 板级、DJI/DM、IMU、Kalman、控制算法与电机控制器               |
+| `modules-systems.js`          | UART、遥控、裁判、板间、视觉、命令服务、云台、底盘与观测      |
+| `architecture-data.js`        | Git 历史、当前调用路径、缺口、上车蓝图、场景与启动顺序        |
+| `vehicle-diagram.js`          | 当前与目标主图的节点、物理分区、显式数据连线及标签            |
+| `docs-index.js`               | Markdown / 样例的标题、路径与分组索引；不复制正文             |
+| `run.sh`                      | 以仓库根目录启动本地静态服务器                                |
 
 修改公开接口时同步对应模块数据和 Markdown 正文。模块数据保持主要接口签名、参数、返回值、线程/时序、错误、至少一个调用示例、生命周期、配置及应用接入状态。`depends` 使用已有模块 ID，供依赖图和上下游文字导航共用。
 
