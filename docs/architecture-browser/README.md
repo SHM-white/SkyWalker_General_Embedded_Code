@@ -1,19 +1,73 @@
-# 交互式架构浏览器
+# 架构与接口浏览器
 
-本地浏览器展示双主控数据流、模块关系和电机异步链路。用 docs/architecture-browser/run.sh 启动本地静态服务器，再打开 http://127.0.0.1:8000。页面没有 npm、CDN 或后台依赖。
+浏览器负责把已有文字文档和当前源码组织成可阅读的整车视图。`docs/getting-started`、`docs/modules`、`docs/applications`、`docs/guides` 和 `docs/dev` 目录继续保留；正文在页面内直接读取，源码也直接读取本地工作区。
 
-架构图由 data.js 的模块基线、app.js 的交互逻辑和 architecture-refresh.js 的更新层组成。当前更新层显示注册式命令来源服务：RemoteSource / VisionSource / RefereePermissionSource → CommandManager worker → CommandArbiter → 非消费式 CommandSnapshot。全量 API、配置和应用状态以[文档中心](../README.md)及当前源码为准。
+## 启动
 
-## 当前代码状态
+在仓库根目录运行：
 
-- CommandManager 是来源注册和后台仲裁服务；同步策略核心是 CommandArbiter。启动前注册 Operator/Aim 来源并绑定许可源，之后消费者用 snapshot() 或 current() 读结果。
-- samples/robotics/command_manager 已接入遥控、视觉和裁判来源；command_safety 只接入遥控。
-- applications/sentry_gimbal 当前只注册 RemoteSource 和 RefereePermissionSource，没有注册 VisionSource，allow_auto=false。board_config 的 RefereeVersion 仍为 Unspecified，connections_configured=false。
-- GimbalExecutor、ChassisExecutor 是应用内部执行封装。旧 GlobalSafetyManager、GimbalLocalSafety、ChassisLocalSafety 和 CommandRouter 类不属于当前源码接口。
-- BMI088、DM-IMU-L1 RS485、ImuReceiver、VisionReceiver 和 AB 协议各自已实现；正式 sentry_gimbal 目前没有将 IMU 或视觉接入命令与姿态反馈主链。外设方向、时序和机械响应仍需实机核验。
+```sh
+bash docs/architecture-browser/run.sh
+```
 
-交互视图用于解释模块关系，不能替代源文件核对、构建或硬件验收。点击节点查看的源码链接固定到 architecture-refresh.js 中的代码快照；更新源码接口后需同时更新该快照和本说明。
+打开 <http://127.0.0.1:4173/docs/architecture-browser/#overview>。脚本只启动 Python 静态服务器，按 Ctrl+C 停止。自定义端口可运行 `bash docs/architecture-browser/run.sh 8000`；从任意工作目录运行该脚本，都以仓库根目录提供文件。
 
-## 更新边界
+页面无需 npm、CDN 或后台服务。使用服务器打开，才能通过 `fetch` 读取 Markdown 和源码；直接双击 `index.html` 不适合文件阅读。旧服务器若仍在以 `docs/` 为根目录运行，先停止，再用新脚本启动。
 
-data.js 与 app.js 保留原始图布局。architecture-refresh.js 提供后来加入的模块和当前命令链更新。若更新层与源码冲突，以源码和正式主题文档为准；调整交互场景时同步更新本文件中的当前状态说明。
+## 怎么阅读
+
+| 入口 | 解决的问题 |
+|---|---|
+| 整车架构 → 当前实际接入 | 现在源码真正连通了什么？两板如何分工？哪些配置仍阻断输出？ |
+| 整车架构 → 最终上车蓝图 | 视觉、IMU、双轴、底盘、发射和观测最终应如何装配？哪些部分仍待实现？ |
+| 模块关系 | 谁依赖谁？点击节点高亮直接上游和消费者，并进入详细接口。 |
+| 接口与示例 | 18 个逻辑模块的职责、主要 API、参数、返回、错误、线程边界、调用顺序、配置和真实用法。 |
+| 端到端调用链 | 遥控、视觉、板间底盘、IMU 和异常恢复，每一步由谁推进？ |
+| Markdown 文档 | 保留已有目录结构，内嵌阅读模块正文、指南、开发记录及样例 README。 |
+| 变更来历 | Git 中何时加入增量覆盖层，注明的目的是什么？ |
+
+顶部搜索支持模块说明、接口签名、参数、示例、配置，以及文档标题和路径。按 `/` 聚焦搜索框；示例提供复制按钮。模块页的右侧目录可以直接跳到接口或示例，页面路由可收藏和分享给使用同一份本地服务器的人。
+
+示例分为具体工程中的周期片段和带构造上下文的使用示意，适用范围写在代码块下方。真实设备、PID、机械参数及完整线程入口仍以链接到的应用或样例源码为依据。
+
+## 状态怎么理解
+
+- **已有代码**：当前仓库存在这项模块能力或调用路径。它不代表已完成真实接线、带载验证或整车验收。
+- **接入 / 配置未完成**：基础模块已实现，但正式应用尚未装配，或板级、协议、参考、功率等配置仍有缺口。
+- **目标 / 待实现**：最终蓝图中的建议扩展，当前没有对应的完整应用链路。
+
+总览的箭头表示运行时数据方向；模块关系图的箭头表示“被依赖模块 → 使用者”，两种关系有各自说明。总览中未连通的感知支路保持独立，蓝图中的未完成连接以虚线标注。
+
+## 当前正式应用的实际边界
+
+`sentry_gimbal` 已组装 RemoteSource 和 RefereePermissionSource，经 CommandManager worker/CommandArbiter 生成非消费式快照。gimbalTask 交给本地 GimbalExecutor 控制单 Yaw；linkTask 交给 InterBoardEndpoint 发送底盘命令和裁判约束。`sentry_chassis` 在独立控制线程执行本地授权、四舵轮解算、功率约束及八电机提交。
+
+正式云台没有组装 IMU、VisionReceiver 或 VisionSource，`allow_auto=false`，执行器不消费 Pitch。两端 `connections_configured=false`；裁判 profile 为 Unspecified，底盘功率模型没有标定。底盘返回的是状态摘要，当前没有有效实测车体速度/功率字段。搜索、导航、射击执行及状态生产年龄的补齐均在目标蓝图中标明。
+
+详细依据可从主图节点、接入缺口、模块接口和[双主控正文](../applications/dual-controller.md)进入。
+
+## 为什么重建
+
+`32f07b9`（2026-09-30 03:30:05，北京时间）新增 `architecture-refresh.js`，`d860163`（03:30:47）在 HTML 中启用它，`a5054de`（03:31:07）说明目的是补视觉与独立 IMU。之后 `cedab2a` 继续追加命令服务覆盖，旧基础节点和后续描述同时保留，页面靠运行时替换维持当前说明。Git 记录没有说明要替代 Markdown 目录。
+
+新版移除旧刷新层与独立电机渲染脚本，用一个渲染入口和按职责组织的数据提供完整页面。电机链路的接口、生命周期、调用示例仍在 DJI、DM、电机控制器、恢复场景及[电机工作流正文](../guides/motor-workflow.md)中。
+
+## 维护文件
+
+| 文件 | 维护内容 |
+|---|---|
+| `index.html` / `styles.css` | 页面骨架、导航、排版及图形外观 |
+| `app.js` | 路由、页面渲染、关系高亮、搜索、示例复制、Markdown / 源码读取 |
+| `data.js` | 模块分类、依赖图布局、正式应用与执行器接口 |
+| `modules-hardware.js` | 板级、DJI/DM、IMU、Kalman、控制算法与电机控制器 |
+| `modules-systems.js` | UART、遥控、裁判、板间、视觉、命令服务、云台、底盘与观测 |
+| `architecture-data.js` | Git 历史、当前调用路径、缺口、上车蓝图、场景与启动顺序 |
+| `vehicle-diagram.js` | 当前与目标主图的节点、物理分区、显式数据连线及标签 |
+| `docs-index.js` | Markdown / 样例的标题、路径与分组索引；不复制正文 |
+| `run.sh` | 以仓库根目录启动本地静态服务器 |
+
+修改公开接口时同步对应模块数据和 Markdown 正文。模块数据保持主要接口签名、参数、返回值、线程/时序、错误、至少一个调用示例、生命周期、配置及应用接入状态。`depends` 使用已有模块 ID，供依赖图和上下游文字导航共用。
+
+修改实际应用装配时同步当前链路、缺口和主图；蓝图仍待实现的连接不得标成已接入。主图中的节点使用仓库相对源码路径关联模块，不固定到历史提交。
+
+新增或改名文档时更新 `docs-index.js` 中的导航条目。常规模块正文和样例 README 进入目录；`docs/dev` 归入开发记录；旧 `docs/01…19` 迁移提示仍可通过原始链接访问。阅读器处理标题、段落、链接、代码块、表格、列表、引用和任务项，不执行 Markdown 内的 HTML 或脚本；原始文件入口始终保留。正文中的 Mermaid 显示源定义，交互架构图由本浏览器直接绘制。

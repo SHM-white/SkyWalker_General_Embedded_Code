@@ -1,174 +1,44 @@
-const COMMIT = "77b053875425827fe0e805f578c1131ee22a3315";
-const REPO = "https://github.com/SHM-white/SkyWalker_General_Embedded_Code/blob/" + COMMIT + "/";
+'use strict';
 
-const statusMeta = {
-  done: { label: "已实现", note: "当前分支存在正式接口与实现" },
-  verify: { label: "待实机", note: "代码或构建已通过，真实硬件链路仍待验证" },
-  todo: { label: "待实现", note: "当前只存在契约、占位或明确的后续边界" },
-};
-
-const lanes = [
-  { id: "gimbal", title: "云台主控", subtitle: "sentry_gimbal · 决策中心" },
-  { id: "link", title: "板间链路", subtitle: "UART · session · wire" },
-  { id: "chassis", title: "底盘主控", subtitle: "sentry_chassis · 执行中心" },
+// Logical module boundaries; detail comes from current public headers and examples.
+window.SKYWALKER_CATEGORIES = ['工程与板级', '驱动与感知', '控制算法', '通信与输入', '机器人与仲裁', '调试与观测'];
+window.SKYWALKER_GRAPH_COLUMNS = [
+  {title: '设备与测量', ids: ['boards', 'imu', 'kalman', 'uart']},
+  {title: '协议与输入', ids: ['remote', 'referee', 'vision', 'interboard']},
+  {title: '决策与编排', ids: ['command-sources', 'command', 'application', 'telemetry']},
+  {title: '机构与控制', ids: ['gimbal', 'chassis', 'motor-control', 'pid']},
+  {title: '总线与电机', ids: ['motor-dji', 'motor-dm']}
 ];
 
-const nodes = [
-  {
-    id: "inputs", current: true, lane: "gimbal", order: 1, status: "verify", kicker: "UART inputs", title: "遥控 / 裁判输入",
-    summary: "RemoteReceiver + RefereeService",
-    description: "云台板由 RemoteReceiver 内部线程接收 DR16，命令线程读取快照并检查有效期；裁判由独立 RefereeService 线程处理。remote-uart 由板级 DTS 提供，裁判串口仍需配置，真实硬件链路待验证。",
-    interfaces: ["RemoteReceiver.start() / snapshot(Snapshot&)", "Snapshot.remote → OperatorIntent", "RefereeState → OutputPermission / PowerSnapshot"],
-    constraints: ["start=0 仅表示安排线程；初始化结果看 state/uart_error", "读取快照重算超时，保留原始帧时间戳；业务命令超时仍独立检查", "静态 Receiver 与独占 nocache DMA 存活整个固件周期", "遥控与裁判 UART 不能复用板间串口或 DMA 通道", "默认裁判 profile 可显式选择 Rm2026V1_3", "已知许可过期必须暂停，不把未知状态当作允许"],
-    dependsOn: [], provides: ["manual_mapper", "global_safety"],
-    sources: ["include/communication/remote/remote_receiver.hpp", "lib/communication/remote_receiver.cpp", "include/communication/remote/remote_service.hpp", "include/communication/referee/referee_service.hpp", "applications/sentry_gimbal/src/main.cpp"],
-  },
-  {
-    id: "manual_mapper", lane: "gimbal", order: 2, status: "done", kicker: "robotics/command", title: "ManualCommandMapper",
-    summary: "输入归一化与人工模式映射",
-    description: "把 DR16 摇杆、拨杆、鼠标键盘转换为无单位 OperatorIntent；不直接碰电机，也不承担最终限幅。",
-    interfaces: ["int map(const RemoteState&, OperatorIntent&) const"],
-    constraints: ["模拟量死区后归一化到 [-1, 1]", "离线输入产生安全的空意图", "Auto 只标识模式，当前没有自主命令生产者"],
-    dependsOn: ["inputs"], provides: ["command_manager"],
-    sources: ["include/robotics/command/manual_command_mapper.hpp", "lib/robotics/command.cpp"],
-  },
-  {
-    id: "global_safety", lane: "gimbal", order: 3, status: "done", kicker: "robotics/safety", title: "GlobalSafetyManager",
-    summary: "全局许可、急停与底盘健康隔离",
-    description: "依据操作开关、裁判许可、底盘心跳/反馈和执行状态，对 gimbal / chassis / shooter 三个输出域分别给出动作。",
-    interfaces: ["int evaluate(const GlobalSafetyInputs&, GlobalSafetyDecision&)", "int clearEmergencyStop(bool input_released)"],
-    constraints: ["急停锁存；只有输入解除并显式 clear 才恢复", "底盘异常只禁用 chassis，健康小 Yaw 可保持 Degraded 运行", "100 ms 默认检查底盘心跳与反馈，300 ms 默认检查许可"],
-    dependsOn: ["inputs", "async_uart"], provides: ["command_manager", "command_router"],
-    sources: ["include/robotics/safety/global_safety_manager.hpp", "include/robotics/messages/safety.hpp", "lib/robotics/safety.cpp"],
-  },
-  {
-    id: "command_manager", lane: "gimbal", order: 4, status: "done", kicker: "robotics/command", title: "CommandManager",
-    summary: "意图 + 安全决策 → RobotCommand",
-    description: "统一生成 chassis、gimbal、shooter 命令快照和 producer sequence。当前真正输出的是 Manual 模式；Auto 与离散射击事件保持禁用。",
-    interfaces: ["int step(const OperatorIntent&, const GlobalSafetyDecision&, uint64_t now_ms, RobotCommand&)", "int reset(uint64_t now_ms)"],
-    constraints: ["输入与安全决策都必须在 input_timeout_ms 内新鲜", "只在对应 SafetyAction::Active 时产生运动命令", "每次成功 step 推进 RobotCommand sequence"],
-    dependsOn: ["manual_mapper", "global_safety"], provides: ["command_router", "shooter"],
-    sources: ["include/robotics/command/command_manager.hpp", "include/robotics/messages/command.hpp", "lib/robotics/command.cpp"],
-  },
-  {
-    id: "command_router", lane: "gimbal", order: 5, status: "done", kicker: "application", title: "CommandRouter",
-    summary: "本地云台与远端底盘双出口",
-    description: "将同一 RobotCommand 固定路由为本地 LocalGimbalCommand 与远端 RemoteChassisControl；两个出口独立提交，不让一侧繁忙跳过另一侧。",
-    interfaces: ["RouteReport route(const RobotCommand&, const GlobalSafetyDecision&, const BoardHeartbeat& peer)"],
-    constraints: ["远端命令回显 chassis boot_id 与 resume_generation", "命令、许可和原因保持在同一快照", "Router 只分发，不执行控制算法"],
-    dependsOn: ["command_manager", "global_safety"], provides: ["gimbal_safety", "interboard_codec"],
-    sources: ["applications/sentry_gimbal/src/command_router.hpp", "applications/sentry_gimbal/src/command_router.cpp"],
-  },
-  {
-    id: "gimbal_safety", lane: "gimbal", order: 6, status: "done", kicker: "local safety", title: "GimbalLocalSafety",
-    summary: "本地反馈、许可与 Hold 降级",
-    description: "云台执行侧的最后一道门：配置、反馈、硬件和急停决定本地动作；命令过期时可从 Active 降为 Hold。",
-    interfaces: ["int evaluate(const LocalSafetyInputs&, LocalSafetyDecision&)", "int clearEmergencyStop(bool released)"],
-    constraints: ["不检查对端心跳；云台本地安全与底盘故障隔离", "反馈或硬件未就绪进入 Recovering", "命令不新鲜时返回 Hold 而非继续 Rate"],
-    dependsOn: ["command_router"], provides: ["yaw_gimbal"],
-    sources: ["include/robotics/safety/gimbal_local_safety.hpp", "lib/robotics/safety.cpp", "applications/sentry_gimbal/src/main.cpp"],
-  },
-  {
-    current: true,
-    id: "yaw_gimbal", lane: "gimbal", order: 7, status: "verify", kicker: "subsystem", title: "GimbalAxis（内含 PositionMotor）",
-    summary: "200 Hz 小 Yaw 本地闭环",
-    description: "GimbalAxis 引用统一 Motor 并私有拥有 PositionMotor，应用通过 Motor/Group 和 CanBus 管理许可与发布，但零点、方向、限位与真实掉电恢复还需在机构上确认。",
-    interfaces: ["int update(const AxisCommand&, SafetyAction, float dt_s)", "GimbalAxis: begin / poll / reset / updateRate / telemetry"],
-    constraints: ["AbsoluteNearest 必须有固定零点单圈反馈能力", "Limited 模式必须使用已校准 DriverContinuous 坐标", "恢复时重置测量参考、PID 与轨迹目标"],
-    dependsOn: ["gimbal_safety", "motor_layer"], provides: [],
-    sources: ["include/robotics/gimbal/gimbal_axis.hpp", "lib/robotics/gimbal_axis.cpp", "applications/sentry_gimbal/src/main.cpp"],
-  },
-  {
-    id: "vision_auto", lane: "gimbal", order: 8, status: "todo", kicker: "future producer", title: "Vision / Auto producer",
-    summary: "自主目标源尚未接入",
-    description: "CommandManager 已保留 Autonomous 来源和 Auto 模式边界，但当前没有视觉或自主导航生产者。",
-    interfaces: ["planned: AutonomousIntent → CommandManager"],
-    constraints: ["不得在没有生产者时猜测 Auto 行为", "未来目标仍需通过 GlobalSafetyManager 和统一超时"],
-    dependsOn: [], provides: ["command_manager"],
-    sources: ["lib/robotics/command.cpp", "SkyWalker_双主控分布式机器人架构施工规格.md"],
-  },
-  {
-    id: "shooter", lane: "gimbal", order: 9, status: "todo", kicker: "future subsystem", title: "Shooter 执行链",
-    summary: "消息结构存在，事件执行未开放",
-    description: "ShooterCommand 与安全域已经存在；摩擦轮、拨弹、单发事件语义和本地执行器尚未接入正式应用。",
-    interfaces: ["ShooterCommand { mode, fire_rate_hz, requested_bullet_speed_m_s }"],
-    constraints: ["离散射击事件不能靠覆盖式 Latest<T> 直接代替事件队列", "恢复时不得补发失联期间的射击事件"],
-    dependsOn: ["command_manager", "global_safety"], provides: [],
-    sources: ["include/robotics/messages/command.hpp", "双主控框架使用说明.md"],
-  },
-  {
-    id: "interboard_codec", lane: "link", order: 1, status: "done", kicker: "wire protocol v1", title: "InterBoardCodec / Parser",
-    summary: "固定帧、CRC16 与逐字段小端编码",
-    description: "V1 帧层负责 Heartbeat、ChassisControl、ChassisConstraint、ChassisFeedback 四类消息的确定性编解码与失步重同步。",
-    interfaces: ["A5 5A | version | role | message_id | payload_len | frame_seq | payload | CRC16", "kMaxPayload = 128 B · kMaxFrame = 142 B"],
-    constraints: ["CRC16: poly 0x1021, init 0xFFFF, non-reflected", "每类消息独立检查 frame_sequence", "CRC 错误不刷新上一条合法状态的有效期"],
-    dependsOn: [], provides: ["async_uart"],
-    sources: ["include/communication/interboard/interboard_protocol.hpp", "include/communication/interboard/interboard_codec.hpp", "lib/communication/interboard_codec.cpp", "lib/communication/interboard_parser.cpp"],
-  },
-  {
-    id: "async_uart", lane: "link", order: 2, status: "verify", kicker: "transport", title: "AsyncUart + InterBoardLink",
-    summary: "460800 8N1 候选板间通道",
-    description: "每板单一通信线程独占 UART 和 InterBoardLink；Link 按角色拒绝回环帧，维护最新会话值、接收时间和重启边界。",
-    interfaces: ["int processRxBytes(const uint8_t*, size_t, uint64_t now_ms)", "latestHeartbeat / latestChassisControl / latestChassisConstraint / latestChassisFeedback"],
-    constraints: ["默认候选 USART1：PA9 TX / PA10 RX，双方交叉并共地", "同一 Link 的方法只能由一个通信线程调用", "UART 中断只搬运字节；应用跨线程发布值拷贝"],
-    dependsOn: ["interboard_codec"], provides: ["global_safety", "chassis_safety", "interboard_codec"],
-    sources: ["include/communication/async_uart.hpp", "include/communication/interboard/interboard_link.hpp", "lib/communication/async_uart.cpp", "lib/communication/interboard_link.cpp"],
-  },
-  {
-    id: "reset_event", lane: "link", order: 3, status: "todo", kicker: "protocol extension", title: "跨板急停复位事件",
-    summary: "当前仅支持本地 reset hook",
-    description: "云台急停可以随命令使底盘锁存，但 V1 没有跨板明确复位事件；底盘必须接入自己的本地复位 hook。",
-    interfaces: ["planned: SystemEvent / explicit E-stop reset handshake"],
-    constraints: ["复位必须确认物理急停输入已解除", "不能用普通 RC Safe→Manual 切换代替急停复位"],
-    dependsOn: ["async_uart"], provides: ["chassis_safety"],
-    sources: ["双主控框架使用说明.md", "include/communication/interboard/interboard_protocol.hpp"],
-  },
-  {
-    id: "chassis_safety", lane: "chassis", order: 1, status: "done", kicker: "local safety", title: "ChassisLocalSafety",
-    summary: "会话上下文 + 3 条新命令恢复门",
-    description: "底盘在执行前同时验证心跳、命令、boot_id、generation、许可、反馈和硬件状态；普通掉线可自动恢复，急停单独锁存。",
-    interfaces: ["int evaluate(const LocalSafetyInputs&, LocalSafetyDecision&)", "Config { command_timeout_ms, heartbeat_timeout_ms, stable_command_count }"],
-    constraints: ["默认心跳与命令均为 100 ms 超时", "恢复上下文匹配后需要连续 3 条新 producer sequence", "掉线期间收到的命令不能计入恢复稳定计数"],
-    dependsOn: ["async_uart"], provides: ["swerve"],
-    sources: ["include/robotics/safety/chassis_local_safety.hpp", "include/robotics/messages/safety.hpp", "lib/robotics/safety.cpp"],
-  },
-  {
-    id: "swerve", lane: "chassis", order: 2, status: "done", kicker: "robotics/swerve", title: "SwerveChassis",
-    summary: "4 舵 + 4 驱运动学与模块优化",
-    description: "消费 ChassisCommand 与八电机反馈，生成四个舵角和轮速/电流目标；FL、FR、RL、RR 顺序固定。",
-    interfaces: ["int step(const ChassisCommand&, const ChassisFeedback&, float dt_s, ChassisOutput&)"],
-    constraints: ["配置包含轮径、模块坐标、零点与方向", "舵角可进行最近路径/反向轮速优化", "配置校验失败只阻止底盘输出并报告 ConfigBlocked"],
-    dependsOn: ["chassis_safety"], provides: ["power_limiter"],
-    sources: ["include/robotics/swerve/swerve_chassis.hpp", "include/robotics/swerve/swerve_module.hpp", "lib/robotics/swerve.cpp"],
-  },
-  {
-    id: "power_limiter", lane: "chassis", order: 3, status: "verify", kicker: "power policy v1", title: "ChassisPowerLimiter",
-    summary: "缓冲能量辅助的统一 effort 缩放",
-    description: "基于估计功率、裁判额度和缓冲能量给出 effort scale。它是台架初版，不等同于已标定的比赛功率控制。",
-    interfaces: ["int step(const ChassisPowerInput&, float dt_s, ChassisPowerDecision& out)"],
-    constraints: ["比赛配置在功率模型未标定时禁止输出", "台架模式使用显式 bench_effort_scale", "需要实际测量拟合 idle_power_w 与 power_per_abs_amp_w"],
-    dependsOn: ["swerve", "inputs"], provides: ["chassis_hardware"],
-    sources: ["include/robotics/chassis/chassis_power_limiter.hpp", "lib/robotics/chassis_power_limiter.cpp", "applications/sentry_chassis/src/main.cpp"],
-  },
-  {
-    current: true,
-    id: "chassis_hardware", lane: "chassis", order: 4, status: "verify", kicker: "application adapter", title: "DjiChassisHardware",
-    summary: "八台 DJI Motor、1/2 个共享 CanBus",
-    description: "底盘应用的硬件适配器：按连接配置绑定八台 DJI Motor 到共享 CanBus，以一个 Group 管理整底盘共同启停；适配器保留 arm / pollRecovery 等业务方法。",
-    interfaces: ["init / read / suspend / pollRecovery / arm / apply", "static constexpr size_t kMaxBuses = 2"],
-    constraints: ["同一物理 CAN 内禁止重复反馈 ID 和发送槽冲突", "任一 Bus 失败时整个 chassis hardware 保持未就绪", "第三条 CAN 返回 -ENOTSUP；跨 CAN 可复用电机 ID"],
-    dependsOn: ["power_limiter"], provides: ["motor_layer", "interboard_codec"],
-    sources: ["applications/sentry_chassis/src/chassis_hardware.hpp", "applications/sentry_chassis/src/chassis_hardware.cpp", "applications/sentry_chassis/src/board_config.hpp"],
-  },
-  {
-    current: true,
-    id: "motor_layer", lane: "chassis", order: 5, status: "verify", kicker: "control + drivers", title: "电机控制层",
-    summary: "控制器 → Motor → CanBus 候选与授权 → CAN",
-    description: "VelocityMotor / PositionMotor 在业务线程计算并向 Motor 暂存目标，CanBus I/O 统一组帧与收发，Group 管理共同许可。发送候选绑定帧与代次；故障恢复不会自动运动。",
-    interfaces: ["CanBus: attach / start / commit / status", "Motor: ready / active / setter / snapshot / reseedPosition", "Group: enable / disable / clearFault / status", "PositionMotor / VelocityMotor: configure / reset / update / telemetry"],
-    constraints: ["同一物理 CAN 一个 owner；可混挂品牌、跨 CAN Group 联动", "业务线程数不固定；每 Motor 单写入方，共享 CAN 的 commit 需协调", "反馈过期撤销旧许可；显式 Fault 不因通信恢复清除", "disable 不依赖下次 commit；TX 完成不等于机械停止"],
-    dependsOn: [], provides: ["yaw_gimbal"],
-    sources: ["include/drivers/motor/can_bus.hpp", "include/drivers/motor/group.hpp", "include/control/position_motor.hpp", "include/control/velocity_motor.hpp", "include/drivers/motor/motor.hpp", "lib/control/motor_control.cpp", "drivers/motor/can_bus.cpp", "drivers/motor/motor.cpp", "docs/17-motor-workflow.md"],
-  },
-];
-
+window.SKYWALKER_MODULES = [{
+  id: 'application', title: '双主控应用与执行器', category: '机器人与仲裁', status: 'partial',
+  summary: '把公开模块装成真实机器人：云台板生成统一命令，底盘板独立执行四舵轮，两边各自管理硬件与恢复。',
+  responsibility: 'applications/sentry_gimbal 与 sentry_chassis 持有设备、静态对象、线程、板级配置和执行器。GimbalExecutor、ChassisExecutor 是各应用私有封装；公开模块不会自动把整个机器人装配完。',
+  statusNote: '已有双板软件骨架；正式云台仅单 Yaw，未接 IMU/视觉/Pitch/发射。两端 connections_configured=false，裁判 profile 未选，底盘功率模型未标定。',
+  depends: ['command', 'interboard', 'gimbal', 'chassis', 'motor-dji', 'boards'],
+  source: [
+    {label: '云台应用线程与来源注册', path: 'applications/sentry_gimbal/src/main.cpp'},
+    {label: '云台执行器声明', path: 'applications/sentry_gimbal/src/gimbal_executor.hpp'},
+    {label: '云台执行与恢复', path: 'applications/sentry_gimbal/src/gimbal_executor.cpp'},
+    {label: '云台板级绑定', path: 'applications/sentry_gimbal/src/board_config.hpp'},
+    {label: '底盘应用线程', path: 'applications/sentry_chassis/src/main.cpp'},
+    {label: '底盘执行器声明', path: 'applications/sentry_chassis/src/chassis_executor.hpp'},
+    {label: '底盘执行与恢复', path: 'applications/sentry_chassis/src/chassis_executor.cpp'},
+    {label: '八电机硬件适配', path: 'applications/sentry_chassis/src/chassis_hardware.hpp'},
+    {label: '底盘板级绑定', path: 'applications/sentry_chassis/src/board_config.hpp'}
+  ],
+  docs: [{label: '双主控应用', path: 'docs/applications/dual-controller.md'}, {label: '模块联动', path: 'docs/applications/module-integration.md'}],
+  interfaces: [
+    {signature: 'RunStatus GimbalExecutor::begin()', description: '检查应用连接配置，构造本地电机/轴的执行上下文。返回执行状态；初始化请求和反馈 ready 是不同阶段。', parameters: [], returns: 'RunStatus 值副本，含 state、reason、ready、error 等。调用方读取状态，而不是把 begin 当作已开始运动。', context: '云台执行线程唯一所有者；对象在控制循环前静态创建。', errors: '接线门禁、设备、电机模式、参考或启动条件不满足时保持不可执行，原因见 RunStatus。'},
+    {signature: 'RunStatus GimbalExecutor::update(const GimbalCommand &command, core::TimeUs now_us)', description: '推进单 Yaw 执行、反馈准备、目标有效期、显式使能、控制更新和 CanBus 提交；异常时撤销并推进恢复。当前不消费 command.pitch。', parameters: [{name: 'command', meaning: '命令服务生成的带原始时间戳云台命令；不自行刷新 stamp。'}, {name: 'now_us', meaning: '单调时间，单位 µs，使用 core::monotonicTimeUs()；真实周期由执行器计算。'}], returns: '当前 RunStatus；ready、状态原因和错误用于跨板摘要及日志。', context: '单一 gimbalTask 每约 5 ms 调用；不能从串口/CAN ISR 调用。', errors: '过期命令、Safe、反馈/参考失效、异常 dt、CAN 故障与恢复等待均会限制输出；正式配置默认阻断。'},
+    {signature: 'explicit ChassisExecutor(communication::InterBoardEndpoint &link)', description: '绑定长期存活的板间端点，执行器从该端点快照消费底盘目标与约束。构造不接管 poll 的所有权。', parameters: [{name: 'link', meaning: '底盘角色的端点；linkTask 是 poll() 的唯一调用方。'}], returns: '构造应用私有对象，不启动线程。', context: '在 chassisTask 中静态构造；引用的端点先存在且一直存活。', errors: '运行配置错误由 begin()/update() 的 RunStatus 报告。'},
+    {signature: 'RunStatus ChassisExecutor::begin(); RunStatus ChassisExecutor::update(core::TimeUs now_us)', description: '初始化八电机硬件域并推进四舵轮执行。校验心跳、命令年龄、目标 boot ID、resume generation、反馈和功率预算；允许后执行解算与逐总线提交。', parameters: [{name: 'now_us', meaning: '本地单调微秒时间；控制周期不是固定写死的 0.005 s。'}], returns: 'RunStatus 含本地状态、ready、generation、last_command_sequence 与 error；现有类型不含状态生产时间。', context: '唯一 chassisTask 约每 5 ms 调用；端点通信推进独立在 linkTask。', errors: '过期/身份错/恢复代次错/预算不可信/硬件未就绪时本地撤销；联网不等于允许出力。'}
+  ],
+  examples: [
+    {title: '云台应用：启动来源服务，再分别消费命令', language: 'cpp', code: '#include <robotics/command/command_manager.hpp>\n#include <robotics/command/receiver_sources.hpp>\n#include <core/clock.hpp>\n#include "gimbal_executor.hpp"\n\n// commands、remote_source、permission_source、link 均按 main.cpp 静态构造。\n// 启动线程，按顺序执行：\nint startCommands() {\n    int ret = commands.registerSource(remote_source);\n    if (ret == 0) ret = commands.bindPermissions(permission_source);\n    if (ret == 0) ret = commands.start();\n    return ret;\n}\n\n// linkTask 周期片段：端点 poll 只有一个调用线程。\nvoid linkTick() {\n    skywalker::robotics::CommandSnapshot frame{};\n    if (commands.snapshot(frame) == 0) {\n        link.submit(frame.decision.command.chassis);\n        link.setReferee(frame.observed.referee);\n    }\n    link.poll(k_uptime_get());\n}\n\n// gimbalTask 周期片段：executor.begin() 在循环前调用一次。\nvoid gimbalTick(GimbalExecutor &executor) {\n    skywalker::robotics::RobotCommand command{};\n    if (commands.current(command) != 0) return;\n    auto status = executor.update(command.gimbal,\n        skywalker::core::monotonicTimeUs());\n    link.setStatus(status);\n}', notes: '这是放入现有应用上下文的调用片段，变量的静态构造见云台 main.cpp，不能当独立 cpp 文件构建。start 成功只说明服务启动；原始命令年龄仍由消费者检查。GimbalExecutor 头文件属于 sentry_gimbal 私有范围。'},
+    {title: '底盘应用：通信推进与机构执行分别拥有线程', language: 'cpp', code: '// applications/sentry_chassis/src/main.cpp 的组织方式。\n// link 为 ChassisController 角色的静态 InterBoardEndpoint。\nvoid linkTask(void *, void *, void *) {\n    for (;;) {\n        link.poll(k_uptime_get());\n        k_sleep(K_MSEC(1));\n    }\n}\n\nvoid chassisTask(void *, void *, void *) {\n    static ChassisExecutor executor(link);\n    auto initial = executor.begin();\n    // initial.state/reason/error 可记录到日志。\n    for (;;) {\n        auto status = executor.update(skywalker::core::monotonicTimeUs());\n        link.setStatus(status);\n        k_sleep(K_MSEC(5));\n    }\n}', notes: '板级对象、包括静态 DMA 与 transport 的构造使用真实应用配置。这里的 setStatus 发布的是执行状态摘要；它没有自动测量车体 vx/vy/wz，也不为旧 RunStatus 增加生产时间。'}
+  ],
+  lifecycle: ['按物理接线配置两个应用自己的 board_config.hpp 与 app.overlay，选定裁判 profile、电机模式和端口。', '静态构造接收器、DMA、来源、命令服务和板间端点；接收对象必须覆盖 worker 生命周期。', 'main() 注册 RemoteSource，绑定权限，启动 CommandManager；此后不再注册来源。', 'linkTask 唯一推进端点；云台/底盘控制线程分别 begin 并周期 update。', '每个执行器在自己的线程完成反馈准备、参考初始化、使能、目标更新、总线提交和异常撤销。', '整车目标还需应用装配视觉/IMU、双轴与任务所需发射/搜索；查看“最终上车蓝图”逐项补齐。'],
+  pitfalls: ['不要从旧图寻找 GlobalSafetyManager、GimbalLocalSafety、ChassisLocalSafety 或 CommandRouter；当前职责分别在 CommandArbiter 与应用执行器/消费者。', 'CommandSnapshot 是非消费式值副本；linkTask 与 gimbalTask 的两次读取可能对应不同 sequence。', '每条物理 CAN 只由一个 CanBus 管理；Endpoint 的 CAN 传输后端需独占另一控制器。', '应用线程存活、通信在线、命令新鲜、执行 ready、电机 TX 完成和机构真正停止是不同状态。', '上车配置不能只翻 connections_configured：参考、单位、方向、急停、功率与恢复上下文都要真实绑定。'],
+  config: [{name: 'connections_configured', description: '两端默认 false。确认实际设备、ID、机械参数与门控后由应用配置。'}, {name: 'command_policy.allow_auto', description: '正式云台默认 false；需要注册视觉来源并完成惯性/机械目标适配后启用。'}, {name: 'referee_version / require_referee_for_motion', description: '默认 Unspecified / true；需真实协议 profile、UART 和许可来源。'}, {name: 'power_model_calibrated / require_power_budget', description: '底盘默认 false / true；真实功率模型与预算必须可信。'}, {name: 'interboard_transport.kind', description: '默认 Uart；两板匹配选择 UART/RS485/CAN，端点 API 不随物理后端改变。'}]
+}];
