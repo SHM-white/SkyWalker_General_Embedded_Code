@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Zephyr IDE: Build and Debug (F5)",
+            "type": "zephyr-ide-cortex",
+            "request": "launch",
+            "servertype": "openocd",
+            "ask": "auto",
+            "preLaunchTask": "Zephyr IDE: Build Active"
+        }
+    ]
+}

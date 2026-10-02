@@ -1,0 +1,34 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Zephyr IDE: Build Active",
+            "type": "shell",
+            "command": "west",
+            "args": [
+                "build",
+                "${command:zephyr-ide.get-active-project-path}",
+                "--build-dir",
+                "${command:zephyr-ide.get-active-build-path}",
+                "--board",
+                "${command:zephyr-ide.get-active-board-name}",
+                "--",
+                "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+                "-DCONFIG_DEBUG_THREAD_INFO=y"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$gcc",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        }
+    ]
+}
