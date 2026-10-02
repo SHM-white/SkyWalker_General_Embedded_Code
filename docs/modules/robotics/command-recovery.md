@@ -27,4 +27,26 @@ sentry_gimbal 目前只注册 RemoteSource 和 RefereePermissionSource，未注�
 
 软件撤销输出不等于机械立即停止，也不能代替物理急停。反馈丢失导致连续位置参考不可信时，恢复前须重建参考并等待新的命令。
 
+## 大 Yaw 独立执行与跨板恢复
+
+`include/robotics/execution/big_yaw_executor.hpp` 提供 `BigYawExecutor`。应用注入独立的 DM Motor 与 VelocityMotor 配置，负责 attach/start 和周期末 CAN commit；执行器只执行速度内环、反馈检查、权限、启停与恢复，不提交物理总线。速度与反馈通过减速比、方向换算为关节 rad/s，连续旋转不依赖固定绝对机械零点。commit 失败后调用 `suspend` 撤销该轴。
+
+`BigYawExecutionInputs` 包含 V2 请求、本板 boot_id、契约兼容状态、本地/板间链路状态、急停和显式清除。该轴的 `RecoveryGate`、生产时间、恢复代次和许可完全独立于四舵轮；V1 心跳的轮控 `resume_generation` 不会授权大 Yaw。
+
+恢复按以下顺序推进：
+
+1. 总线、反馈、控制周期或授权撤销时停止驱动输出，原目标不再有效。暂态协议故障满足条件后尝试清除；急停与硬故障要求显式清除。
+2. 链路、反馈和周期恢复，速度控制历史 reset 完成后建立新的本地准备边界，独立恢复代次递增。
+3. 底盘执行线程生产 `BigYawFeedback`，通信线程保留其生产时间并发送独立代次。云台端收到新鲜有效反馈后绑定目标板 boot_id 和大 Yaw 代次，记录当前原始输入序号为发送边界。
+4. 云台原始输入在新边界之后继续生产，且头部惯性保持有效、小云台实际 Active，回中外环才产生有效速度请求。请求保留原始源序号、原始源年龄、仲裁命令年龄与输出许可。
+5. 底盘执行器要求目标 boot_id/独立代次匹配、原始源和最终命令均晚于本地准备边界且新鲜、许可新鲜有效，才申请驱动 enable。Enabling 每轮继续监督这些条件，握手完成后执行速度内环。
+
+单板重启、独立轴恢复代次变化、能力或反馈失效，会撤销旧上下文；旧目标与旧原始源不能仅凭通信恢复重新使能。禁用命令可立即撤销输出，不需要用旧授权继续运动。
+
+V2 有独立 capabilities/request/feedback ID，双方显式开启该能力且契约版本相符后才开放新增轴；V1 保留原有布局与含义。版本失配、旧固件不声明能力或能力过期时，大 Yaw 保持禁用。协议字段与年龄处理见[板间通信](../communication/interboard-transports.md)。
+
+`BigYawFeedback.stamp` 由执行线程真实生产；`setBigYawFeedback`、通信发送、对端读取快照不会刷新它。状态停止生产但心跳继续时，反馈生产年龄超过时限即撤销 ready/armed/valid；请求停止生产或原始输入停止更新同样过期。最终请求序号、板间帧序号变新都不能代替原始输入生产。
+
+`big_yaw` 单轴台架先验证速度内环，`dual_yaw_centering` 的云台角色运行头部惯性适配和回中外环，底盘角色仅运行独立大 Yaw。机械中心使用中央 `vehicle::yaw_center_rad`，与编码器零点分开。默认接线/安装确认仍关闭；速度环、方向、回中参数、停止延迟和故障恢复留有 TODO，必须在实板关卡保存标定结果。
+
 接口示例见[命令来源服务文档](command-service.md)，应用级时序见[模块联动](../../applications/module-integration.md)。

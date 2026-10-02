@@ -45,6 +45,10 @@ struct ShooterCommand {
     ControlSource source = ControlSource::None;
     // 命令的时间戳与序号。
     MessageStamp stamp{};
+    // Single-shot events have their own producer identity. Arbitration and
+    // repeated snapshot reads must preserve both fields, never regenerate them.
+    std::uint32_t fire_event_id = 0;
+    MessageStamp fire_event_stamp{};
 };
 struct RobotCommand {
     // 底盘命令。

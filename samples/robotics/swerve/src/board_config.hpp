@@ -3,30 +3,22 @@
 #include <zephyr/devicetree.h>
 #include <drivers/motor/dji_motor.hpp>
 #include <robotics/swerve/swerve_module.hpp>
+#include "../../common/chassis_bench.hpp"
 namespace bench {
-inline const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+// TODO(wiring): confirm actual split topology; steer and wheel use separate CAN.
+inline const device *steer_can = DEVICE_DT_GET(DT_NODELABEL(can1));
+inline const device *drive_can = DEVICE_DT_GET(DT_NODELABEL(can2));
+inline constexpr bool hardware_confirmed = skywalker::robotics::vehicle::connections_confirmed;
 inline skywalker::motor::dji::Config steerHardware() {
-    return skywalker::motor::dji::gm6020({.id = 1,
-                                          .current_limit_a = 0.5f,
-                                          .encoder_zero_ticks = 0,
-                                          .current_mode_confirmed = true,
-                                          .timing = {20, 20, 30, 100}});
+    return skywalker::samples::chassis::steerConfig(0);
 }
 inline skywalker::motor::dji::Config driveHardware() {
-    return skywalker::motor::dji::m3508(
-        {.id = 1, .current_limit_a = 0.5f, .gear_ratio = 3591.0f / 187.0f, .timing = {20, 20, 30, 100}});
+    return skywalker::samples::chassis::driveConfig(0);
 }
-inline constexpr float steer_direction = 1, drive_direction = 1;
+inline constexpr float steer_direction = skywalker::robotics::vehicle::steer[0].direction;
+inline constexpr float drive_direction = skywalker::robotics::vehicle::wheel[0].direction;
 inline constexpr float test_speed_m_s = 0.1f;
 inline skywalker::robotics::SwerveModule::Config moduleConfig() {
-    skywalker::robotics::SwerveModule::Config c{};
-    c.wheel_radius_m = 0.05f;
-    c.drive.regulator.feedback = {0.03f, 0.1f, 0, 0, -0.3f, 0.3f, -0.3f, 0.3f, 0, .001f, .02f};
-    c.drive.reference_slew = {10, 10};
-    c.drive.requested_velocity_abs_max_rad_s = 10;
-    c.drive.effort_abs_max = .3f;
-    c.steer.velocity = c.drive;
-    c.steer.position = {3, 0, 0, 0, -10, 10, -10, 10, 0.01f, .001f, .02f};
-    return c;
+    return skywalker::samples::chassis::controllerConfig().modules[0];
 }
 }

@@ -89,6 +89,14 @@ DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致
 | `samples/robotics/swerve` | 单物理舵轮：GM6020 舵向 + M3508 驱动 | 是，单模块 |
 | `samples/robotics/gimbal_control` | DJI + DM 双轴 Group 云台台架 | 是，双轴联动，默认连接未配置 |
 | [samples/robotics/command_gimbal](../../samples/robotics/command_gimbal/README.md) | CommandManager → 小 Yaw/Pitch 双轴机械执行器，统一总线提交 | 是，双 CAN，默认连接未配置 |
+| [samples/robotics/inertial_gimbal](../../samples/robotics/inertial_gimbal/README.md) | 头部 IMU → 惯性适配 → 机械双轴，锁 Pitch/释放 Pitch 配置 | 是，安装确认默认关闭 |
+| [samples/robotics/gimbal_shared_can](../../samples/robotics/gimbal_shared_can/README.md) | 小云台、双摩擦轮、拨盘共享 DJI CAN，独立故障组 | 是，无弹空载，默认连接未配置 |
+| [samples/robotics/big_yaw](../../samples/robotics/big_yaw/README.md) | 大 Yaw 独立 MIT 软件速度环，连续旋转 | 是，默认连接未配置 |
+| [samples/robotics/dual_yaw_centering](../../samples/robotics/dual_yaw_centering/README.md) | 双板头部惯性保持、中心外环与大 Yaw 内环 | 是，双角色，默认连接未配置 |
+| [samples/robotics/four_swerve](../../samples/robotics/four_swerve/README.md) | 四舵四驱、完整 SwerveChassis、双 CAN 统一提交 | 是，默认连接未配置 |
+| [samples/robotics/chassis_power](../../samples/robotics/chassis_power/README.md) | 裁判预算、真实功率测量合同和八电机执行器 | 是，完整功率标定默认关闭 |
+| [samples/robotics/shooter_bench](../../samples/robotics/shooter_bench/README.md) | 摩擦就绪、拨盘分度、单发/连发、恢复丢弃和卡滞 | 是，默认空载；loaded 条件缺失时禁用 |
+| [samples/robotics/vehicle_integration](../../samples/robotics/vehicle_integration/README.md) | 双板手动 → 视觉 → 发射阶段，复用机构执行器 | 是，默认连接未配置 |
 
 典型构建：
 
@@ -112,7 +120,9 @@ west build -p -b dm_mc02/stm32h723xx -d build/swerve \
 | 路径 | 状态 |
 |---|---|
 | `samples/` | 独立小项目，目标是验证一个驱动/协议/算法 |
-| `applications/sentry_chassis` | 四轮舵底盘双线程应用骨架，默认连接未配置 |
-| `applications/sentry_gimbal` | 云台主控双主控应用骨架，默认连接未配置 |
+| `applications/sentry_chassis` | 复用整车运行入口：四舵轮与大 Yaw 独立执行和恢复，默认连接未配置 |
+| `applications/sentry_gimbal` | 复用整车运行入口：惯性云台、回中、仲裁和发射约束，默认连接未配置 |
 
 整机应用的配置和线程关系见 [15 应用骨架](../applications/dual-controller.md)；从遥控到执行器的调用顺序见 [模块联动](../applications/module-integration.md)。
+
+中央标定入口为 `include/robotics/vehicle/calibration.hpp`。所有新入口的源码 TODO 指向硬件端口、模式、机械参数、IMU 安装、索引/热量来源和实测性能；框架入口存在不代表实板通过。`command_gimbal` 另有裁判权限、视觉观察和视觉执行三种配置，视觉执行必须经过头部惯性参考适配。

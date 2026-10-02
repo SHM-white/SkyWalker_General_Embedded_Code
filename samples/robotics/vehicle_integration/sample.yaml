@@ -1,0 +1,21 @@
+sample:
+  name: SkyWalker two-board vehicle integration
+  description: Eight-wheel chassis plus independent big Yaw and inertial head, with staged sources and shooter contracts
+common:
+  tags: [skywalker, hardware, vehicle]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.vehicle.gimbal.manual: {}
+  sample.skywalker.robotics.vehicle.chassis.manual:
+    extra_args: EXTRA_CONF_FILE=chassis.conf
+  sample.skywalker.robotics.vehicle.gimbal.vision_observe:
+    extra_args: EXTRA_CONF_FILE=vision_observe.conf
+  sample.skywalker.robotics.vehicle.gimbal.vision_execute:
+    extra_args: EXTRA_CONF_FILE=vision_execute.conf
+  sample.skywalker.robotics.vehicle.gimbal.referee:
+    extra_args: EXTRA_CONF_FILE=referee.conf
+  sample.skywalker.robotics.vehicle.gimbal.shooting:
+    extra_args: EXTRA_CONF_FILE=shooting.conf
+  sample.skywalker.robotics.vehicle.chassis.power:
+    extra_args: EXTRA_CONF_FILE="chassis.conf;power.conf"

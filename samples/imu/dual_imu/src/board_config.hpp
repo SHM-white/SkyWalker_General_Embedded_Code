@@ -3,9 +3,13 @@
 #include <drivers/imu/dm_imu_rs485.hpp>
 #include <drivers/imu/imu_heater.hpp>
 #include <drivers/imu/imu_receiver.hpp>
+#include <robotics/vehicle/calibration.hpp>
 namespace bench {
 // Frame IDs distinguish installations, epochs distinguish reference sessions.
-// Unit installation transforms below are placeholders, not measured calibration.
+// TODO(IMU): measure the three mounting transforms in the shared calibration.
+// Acquisition remains available while imu_mounting_confirmed is false, so this
+// observation bench can produce the calibration used by execution samples.
+namespace calibration = skywalker::robotics::vehicle;
 inline constexpr bool chassis_board = IS_ENABLED(CONFIG_DUAL_IMU_CHASSIS_BOARD);
 inline constexpr bool use_external = !chassis_board;
 inline constexpr const char *onboard_mount = chassis_board ? "chassis" : "large_yaw_carrier";
@@ -17,12 +21,14 @@ inline const device *gyro = DEVICE_DT_GET(DT_ALIAS(gyro0));
 inline const device *external_uart = DEVICE_DT_GET(DT_ALIAS(rs485_2));
 inline const device *telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
 inline constexpr skywalker::control::QuaternionEkf::Config estimator{};
-inline constexpr skywalker::imu::Bmi088Imu::Config onboard{.reference = {chassis_board ? 1u : 2u, 1},
-                                                           .sensor_to_body = {},
+inline constexpr skywalker::imu::Bmi088Imu::Config onboard{.reference = chassis_board ? calibration::chassis_reference
+                                                                                                   : calibration::carrier_reference,
+                                                           .sensor_to_body = chassis_board ? calibration::chassis_sensor_to_body
+                                                                                                        : calibration::carrier_sensor_to_body,
                                                            .freshness = {20000, 20000, 20000, 200000}};
 inline constexpr skywalker::imu::DmImuRs485Source::Config external{.protocol = {1, 20000},
-                                                                   .reference = {3, 1},
-                                                                   .sensor_to_body = {},
+                                                                   .reference = calibration::head_reference,
+                                                                   .sensor_to_body = calibration::head_sensor_to_body,
                                                                    .device_quaternion_is_world_to_sensor = false,
                                                                    .acceleration_scale = 1,
                                                                    .angular_velocity_scale = 1};

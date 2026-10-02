@@ -1,58 +1,54 @@
-# 双主控应用骨架
+# 双主控整车框架
 
-applications/sentry_gimbal 与 applications/sentry_chassis 是整机编排入口，复用公开通信、命令仲裁、机器人、控制和驱动模块。它们展示线程边界与恢复流程；默认连接门禁关闭，不能视作完成真实接线后的成品固件。
+`applications/sentry_gimbal`、`applications/sentry_chassis` 与 `samples/robotics/vehicle_integration` 共用板级运行时。独立样例先验证各机构，applications 再组合双板；接线确认默认关闭，机械参数与安装变换集中在 `include/robotics/vehicle/calibration.hpp`。
 
-端到端消息路线见[模块联动](module-integration.md)，命令服务 API 见[命令来源与后台服务](../modules/robotics/command-service.md)。
-
-## 当前线程与数据流
+## 线程与设备归属
 
 ~~~text
-sentry_gimbal
-  RemoteReceiver worker
-  CommandManager worker
-    RemoteSource + RefereePermissionSource
-      → CommandArbiter → CommandSnapshot
-  link thread: snapshot → InterBoardEndpoint.submit / poll
-  gimbal thread: current → GimbalExecutor → GimbalAxis → Motor / CanBus
+云台板
+  输入 worker → CommandManager → CommandSnapshot
+  执行线程（5 ms）
+    头部 IMU → InertialGimbalAdapter → GimbalExecutor
+    小 Yaw 机械反馈 + 头部稳定状态 → YawCenteringController
+    发射请求 + 实际权限/热量/云台状态 → ShooterExecutor
+    所有机构暂存输出 → DJI CAN1 / Pitch CAN2 各提交一次
+    执行状态与大 Yaw 请求 → 快照缓存
+  通信线程 → InterBoardEndpoint V2 → UART1
 
-sentry_chassis
-  link thread: InterBoardEndpoint.poll
-  chassis thread: ChassisExecutor
-    → SwerveChassis + DjiChassisHardware
-    → Motor / Group / CanBus
+底盘板
+  通信线程 → InterBoardEndpoint V2 → 接收快照
+  执行线程（5 ms）
+    底盘命令 → ChassisExecutor → SwerveChassis → 八电机
+    大 Yaw 请求 → BigYawExecutor → DM 速度内环
+    CAN1 舵向 / CAN2 轮驱动 / CAN3 大 Yaw 各提交一次
+    轮控与大 Yaw 独立状态 → 快照缓存
 ~~~
 
-云台 app 没有单独的裁判线程：RefereePermissionSource 在 CommandManager worker 中调用 RefereeReceiver::poll。当前 app 不注册 VisionSource，因此 board_config 将 allow_auto 设为 false。CommandManager 需要先在启动线程完成来源注册和许可绑定，然后调用 start；消费者读取的 CommandSnapshot 与 RobotCommand 是值副本。
+只有执行线程设置电机目标和提交 CAN。通信线程只传递快照、推进 endpoint；CommandManager 的消费者不会互相取走命令。云台组、摩擦组、拨盘、八电机轮控组和大 Yaw 分别管理故障与恢复；物理总线失效影响该总线全部成员。
 
-## sentry_gimbal
+## 云台板组合
 
-源码位于 applications/sentry_gimbal/src/。
+默认手动阶段使用遥控来源；`VEHICLE_REFEREE` 接入真实裁判权限，`VEHICLE_VISION_OBSERVE` 只观察视觉目标，`VEHICLE_VISION_EXECUTE` 才参与执行。视觉与惯性控制消费头部 IMU 的实际参考会话。小 Yaw 的编码器角仍是机械关节角，惯性目标先经过适配层再进入机械执行器。
 
-- main.cpp 静态构造 RemoteReceiver、RefereeReceiver、InterBoardEndpoint、RemoteSource、RefereePermissionSource 和 CommandManager。
-- main() 依次注册遥控来源、绑定裁判许可、启动命令服务；默认 referee_version=Unspecified，需按实际裁判 profile 和 UART 完成板级配置后才会产生有效权限。
-- linkTask 读取完整 CommandSnapshot，将最终底盘命令和裁判状态提交给 InterBoardEndpoint，再调用 poll 推进所选传输后端。两侧 `board_config.hpp` 的 `interboard_transport.kind` 可选择 UART、RS485 或 CAN；默认 UART，RS485 使用 USART2，CAN 使用独占 CAN3，详见[传输配置](../modules/communication/interboard-transports.md)。
-- gimbalTask 读取 CommandManager::current()，交给应用私有 GimbalExecutor。
-- GimbalExecutor 管理单轴 Motor、CanBus、GimbalAxis、恢复与提交。
+回中外环根据独立标定的小 Yaw 中心产生大 Yaw 角速度请求，并检查头部稳定、命令新鲜度与权限。请求携带底盘 boot ID、大 Yaw 独立恢复代次、生产序号和年龄。底盘轮控恢复不会授权大 Yaw；版本或能力不匹配时大 Yaw 保持禁用。
 
-board_config::connections_configured 默认 false。真实启动前核对 UART/CAN、DMA、电机模式与 ID、控制方向、零点、限幅、急停和位置参考。
+`VEHICLE_SHOOTING` 接入摩擦轮和拨盘。单发事件具有独立编号和生产时间；恢复、忙碌或条件不满足时的旧事件被丢弃。连发持续检查新鲜请求、摩擦轮就绪、真实热量、权限和云台状态。拨盘归位与热量测量的实际来源仍需接入，TODO 未完成时有载发射不能通过准备条件。
 
-## sentry_chassis
+## 底盘板组合
 
-源码位于 applications/sentry_chassis/src/。
+`ChassisExecutor` 注入应用持有的 `SwerveHardware`；四舵向共用 CAN1，四轮驱动共用 CAN2。大 Yaw 使用独立 DM 电机与 CAN3，通过速度控制允许连续旋转，无需固定绝对机械零点。
 
-- linkTask 是 InterBoardEndpoint::poll() 的唯一调用方。
-- chassisTask 持有 ChassisExecutor，由它读取端点快照并校验对端身份、命令年龄、恢复代次及功率约束。
-- DjiChassisHardware 绑定八台 DJI Motor、Group 和最多两条物理 CanBus。
-- SwerveChassis 计算四个舵向与驱动目标；ChassisPowerLimiter 仅在功率模型已标定且数据新鲜时参与输出缩放。
-- board_config::connections_configured 与 power_model_calibrated 默认关闭。
+`VEHICLE_POWER_BUDGET` 接入裁判预算，但预算不是实测功率。现有 V1 约束没有实测功率字段；整车框架预留 `IPowerMeasurementSource`，实际传感器与功率模型完成标定后才能开放完整功率控制。独立 `chassis_power` 样例提供测量与缩放观察入口。
 
-## 构建与上机顺序
+## 配置与上机顺序
 
-从 west workspace 根目录执行：
+阶段配置、接线与构建命令见 `samples/robotics/vehicle_integration/README.md`。默认配置均保留中央接线门禁；解除前须填写电机 ID、方向、减速比、零点、机械限位、IMU 安装变换和低功率参数。
+
+从 west workspace 根目录构建两应用：
 
 ~~~sh
 west build -p -b dm_mc02/stm32h723xx -d build/sentry-gimbal skywalker_code/applications/sentry_gimbal
 west build -p -b dm_mc02/stm32h723xx -d build/sentry-chassis skywalker_code/applications/sentry_chassis
 ~~~
 
-如当前目录就是 skywalker_code，可将工程路径改成 applications/sentry_gimbal 和 applications/sentry_chassis。先分别验证通信、命令管理、云台轴和舵轮样例，再联调双板。软件状态不代替实物方向、限幅、停机和物理急停验证。
+先通过惯性云台与大 Yaw 单轴，再运行双 Yaw 回中；随后接入四舵轮、功率和发射。编译通过只说明框架可构建，实物性能与故障恢复按实施指南逐级记录。

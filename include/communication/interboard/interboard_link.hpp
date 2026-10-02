@@ -17,12 +17,17 @@ public:
         control_ = {};
         constraint_ = {};
         feedback_ = {};
+        big_yaw_request_ = {};
+        big_yaw_feedback_ = {};
     }
     bool peerOnline(std::uint64_t now_ms, std::uint32_t timeout_ms = 200) const;
     int latestHeartbeat(robotics::BoardHeartbeat &) const;
     int latestChassisControl(robotics::RemoteChassisControl &) const;
     int latestChassisConstraint(robotics::ChassisConstraint &) const;
     int latestChassisFeedback(robotics::ChassisFeedbackSummary &) const;
+    int latestCapabilities(robotics::InterBoardCapabilities &) const;
+    int latestBigYawRequest(robotics::BigYawRequest &) const;
+    int latestBigYawFeedback(robotics::BigYawFeedback &) const;
     const InterBoardParser::Stats &stats() const {
         return parser_.stats();
     }
@@ -34,11 +39,14 @@ private:
     void accept(const FrameMeta &, const std::uint8_t *, std::size_t);
     BoardRole role_;
     InterBoardParser parser_{};
-    std::array<robotics::MessageStamp, 4> sequences_{};
+    std::array<robotics::MessageStamp, kMessageCount> sequences_{};
     robotics::BoardHeartbeat heartbeat_{};
     robotics::RemoteChassisControl control_{};
     robotics::ChassisConstraint constraint_{};
     robotics::ChassisFeedbackSummary feedback_{};
+    robotics::InterBoardCapabilities capabilities_{};
+    robotics::BigYawRequest big_yaw_request_{};
+    robotics::BigYawFeedback big_yaw_feedback_{};
     std::uint32_t rejected_ = 0;
 };
 }

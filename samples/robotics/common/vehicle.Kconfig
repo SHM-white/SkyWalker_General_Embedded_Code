@@ -1,0 +1,41 @@
+config VEHICLE_CHASSIS_ROLE
+    bool "Build chassis board (eight wheels and independent big Yaw)"
+    default n
+
+config VEHICLE_REFEREE
+    bool "Require real referee movement permissions"
+    default n
+    depends on SKYWALKER_REFEREE && SKYWALKER_UART_TRANSPORT
+    help
+        Cloud/gimbal board reads its actual referee port. Chassis board uses
+        forwarded production ages; no missing permission is synthesized.
+
+config VEHICLE_POWER_BUDGET
+    bool "Require measured power and real forwarded power budgets"
+    default n
+    depends on VEHICLE_REFEREE
+    help
+        Chassis remains disabled until a real IPowerMeasurementSource is
+        supplied. An invalid sensor sample is never replaced by a budget.
+
+config VEHICLE_VISION_OBSERVE
+    bool "Observe vision without enabling automatic execution"
+    default n
+    depends on SKYWALKER_VISION_RECEIVER
+
+config VEHICLE_VISION_EXECUTE
+    bool "Execute reference-matched vision through the inertial adapter"
+    default n
+    depends on SKYWALKER_VISION_RECEIVER && SKYWALKER_ROBOTICS_INERTIAL_GIMBAL
+
+config VEHICLE_SHOOTING
+    bool "Enable loaded shooter contract (real permission, heat and index)"
+    default n
+    depends on VEHICLE_REFEREE && SKYWALKER_ROBOTICS_SHOOTER
+    help
+        Heat and dial-home providers are intentionally invalid until actual
+        measurement producers are connected. No bench override is used here.
+
+config VEHICLE_LOCK_PITCH
+    bool "Lock inertial pitch while validating head yaw compensation"
+    default y

@@ -1,5 +1,4 @@
-/* CAN1 is provided by the MC02 board DTS. Motor model, IDs and limits are
- * configured in src/board_config.hpp.
+/* MC02 CAN1: GM6020 steer ID1. CAN2: M3508 wheel ID1.
+ * Wiring and calibrated hardware values live in robotics/vehicle/calibration.hpp.
  */
-/ {
-};
+/ {};

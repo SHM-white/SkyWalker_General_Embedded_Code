@@ -8,29 +8,33 @@
 #include <robotics/gimbal/gimbal_axis.hpp>
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/command/command_manager.hpp>
+#include <robotics/vehicle/calibration.hpp>
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+#include <drivers/imu/dm_imu_rs485.hpp>
+#include <drivers/imu/imu_receiver.hpp>
+#include <robotics/gimbal/inertial_gimbal.hpp>
+#endif
 
 namespace board_config {
 // Set true only after checking BOTH motors, units, direction, zero and limits.
-inline constexpr bool connections_configured = false;
+namespace calibration = skywalker::robotics::vehicle;
+inline constexpr bool connections_configured = calibration::connections_confirmed;
 inline constexpr std::uint32_t command_timeout_ms = 100;
-inline constexpr std::uint16_t yaw_encoder_zero_ticks = 5670;
-inline constexpr std::uint16_t yaw_encoder_min_ticks = 5670;
-inline constexpr std::uint16_t yaw_encoder_max_ticks = 7440;
-inline constexpr std::uint16_t yaw_travel_margin_ticks = 100;
-inline constexpr std::uint16_t yaw_travel_low_ticks = yaw_encoder_min_ticks + yaw_travel_margin_ticks;
-inline constexpr std::uint16_t yaw_travel_high_ticks = yaw_encoder_max_ticks - yaw_travel_margin_ticks;
+inline constexpr std::uint16_t yaw_encoder_zero_ticks = calibration::small_yaw.encoder_zero_ticks;
+inline constexpr std::uint16_t yaw_travel_low_ticks = calibration::yaw_low_ticks;
+inline constexpr std::uint16_t yaw_travel_high_ticks = calibration::yaw_high_ticks;
 inline constexpr float dji_encoder_ticks_per_turn = 8192.0f;
 inline constexpr float two_pi = 6.2831853071795864769f;
-inline constexpr float yaw_min_angle_rad = (yaw_travel_low_ticks - yaw_encoder_zero_ticks) * two_pi /
-                                           dji_encoder_ticks_per_turn;
-inline constexpr float yaw_max_angle_rad = (yaw_travel_high_ticks - yaw_encoder_zero_ticks) * two_pi /
-                                           dji_encoder_ticks_per_turn;
+inline constexpr float yaw_min_angle_rad = calibration::yaw_min_rad;
+inline constexpr float yaw_max_angle_rad = calibration::yaw_max_rad;
 // Independently calibrated joint center for the future big-yaw follower.
 // This initial value is the safe travel midpoint, NOT the driver encoder zero.
-inline constexpr float yaw_center_rad = (yaw_min_angle_rad + yaw_max_angle_rad) * 0.5f;
-static_assert(yaw_encoder_min_ticks <= yaw_encoder_zero_ticks && yaw_encoder_zero_ticks < yaw_encoder_max_ticks &&
-              yaw_encoder_max_ticks < 8192 &&
-              2 * yaw_travel_margin_ticks < yaw_encoder_max_ticks - yaw_encoder_min_ticks);
+inline constexpr float yaw_center_rad = calibration::yaw_center_rad;
+static_assert(yaw_travel_low_ticks < yaw_travel_high_ticks && yaw_travel_high_ticks < 8192 &&
+              yaw_encoder_zero_ticks < 8192);
+// These native-shaft driver profiles do not implement an external gearbox.
+// TODO(hardware): add an explicit output-shaft transform if either joint has one.
+static_assert(calibration::small_yaw.gear_ratio == 1 && calibration::pitch.gear_ratio == 1);
 #if DT_NODE_HAS_STATUS(DT_ALIAS(remote_uart), okay)
 inline const device *remote_uart = DEVICE_DT_GET(DT_ALIAS(remote_uart));
 #else
@@ -43,47 +47,48 @@ inline const device *pitch_can = DEVICE_DT_GET(DT_NODELABEL(can2));
 
 // Confirm these settings against the installed motors before enabling them.
 inline skywalker::motor::dji::Config yawHardware() {
-    return skywalker::motor::dji::gm6020({.id = 7,
-                                          .current_limit_a = 1.5f,
+    return skywalker::motor::dji::gm6020({.id = calibration::small_yaw.id,
+                                          .current_limit_a = calibration::small_yaw.effort_limit,
                                           .encoder_zero_ticks = yaw_encoder_zero_ticks,
-                                          .current_mode_confirmed = true,
+                                          .current_mode_confirmed = connections_configured,
                                           .timing = {20, 20, 30, 100}});
 }
 inline skywalker::motor::dm::Config pitchHardware() {
-    return skywalker::motor::dm::j4310Mit({.id = 1,
-                                           .master_id = 0x11,
+    return skywalker::motor::dm::j4310Mit({.id = calibration::pitch.id,
+                                           .master_id = calibration::pitch.master_id,
                                            .position_max_rad = 12.5f,
                                            .velocity_max_rad_s = 30.0f,
                                            .torque_max_nm = 10.0f,
-                                           .torque_limit_nm = 1.0f,
+                                           .torque_limit_nm = calibration::pitch.effort_limit,
                                            .timing = {50, 20, 50, 3000}});
 }
 
 // ManualCommandMapper already maps right_x to negative yaw and right_y to
 // positive pitch, matching the source gimbal_control calibration. These signs
 // map the resulting mechanical command into the calibrated driver coordinates.
-inline constexpr float yaw_command_sign = 1.0f, pitch_command_sign = 1.0f;
+inline constexpr float yaw_command_sign = calibration::small_yaw.direction,
+                       pitch_command_sign = calibration::pitch.direction;
 // Limited axes use calibrated driver coordinates, not a startup-relative zero.
 // Yaw uses the calibrated encoder range; replace the pitch placeholder with measured limits.
 inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Limited,
                                                            yaw_min_angle_rad,
                                                            yaw_max_angle_rad,
-                                                           4.0f,
+                                                           calibration::small_yaw.velocity_limit_rad_s,
                                                            true,
                                                            skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
 // Pitch mechanical limits are still placeholders until measured on the installed gimbal.
 inline constexpr skywalker::robotics::GimbalAxisConfig
     pitch{skywalker::robotics::AxisTopology::Limited,
-          -0.5f,
-          0.5f,
-          5.0f,
+          calibration::pitch_min_rad,
+          calibration::pitch_max_rad,
+          calibration::pitch.velocity_limit_rad_s,
           true,
           skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
 
 inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::Ampere;
-    c.safety = {4.0f, 70.0f};
+    c.safety = {calibration::small_yaw.velocity_limit_rad_s, 70.0f};
     c.reference = skywalker::control::PositionReference::DriverContinuous;
     c.loop.position = {.kp = 20.0f,
                        .ki = 0.5f,
@@ -110,14 +115,16 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     c.loop.velocity.reference_slew = {20.0f, 20.0f};
     c.loop.velocity.measurement_filter_tau_s = 0.0f;
     c.loop.velocity.soft_deadband_rad_s = 0.0f;
-    c.loop.velocity.requested_velocity_abs_max_rad_s = 4.0f;
-    c.loop.velocity.effort_abs_max = 1.2f;
+    c.loop.velocity.requested_velocity_abs_max_rad_s = calibration::small_yaw.velocity_limit_rad_s;
+    c.loop.velocity.effort_abs_max = calibration::small_yaw.effort_limit;
+    c.loop.velocity.regulator.feedback.output_min = -calibration::small_yaw.effort_limit;
+    c.loop.velocity.regulator.feedback.output_max = calibration::small_yaw.effort_limit;
     return c;
 }
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
-    c.safety = {10.0f, 60.0f};
+    c.safety = {calibration::pitch.velocity_limit_rad_s, 60.0f};
     c.reference = skywalker::control::PositionReference::DriverContinuous;
     c.loop.position = {.kp = 0.8f,
                        .ki = 0.1f,
@@ -144,8 +151,10 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     c.loop.velocity.reference_slew = {2.0f, 2.0f};
     c.loop.velocity.measurement_filter_tau_s = 0.02f;
     c.loop.velocity.soft_deadband_rad_s = 0.02f;
-    c.loop.velocity.requested_velocity_abs_max_rad_s = 5.0f;
-    c.loop.velocity.effort_abs_max = 0.5f;
+    c.loop.velocity.requested_velocity_abs_max_rad_s = calibration::pitch.velocity_limit_rad_s;
+    c.loop.velocity.effort_abs_max = calibration::pitch.effort_limit;
+    c.loop.velocity.regulator.feedback.output_min = -calibration::pitch.effort_limit;
+    c.loop.velocity.regulator.feedback.output_max = calibration::pitch.effort_limit;
     return c;
 }
 
@@ -154,8 +163,11 @@ inline const skywalker::robotics::CommandManager::Config command_policy = [] {
     c.max_gimbal_yaw_rate_rad_s = 1.0f;
     c.max_gimbal_pitch_rate_rad_s = 0.8f;
     c.input_timeout_ms = command_timeout_ms;
-    c.require_referee_for_motion = false; // Explicit unloaded mechanical bench policy.
-    c.allow_auto = false;                // Inertial/vision references are a later stage.
+    c.require_referee_for_motion = IS_ENABLED(CONFIG_COMMAND_GIMBAL_REFEREE);
+    c.allow_auto = IS_ENABLED(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE);
+    // TODO(reference): AB carries no epoch metadata; negotiate a new reference
+    // session with the vision producer after IMU reset before enabling Auto.
+    c.expected_vision_reference = calibration::head_reference;
     return c;
 }();
 inline const skywalker::robotics::GimbalExecutor::Config execution_policy{
@@ -165,7 +177,31 @@ inline const skywalker::robotics::GimbalExecutor::Config execution_policy{
     .fault_retry_ms = 100,
 };
 
-// Connect physical estop/reset inputs here. RC disable is recoverable, not estop.
+#ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
+inline const device *head_uart = DEVICE_DT_GET(DT_ALIAS(rs485_2));
+inline constexpr skywalker::imu::ImuReceiver::Config head_receiver{.poll_interval_us = 1000, .priority = 6};
+inline skywalker::imu::DmImuRs485Source::Config headSensor() {
+    skywalker::imu::DmImuRs485Source::Config c{};
+    c.protocol = {1, 20000};
+    c.reference = calibration::head_reference;
+    c.sensor_to_body = calibration::head_sensor_to_body;
+    // TODO(IMU): confirm quaternion direction/scales and vendor quality policy.
+    return c;
+}
+inline skywalker::robotics::InertialGimbalAdapter::Config inertialPolicy() {
+    skywalker::robotics::InertialGimbalAdapter::Config c{};
+    c.yaw = yaw;
+    c.pitch = pitch;
+    c.yaw_direction = yaw_command_sign;
+    c.pitch_direction = pitch_command_sign;
+    c.pitch_locked = false;
+    c.allow_unknown_quality = true;
+    // TODO(control): validate inertial_gimbal before opening vision execution.
+    return c;
+}
+#endif
+
+// TODO(hardware): connect physical estop/reset. RC disable is recoverable.
 inline bool emergencyStopRequested() {
     return false;
 }

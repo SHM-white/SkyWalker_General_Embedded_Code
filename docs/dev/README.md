@@ -6,7 +6,7 @@
 
 | 记录 | 当前代码入口 | 说明 |
 |---|---|---|
-| [双主控逐级整车验证实施](项目优化与逐级整车验证样例实施指南.md) | samples/robotics/execution_skeleton、command_gimbal、samples/imu/dual_imu | 首个实施包直接实现；后续惯性控制、大 Yaw、共享 CAN 和整车按独立里程碑登记，实板待验证 |
+| [双主控逐级整车验证实施](项目优化与逐级整车验证样例实施指南.md) | samples/robotics/ 的逐级样例、include/robotics/vehicle/ | 首包与后续惯性控制、大 Yaw、共享 CAN、四舵轮、发射和整车框架已直接实现；实板与标定 TODO 待落实 |
 | [命令来源注册与后台仲裁服务](命令来源注册与后台仲裁服务实施指南.md) | include/robotics/command/command_manager.hpp、receiver_sources.hpp | 已实现的来源注册、后台 worker、CommandSnapshot 与同步 CommandArbiter 分层 |
 | [三源命令管理台架原施工方案](三源命令管理sample手工实施指南.md) | samples/robotics/command_manager/ | 方案已落地；当前接线、配置和操作以 sample README 为准 |
 | [电机驱动复核记录](电机驱动审查复核与线程弹性实施指南.md) | drivers/motor/、tests/motor/regression/ | 旧版待修清单属于历史检查点；当前代码与回归入口应以现行电机文档为准 |
@@ -15,7 +15,7 @@
 
 | 文档 | 当前待办 |
 |---|---|
-| [云台 GimbalAxis 与 Gimbal 分层方案](云台GimbalAxis与Gimbal分层重构方案.md) | GimbalAxis 与双轴机械执行器已实现；惯性姿态适配和大小 Yaw 协调器仍待实施，硬件标定待确认。 |
+| [云台 GimbalAxis 与 Gimbal 分层方案](云台GimbalAxis与Gimbal分层重构方案.md) | 机械双轴、惯性适配和大小 Yaw 协调框架已实现，硬件标定与实板闭环待确认。 |
 | [云台遥控样例安全策略阅读指南](云台遥控样例安全策略阅读指南.md) | 真实接线、可触达急停/复位输入和实机安全行为仍待确认。 |
 | [rm_typec SPI 属性诊断指南](rm_typec设备树SPI频率属性诊断指南.md) | 编辑器 binding 警告来源和目标板构建结果待核验。 |
 | [多品牌电机驱动架构手工指南](多品牌电机驱动重构架构与手工实施指南.md) | 核心对象已落地；方案的目标契约不自动代表当前 API，待办以电机主题文档为准。 |

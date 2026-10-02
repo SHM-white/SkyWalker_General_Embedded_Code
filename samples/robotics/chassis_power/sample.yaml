@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker chassis power bench
+  description: Actual referee permissions and budgets drive the eight-motor power limiting chain
+common:
+  tags: [skywalker, hardware, chassis, referee]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.chassis_power: {}

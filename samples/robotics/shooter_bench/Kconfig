@@ -1,0 +1,5 @@
+mainmenu "Shooter bench"
+config SHOOTER_UNLOADED_FEED
+    bool "Empty mechanism indexing without referee constraints"
+    default y
+source "Kconfig.zephyr"

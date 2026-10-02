@@ -1,3 +1,5 @@
+// TODO(legacy): historical private implementation. The active entry now uses
+// samples/robotics/common/vehicle_bench.hpp and central vehicle calibration.
 #pragma once
 
 #include <array>

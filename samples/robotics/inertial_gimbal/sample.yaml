@@ -1,0 +1,11 @@
+sample:
+  name: SkyWalker head inertial gimbal
+  description: Head RS485 IMU, independent inertial reference session and two-CAN mechanical executor
+common:
+  tags: [skywalker, hardware, motor, imu]
+  platform_allow: [dm_mc02/stm32h723xx]
+  build_only: true
+tests:
+  sample.skywalker.robotics.inertial_gimbal.pitch_locked: {}
+  sample.skywalker.robotics.inertial_gimbal.pitch_free:
+    extra_args: EXTRA_CONF_FILE=pitch_free.conf
