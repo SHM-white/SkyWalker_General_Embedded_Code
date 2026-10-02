@@ -34,7 +34,8 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     n.mode = r.left_switch == RcSwitch::Middle ? OperatorMode::Manual
              : r.left_switch == RcSwitch::Up   ? OperatorMode::Auto
                                                : OperatorMode::Safe;
-    n.source = r.right_switch == RcSwitch::Up ? ControlSource::KeyboardMouse : ControlSource::Remote;
+    const bool physical = config_.input_profile == RemoteInputProfile::PhysicalRemote;
+    n.source = !physical && r.right_switch == RcSwitch::Up ? ControlSource::KeyboardMouse : ControlSource::Remote;
     auto norm = [&](float x) {
         x = std::clamp(x / config_.channel_range, -1.0f, 1.0f);
         return std::fabs(x) <= config_.analog_deadband
@@ -47,6 +48,10 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
         n.chassis_wz_norm = norm(r.analog.wheel);
         n.gimbal_yaw_rate_norm = -norm(r.analog.right_x);
         n.gimbal_pitch_rate_norm = norm(r.analog.right_y);
+        if (physical) {
+            n.friction_requested = r.right_switch != RcSwitch::Down;
+            n.fire_requested = r.right_switch == RcSwitch::Up;
+        }
     }
     else {
         auto key = [&](unsigned bit) { return (r.keyboard.bits >> bit) & 1u; };
@@ -240,7 +245,8 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         s.source = i.source;
         const bool fire = i.mode == OperatorMode::Manual || manual_override_
                               ? i.fire_requested
-                              : visual_control && in.vision.value.fire_requested;
+                              : visual_control && in.vision.value.fire_requested &&
+                                (config_.mapper.input_profile != RemoteInputProfile::PhysicalRemote || i.fire_requested);
         if (fire) {
             s.mode = ShooterMode::FireContinuous;
             s.source = visual_control ? ControlSource::Vision : i.source;

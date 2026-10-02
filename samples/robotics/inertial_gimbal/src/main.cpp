@@ -1,8 +1,9 @@
 #include "board_config.hpp"
+#include "../../common/rc_controls.hpp"
+#include "../../common/sample_diagnostics.hpp"
 
 #include <cerrno>
 #include <cmath>
-#include <cstring>
 #include <core/clock.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <lib/vofa/vofa.h>
@@ -17,7 +18,7 @@ using namespace skywalker::robotics;
 
 namespace {
 communication::AsyncUart::DmaBuffers remote_dma __nocache, head_dma __nocache;
-communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, {});
+communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, samples::control::receiverConfig());
 RemoteSource remote_source(remote);
 atomic_t input_paused = 0, execution_paused = 0, status_paused = 0, head_paused = 0;
 atomic_t estop = 0, clear_requested = 0;
@@ -48,23 +49,10 @@ struct Observation {
 SnapshotCache<Observation> observation;
 K_SEM_DEFINE(telemetry_ready, 0, 1);
 
-void controls(const char *key, float value) {
-    if (!std::isfinite(value)) return;
-    const bool enabled = value != 0;
-    if (!std::strcmp(key, "input_pause")) atomic_set(&input_paused, enabled);
-    else if (!std::strcmp(key, "execution_pause")) atomic_set(&execution_paused, enabled);
-    else if (!std::strcmp(key, "status_pause")) atomic_set(&status_paused, enabled);
-    else if (!std::strcmp(key, "head_pause")) atomic_set(&head_paused, enabled);
-    else if (!std::strcmp(key, "estop")) atomic_set(&estop, enabled);
-    else if (!std::strcmp(key, "clear") && enabled) atomic_set(&clear_requested, 1);
-}
-
 void telemetryTask(void *, void *, void *) {
     k_sem_take(&telemetry_ready, K_FOREVER);
     Vofa vofa{};
-    std::uint8_t rx[100];
     const int ret = vofa_init(&vofa, DEVICE_DT_GET(DT_ALIAS(telemetry_uart)));
-    if (ret == 0) (void)vofa_set_handler(&vofa, rx, sizeof(rx), controls);
     std::uint64_t next_log_ms = 0;
     for (;;) {
         Observation seen{};
@@ -117,8 +105,22 @@ int main() {
     core::TimeUs retry_us = 0, previous_us = 0;
     Observation current{};
     imu::Snapshot head_cache{};
+    samples::control::RcControlAdapter controls;
+    samples::control::SampleDiagnostics diagnostics;
+    communication::RemoteReceiver::Snapshot operator_cache{};
     for (;;) {
-        if (atomic_get(&execution_paused)) { k_sleep(K_MSEC(5)); continue; }
+        (void)remote.snapshot(operator_cache);
+        const auto &operator_state = controls.update(operator_cache.remote, k_uptime_get());
+        const auto exercise = diagnostics.update(k_uptime_get(), current.execution.state == RunState::Active,
+            !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
+        atomic_set(&input_paused, exercise.input_paused);
+        atomic_set(&execution_paused, exercise.execution_paused);
+        atomic_set(&status_paused, exercise.status_paused);
+        atomic_set(&head_paused, exercise.head_paused);
+        if (operator_state.clear_fault) atomic_set(&clear_requested, 1);
+        if (atomic_get(&execution_paused) && operator_state.run_allowed && !operator_state.clear_fault) {
+            k_sleep(K_MSEC(5)); continue;
+        }
         const auto now = core::monotonicTimeUs();
         if (previous_us && now - previous_us > board_config::execution_policy.max_cycle_us) ++current.overruns;
         previous_us = now;
@@ -146,6 +148,7 @@ int main() {
         inertial.yaw = yaw.snapshot();
         inertial.pitch = pitch.snapshot();
         inertial.command = frame.decision.command.gimbal;
+        if (!operator_state.run_allowed) inertial.command.mode = GimbalMode::Disabled;
         inertial.source_stamp = sourceStamp(frame, inertial.command.source);
         inertial.prerequisites_ready = transport && inertial_bench::mounting_configured;
         current.inertial = adapter.update(inertial, now);
@@ -171,6 +174,9 @@ int main() {
             current.inertial = adapter.suspend(now, WaitReason::Reference, -ESTALE);
         current.inertial.stabilization_valid = current.inertial.stabilization_valid &&
             current.execution.state == RunState::Active;
+        if (operator_state.run_allowed && previous_run.state == RunState::Active &&
+            (current.execution.state != RunState::Active || current.execution.generation != previous_run.generation))
+            controls.withdraw();
         current.head_stamp = head_cache.sample.orientation.stamp;
         current.duration_us = core::monotonicTimeUs() - now;
         if (!atomic_get(&status_paused)) observation.publish(current);

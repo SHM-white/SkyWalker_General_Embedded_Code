@@ -19,7 +19,7 @@ DM 的 PMAX 12.5 rad、VMAX 30 rad/s、TMAX 10 N·m 必须与驱动器实际配�
 
 ## 调用与安全行为
 
-应用先 attach/start，再通过两轴 `GimbalAxis::begin()` 配置各自私有的 PositionMotor。`poll(now)` 汇总参考准备、反馈健康和就绪时间，`reset()` 与 `updateRate()` 提供单轴操作。遥控左拨杆需先到上或下位，收到新的有效帧后拨到中位，程序才调用一次 `Group.enable()`。右摇杆横向/纵向分别给 yaw/pitch 角速度；两个控制器只暂存安培和牛·米目标，周期末由 CanBus.commit 发布。任一轴反馈、限位、遥控或控制周期异常会撤销整个 Group；故障后需重新经过安全拨杆动作。Group.disable 会立刻关闭软件输出许可，安全帧由 I/O 线程发送。
+应用先 attach/start，再通过两轴 `GimbalAxis::begin()` 配置各自私有的 PositionMotor。`poll(now)` 汇总参考准备、反馈健康和就绪时间，`reset()` 与 `updateRate()` 提供单轴操作。左 Down、右 Down，双摇杆和拨轮归中保持 500 ms，再拨左 Middle，程序才申请一次 `Group.enable()`；本例左 Up 禁用。右摇杆横向/纵向分别给 yaw/pitch 角速度；两个控制器只暂存安培和牛·米目标，周期末由 CanBus.commit 发布。任一轴反馈、限位、遥控或控制周期异常会撤销整个 Group；故障后需重新经过安全拨杆动作。Group.disable 会立刻关闭软件输出许可，安全帧由 I/O 线程发送。
 
 Limited 轴在禁用且反馈稳定后，使用 GM6020 校准的单圈绝对角或 DM 原生保存零点的位置重建连续参考。切电机电源后重新建立参考，再允许位置控制。pitch 失能可能下坠，须支撑机构；首次测试先验证方向、限位和禁用动作。
 
@@ -33,4 +33,6 @@ west build -b dm_mc02 samples/robotics/gimbal_control -d ../build/gimbal_rc_test
 
 运行状态每秒通过独立的 `telemetry-uart`（MC02 USART1）发送一帧 VOFA+ JustFloat；遥控接收仍使用 UART5，控制台日志仍使用 USART10。VOFA+ 串口设为 115200 baud、JustFloat 协议。按顺序为 11 个通道：遥控帧有效（0/1）、左拨杆位置、允许重新使能（0/1）、急停锁存（0/1）、联动组运行（0/1）、联动组等待使能（0/1）、yaw 电机状态、pitch 电机状态、联动组故障原因、yaw CAN 最近错误码、pitch CAN 最近错误码。同 CAN 配置下最后一个通道固定为 0。VOFA 初始化或发送失败时，错误写入控制台日志。
 
-本次 VOFA 改动已在 MC02 编译链接通过；未刷写或实机验证。
+本次仅进行最终编译，不刷写或执行实机动作。
+
+物理遥控含拨轮，清故障用安全档手势，操作见 [统一遥控操作](../common/REMOTE_CONTROL.md)。诊断构建支持场景 1（输入）、2（执行）、3（状态）；默认 `diagnostic.conf` 选择 1，稳定运行 3 秒后暂停 1.5 秒，管理路径继续处理停机。

@@ -9,7 +9,8 @@
 #include <robotics/vehicle/swerve_profile.hpp>
 #include "chassis_can.hpp"
 #include "chassis_period.hpp"
-#include <zephyr/drivers/uart.h>
+#include "rc_controls.hpp"
+#include "sample_diagnostics.hpp"
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/logging/log.h>
@@ -121,10 +122,24 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
     ChassisExecutor executor(hardware.adapter, controllerConfig(), executorConfig(with_power));
     const int topology_error = hardware.start();
     const int config_error = executor.begin();
-    const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    bool requested = false, source_paused = false, execution_paused = false, measurement_paused = false, estop = false;
-    std::uint32_t source_sequence = 0;
-    core::TimeUs next_source = 0, next_log = 0, lease_until_us = 0;
+    namespace input = skywalker::samples::control;
+    if (input::diagnostic_scenario != input::DiagnosticScenario::None &&
+        input::diagnostic_scenario != input::DiagnosticScenario::InputPause &&
+        input::diagnostic_scenario != input::DiagnosticScenario::ExecutionPause &&
+        input::diagnostic_scenario != input::DiagnosticScenario::StatusPause &&
+        input::diagnostic_scenario != input::DiagnosticScenario::PermissionPause &&
+        input::diagnostic_scenario != input::DiagnosticScenario::MeasurementPause) return -ENOTSUP;
+    if (!with_power && (input::diagnostic_scenario == input::DiagnosticScenario::PermissionPause ||
+                        input::diagnostic_scenario == input::DiagnosticScenario::MeasurementPause)) return -EINVAL;
+    static communication::AsyncUart::DmaBuffers remote_dma __nocache;
+    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, input::receiverConfig());
+    const int remote_error = remote.start();
+    if (remote_error < 0) return remote_error;
+    communication::RemoteReceiver::Snapshot remote_snapshot{};
+    input::RcControlAdapter rc_adapter;
+    input::SampleDiagnostics diagnostics;
+    bool authority_started = false;
+    core::TimeUs next_log = 0;
     PeriodicDeadline deadline;
     ChassisExecutionInputs inputs{};
     RunStatus status{};
@@ -135,54 +150,37 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
     static communication::RefereeReceiver receiver(referee_uart, referee_dma, communication::RefereeVersion::Rm2026V1_3);
 #endif
     printk("8 motors FL/FR/RL/RR: steer CAN1, drive CAN3; topology=%d config=%d\n", topology_error, config_error);
-    printk("e enable, space disable, w/s x, a/d y, q/z yaw, u/j x+yaw, 0 coast, ! estop, r clear; p source pause, x execution pause, m measurement pause\n");
+    printk("RC safe+center 0.5s then left Middle; left stick xy, wheel yaw; console is telemetry only\n");
     for (;;) {
         const auto now_us = core::monotonicTimeUs();
         const auto now_ms = now_us / 1000;
-        bool clear = false;
-        unsigned char key = 0;
-        while (uart_poll_in(console, &key) == 0) {
-            if (key == 'e' && !estop) {
-                requested = true;
-                inputs.command.vx_m_s = inputs.command.vy_m_s = inputs.command.wz_rad_s = 0;
-                lease_until_us = now_us + calibration::bench_command_lease_us;
-            }
-            if (key == ' ' || key == '!') { requested = false; estop = estop || key == '!'; }
-            if (key == 'r') { clear = true; estop = false; requested = false; }
-            if (key == 'p') source_paused = !source_paused;
-            if (key == 'x') execution_paused = !execution_paused;
-            if (key == 'm') measurement_paused = !measurement_paused;
-            if (key == 'w' || key == 's' || key == 'a' || key == 'd' || key == 'q' || key == 'z' || key == 'u' || key == 'j' || key == '0') {
-                inputs.command.vx_m_s = (key == 'w' || key == 'u' || key == 'j') ? .1f : key == 's' ? -.1f : 0;
-                inputs.command.vy_m_s = key == 'a' ? .1f : key == 'd' ? -.1f : 0;
-                inputs.command.wz_rad_s = (key == 'q' || key == 'u') ? .2f : (key == 'z' || key == 'j') ? -.2f : 0;
-                lease_until_us = now_us + calibration::bench_command_lease_us;
-            }
+        (void)remote.snapshot(remote_snapshot);
+        const auto &rc = rc_adapter.update(remote_snapshot.remote, now_ms);
+        const auto diagnostic = diagnostics.update(now_ms, hardware.group.active(),
+            !rc.fresh || rc.remote.left_switch == RcSwitch::Down);
+        if (!diagnostic.input_paused && rc.fresh && (!inputs.command.stamp.valid ||
+            sequenceAfter(rc.remote.stamp.sequence, inputs.command.stamp.sequence))) {
+            inputs.command.mode = rc.run_allowed ? ChassisMode::BodyVelocity : ChassisMode::Disabled;
+            inputs.command.source = ControlSource::Remote;
+            inputs.command.vx_m_s = input::RcControlAdapter::normalize(rc.remote.analog.left_y) * .1f;
+            inputs.command.vy_m_s = -input::RcControlAdapter::normalize(rc.remote.analog.left_x) * .1f;
+            inputs.command.wz_rad_s = input::RcControlAdapter::normalize(rc.remote.analog.wheel) * .2f;
+            inputs.command.stamp = rc.remote.stamp;
+            inputs.source_stamp = {rc.remote.stamp.timestamp_ms * 1000, rc.remote.stamp.sequence, true};
         }
-        // Synthetic source production is not evidence of operator presence.
-        // Expiry withdraws immediately, even while source production is paused.
-        if (requested && now_us >= lease_until_us) requested = false;
-        if (!requested) {
+        if (!rc.run_allowed) {
             inputs.command.mode = ChassisMode::Disabled;
             inputs.command.vx_m_s = inputs.command.vy_m_s = inputs.command.wz_rad_s = 0;
         }
-        if (!source_paused && now_us >= next_source) {
-            next_source = now_us + 10000;
-            inputs.command.mode = requested ? ChassisMode::BodyVelocity : ChassisMode::Disabled;
-            inputs.command.source = ControlSource::Autonomous;
-            inputs.command.stamp = {now_ms, ++source_sequence, true};
-            inputs.source_stamp = {now_us, source_sequence, true};
-        }
-        inputs.emergency_stop = estop;
-        inputs.clear_fault = clear;
+        inputs.clear_fault = rc.clear_fault;
         inputs.transport_ready = topology_error == 0 && hardware.running();
         inputs.require_permission = with_power;
 #if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
         if (with_power && referee_uart && device_is_ready(referee_uart)) referee = receiver.poll(now_ms);
 #endif
-        inputs.permission = referee.robot.chassis_output;
+        if (!diagnostic.permission_paused) inputs.permission = referee.robot.chassis_output;
         inputs.power_budget = referee.power;
-        if (!measurement_paused) {
+        if (!diagnostic.measurement_paused) {
             if (power_source) {
                 PowerMeasurement next{};
                 const int ret = power_source->sample(now_us, next);
@@ -199,18 +197,24 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             }
         }
         inputs.measured_power = measurement;
-        if (!execution_paused || clear || estop || !requested) {
-            status = executor.update(inputs, now_us);
+        if (!diagnostic.execution_paused || rc.clear_fault || !rc.run_allowed) {
+            auto execution_status = executor.update(inputs, now_us);
             if (topology_error == 0) {
                 const int commit = hardware.commit();
-                if (commit < 0) status = executor.suspend(now_us, WaitReason::Transport, commit);
+                if (commit < 0) execution_status = executor.suspend(now_us, WaitReason::Transport, commit);
             }
+            if (!diagnostic.status_paused) status = execution_status;
+            const auto group_state = hardware.group.status();
+            const bool authority_now = group_state.active || group_state.enable_pending;
+            if (rc.run_allowed && ((authority_started && !authority_now) || execution_status.state == RunState::Blocked))
+                rc_adapter.withdraw();
+            authority_started = rc.run_allowed && authority_now;
         }
         if (now_us >= next_log) {
             next_log = now_us + 500000;
             const bool status_fresh = isFresh(status.stamp, now_ms, 100);
             LOG_INF("src=%u age_ms=%llu exec=%u fresh=%d ready=%d reason=%u err=%d gen=%u power_valid=%d scale_milli=%d power_mW=%d budget_mW=%d bus=%u/%u",
-                source_sequence, static_cast<unsigned long long>(now_ms >= inputs.command.stamp.timestamp_ms ?
+                inputs.command.stamp.sequence, static_cast<unsigned long long>(now_ms >= inputs.command.stamp.timestamp_ms ?
                 now_ms - inputs.command.stamp.timestamp_ms : 0), unsigned(status.state), status_fresh,
                 status_fresh && status.ready, unsigned(status.reason), status.error, status.generation,
                 measurement.valid && core::fresh(measurement.stamp, now_us, 300000),

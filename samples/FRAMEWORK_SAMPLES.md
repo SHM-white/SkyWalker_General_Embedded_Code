@@ -6,15 +6,15 @@
 | --- | --- | --- |
 | [DR16](communication/dr16/README.md) | 接遥控 UART，观察通道、拨杆、鼠标键盘、掉线 | 遥控器实际操作 |
 | [裁判](communication/referee/README.md) | 接裁判 User 串口，观察 CRC、许可、额度、缓冲和过期 | 插拔真实串口/改变供电许可 |
-| [板间](communication/interboard/README.md) | 两块板互接 UART，观察在线、boot/generation、命令超时 | 控制台 `p` 暂停命令生产，`g` 更改恢复上下文 |
-| [命令与安全](robotics/command_safety/README.md) | 真实 DR16 -> 意图 -> 安全 -> 机器人命令；不接电机 | RC 拨杆；控制台 `!` 急停、`r` 复位 |
+| [板间](communication/interboard/README.md) | 两块板互接 UART，观察在线、boot/generation、命令超时 | 唯一当前板间协议；独立诊断构建定时暂停生产或改变恢复上下文 |
+| [命令与安全](robotics/command_safety/README.md) | 真实 DR16 -> 意图 -> 安全 -> 机器人命令；不接电机 | 安全档归中后遥控解锁，左 Down 停机 |
 | [电机恢复](motor/recovery/README.md) | 单 DJI 或 DM MIT 电机，主控存活时单独断电恢复 | `e` 运行，空格暂停，`!` 急停，`r` 复位 |
-| [多电机拓扑](motor/mixed_topology/README.md) | DJI 同帧独立组、DM 共用 Master ID、跨 CAN 联动及故障隔离 | 构建时选择四种拓扑之一；控制台显式使能 |
-| [小 Yaw](robotics/yaw_gimbal/README.md) | GM6020 小云台，Hold/Rate/AbsoluteAngle | `e/a/d/h/0/1`，空格暂停，`!` 急停，`r` 复位 |
-| [单舵轮](robotics/swerve/README.md) | 一套 GM6020 舵向 + M3508 驱动，共享 CAN | `w/s/a/d/q` 选择平移/旋转，`e` 使能 |
+| [多电机拓扑](motor/mixed_topology/README.md) | DJI 同帧独立组、DM 共用 Master ID、跨 CAN 联动及故障隔离 | 构建时选择拓扑；遥控解锁后用左纵杆、右纵杆、拨轮保持各组运行 |
+| [小 Yaw](robotics/yaw_gimbal/README.md) | GM6020 小云台，Hold/Rate/AbsoluteAngle | 遥控解锁；右开关选择速率/Hold/绝对角，安全档复位 |
+| [单舵轮](robotics/swerve/README.md) | 一套 GM6020 舵向 + M3508 驱动，双 CAN | 遥控解锁；左杆平移，拨轮旋转 |
 | [双轴云台](robotics/gimbal_control/README.md) | DJI + DM 双轴 Group，观察跨品牌联动 | 按样例 README 配线和使能 |
 
-控制台样例沿用板定义的 USART10 / 115200 baud。`recovery` 和 `mixed_topology` 均要求显式使能；真实掉电后，反馈恢复不会重新授权运动，需再次按 `e`（多电机独立组按 `1`/`2`）。`r` 只清除可清故障，不使能。原有定时自动运行的单电机样例保留其既定目标和 VOFA 通道，驱动故障会撤销输出。
+机器人机构与多电机拓扑使用 [统一遥控操作](robotics/common/REMOTE_CONTROL.md)，console 与 VOFA 只用于观察。单电机模块测试保留原有方式：`recovery` 继续使用 `e`、空格、`!`、`r`；其余定时自动运行的单电机样例保留既定轨迹及 VOFA 通道。
 
 通用构建/刷写方式（替换 sample 路径与 build 目录）：
 

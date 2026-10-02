@@ -7,4 +7,5 @@ config INERTIAL_GIMBAL_LOCK_PITCH
         First validate yaw compensation while manually rotating the carrier.
         Release Pitch only after directions, IMU transform and limits are measured.
 
+rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"

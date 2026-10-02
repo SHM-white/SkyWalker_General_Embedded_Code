@@ -8,7 +8,7 @@ namespace skywalker::robotics {
 struct BigYawExecutionInputs {
     BigYawRequest request{};
     std::uint64_t local_boot_id = 0;
-    bool contract_compatible = false;
+    bool peer_online = false;
     bool transport_ready = false;
     bool emergency_stop = false;
     bool clear_fault = false;

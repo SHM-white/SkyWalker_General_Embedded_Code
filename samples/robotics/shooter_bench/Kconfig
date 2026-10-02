@@ -2,4 +2,5 @@ mainmenu "Shooter bench"
 config SHOOTER_UNLOADED_FEED
     bool "Empty mechanism indexing without referee constraints"
     default y
+rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"

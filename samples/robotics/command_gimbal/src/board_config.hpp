@@ -160,6 +160,7 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
 
 inline const skywalker::robotics::CommandManager::Config command_policy = [] {
     skywalker::robotics::CommandManager::Config c{};
+    c.mapper.input_profile = skywalker::robotics::RemoteInputProfile::PhysicalRemote;
     c.max_gimbal_yaw_rate_rad_s = 1.0f;
     c.max_gimbal_pitch_rate_rad_s = 0.8f;
     c.input_timeout_ms = command_timeout_ms;

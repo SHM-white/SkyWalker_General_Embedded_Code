@@ -124,7 +124,7 @@ ZTEST(execution, test_status_cache_never_renews_age) {
 }
 
 namespace {
-// No callback or worker: send() immediately copies into the real V1 session.
+// No callback or worker: send() immediately copies into the real interboard session.
 class CapturingTransport final : public communication::InterBoardTransport {
 public:
     communication::InterBoardLink observer{BoardRole::GimbalController};

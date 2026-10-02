@@ -8,13 +8,18 @@
 #include <robotics/execution/snapshot_cache.hpp>
 #include <robotics/shooter/shooter_executor.hpp>
 #include <robotics/vehicle/big_yaw_profile.hpp>
+#if !defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
 #include <zephyr/drivers/uart.h>
+#endif
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/printk.h>
 #if defined(CONFIG_BOARD_DM_MC02)
 #include <zephyr/drivers/regulator.h>
 #endif
 #include "chassis_bench.hpp"
+#include "rc_controls.hpp"
+#include "sample_diagnostics.hpp"
+#include "operator_controls.hpp"
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
 #include "shooter_bench.hpp"
 #include <drivers/imu/dm_imu_rs485.hpp>
@@ -65,16 +70,20 @@ inline communication::ConfiguredInterBoardTransport::Config linkConfig() {
 inline communication::ConfiguredInterBoardTransport transport(linkConfig(), &link_dma);
 inline communication::InterBoardEndpoint::Config endpointConfig() {
     communication::InterBoardEndpoint::Config c{kRole};
-    c.enable_big_yaw = true;
     return c;
 }
 inline communication::InterBoardEndpoint endpoint(transport, endpointConfig());
 inline atomic_t input_paused = 0, execution_paused = 0, status_paused = 0, head_paused = 0, measurement_paused = 0;
 inline atomic_t estop = 0, clear_requested = 0, continuous_requested = 0;
+inline atomic_t vision_paused = 0, permission_paused = 0, release_requested = 0;
+inline SnapshotCache<control::RcControlState> operator_states;
 inline atomic_ptr_t execution_thread = nullptr;
 struct ShotEvent { std::uint32_t id = 0; MessageStamp stamp{}; };
+#if !defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
 inline SnapshotCache<ShotEvent> shot_events;
 inline SnapshotCache<core::Stamp> console_fire_requests;
+inline SnapshotCache<core::Stamp> console_clear_requests;
+#endif
 
 struct Observation {
     RunStatus mechanism{}, big_yaw{};
@@ -106,7 +115,8 @@ inline MessageStamp forwardedStamp(const MessageStamp &received, std::uint32_t a
 
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
 inline communication::AsyncUart::DmaBuffers remote_dma __nocache, head_dma __nocache;
-inline communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, {});
+inline communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
+    IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS) ? control::receiverConfig() : communication::RemoteReceiver::Config{});
 inline RemoteSource original_remote(remote);
 class PausableRemote final : public ICommandSource {
 public:
@@ -119,6 +129,8 @@ public:
 inline PausableRemote remote_source;
 inline CommandManager::Config commandConfig() {
     auto c = board_config::command_policy;
+    c.mapper.input_profile = IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+        ? RemoteInputProfile::PhysicalRemote : RemoteInputProfile::KeyboardMouseSelectable;
     c.require_referee_for_motion = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
     c.allow_auto = IS_ENABLED(CONFIG_VEHICLE_VISION_EXECUTE);
     c.expected_vision_reference = calibration::head_reference;
@@ -132,7 +144,15 @@ inline CommandManager commands(commandConfig());
 inline communication::AsyncUart::DmaBuffers referee_dma __nocache;
 inline communication::RefereeReceiver referee(DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma,
     communication::RefereeVersion::Rm2026V1_3);
-inline RefereePermissionSource permission_source(referee);
+inline RefereePermissionSource original_permission(referee);
+class PausablePermission final : public IPermissionSource {
+public:
+    int start() override { return original_permission.start(); }
+    int sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) override {
+        return atomic_get(&permission_paused) ? -EAGAIN : original_permission.sample(now_ms, out, diagnostics);
+    }
+};
+inline PausablePermission permission_source;
 #endif
 #if defined(CONFIG_VEHICLE_VISION_OBSERVE) || defined(CONFIG_VEHICLE_VISION_EXECUTE)
 inline communication::AsyncUart::DmaBuffers vision_dma __nocache;
@@ -152,7 +172,7 @@ public:
     SourceRole role() const override { return original_vision.role(); }
     int start() override { return original_vision.start(); }
     int sample(SourceSample &out) override {
-        return atomic_get(&input_paused) ? -EAGAIN : original_vision.sample(out);
+        return (atomic_get(&input_paused) || atomic_get(&vision_paused)) ? -EAGAIN : original_vision.sample(out);
     }
 };
 inline PausableVision vision_source;
@@ -185,10 +205,13 @@ inline YawCenteringController::Config centeringConfig() {
     return c;
 }
 
+#if !defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
 inline void produceShotEvent(const MessageStamp &stamp, std::uint32_t &counter) {
     if (!stamp.valid || counter == UINT32_MAX) return;
     (void)shot_events.publish({++counter, stamp});
 }
+#endif
+
 #endif
 
 // Communication and command production exchange snapshots only. Motor setters
@@ -196,19 +219,59 @@ inline void produceShotEvent(const MessageStamp &stamp, std::uint32_t &counter) 
 inline void communicationTask(void *, void *, void *) {
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
     CommandSnapshot frame{};
-    std::uint64_t next_command_ms = 0, console_sequence = 0;
+    communication::RemoteReceiver::Snapshot raw{};
+    control::OperatorControlPublisher operator_publisher;
+    std::uint64_t next_command_ms = 0;
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+    control::RcControlAdapter controls({IS_ENABLED(CONFIG_VEHICLE_VISION_EXECUTE)});
+    control::SampleDiagnostics diagnostics;
+    Observation observed{};
+#else
+    std::uint64_t console_sequence = 0;
     std::uint32_t last_remote_sequence = 0, event_counter = 0;
     bool have_remote = false, previous_left = false;
+    core::Stamp clear_request{};
+#endif
 #endif
     for (;;) {
         const auto now_ms = static_cast<std::uint64_t>(k_uptime_get());
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
+        // Management samples the receiver directly, outside the deliberately
+        // pausable command publication and outside execution/status workers.
+        (void)remote.snapshot(raw);
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+        if (atomic_set(&release_requested, 0)) controls.withdraw();
+        const auto &operator_state = controls.update(raw.remote, now_ms);
+        (void)observations.snapshot(observed);
+        const auto exercise = diagnostics.update(now_ms, observed.mechanism.state == RunState::Active,
+            !operator_state.fresh || raw.remote.left_switch == RcSwitch::Down);
+        atomic_set(&input_paused, exercise.input_paused);
+        atomic_set(&execution_paused, exercise.execution_paused);
+        atomic_set(&status_paused, exercise.status_paused);
+        atomic_set(&head_paused, exercise.head_paused);
+        atomic_set(&measurement_paused, exercise.measurement_paused);
+        atomic_set(&vision_paused, exercise.vision_paused);
+        atomic_set(&permission_paused, exercise.permission_paused);
+        if (operator_state.clear_fault) atomic_set(&clear_requested, 1);
+        if (operator_publisher.publish(endpoint, operator_state.run_allowed, atomic_get(&estop),
+            raw.remote.stamp, operator_state.clear_event_id, operator_state.clear_stamp, now_ms)) controls.withdraw();
+        (void)operator_states.publish(operator_state);
+#else
+        (void)console_clear_requests.snapshot(clear_request);
+        const MessageStamp clear_stamp{clear_request.time_us / 1000,
+            static_cast<std::uint32_t>(clear_request.sequence), clear_request.valid};
+        const bool operator_run = raw.remote.online && isFresh(raw.remote.stamp, now_ms, kCommandTimeoutMs) &&
+            raw.remote.left_switch != RcSwitch::Down && raw.remote.left_switch != RcSwitch::Unknown;
+        (void)operator_publisher.publish(endpoint, operator_run && !atomic_get(&estop), atomic_get(&estop),
+            raw.remote.stamp, static_cast<std::uint32_t>(clear_request.sequence), clear_stamp, now_ms);
+#endif
         if (now_ms >= next_command_ms && commands.snapshot(frame) == 0) {
             next_command_ms = now_ms + 10;
             auto wheel_command = frame.decision.command.chassis;
             if (atomic_get(&estop)) wheel_command.mode = ChassisMode::Disabled;
-            endpoint.submit(wheel_command);
-            endpoint.setReferee(frame.observed.referee);
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+            if (!operator_state.run_allowed) wheel_command.mode = ChassisMode::Disabled;
+#else
             const auto &operator_input = frame.observed.remote;
             if (operator_input.online && isFresh(operator_input.stamp, now_ms, kCommandTimeoutMs) &&
                 (!have_remote || sequenceAfter(operator_input.stamp.sequence, last_remote_sequence))) {
@@ -224,6 +287,9 @@ inline void communicationTask(void *, void *, void *) {
                 if (!atomic_get(&input_paused)) produceShotEvent(
                     {console_request.time_us / 1000, static_cast<std::uint32_t>(console_request.sequence), true}, event_counter);
             }
+#endif
+            endpoint.submit(wheel_command);
+            endpoint.setReferee(frame.observed.referee);
         }
 #endif
         endpoint.poll(now_ms);
@@ -231,11 +297,15 @@ inline void communicationTask(void *, void *, void *) {
     }
 }
 
-inline void consoleTask(void *, void *, void *) {
+inline void telemetryTask(void *, void *, void *) {
+#if !defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
     const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    std::uint64_t next_log_ms = 0, console_fire_sequence = 0;
+    std::uint64_t console_fire_sequence = 0, console_clear_sequence = 0;
+#endif
+    std::uint64_t next_log_ms = 0;
     Observation observation{};
     for (;;) {
+#if !defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
         unsigned char key = 0;
         while (uart_poll_in(console, &key) == 0) {
             if (key == 'p') atomic_set(&input_paused, !atomic_get(&input_paused));
@@ -246,11 +316,13 @@ inline void consoleTask(void *, void *, void *) {
             if (key == '!') atomic_set(&estop, 1);
             if (key == 'r') {
                 atomic_set(&estop, 0); atomic_set(&clear_requested, 1); atomic_set(&continuous_requested, 0);
+                (void)console_clear_requests.publish({core::monotonicTimeUs(), ++console_clear_sequence, true});
             }
             if (key == 'c') atomic_set(&continuous_requested, 1);
             if (key == 'h') atomic_set(&continuous_requested, 0);
             if (key == 'f') (void)console_fire_requests.publish({core::monotonicTimeUs(), ++console_fire_sequence, true});
         }
+#endif
         const auto now_ms = static_cast<std::uint64_t>(k_uptime_get());
         if (now_ms >= next_log_ms) {
             next_log_ms = now_ms + 200;
@@ -262,8 +334,8 @@ inline void consoleTask(void *, void *, void *) {
             const auto owner = static_cast<k_tid_t>(atomic_ptr_get(&execution_thread));
             if (owner) (void)k_thread_stack_space_get(owner, &execution_stack_unused);
 #endif
-            printk("role=%u online=%d V2=%d source=%u sourceAge=%u stateAge=%u run=%u reason=%u error=%d ready=%d gen=%u bigRun=%u bigGen=%u bigRate_mrad_s=%d headStable=%d headAge=%u center_mrad=%d request_mrad_s=%d scale_milli=%d powerValid=%d frictionReady=%d feed=%u event=%u shots=%u us=%llu peakUs=%llu overruns=%u\n",
-                unsigned(kRole), rx.online, rx.big_yaw_compatible, observation.source_stamp.sequence,
+            printk("role=%u online=%d operator=%d source=%u sourceAge=%u stateAge=%u run=%u reason=%u error=%d ready=%d gen=%u bigRun=%u bigGen=%u bigRate_mrad_s=%d headStable=%d headAge=%u center_mrad=%d request_mrad_s=%d scale_milli=%d powerValid=%d frictionReady=%d feed=%u event=%u shots=%u us=%llu peakUs=%llu overruns=%u\n",
+                unsigned(kRole), rx.online, rx.operator_control_valid, observation.source_stamp.sequence,
                 ageMs(observation.source_stamp, now_ms), ageMs(observation.stamp, now_ms),
                 unsigned(observation.mechanism.state), unsigned(observation.mechanism.reason), observation.mechanism.error,
                 fresh && observation.mechanism.ready, observation.mechanism.generation, unsigned(observation.big_yaw.state),
@@ -306,7 +378,11 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
     printk("vehicle role=%u hardware=%d IMU mounting=%d referee=%d vision=%d shooting=%d\n", unsigned(kRole),
         calibration::connections_confirmed, calibration::imu_mounting_confirmed, IS_ENABLED(CONFIG_VEHICLE_REFEREE),
         IS_ENABLED(CONFIG_VEHICLE_VISION_EXECUTE), IS_ENABLED(CONFIG_VEHICLE_SHOOTING));
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+    printk("physical RC: LeftDown stop; neutral Down/Down 500ms -> LeftMiddle arm; right Middle spin, Up single/hold continuous\n");
+#else
     printk("p pause source, e pause executor, s pause status, i pause head read, m pause power; ! estop, r clear; f single, c continuous, h stop feed\n");
+#endif
     Observation observation{};
     core::TimeUs previous_cycle_us = 0;
     std::uint32_t observation_sequence = 0;
@@ -330,13 +406,32 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
     printk("chassis setup=%d control=%d bigYaw=%d rail=%d\n", topology_error, chassis_error, big_error, power_error);
     std::uint64_t peer_boot = 0;
     PowerMeasurement measurement{};
+    control::OperatorControlConsumer operator_controls;
+    control::SampleDiagnostics diagnostics;
+    RemoteChassisControl cached_control{};
+    BigYawRequest cached_big_request{};
     samples::chassis::PeriodicDeadline deadline;
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto rx = endpoint.snapshot();
-        const bool emergency = atomic_get(&estop);
-        const bool clear = atomic_set(&clear_requested, 0);
-        if (!atomic_get(&execution_paused) || emergency || clear) {
+        const auto peer_operator = operator_controls.update(rx, now_ms);
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+        const auto exercise = diagnostics.update(now_ms, observation.mechanism.state == RunState::Active ||
+            observation.big_yaw.state == RunState::Active, !rx.operator_control_valid || !rx.operator_control.run_allowed);
+        atomic_set(&input_paused, exercise.input_paused);
+        atomic_set(&execution_paused, exercise.execution_paused);
+        atomic_set(&status_paused, exercise.status_paused);
+        atomic_set(&measurement_paused, exercise.measurement_paused);
+        if (exercise.wheel_generation) observation.mechanism = chassis.suspend(now_us, WaitReason::Reference, -ESTALE);
+        if (exercise.big_yaw_generation) observation.big_yaw = big_axis.suspend(now_us, WaitReason::Reference, -ESTALE);
+#endif
+        if (!atomic_get(&input_paused)) {
+            cached_control = rx.control;
+            cached_big_request = rx.big_yaw_request;
+        }
+        const bool emergency = atomic_get(&estop) || peer_operator.emergency_stop;
+        const bool clear = atomic_set(&clear_requested, 0) || peer_operator.clear_fault;
+        if (!atomic_get(&execution_paused) || emergency || clear || !peer_operator.run_allowed) {
             if (previous_cycle_us && (now_us <= previous_cycle_us || now_us - previous_cycle_us > 20000)) ++observation.overruns;
             previous_cycle_us = now_us;
             if (rx.peer.stamp.valid && peer_boot != rx.peer.sender_boot_id) {
@@ -345,12 +440,14 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                 (void)big_axis.suspend(now_us, WaitReason::Reference, -ESTALE);
             }
             ChassisExecutionInputs input{};
-            input.command = rx.control.command;
-            if (rx.control.global_action != SafetyAction::Active || atomic_get(&input_paused)) input.command.mode = ChassisMode::Disabled;
+            input.command = cached_control.command;
+            if (cached_control.global_action != SafetyAction::Active || !peer_operator.run_allowed ||
+                (!IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS) && atomic_get(&input_paused)))
+                input.command.mode = ChassisMode::Disabled;
             input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence, input.command.stamp.valid};
             input.transport_ready = topology_error == 0 && power_error == 0 && hardware.running() && rx.online;
-            input.recovery_context_valid = rx.local_boot_id && rx.control.receiver_boot_id == rx.local_boot_id &&
-                rx.control.resume_generation == chassis.status().generation;
+            input.recovery_context_valid = rx.local_boot_id && cached_control.receiver_boot_id == rx.local_boot_id &&
+                cached_control.resume_generation == chassis.status().generation;
             input.require_permission = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
             input.permission = rx.constraint.output;
             input.permission.stamp = forwardedStamp(rx.constraint.stamp, rx.constraint.output_age_ms);
@@ -371,10 +468,11 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             input.emergency_stop = emergency; input.clear_fault = clear;
             observation.mechanism = chassis.update(input, now_us);
             BigYawExecutionInputs big_input{};
-            big_input.request = rx.big_yaw_request;
-            if (atomic_get(&input_paused)) big_input.request.mode = BigYawMode::Disabled;
+            big_input.request = cached_big_request;
+            if (!peer_operator.run_allowed || (!IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS) && atomic_get(&input_paused)))
+                big_input.request.mode = BigYawMode::Disabled;
             big_input.local_boot_id = rx.local_boot_id;
-            big_input.contract_compatible = rx.big_yaw_compatible;
+            big_input.peer_online = rx.online;
             big_input.transport_ready = big_error == 0 && power_error == 0 && rx.online &&
                 big_bus.status().state == motor::BusState::Running;
             big_input.emergency_stop = emergency; big_input.clear_fault = clear;
@@ -426,18 +524,32 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
     imu::Snapshot head_cache{};
     ShooterHeatState heat_cache{};
     core::Measurement<double> home_cache{};
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+    control::RcControlState operator_state{};
+    control::RcShooterRequest firing;
+#else
     ShotEvent event{};
+#endif
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
-        const bool emergency = atomic_get(&estop);
-        const bool clear = atomic_set(&clear_requested, 0);
-        if (!atomic_get(&execution_paused) || emergency || clear) {
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+        (void)operator_states.snapshot(operator_state);
+        const bool run_allowed = operator_state.run_allowed && operator_state.fresh &&
+            isFresh(operator_state.remote.stamp, now_ms, kCommandTimeoutMs);
+        if (!run_allowed) operator_state.run_allowed = false;
+#else
+        const bool run_allowed = true;
+#endif
+        const bool emergency = atomic_get(&estop) || board_config::emergencyStopRequested();
+        const bool clear = atomic_set(&clear_requested, 0) || board_config::takeEmergencyResetRequest();
+        if (!atomic_get(&execution_paused) || emergency || clear || !run_allowed) {
             if (previous_cycle_us && (now_us <= previous_cycle_us || now_us - previous_cycle_us > 20000)) ++observation.overruns;
             previous_cycle_us = now_us;
             (void)commands.snapshot(frame);
             if (!atomic_get(&head_paused)) head_cache = head.snapshot();
             InertialGimbalInputs inertial_input{};
             inertial_input.command = frame.decision.command.gimbal;
+            if (!run_allowed) inertial_input.command.mode = GimbalMode::Disabled;
             inertial_input.source_stamp = sourceStamp(frame, inertial_input.command.source);
             inertial_input.yaw = hardware.yaw.snapshot(); inertial_input.pitch = hardware.pitch.snapshot();
             inertial_input.head = head_cache;
@@ -477,8 +589,9 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             follow.joint_stamp = {inertial_input.yaw.feedback.timestamp_ms * 1000,
                 inertial_input.yaw.feedback.timestamp_ms, inertial_input.yaw.feedback_fresh};
             follow.source_stamp = inertial_input.source_stamp;
-            follow.enabled = inertial_input.command.mode != GimbalMode::Disabled && rx.big_yaw_compatible &&
-                rx.big_yaw_feedback.valid && rx.big_yaw_feedback.ready && !emergency;
+            follow.enabled = inertial_input.command.mode != GimbalMode::Disabled && rx.online &&
+                rx.big_yaw_feedback.valid && rx.big_yaw_feedback.ready &&
+                forwardedFresh(rx.big_yaw_feedback.stamp, rx.big_yaw_feedback.production_age_ms, now_ms, kStatusTimeoutMs) && !emergency;
             follow.head_stable = head_stable;
             follow.permission_valid = movement_permission.valid && movement_permission.enabled &&
                 isFresh(movement_permission.stamp, now_ms, 300);
@@ -510,6 +623,9 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                 const int home_ret = home_source->sample(next_home);
                 if (home_ret == 0) home_cache = next_home;
                 else if (home_ret != -EAGAIN) home_cache = {};
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+                shooter_input.command = firing.update(operator_state, frame, observation.shooter, now_ms);
+#else
                 (void)shot_events.snapshot(event);
                 if (shooter_input.command.source != ControlSource::Vision && shooter_input.command.mode != ShooterMode::Disabled) {
                     shooter_input.command.mode = atomic_get(&continuous_requested) ? ShooterMode::FireContinuous
@@ -517,7 +633,9 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                     shooter_input.command.fire_rate_hz = 2;
                     shooter_input.command.fire_event_id = event.id; shooter_input.command.fire_event_stamp = event.stamp;
                 }
+#endif
             }
+            if (!run_allowed) shooter_input.command.mode = ShooterMode::Disabled;
             shooter_input.heat = heat_cache; shooter_input.dial_home_reference = home_cache;
             observation.shooter = topology_error == 0 ? hardware.shooter.update(shooter_input, now_us)
                 : hardware.shooter.suspend(now_us, WaitReason::Configuration, topology_error);
@@ -537,6 +655,11 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             vision_feedback.orientation = head_cache.sample.orientation;
             vision_feedback.gyro_rad_s = head_cache.sample.gyro_rad_s;
             (void)vision.setFeedback(vision_feedback);
+#endif
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+            if (run_allowed && previous.state == RunState::Active &&
+                (observation.mechanism.state != RunState::Active || observation.mechanism.generation != previous.generation))
+                atomic_set(&release_requested, 1);
 #endif
             observation.source_stamp = frame.observed.remote.stamp;
             observation.head_stamp = head_cache.sample.orientation.stamp;
@@ -561,4 +684,4 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
 } // namespace skywalker::samples::vehicle
 
 K_THREAD_DEFINE(vehicle_link_worker, 8192, skywalker::samples::vehicle::communicationTask, nullptr, nullptr, nullptr, 6, K_FP_REGS, 0);
-K_THREAD_DEFINE(vehicle_console_worker, 6144, skywalker::samples::vehicle::consoleTask, nullptr, nullptr, nullptr, 7, 0, 0);
+K_THREAD_DEFINE(vehicle_telemetry_worker, 6144, skywalker::samples::vehicle::telemetryTask, nullptr, nullptr, nullptr, 7, 0, 0);

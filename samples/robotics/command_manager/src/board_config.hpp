@@ -17,6 +17,7 @@ inline const InputConfig inputs{
     .remote_uart = DEVICE_DT_GET(DT_ALIAS(remote_uart)),
     .vision_uart = DEVICE_DT_GET(DT_ALIAS(vision_uart)),
     .referee_uart = DEVICE_DT_GET(DT_ALIAS(referee_uart)),
+    .remote = {.decoder = {.decode_wheel = true}},
 };
 #ifdef CONFIG_COMMAND_MANAGER_VOFA
 inline const device *telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
@@ -25,6 +26,7 @@ inline const device *telemetry_uart = nullptr;
 #endif
 inline const skywalker::robotics::CommandManager::Config manager = [] {
     skywalker::robotics::CommandManager::Config c{};
+    c.mapper.input_profile = skywalker::robotics::RemoteInputProfile::PhysicalRemote;
     c.max_chassis_vx_m_s = 0.5f;
     c.max_chassis_vy_m_s = 0.5f;
     c.max_chassis_wz_rad_s = 1.0f;

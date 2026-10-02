@@ -1,4 +1,5 @@
 mainmenu "Dual Yaw centering bench"
+rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"
 config DUAL_YAW_CHASSIS_ROLE
     bool "Build the dedicated big-Yaw chassis peer"

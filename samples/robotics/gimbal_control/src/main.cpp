@@ -12,6 +12,8 @@
 #include <zephyr/logging/log.h>
 
 #include "board_config.hpp"
+#include "../../common/rc_controls.hpp"
+#include "../../common/sample_diagnostics.hpp"
 
 #define VOFA_UART_NODE DT_ALIAS(telemetry_uart)
 
@@ -25,13 +27,7 @@ using namespace skywalker::robotics;
 
 namespace {
 static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
-communication::RemoteReceiver receiver(board_config::remote_uart, dma_buffers, {});
-
-float normalizeStick(std::int16_t raw) {
-    const float x = std::clamp(float(raw) / 660.0f, -1.0f, 1.0f);
-    constexpr float deadband = 0.03f;
-    return std::fabs(x) <= deadband ? 0.0f : std::copysign((std::fabs(x) - deadband) / (1.0f - deadband), x);
-}
+communication::RemoteReceiver receiver(board_config::remote_uart, dma_buffers, samples::control::receiverConfig());
 
 void gimbalTask(void *, void *, void *) {
     static motor::Motor yaw_drive(board_config::yawHardware());
@@ -67,14 +63,23 @@ void gimbalTask(void *, void *, void *) {
     if (ret < 0)
         return;
 
-    communication::RemoteReceiver::Snapshot rc{};
+    communication::RemoteReceiver::Snapshot rc{}, operator_cache{};
+    samples::control::RcControlAdapter controls;
+    samples::control::SampleDiagnostics diagnostics;
     bool estop_latched = false, rearm_allowed = false, enable_issued = false;
     auto previous_ms = k_uptime_get();
     std::uint64_t next_telemetry = 0;
     for (;;) {
-        receiver.snapshot(rc);
-        const auto &remote = rc.remote;
+        (void)receiver.snapshot(operator_cache);
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
+        const auto &operator_state = controls.update(operator_cache.remote, now);
+        const auto exercise = diagnostics.update(now, gimbal.active(),
+            !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
+        if (!exercise.input_paused) rc = operator_cache;
+        const auto &remote = rc.remote;
+        if (exercise.execution_paused && operator_state.run_allowed && !operator_state.clear_fault) {
+            k_sleep(K_MSEC(5)); continue;
+        }
         const float dt = (now - previous_ms) / 1000.0f;
         previous_ms = now;
         const bool fresh = remote.online && isFresh(remote.stamp, now, board_config::command_timeout_ms);
@@ -85,7 +90,7 @@ void gimbalTask(void *, void *, void *) {
             enable_issued = false;
             rearm_allowed = false;
         }
-        if (board_config::takeEmergencyResetRequest() && !estop) {
+        if ((operator_state.clear_fault || board_config::takeEmergencyResetRequest()) && !estop) {
             gimbal.disable();
             ret = gimbal.clearFault();
             if (ret < 0)
@@ -101,21 +106,21 @@ void gimbalTask(void *, void *, void *) {
         const bool pitch_ready = pitch_status.ready_for_enable;
         const bool feedback_ok = yaw_status.feedback_healthy && pitch_status.feedback_healthy;
         const bool timing_ok = dt > 0.0f && dt <= 0.02f;
-        const bool safe_switch = remote.left_switch == RcSwitch::Up || remote.left_switch == RcSwitch::Down;
         const bool new_command = remote.stamp.timestamp_ms >
                                  std::max(yaw_status.ready_since_ms, pitch_status.ready_since_ms);
         const auto group = gimbal.status();
         if (enable_issued && !group.active && !group.enable_pending) {
             enable_issued = false;
-            rearm_allowed = false; // A driver fault needs a new safe-switch cycle.
+            rearm_allowed = false;
+            controls.withdraw();
         }
         if (!fresh || !feedback_ok || !timing_ok || estop_latched || remote.left_switch == RcSwitch::Unknown)
             rearm_allowed = false;
-        else if (safe_switch && yaw_ready && pitch_ready && new_command)
-            rearm_allowed = true;
+        else
+            rearm_allowed = operator_state.run_allowed && yaw_ready && pitch_ready && new_command;
 
         const bool requested = fresh && feedback_ok && timing_ok && !estop_latched && rearm_allowed && new_command &&
-                               remote.left_switch == RcSwitch::Middle;
+                               operator_state.run_allowed && remote.left_switch == RcSwitch::Middle;
         if (!requested) {
             if (group.active || group.enable_pending) {
                 gimbal.disable();
@@ -131,13 +136,14 @@ void gimbalTask(void *, void *, void *) {
             enable_issued = ret == 0;
             if (ret < 0) {
                 rearm_allowed = false;
+                controls.withdraw();
                 LOG_ERR("group enable failed: %d", ret);
             }
         }
         else if (gimbal.active()) {
-            const float yaw_rate = board_config::yaw_direction * normalizeStick(remote.analog.right_x) *
+            const float yaw_rate = board_config::yaw_direction * samples::control::RcControlAdapter::normalize(remote.analog.right_x) *
                                    board_config::yaw.max_rate_rad_s;
-            const float pitch_rate = board_config::pitch_direction * normalizeStick(remote.analog.right_y) *
+            const float pitch_rate = board_config::pitch_direction * samples::control::RcControlAdapter::normalize(remote.analog.right_y) *
                                      board_config::pitch.max_rate_rad_s;
             const int yr = yaw.updateRate(yaw_rate, dt);
             const int pr = yr == 0 ? pitch.updateRate(pitch_rate, dt) : 0;
@@ -150,11 +156,12 @@ void gimbalTask(void *, void *, void *) {
                 gimbal.disable();
                 enable_issued = false;
                 rearm_allowed = false;
+                controls.withdraw();
                 LOG_ERR("axis update failed: yaw=%d pitch=%d commit=%d", yr, pr, submit);
             }
         }
 
-        if (now >= next_telemetry) {
+        if (!exercise.status_paused && now >= next_telemetry) {
             next_telemetry = now + 1000;
             const auto status = gimbal.status();
             const auto ys = yaw_drive.snapshot();

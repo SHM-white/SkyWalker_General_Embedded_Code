@@ -15,4 +15,5 @@ config COMMAND_GIMBAL_VISION_EXECUTE
     default n
     depends on SKYWALKER_VISION_RECEIVER && SKYWALKER_IMU_DM_RS485 && SKYWALKER_IMU_RECEIVER
 
+rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"

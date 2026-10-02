@@ -1,8 +1,9 @@
 #include "../../common/chassis_can.hpp"
+#include "../../common/rc_controls.hpp"
+#include "../../common/sample_diagnostics.hpp"
 #include <core/clock.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <robotics/vehicle/big_yaw_profile.hpp>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #if defined(CONFIG_BOARD_DM_MC02)
@@ -12,10 +13,18 @@ LOG_MODULE_REGISTER(big_yaw_bench, LOG_LEVEL_INF);
 using namespace skywalker;
 using namespace skywalker::robotics;
 int main() {
-    // TODO(wiring): CAN2 is the reserved big-Yaw physical bus on the chassis.
+    namespace input = skywalker::samples::control;
+    static_assert(input::diagnostic_scenario == input::DiagnosticScenario::None ||
+                  input::diagnostic_scenario == input::DiagnosticScenario::InputPause ||
+                  input::diagnostic_scenario == input::DiagnosticScenario::ExecutionPause ||
+                  input::diagnostic_scenario == input::DiagnosticScenario::StatusPause);
+    static communication::AsyncUart::DmaBuffers remote_dma __nocache;
+    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, input::receiverConfig());
     static motor::Motor drive(vehicle::bigYawHardware());
-    static motor::CanBus bus(skywalker::samples::chassis::big_yaw_can);
+    static motor::CanBus bus(samples::chassis::big_yaw_can);
     static BigYawExecutor axis(drive, vehicle::bigYawMotorConfig(), vehicle::bigYawExecutionConfig());
+    const int remote_error = remote.start();
+    if (remote_error < 0) return remote_error;
     bool started = false;
     int ret = 0;
     if (vehicle::connections_confirmed) {
@@ -27,54 +36,60 @@ int main() {
         if (ret == 0) ret = axis.begin();
         started = ret == 0;
     }
-    LOG_INF("a: arm, d: disable, +/-: direction, p: pause producer, s: pause execution, x: estop, r: clear; confirmed=%d setup=%d",
+    LOG_INF("RC safe+center 0.5s then left Middle; wheel +/-0.1 rad/s; confirmed=%d setup=%d",
             vehicle::connections_confirmed, ret);
-    const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    bool armed = false, producing = true, executing = true, stop = false;
-    float target = 0.1f;
-    std::uint32_t sequence = 0;
-    std::uint64_t next_input = 0, next_log = 0;
+    communication::RemoteReceiver::Snapshot snapshot{};
+    input::RcControlAdapter adapter;
+    input::SampleDiagnostics diagnostics;
+    std::uint64_t next_log = 0;
     BigYawRequest request{};
+    RunStatus published{};
+    bool authority_started = false;
     for (;;) {
         const auto now = core::monotonicTimeUs(), ms = now / 1000;
-        bool clear = false;
-        unsigned char key = 0;
-        if (uart_poll_in(console, &key) == 0) {
-            if (key == 'a') armed = true;
-            if (key == 'd') armed = false;
-            if (key == '+') target = 0.1f;
-            if (key == '-') target = -0.1f;
-            if (key == 'p') producing = !producing;
-            if (key == 's') executing = !executing;
-            if (key == 'x') { stop = true; armed = false; }
-            if (key == 'r') { stop = false; clear = true; }
+        (void)remote.snapshot(snapshot);
+        const auto &rc = adapter.update(snapshot.remote, ms);
+        const auto diagnostic = diagnostics.update(ms, drive.active(),
+            !rc.fresh || rc.remote.left_switch == RcSwitch::Down);
+        if (!diagnostic.input_paused && rc.fresh &&
+            (!request.stamp.valid || sequenceAfter(rc.remote.stamp.sequence, request.stamp.sequence))) {
+            request.mode = rc.run_allowed ? BigYawMode::FollowCenter : BigYawMode::Disabled;
+            request.target_rate_rad_s = .1f * input::RcControlAdapter::normalize(rc.remote.analog.wheel);
+            request.stamp = rc.remote.stamp;
+            request.source_sequence = rc.remote.stamp.sequence;
+            request.receiver_boot_id = 1;
+            request.resume_generation = axis.status().generation;
+            request.permission = {rc.fresh, vehicle::connections_confirmed && rc.run_allowed, rc.remote.stamp};
         }
-        if (producing && ms >= next_input) {
-            next_input = ms + 10;
-            request.mode = armed ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-            request.target_rate_rad_s = target;
-            request.stamp = {ms, ++sequence, true}; request.source_sequence = sequence;
-            request.receiver_boot_id = 1; request.resume_generation = axis.status().generation;
-            // Unloaded bench permission, produced in the same owner as the input.
-            request.permission = {true, vehicle::connections_confirmed && armed, request.stamp};
+        if (!rc.run_allowed) {
+            request.mode = BigYawMode::Disabled;
+            request.target_rate_rad_s = 0;
+            request.permission.enabled = false;
         }
-        if (executing) {
+        if (!diagnostic.execution_paused || !rc.run_allowed || rc.clear_fault) {
             if (started) {
                 BigYawExecutionInputs in{};
-                in.request = request; in.local_boot_id = 1; in.contract_compatible = true;
+                in.request = request; in.local_boot_id = 1; in.peer_online = true;
                 in.transport_ready = bus.status().state == motor::BusState::Running;
-                in.emergency_stop = stop; in.clear_fault = clear;
+                in.clear_fault = rc.clear_fault;
                 axis.update(in, now);
                 const int error = bus.commit().error;
                 if (error < 0) axis.suspend(now, WaitReason::Transport, error);
             } else axis.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
+            if (!diagnostic.status_paused) published = axis.status();
         }
+        const auto motor_state = drive.snapshot().state;
+        const bool authority_now = motor_state == motor::MotorState::Active || motor_state == motor::MotorState::Enabling;
+        if (rc.run_allowed && ((authority_started && !authority_now) || axis.status().state == RunState::Blocked))
+            adapter.withdraw();
+        authority_started = rc.run_allowed && authority_now;
         if (ms >= next_log) {
             next_log = ms + 200;
-            const auto f = axis.feedback(); const auto s = axis.status();
-            LOG_INF("run=%u wait=%u gen=%u ready=%d active=%d target=%f actual=%f status_seq=%u error=%d",
-                    unsigned(s.state), unsigned(s.reason), s.generation, s.ready, f.armed,
-                    double(target), double(f.actual_rate_rad_s), s.stamp.sequence, s.error);
+            const auto f = axis.feedback();
+            LOG_INF("run=%u wait=%u gen=%u ready=%d active=%d target=%f actual=%f status_seq=%u fresh=%d error=%d rc=%d",
+                unsigned(published.state), unsigned(published.reason), published.generation, published.ready, f.armed,
+                double(request.target_rate_rad_s), double(f.actual_rate_rad_s), published.stamp.sequence,
+                isFresh(published.stamp, ms, 100), published.error, rc.fresh);
         }
         k_sleep(K_MSEC(5));
     }

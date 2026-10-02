@@ -7,3 +7,7 @@ common:
   build_only: true
 tests:
   sample.skywalker.robotics.chassis_power: {}
+  sample.skywalker.robotics.chassis_power.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf
+  sample.skywalker.robotics.chassis_power.measurement_diagnostic:
+    extra_args: EXTRA_CONF_FILE=measurement_diagnostic.conf

@@ -19,3 +19,5 @@ tests:
     extra_args: EXTRA_CONF_FILE=shooting.conf
   sample.skywalker.robotics.vehicle.chassis.power:
     extra_args: EXTRA_CONF_FILE="chassis.conf;power.conf"
+  sample.skywalker.robotics.vehicle_integration.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf

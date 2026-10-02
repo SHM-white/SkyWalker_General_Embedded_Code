@@ -1,61 +1,43 @@
-# 两板 UART / RS485 / CAN 联调
+# 板间通信演练
 
-样例使用正式的 `ConfiguredInterBoardTransport + InterBoardEndpoint`，仅在初始化时选择后端。三种方式均有实际实现；默认 UART。此项目只交换业务消息，不连接电机。
+本例程只交换消息并模拟执行状态，不连接或驱动电机，因此保留自动演练，无需遥控器。串口只打印状态，没有终端指令入口。`ConfiguredInterBoardTransport` 在启动时选择 UART、RS485 或独立 CAN3。
 
-## MC02 接线与角色
+双方必须使用当前唯一协议标识 `3`。没有能力协商、旧协议回退或可选契约版本；错误标识的帧直接拒收。底盘与大 Yaw 分别使用自己的恢复代次，重启绑定使用 boot ID，原始输入、执行状态和清故障事件分别保留实际年龄。
 
-| 方式 | 接口 | 默认配置 |
-| --- | --- | --- |
-| UART | USART1：A PA9 → B PA10，B PA9 → A PA10，信号地连接 | 460800、8N1 |
-| RS485 | 两板 RS485-2：A/B 对应连接，按实际线缆配置端接和信号参考 | USART2，460800、硬件 DE；云台协调端、底盘应答端 |
-| CAN | 两板 CAN3：CANH/CANL 对应连接，信号参考与两端端接按硬件要求配置 | 经典 CAN 1 Mbps；云台 TX=0x600/RX=0x601，底盘相反 |
+| 消息 | ID | 索引 | 载荷字节 |
+| --- | --- | --- | --- |
+| Heartbeat | `0x0001` | 0 | 24 |
+| ChassisControl | `0x0101` | 1 | 36 |
+| ChassisConstraint | `0x0102` | 2 | 20 |
+| ChassisFeedback | `0x0103` | 3 | 32 |
+| OperatorControl | `0x0301` | 4 | 36 |
+| BigYawRequest | `0x0402` | 5 | 40 |
+| BigYawFeedback | `0x0403` | 6 | 28 |
 
-控制台使用 USART10，115200。RS485 收发器和 CAN 收发器已在 MC02 板上；MC02 CAN 收发器需要手册规定的供电。不要把 UART TX/RX 直接接到差分总线。第一次上机先断电接线，再给两板上电。
+管理消息由云台角色产生；接收端要求心跳在线、双方 boot 匹配、原始输入年龄不超过 100ms。管理消息失效、撤销运行许可或请求急停时，轮底盘和大 Yaw 请求同时禁用。通信重发不更新原始输入时间；clear 事件按发送方 boot 与事件编号一次消费，重启后不得重绑定旧 clear。
 
-两块板选择相同通信方式，一块使用默认云台角色，另一块额外加载 `chassis.conf`。CAN3 由本样例独占，不与电机 CanBus 共用控制器。
-
-## 构建
-
-从 `skywalker_code` 根目录运行。UART 两端：
-
-```sh
-west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/interboard_uart_gimbal
-west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/interboard_uart_chassis -- -DEXTRA_CONF_FILE=chassis.conf
-```
-
-RS485 两端：
+从仓库根目录构建云台角色：
 
 ```sh
-west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/interboard_rs485_gimbal -- -DEXTRA_CONF_FILE=rs485.conf
-west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/interboard_rs485_chassis -- '-DEXTRA_CONF_FILE=rs485.conf;chassis.conf'
+west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/interboard_gimbal
 ```
 
-CAN 两端：
+底盘角色使用 `-DEXTRA_CONF_FILE=chassis.conf`；两端必须选择同一种物理传输。UART、RS485、CAN 的设备、波特率、ID 与引脚以 `src/board_config.hpp` 和 overlay 为准。仅连接板间通信与供电，不连接执行器；UART 交叉 TX/RX 并共地，RS485 连接同名 A/B 并使用正确终端电阻，CAN 使用独立 CAN3 并正确终端匹配。
 
-```sh
-west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/interboard_can_gimbal -- -DEXTRA_CONF_FILE=can.conf
-west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/interboard_can_chassis -- '-DEXTRA_CONF_FILE=can.conf;chassis.conf'
-```
+默认持续产生 100Hz 合成命令，执行状态和心跳独立发布。观察 `online`、`authority`、`cmd`、`ready`、`valid`、底盘 `gen` 与大 Yaw `localGen/peerGen`。命令生产停止时输入年龄增加，状态生产停止时 ready/valid 超时撤销，心跳继续工作。
 
-刷写时使用对应目录，例如 `west flash -d build/interboard_rs485_gimbal`。根据连接的下载器明确选择要刷写的板子。
+诊断通过独立配置选择，正常固件无需控制台操作：
 
-`prj.conf` 默认编译三种后端，配置片段只决定启动时选择哪个。UART 的设备树别名为 interboard-uart，RS485 为 interboard-rs485，CAN 为 interboard-can。USART2 新增 TX/RX DMA，使用通道 0/5，避开 SPI2、USART1 和 UART5 的板级分配。
+| `CONFIG_SAMPLE_DIAGNOSTIC_SCENARIO` | 演练 |
+| --- | --- |
+| 0 | 正常连续交换 |
+| 1 | 暂停命令与管理输入生产 |
+| 2 | 暂停执行生产 |
+| 3 | 暂停状态发布 |
+| 8 | 轮底盘恢复代次递增一次 |
+| 9 | 大 Yaw 恢复代次递增一次 |
+| 10 | 临时注入错误协议标识，CRC 仍正确 |
 
-## 业务调用与预期现象
+双方在线稳定 3 秒后触发一次；暂停与错误标识持续 1.5 秒，代次变化只发生一次。无自动重复。错误协议演练使用 `-DEXTRA_CONF_FILE=invalid_protocol.conf`，底盘角色组合为 `-DEXTRA_CONF_FILE="chassis.conf;invalid_protocol.conf"`。这会在样例传输装饰器中改变帧标识，正常 endpoint 始终只编码当前协议。
 
-三种方式都通过 `submit / setStatus / poll / snapshot` 交换数据。正常时日志 `peer_online=1`，底盘接收到递增命令序号，`cmd_fresh=1`。RS485 协调端上电先静默约一秒，之后开始轮询；CAN 每个批次包含多个分片，实际更新率受通信线程周期影响。
-
-在云台控制台输入 `p` 只暂停新的命令生产，心跳继续；底盘最后一条命令超过 100 ms 后 `cmd_fresh=0`。再次输入 `p` 恢复生产。在底盘输入 `g` 改变恢复 generation，云台观察后绑定新的控制上下文。重启单板会生成新的 boot ID。
-
-在底盘控制台输入 `s` 只暂停执行状态生产，`poll()` 和心跳继续。100 ms 后云台应仍看到 `peer_online=1`，同时 `peer_ready=0`，等待原因含 `FeedbackStale`；旧 Active/Ready 不再发送。再次输入 `s` 发布新生产时间的状态，按样例当前条件恢复。`RunStatus.stamp` 只能由执行状态生产者更新，`setStatus`、缓存读取和通信发送都不会更新这个时间。V1 的字节布局与枚举保持兼容，本例尚未加入大 Yaw 的扩展版本消息。
-
-日志 `transport` 的 0/1/2 分别表示 UART/RS485/CAN，`error` 为负 errno。`-ENODEV` 优先定位设备/别名；RS485 的 `-ENOTSUP` 检查硬件 DE 和 8N1；CAN `-EBUSY` 检查控制器是否已被占用；超时检查两端模式、接线、供电、速率、CAN ID 和 poll 周期。Parser 的 CRC 计数仅针对内部 V1 帧，不包含下层 RS485/CAN 封装丢包。
-
-完整接口、线上封装、缓冲限制和恢复行为见[板间传输文档](../../../docs/modules/communication/interboard-transports.md)。本次没有执行实际刷写或双板收发验证。
-
-
-## 大 Yaw V2 契约观测（无电机输出）
-
-默认双方声明 V2 能力，同时保留 V1 底盘字段。`g` 仅改变轮控恢复代次，`b` 仅改变大 Yaw 恢复代次；`p` 停命令生产，`s` 停执行状态生产但保留心跳。通信线程不能刷新旧状态的生产年龄。大 Yaw 反馈、请求原始源年龄和目标板 boot/context 在日志单独记录。
-
-用 `version_mismatch.conf` 构建任一端可声明不同契约版本，另一端 `bigYaw compatible=0`，新增轴请求保持禁用。底盘角色组合配置为 `-DEXTRA_CONF_FILE="chassis.conf;version_mismatch.conf"`。TODO(hardware)：实际双板单板重启、执行停更、原始输入停更和 UART 断流验收记录。
+所有帧保持 14 字节封装开销，传输批次最多 240 字节。完整云台批次当前为 226 字节；调度器逐帧装箱，装不下的消息保持待发送，下轮按最新年龄重编码。发送成功只表示后端接收批次，不表示对端已复位或执行。

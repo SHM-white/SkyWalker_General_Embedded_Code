@@ -55,7 +55,7 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
     if (!configured_) return suspend(now, WaitReason::Configuration, config_error_ ? config_error_ : -EACCES, true);
     if (emergency_latched_) return suspend(now, WaitReason::Drive, -ECANCELED, true);
     if (latched_error_) return suspend(now, WaitReason::Drive, latched_error_, true);
-    if (!in.transport_ready || !in.contract_compatible || !in.local_boot_id)
+    if (!in.transport_ready || !in.peer_online || !in.local_boot_id)
         return suspend(now, WaitReason::Transport, -EAGAIN);
     if (!cycle) return suspend(now, WaitReason::Cycle, -ESTALE);
     auto view = drive_.snapshot();
