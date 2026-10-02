@@ -1,0 +1,70 @@
+name: Deploy architecture browser to GitHub Pages
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare static site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+
+          # Keep the repository layout so architecture-browser/app.js can
+          # continue resolving ../../ paths to Markdown and source files.
+          git archive --format=tar HEAD | tar -xf - -C _site
+          touch _site/.nojekyll
+
+          # Make the Pages root a convenient entry point without changing
+          # the repository's own root layout.
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="zh-CN">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="refresh" content="0; url=docs/architecture-browser/">
+            <title>SkyWalker · 架构与接口手册</title>
+            <script>
+              location.replace('docs/architecture-browser/' + location.hash);
+            </script>
+          </head>
+          <body>
+            <p><a href="docs/architecture-browser/">打开 SkyWalker 架构与接口手册</a></p>
+          </body>
+          </html>
+          HTML
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
