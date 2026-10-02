@@ -1,3 +1,4 @@
+#include "../../common/chassis_can.hpp"
 #include <core/clock.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <robotics/vehicle/big_yaw_profile.hpp>
@@ -11,9 +12,9 @@ LOG_MODULE_REGISTER(big_yaw_bench, LOG_LEVEL_INF);
 using namespace skywalker;
 using namespace skywalker::robotics;
 int main() {
-    // TODO(wiring): can3 is the reserved big-Yaw physical bus on the chassis.
+    // TODO(wiring): CAN2 is the reserved big-Yaw physical bus on the chassis.
     static motor::Motor drive(vehicle::bigYawHardware());
-    static motor::CanBus bus(DEVICE_DT_GET(DT_NODELABEL(can3)));
+    static motor::CanBus bus(skywalker::samples::chassis::big_yaw_can);
     static BigYawExecutor axis(drive, vehicle::bigYawMotorConfig(), vehicle::bigYawExecutionConfig());
     bool started = false;
     int ret = 0;

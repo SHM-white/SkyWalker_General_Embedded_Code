@@ -1,2 +1,2 @@
-/* TODO(wiring): chassis board big-Yaw occupies its reserved CAN3. */
-&can3 { status = "okay"; bitrate = <1000000>; };
+/* TODO(wiring): chassis board big-Yaw occupies its reserved CAN2. */
+&can2 { status = "okay"; bitrate = <1000000>; };

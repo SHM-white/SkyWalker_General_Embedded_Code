@@ -2,7 +2,7 @@
 
 云台角色默认构建，底盘角色只控制独立大 Yaw。输出确认默认关闭。先完成 `big_yaw` 与 `inertial_gimbal` 台架，在中央 calibration 中保存 ID、方向、减速比、限幅和独立小 Yaw 中心。头部保持有效且小云台实际 Active 后才开放回中。TODO(hardware)：死区/迟滞、回中方向、速度与斜坡、头部误差、无线输入停更和三种重启场景需要实板记录。
 
-USART1 双板交叉 TX/RX 共地，日志用 console；云台小 Yaw/Pitch 分处 CAN1/CAN2，底盘大 Yaw 使用 CAN3。外置头部 IMU 使用 rs485-2。
+USART1 双板交叉 TX/RX 共地，日志用 console；云台小 Yaw/Pitch 分处 CAN1/CAN2，底盘大 Yaw 使用 CAN2。外置头部 IMU 使用 rs485-2。
 
 ```sh
 west build -b dm_mc02 samples/robotics/dual_yaw_centering -d build/dual_yaw_gimbal
