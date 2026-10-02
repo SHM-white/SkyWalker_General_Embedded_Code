@@ -1,3 +1,4 @@
+#include "../../common/chassis_can.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <communication/interboard/interboard_endpoint.hpp>
@@ -85,7 +86,7 @@ int main() {
         unsigned(role), vehicle::connections_confirmed);
 #if defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
     static motor::Motor drive(vehicle::bigYawHardware());
-    static motor::CanBus bus(DEVICE_DT_GET(DT_NODELABEL(can3)));
+    static motor::CanBus bus(skywalker::samples::chassis::big_yaw_can);
     static BigYawExecutor axis(drive, vehicle::bigYawMotorConfig(), vehicle::bigYawExecutionConfig());
     bool started = false;
     int ret = 0;

@@ -6,15 +6,19 @@
 #include <core/clock.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <robotics/chassis/chassis_executor.hpp>
-#include <robotics/vehicle/calibration.hpp>
+#include <robotics/vehicle/swerve_profile.hpp>
+#include "chassis_can.hpp"
+#include "chassis_period.hpp"
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/logging/log.h>
 #if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
 #include <communication/referee/referee_receiver.hpp>
 #endif
 
 namespace skywalker::samples::chassis {
+LOG_MODULE_REGISTER(chassis_bench, LOG_LEVEL_INF);
 namespace calibration = robotics::vehicle;
 
 inline motor::dji::Config steerConfig(std::size_t index) {
@@ -40,25 +44,7 @@ inline robotics::SwerveHardware::Config hardwareConfig() {
     return c;
 }
 inline robotics::SwerveChassis::Config controllerConfig() {
-    robotics::SwerveChassis::Config c{};
-    const float x = calibration::wheelbase_m * 0.5f, y = calibration::track_m * 0.5f;
-    c.kinematics.locations = {robotics::ModuleLocation{x, y}, {x, -y}, {-x, y}, {-x, -y}};
-    c.kinematics.max_wheel_velocity_m_s = 0.3f;
-    for (std::size_t i = 0; i < 4; ++i) {
-        auto &m = c.modules[i];
-        m.wheel_radius_m = calibration::wheel_radius_m;
-        // TODO(control): replace low-current bench gains and acceleration limits
-        // with the individual wheel's saved calibration before ground operation.
-        m.drive.regulator.feedback = {0.03f, 0.1f, 0, 0, -0.3f, 0.3f, -0.3f, 0.3f, 0, .001f, .02f};
-        m.drive.reference_slew = {10, 10};
-        m.drive.requested_velocity_abs_max_rad_s = std::min(10.0f, calibration::wheel[i].velocity_limit_rad_s);
-        m.drive.effort_abs_max = std::min(0.3f, calibration::wheel[i].effort_limit);
-        m.steer.velocity = m.drive;
-        m.steer.velocity.requested_velocity_abs_max_rad_s = calibration::steer[i].velocity_limit_rad_s;
-        m.steer.velocity.effort_abs_max = std::min(0.3f, calibration::steer[i].effort_limit);
-        m.steer.position = {3, 0, 0, 0, -6, 6, -6, 6, .01f, .001f, .02f};
-    }
-    return c;
+    return calibration::swerveConfig();
 }
 inline robotics::ChassisExecutor::Config executorConfig(bool power_budget) {
     robotics::ChassisExecutor::Config c{};
@@ -70,7 +56,10 @@ inline robotics::ChassisExecutor::Config executorConfig(bool power_budget) {
     c.allow_estimated_power = false;
     c.estimate_idle_power_w = calibration::power_idle_w;
     c.estimate_w_per_abs_amp = calibration::power_per_abs_amp_w;
-    c.bench_effort_scale = 0.15f;
+    c.bench_effort_scale = calibration::chassis_drive_scale;
+    c.bench_steer_effort_scale = calibration::chassis_steer_scale;
+    c.bench_drive_current_limit_a = calibration::drive_bench_current_a;
+    c.bench_steer_current_limit_a = calibration::steer_bench_current_a;
     return c;
 }
 
@@ -135,7 +124,8 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
     const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
     bool requested = false, source_paused = false, execution_paused = false, measurement_paused = false, estop = false;
     std::uint32_t source_sequence = 0;
-    core::TimeUs next_source = 0, next_log = 0;
+    core::TimeUs next_source = 0, next_log = 0, lease_until_us = 0;
+    PeriodicDeadline deadline;
     ChassisExecutionInputs inputs{};
     RunStatus status{};
     PowerMeasurement measurement{};
@@ -144,25 +134,37 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
     static communication::AsyncUart::DmaBuffers referee_dma __nocache;
     static communication::RefereeReceiver receiver(referee_uart, referee_dma, communication::RefereeVersion::Rm2026V1_3);
 #endif
-    printk("8 motors FL/FR/RL/RR: steer CAN1, drive CAN2; topology=%d config=%d\n", topology_error, config_error);
-    printk("e enable, space disable, w/s x, a/d y, q/z yaw, 0 zero, ! estop, r clear; p source pause, x execution pause, m measurement pause\n");
+    printk("8 motors FL/FR/RL/RR: steer CAN1, drive CAN3; topology=%d config=%d\n", topology_error, config_error);
+    printk("e enable, space disable, w/s x, a/d y, q/z yaw, u/j x+yaw, 0 coast, ! estop, r clear; p source pause, x execution pause, m measurement pause\n");
     for (;;) {
         const auto now_us = core::monotonicTimeUs();
         const auto now_ms = now_us / 1000;
         bool clear = false;
         unsigned char key = 0;
         while (uart_poll_in(console, &key) == 0) {
-            if (key == 'e' && !estop) requested = true;
+            if (key == 'e' && !estop) {
+                requested = true;
+                inputs.command.vx_m_s = inputs.command.vy_m_s = inputs.command.wz_rad_s = 0;
+                lease_until_us = now_us + calibration::bench_command_lease_us;
+            }
             if (key == ' ' || key == '!') { requested = false; estop = estop || key == '!'; }
             if (key == 'r') { clear = true; estop = false; requested = false; }
             if (key == 'p') source_paused = !source_paused;
             if (key == 'x') execution_paused = !execution_paused;
             if (key == 'm') measurement_paused = !measurement_paused;
-            if (key == 'w' || key == 's' || key == 'a' || key == 'd' || key == 'q' || key == 'z' || key == '0') {
-                inputs.command.vx_m_s = key == 'w' ? .1f : key == 's' ? -.1f : 0;
+            if (key == 'w' || key == 's' || key == 'a' || key == 'd' || key == 'q' || key == 'z' || key == 'u' || key == 'j' || key == '0') {
+                inputs.command.vx_m_s = (key == 'w' || key == 'u' || key == 'j') ? .1f : key == 's' ? -.1f : 0;
                 inputs.command.vy_m_s = key == 'a' ? .1f : key == 'd' ? -.1f : 0;
-                inputs.command.wz_rad_s = key == 'q' ? .2f : key == 'z' ? -.2f : 0;
+                inputs.command.wz_rad_s = (key == 'q' || key == 'u') ? .2f : (key == 'z' || key == 'j') ? -.2f : 0;
+                lease_until_us = now_us + calibration::bench_command_lease_us;
             }
+        }
+        // Synthetic source production is not evidence of operator presence.
+        // Expiry withdraws immediately, even while source production is paused.
+        if (requested && now_us >= lease_until_us) requested = false;
+        if (!requested) {
+            inputs.command.mode = ChassisMode::Disabled;
+            inputs.command.vx_m_s = inputs.command.vy_m_s = inputs.command.wz_rad_s = 0;
         }
         if (!source_paused && now_us >= next_source) {
             next_source = now_us + 10000;
@@ -197,7 +199,7 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             }
         }
         inputs.measured_power = measurement;
-        if (!execution_paused || clear || estop) {
+        if (!execution_paused || clear || estop || !requested) {
             status = executor.update(inputs, now_us);
             if (topology_error == 0) {
                 const int commit = hardware.commit();
@@ -205,9 +207,9 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             }
         }
         if (now_us >= next_log) {
-            next_log = now_us + 100000;
+            next_log = now_us + 500000;
             const bool status_fresh = isFresh(status.stamp, now_ms, 100);
-            printk("src=%u age_ms=%llu exec=%u fresh=%d ready=%d reason=%u err=%d gen=%u power_valid=%d scale_milli=%d power_mW=%d budget_mW=%d bus=%u/%u\n",
+            LOG_INF("src=%u age_ms=%llu exec=%u fresh=%d ready=%d reason=%u err=%d gen=%u power_valid=%d scale_milli=%d power_mW=%d budget_mW=%d bus=%u/%u",
                 source_sequence, static_cast<unsigned long long>(now_ms >= inputs.command.stamp.timestamp_ms ?
                 now_ms - inputs.command.stamp.timestamp_ms : 0), unsigned(status.state), status_fresh,
                 status_fresh && status.ready, unsigned(status.reason), status.error, status.generation,
@@ -218,11 +220,17 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             const auto &feedback = executor.feedback();
             const auto &output = executor.output();
             for (std::size_t i = 0; i < 4; ++i)
-                printk("wheel=%u steer_mrad=%d target_mrad=%d drive_mrad_s=%d target_mrad_s=%d\n", unsigned(i),
+                LOG_INF("wheel=%u steer_mrad=%d final_mrad=%d ramp_mrad=%d error_mrad=%d ready=%d drive_on=%d flip=%d coast=%d drive_mrad_s=%d target_mrad_s=%d current_mA=%d/%d scale_milli=%d/%d", unsigned(i),
                     int(feedback.module[i].steer_absolute_rad * 1000), int(output.module[i].optimized_angle_rad * 1000),
-                    int(feedback.module[i].drive_velocity_rad_s * 1000), int(output.module[i].drive_target_rad_s * 1000));
+                    int(output.module[i].steer_reference_rad * 1000), int(output.module[i].alignment_error_rad * 1000),
+                    output.module[i].drive_ready, output.module[i].drive_enabled, output.module[i].flipped,
+                    output.module[i].coasting, int(feedback.module[i].drive_velocity_rad_s * 1000),
+                    int(output.module[i].drive_target_rad_s * 1000),
+                    int(output.module[i].steer_effort * executor.steerEffortScale() * 1000),
+                    int(output.module[i].drive_effort * executor.effortScale() * 1000),
+                    int(executor.steerEffortScale() * 1000), int(executor.effortScale() * 1000));
         }
-        k_sleep(K_MSEC(5));
+        deadline.wait();
     }
 }
 } // namespace skywalker::samples::chassis

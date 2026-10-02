@@ -2,5 +2,5 @@
  * TODO(wiring): cloud head IMU uses MC02 rs485-2, RC uses UART5. */
 / { aliases { interboard-uart = &usart1; }; };
 &usart1 { current-speed = <460800>; };
-&can3 { status = "okay"; bitrate = <1000000>; };
+&can2 { status = "okay"; bitrate = <1000000>; };
 &rng { status = "okay"; };
