@@ -3,7 +3,7 @@ name: Deploy architecture browser to GitHub Pages
 on:
   push:
     branches:
-      - dev
+      - main
   workflow_dispatch:
 
 permissions:
