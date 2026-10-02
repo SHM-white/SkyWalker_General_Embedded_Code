@@ -13,6 +13,7 @@ public:
         robotics::BoardRole role;
         std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100;
         std::uint32_t tx_timeout_ms = 60;
+        std::uint32_t status_timeout_ms = 100;
     };
     struct Snapshot {
         robotics::BoardHeartbeat peer{};

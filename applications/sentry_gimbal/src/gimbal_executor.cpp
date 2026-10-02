@@ -30,6 +30,7 @@ RunStatus GimbalExecutor::update(const GimbalCommand &command, core::TimeUs now_
         status_.reason = reason;
         status_.error = error;
         status_.generation = static_cast<std::uint32_t>(drive_.snapshot().enable_generation);
+        status_.stamp = {now, status_.stamp.sequence + 1, true};
         return status_;
     };
     const bool requested = command.mode != GimbalMode::Disabled &&

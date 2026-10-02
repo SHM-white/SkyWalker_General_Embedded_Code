@@ -40,7 +40,7 @@ public:
     imu::ImuState &state;
 };
 }
-ZTEST(vision_imu, end_to_end) {
+ZTEST(vision_imu, test_end_to_end) {
     static_assert(std::is_abstract_v<imu::DmImuCanSource>);
     using Ekf = skywalker::control::QuaternionEkf;
     Ekf first({}), second({});

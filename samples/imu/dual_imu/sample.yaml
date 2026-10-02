@@ -7,3 +7,5 @@ common:
   build_only: true
 tests:
   sample.skywalker.imu.dual: {}
+  sample.skywalker.imu.chassis:
+    extra_args: EXTRA_CONF_FILE=chassis.conf

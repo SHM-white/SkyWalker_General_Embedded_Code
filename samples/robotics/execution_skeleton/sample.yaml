@@ -1,0 +1,9 @@
+sample:
+  name: SkyWalker execution skeleton
+  description: Real command service and independent simulated executors with producer-age and automatic-recovery exercises
+common:
+  tags: [skywalker, robotics]
+  platform_allow: [dm_mc02/stm32h723xx, rm_typec/stm32f407xx, native_sim/native/64]
+  build_only: true
+tests:
+  sample.skywalker.robotics.execution_skeleton: {}

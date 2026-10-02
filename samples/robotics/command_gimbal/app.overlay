@@ -1,0 +1,5 @@
+/* MC02 supplies can1, can2, remote-uart (UART5), telemetry-uart (USART1)
+ * and the console (USART10). Keep transport ownership separate.
+ * Hardware model, IDs, calibration and limits live in src/board_config.hpp.
+ */
+/ {};

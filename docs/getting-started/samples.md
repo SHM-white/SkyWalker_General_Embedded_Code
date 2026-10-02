@@ -9,7 +9,7 @@
 | `samples/hello` | 最小启动、UART/VOFA 单通道 | 任一已支持板卡 |
 | `samples/control` | PID、前馈、角度、斜坡等控制算法自检 | 任一已支持板卡 |
 | `samples/imu_test` | 新接口的单板载 BMI088、EKF、温控、VOFA | MC02 板载传感器与 TIM3 CH4 加热 |
-| [samples/imu/dual_imu](../../samples/imu/dual_imu/README.md) | 板载 EKF/温控与 485-2 外置 IMU 同时输出 VOFA | MC02 + 预配置的 DM-IMU-L1 |
+| [samples/imu/dual_imu](../../samples/imu/dual_imu/README.md) | 底盘/载体/头部安装位置观测，原始时间、质量、参考代次及 VOFA | MC02；云台配置另需 DM-IMU-L1 |
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx -d build/hello samples/hello
@@ -82,10 +82,13 @@ DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致
 
 | 样例 | 作用 | 是否驱动电机 |
 |---|---|---|
-| `samples/robotics/command_safety` | DR16 → intent → global safety → command | 否，模拟底盘心跳/反馈 |
+| `samples/robotics/command_safety` | RemoteSource → CommandManager 保险与恢复观察 | 否 |
+| [samples/robotics/command_manager](../../samples/robotics/command_manager/README.md) | 遥控/视觉/裁判三源仲裁服务观测 | 否，仅消息观测 |
+| [samples/robotics/execution_skeleton](../../samples/robotics/execution_skeleton/README.md) | 真实命令服务、独立消费者、生产停更与自动恢复 | 否，执行器模拟 |
 | `samples/robotics/yaw_gimbal` | GM6020 Yaw，Hold/Rate/AbsoluteAngle | 是，单电机 |
 | `samples/robotics/swerve` | 单物理舵轮：GM6020 舵向 + M3508 驱动 | 是，单模块 |
 | `samples/robotics/gimbal_control` | DJI + DM 双轴 Group 云台台架 | 是，双轴联动，默认连接未配置 |
+| [samples/robotics/command_gimbal](../../samples/robotics/command_gimbal/README.md) | CommandManager → 小 Yaw/Pitch 双轴机械执行器，统一总线提交 | 是，双 CAN，默认连接未配置 |
 
 典型构建：
 
@@ -101,6 +104,8 @@ west build -p -b dm_mc02/stm32h723xx -d build/swerve \
 `dr16`、`command_safety`、`gimbal_control` 统一使用 `RemoteReceiver`；后两者分别保留 10 ms 命令循环和 5 ms 双轴控制循环。DMA 声明和协议参数由各 sample 提供，接收循环由库管理。接入与返回值见 [13 通信](../modules/communication/communication.md)。
 
 键盘操作和默认 GPIO/CAN 配置见各 sample README 及 `src/board_config.hpp`。
+
+新增入口、配置变体、后续里程碑和实板验收记录见[逐级整车验证指南](../dev/项目优化与逐级整车验证样例实施指南.md)。上述索引描述代码入口，实板通过状态须以验收记录为准；单舵轮、视觉接收和历史设计方案不表示完成整车闭环。
 
 ## 6. applications 与 samples 的区别
 

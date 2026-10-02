@@ -47,6 +47,8 @@ west build -b dm_mc02/stm32h723xx samples/communication/interboard -d build/inte
 
 在云台控制台输入 `p` 只暂停新的命令生产，心跳继续；底盘最后一条命令超过 100 ms 后 `cmd_fresh=0`。再次输入 `p` 恢复生产。在底盘输入 `g` 改变恢复 generation，云台观察后绑定新的控制上下文。重启单板会生成新的 boot ID。
 
+在底盘控制台输入 `s` 只暂停执行状态生产，`poll()` 和心跳继续。100 ms 后云台应仍看到 `peer_online=1`，同时 `peer_ready=0`，等待原因含 `FeedbackStale`；旧 Active/Ready 不再发送。再次输入 `s` 发布新生产时间的状态，按样例当前条件恢复。`RunStatus.stamp` 只能由执行状态生产者更新，`setStatus`、缓存读取和通信发送都不会更新这个时间。V1 的字节布局与枚举保持兼容，本例尚未加入大 Yaw 的扩展版本消息。
+
 日志 `transport` 的 0/1/2 分别表示 UART/RS485/CAN，`error` 为负 errno。`-ENODEV` 优先定位设备/别名；RS485 的 `-ENOTSUP` 检查硬件 DE 和 8N1；CAN `-EBUSY` 检查控制器是否已被占用；超时检查两端模式、接线、供电、速率、CAN ID 和 poll 周期。Parser 的 CRC 计数仅针对内部 V1 帧，不包含下层 RS485/CAN 封装丢包。
 
 完整接口、线上封装、缓冲限制和恢复行为见[板间传输文档](../../../docs/modules/communication/interboard-transports.md)。本次没有执行实际刷写或双板收发验证。

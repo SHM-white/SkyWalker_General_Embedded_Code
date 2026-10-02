@@ -1,0 +1,5 @@
+tests:
+  skywalker.command_service.lifecycle:
+    platform_allow: [native_sim/native/64]
+    tags: [robotics, command, service, threading]
+    harness: ztest
