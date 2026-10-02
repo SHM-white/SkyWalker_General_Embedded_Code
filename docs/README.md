@@ -45,6 +45,6 @@
 ## 资料、交互图和开发记录
 
 - datasheets/ 保存电机、传感器、裁判系统和开发板 PDF；下载索引见 [DOWNLOAD_LINKS.txt](datasheets/DOWNLOAD_LINKS.txt)。
-- [架构浏览器](architecture-browser/README.md) 是本地交互图，适合查看组件关系与电机时序。
+- [架构与接口浏览器](architecture-browser/README.md) 提供当前双主控架构、最终上车蓝图、可点击模块关系、接口契约、调用示例和端到端链路；支持在页面内阅读本目录的 Markdown 正文及本地源码。运行 `bash docs/architecture-browser/run.sh`，打开脚本打印的地址。
 - [开发专题索引](dev/README.md) 收录设计方案、分析与待实施记录；以模块文档和源码判断当前状态。
 - samples/ 是独立验证入口；applications/sentry_* 是需按真实接线和安全策略配置的应用骨架。

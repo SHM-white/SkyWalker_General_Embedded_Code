@@ -43,7 +43,7 @@ west flash -d build/app
 
 - STM32F407，CPU 时钟 168 MHz。
 - CAN1 和 CAN2 默认 1 Mbps。
-- BMI088、USB FS CDC-ACM、USART1/3/6；USART6 是 DTS 中的 console/telemetry alias，USART3 默认 100000 baud，可用于遥控/串行设备。
+- BMI088、USB FS CDC-ACM、USART1/3/6；当前 DTS 的 console/shell 使用 USART1，`telemetry-uart` alias 使用 USART6，USART3 默认 100000 baud，可用于遥控/串行设备。alias `usart1` 也指向 USART6；`DT_ALIAS(usart1)` 与 `DT_NODELABEL(usart1)` 不是同一个设备。
 - 板载 LED、按键、PWM 蜂鸣器、音频 I2S/I2C 外设。
 - 无板载调试器，需要外接 CMSIS-DAP 或 ST-Link。
 

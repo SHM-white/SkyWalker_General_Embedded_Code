@@ -20,7 +20,7 @@ if (snapshot.link.aim_fresh) {
 
 VisionLink 可脱离 UART 单独使用：init 后，单一所有者调用 processRxBytes/discardPartial/encodeFeedback；其他线程可以 setFeedback 和 snapshot。构造不做 I/O。零长度输入周期推进半包超时；快照读取时按当前时钟判断已接受命令是否过期，即使接收线程卡住仍会过期。
 
-命令 sequence 是本地接受计数，不是远端采样序号。接收块 timestamp_ms 换算成 time_us 后仍只有毫秒粒度。mode=0 是合法停止消息，会清空目标并覆盖旧 active；停止来包只使 aim_fresh=false，消费者不能只看遗留的 control_requested。
+命令 sequence 是本地接受计数，不是远端采样序号。接收块 timestamp_ms 换算成 time_us 后仍只有毫秒粒度。mode=0 是合法停止消息，会清空目标并覆盖旧 active。aim_fresh 只判断消息时间是否新鲜，因此刚收到的停止消息也可能为 true；消费者必须同时检查 aim_fresh 与 aim.value.control_requested，停止消息的 control_requested 为 false。
 
 ## 已确认的线协议
 
