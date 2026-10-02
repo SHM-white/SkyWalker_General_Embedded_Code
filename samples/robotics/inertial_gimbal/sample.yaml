@@ -9,3 +9,5 @@ tests:
   sample.skywalker.robotics.inertial_gimbal.pitch_locked: {}
   sample.skywalker.robotics.inertial_gimbal.pitch_free:
     extra_args: EXTRA_CONF_FILE=pitch_free.conf
+  sample.skywalker.robotics.inertial_gimbal.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf

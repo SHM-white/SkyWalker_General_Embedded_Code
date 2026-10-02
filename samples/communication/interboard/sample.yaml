@@ -7,5 +7,5 @@ common:
   build_only: true
 tests:
   sample.skywalker.communication.interboard: {}
-  sample.skywalker.communication.interboard.version_mismatch:
-    extra_args: EXTRA_CONF_FILE=version_mismatch.conf
+  sample.skywalker.communication.interboard.invalid_protocol:
+    extra_args: EXTRA_CONF_FILE=invalid_protocol.conf

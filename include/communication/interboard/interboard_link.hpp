@@ -17,6 +17,7 @@ public:
         control_ = {};
         constraint_ = {};
         feedback_ = {};
+        operator_control_ = {};
         big_yaw_request_ = {};
         big_yaw_feedback_ = {};
     }
@@ -25,7 +26,7 @@ public:
     int latestChassisControl(robotics::RemoteChassisControl &) const;
     int latestChassisConstraint(robotics::ChassisConstraint &) const;
     int latestChassisFeedback(robotics::ChassisFeedbackSummary &) const;
-    int latestCapabilities(robotics::InterBoardCapabilities &) const;
+    int latestOperatorControl(robotics::OperatorControl &) const;
     int latestBigYawRequest(robotics::BigYawRequest &) const;
     int latestBigYawFeedback(robotics::BigYawFeedback &) const;
     const InterBoardParser::Stats &stats() const {
@@ -44,7 +45,7 @@ private:
     robotics::RemoteChassisControl control_{};
     robotics::ChassisConstraint constraint_{};
     robotics::ChassisFeedbackSummary feedback_{};
-    robotics::InterBoardCapabilities capabilities_{};
+    robotics::OperatorControl operator_control_{};
     robotics::BigYawRequest big_yaw_request_{};
     robotics::BigYawFeedback big_yaw_feedback_{};
     std::uint32_t rejected_ = 0;

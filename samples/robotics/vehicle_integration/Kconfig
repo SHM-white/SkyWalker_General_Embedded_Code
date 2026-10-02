@@ -1,3 +1,4 @@
 mainmenu "Staged two-board vehicle integration"
 rsource "../common/vehicle.Kconfig"
+rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"

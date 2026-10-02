@@ -15,7 +15,4 @@ config BENCH_TRANSPORT_CAN
     bool "Classic CAN on dedicated CAN3"
 endchoice
 
-config BENCH_BIG_YAW_CONTRACT_VERSION
-    int "Advertised big-Yaw contract version (1 deliberately mismatches V2)"
-    range 1 2
-    default 2
+rsource "../../robotics/common/sample_control.Kconfig"

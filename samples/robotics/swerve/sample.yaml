@@ -7,3 +7,5 @@ common:
   build_only: true
 tests:
   sample.skywalker.robotics.swerve: {}
+  sample.skywalker.robotics.swerve.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf

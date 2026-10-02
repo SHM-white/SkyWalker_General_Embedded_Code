@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
-#include <cstring>
 
 #include <core/clock.hpp>
 #include <drivers/motor/can_bus.hpp>
@@ -15,6 +14,8 @@
 #include <zephyr/sys/atomic.h>
 
 #include "board_config.hpp"
+#include "../../common/rc_controls.hpp"
+#include "../../common/sample_diagnostics.hpp"
 
 LOG_MODULE_REGISTER(command_gimbal, LOG_LEVEL_INF);
 using namespace skywalker;
@@ -25,7 +26,7 @@ atomic_t input_paused = 0, execution_paused = 0, status_paused = 0;
 atomic_t emergency_stop = 0, clear_requested = 0;
 atomic_t vision_paused = 0, permission_paused = 0, head_paused = 0;
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
-communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, {});
+communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, samples::control::receiverConfig());
 RemoteSource remote_source(remote);
 // Pausing publication freezes the manager's cached original source stamp; the
 // receiver and its DMA worker continue independently.
@@ -98,28 +99,6 @@ struct Observation {
 SnapshotCache<Observation> execution_observation;
 K_SEM_DEFINE(telemetry_ready, 0, 1);
 
-void onTelemetryCommand(const char *key, float value) {
-    if (!std::isfinite(value))
-        return;
-    const bool set = value != 0.0f;
-    if (std::strcmp(key, "input_pause") == 0)
-        atomic_set(&input_paused, set);
-    else if (std::strcmp(key, "execution_pause") == 0)
-        atomic_set(&execution_paused, set);
-    else if (std::strcmp(key, "status_pause") == 0)
-        atomic_set(&status_paused, set);
-    else if (std::strcmp(key, "estop") == 0)
-        atomic_set(&emergency_stop, set);
-    else if (std::strcmp(key, "clear") == 0 && set)
-        atomic_set(&clear_requested, 1);
-    else if (std::strcmp(key, "vision_pause") == 0)
-        atomic_set(&vision_paused, set);
-    else if (std::strcmp(key, "permission_pause") == 0)
-        atomic_set(&permission_paused, set);
-    else if (std::strcmp(key, "head_pause") == 0)
-        atomic_set(&head_paused, set);
-}
-
 float age(const MessageStamp &stamp, std::uint64_t now_ms) {
     return stamp.valid && now_ms >= stamp.timestamp_ms ? float(now_ms - stamp.timestamp_ms) : -1.0f;
 }
@@ -132,7 +111,6 @@ bool permanentSetupError(int error) {
 void telemetryTask(void *, void *, void *) {
     k_sem_take(&telemetry_ready, K_FOREVER);
     static Vofa vofa{};
-    static std::uint8_t rx_buffer[80];
     const device *const telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
     bool telemetry_available = true;
 #ifdef CONFIG_COMMAND_GIMBAL_REFEREE
@@ -141,8 +119,7 @@ void telemetryTask(void *, void *, void *) {
     // USART1 has exactly one owner. With the referee profile, console logs and
     // debugger atomic flags remain available while VOFA RX/TX stays unstarted.
     const int vofa_ret = telemetry_available ? vofa_init(&vofa, telemetry_uart) : -EBUSY;
-    const int rx_ret = vofa_ret == 0 ? vofa_set_handler(&vofa, rx_buffer, sizeof(rx_buffer), onTelemetryCommand) : vofa_ret;
-    LOG_INF("VOFA start=%d controls=%d", vofa_ret, rx_ret);
+    LOG_INF("VOFA telemetry start=%d; controls=physical RC", vofa_ret);
     CommandSnapshot frame{};
     Observation observed{};
     std::uint64_t next_log_ms = 0;
@@ -239,11 +216,25 @@ int main() {
     CommandSnapshot frame{};
     Observation observation{};
     core::TimeUs previous_cycle_us = 0;
+    samples::control::RcControlAdapter controls({board_config::command_policy.allow_auto});
+    samples::control::SampleDiagnostics diagnostics;
+    communication::RemoteReceiver::Snapshot operator_cache{};
 #ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
     imu::Snapshot head_cache{};
 #endif
     for (;;) {
-        if (atomic_get(&execution_paused)) {
+        (void)remote.snapshot(operator_cache);
+        const auto &operator_state = controls.update(operator_cache.remote, k_uptime_get());
+        const auto exercise = diagnostics.update(k_uptime_get(), observation.run.state == RunState::Active,
+            !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
+        atomic_set(&input_paused, exercise.input_paused);
+        atomic_set(&execution_paused, exercise.execution_paused);
+        atomic_set(&status_paused, exercise.status_paused);
+        atomic_set(&head_paused, exercise.head_paused);
+        atomic_set(&vision_paused, exercise.vision_paused);
+        atomic_set(&permission_paused, exercise.permission_paused);
+        if (operator_state.clear_fault) atomic_set(&clear_requested, 1);
+        if (atomic_get(&execution_paused) && operator_state.run_allowed && !operator_state.clear_fault) {
             // Deliberately freeze the execution producer while command and
             // telemetry workers remain alive. Motor I/O owns expiry/stop.
             k_sleep(K_MSEC(5));
@@ -280,6 +271,7 @@ int main() {
         (void)commands.snapshot(frame);
         GimbalExecutionInputs inputs{};
         inputs.command = frame.decision.command.gimbal;
+        if (!operator_state.run_allowed) inputs.command.mode = GimbalMode::Disabled;
 #ifndef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
         inputs.command.yaw_rate_rad_s *= board_config::yaw_command_sign;
         inputs.command.pitch_rate_rad_s *= board_config::pitch_command_sign;
@@ -318,8 +310,8 @@ int main() {
         feedback.gyro_rad_s = head_cache.sample.gyro_rad_s;
         // No shooting sensor exists on this bench; unset measurements remain invalid.
         (void)vision.setFeedback(feedback);
+ #endif
         const auto previous_run = observation.run;
-#endif
         observation.run = executor_started ? executor.update(inputs, now_us)
             : executor.suspend(now_us, setup_blocked ? WaitReason::Configuration : WaitReason::Transport,
                                 setup_error, setup_blocked);
@@ -338,6 +330,9 @@ int main() {
         observation.inertial.stabilization_valid = observation.inertial.stabilization_valid &&
             observation.run.state == RunState::Active;
 #endif
+        if (operator_state.run_allowed && previous_run.state == RunState::Active &&
+            (observation.run.state != RunState::Active || observation.run.generation != previous_run.generation))
+            controls.withdraw();
         observation.yaw_target = executor.yawTargetRad();
         observation.pitch_target = executor.pitchTargetRad();
         observation.duration_us = core::monotonicTimeUs() - now_us;

@@ -2,6 +2,13 @@ config VEHICLE_CHASSIS_ROLE
     bool "Build chassis board (eight wheels and independent big Yaw)"
     default n
 
+config VEHICLE_SAMPLE_CONTROLS
+    bool "Use physical RC gestures for the vehicle sample"
+    default n
+    help
+        The vehicle sample selects stick/switch/wheel control. Applications
+        keep their explicit keyboard/mouse and console operation profile.
+
 config VEHICLE_REFEREE
     bool "Require real referee movement permissions"
     default n

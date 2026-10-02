@@ -5,7 +5,8 @@
 #include <drivers/motor/group.hpp>
 #include <robotics/execution/recovery_gate.hpp>
 #include <robotics/swerve/swerve_kinematics.hpp>
-#include <zephyr/drivers/uart.h>
+#include "../../common/rc_controls.hpp"
+#include "../../common/sample_diagnostics.hpp"
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include "board_config.hpp"
@@ -26,16 +27,26 @@ int main() {
     if (ret == 0) ret = steer_bus.start();
     if (ret == 0) ret = drive_bus.start();
     const int topology_error = ret;
-    const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    LOG_INF("split-CAN suspended single module init=%d: e enable, space disable, w/s x, a/d y, q/z yaw, u/j x+yaw, 0 coast, p input pause, ! estop, r clear", ret);
-    bool requested = false, estop = false, paused = false, seeded = false, ready = false, hard_fault = false;
+    namespace input = skywalker::samples::control;
+    static_assert(input::diagnostic_scenario == input::DiagnosticScenario::None ||
+                  input::diagnostic_scenario == input::DiagnosticScenario::InputPause ||
+                  input::diagnostic_scenario == input::DiagnosticScenario::ExecutionPause);
+    static communication::AsyncUart::DmaBuffers remote_dma __nocache;
+    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, input::receiverConfig());
+    const int remote_error = remote.start();
+    if (remote_error < 0) return remote_error;
+    communication::RemoteReceiver::Snapshot snapshot{};
+    input::RcControlAdapter adapter;
+    input::SampleDiagnostics diagnostics;
+    LOG_INF("split-CAN init=%d; RC safe+center then left Middle, left stick xy, wheel yaw", ret);
+    bool requested = false, seeded = false, ready = false, hard_fault = false;
     std::uint64_t stable_since = 0, first_steer = 0, first_drive = 0, next_log = 0, retry_ms = 0;
     std::uint64_t steer_reference = 0, drive_reference = 0;
-    core::TimeUs previous_us = 0, next_input_us = 0, lease_until_us = 0;
+    core::TimeUs previous_us = 0;
     samples::chassis::PeriodicDeadline deadline;
     core::Stamp source{};
     ChassisCommand command{};
-    command.source = ControlSource::Autonomous;
+    command.source = ControlSource::Remote;
     SwerveKinematics::Config kconfig = samples::chassis::controllerConfig().kinematics;
     SwerveKinematics kinematics(kconfig);
     ModuleTargets targets{};
@@ -43,6 +54,11 @@ int main() {
     ModuleOutput output{};
     const auto suspend = [&](WaitReason reason, int error = 0, bool blocked = false) {
         const auto state = group.status();
+        if (state.active || state.enable_pending || recovery.stage() == RecoveryGate::Stage::Active ||
+            recovery.stage() == RecoveryGate::Stage::Enabling || blocked) {
+            adapter.withdraw();
+            requested = false;
+        }
         if (state.active || state.enable_pending) group.disable();
         seeded = ready = false;
         output = {};
@@ -54,39 +70,41 @@ int main() {
         const bool cycle = previous_us && now_us > previous_us && now_us - previous_us <= 20000;
         const float dt = cycle ? float(now_us - previous_us) / 1000000 : 0;
         previous_us = now_us;
-        bool clear = false;
-        unsigned char key;
-        while (uart_poll_in(console, &key) == 0) {
-            if (key == 'e' && !estop) {
-                requested = true;
-                command.vx_m_s = command.vy_m_s = command.wz_rad_s = 0;
-                lease_until_us = now_us + vehicle::bench_command_lease_us;
-            }
-            if (key == ' ' || key == '!') { requested = false; estop = estop || key == '!'; }
-            if (key == 'p') paused = !paused;
-            if (key == 'r') { clear = true; requested = false; }
-            if (key == 'w' || key == 's' || key == 'a' || key == 'd' || key == 'q' || key == 'z' || key == 'u' || key == 'j' || key == '0') {
-                command.vx_m_s = (key == 'w' || key == 'u' || key == 'j') ? bench::test_speed_m_s : key == 's' ? -bench::test_speed_m_s : 0;
-                command.vy_m_s = key == 'a' ? bench::test_speed_m_s : key == 'd' ? -bench::test_speed_m_s : 0;
-                command.wz_rad_s = (key == 'q' || key == 'u') ? .2f : (key == 'z' || key == 'j') ? -.2f : 0;
-                lease_until_us = now_us + vehicle::bench_command_lease_us;
-            }
+        (void)remote.snapshot(snapshot);
+        const auto &rc = adapter.update(snapshot.remote, now);
+        const auto diagnostic = diagnostics.update(now, group.active(),
+            !rc.fresh || rc.remote.left_switch == RcSwitch::Down);
+        const bool clear = rc.clear_fault;
+        requested = rc.run_allowed;
+        if (!diagnostic.input_paused && rc.fresh &&
+            (!command.stamp.valid || sequenceAfter(rc.remote.stamp.sequence, command.stamp.sequence))) {
+            command.mode = requested ? ChassisMode::BodyVelocity : ChassisMode::Disabled;
+            command.vx_m_s = input::RcControlAdapter::normalize(rc.remote.analog.left_y) * bench::test_speed_m_s;
+            command.vy_m_s = -input::RcControlAdapter::normalize(rc.remote.analog.left_x) * bench::test_speed_m_s;
+            command.wz_rad_s = input::RcControlAdapter::normalize(rc.remote.analog.wheel) * .2f;
+            command.stamp = rc.remote.stamp;
+            source = {rc.remote.stamp.timestamp_ms * 1000, rc.remote.stamp.sequence, true};
         }
-        if (requested && now_us >= lease_until_us) requested = false;
+        if (requested && !isFresh(command.stamp, now, 100)) {
+            adapter.withdraw();
+            requested = false;
+        }
         if (!requested) {
             command.mode = ChassisMode::Disabled;
             command.vx_m_s = command.vy_m_s = command.wz_rad_s = 0;
         }
-        if (!paused && now_us >= next_input_us) {
-            next_input_us = now_us + 10000;
-            command.mode = requested ? ChassisMode::BodyVelocity : ChassisMode::Disabled;
-            command.stamp = {now, command.stamp.sequence + 1, true};
-            source = {now_us, command.stamp.sequence, true};
+        if (diagnostic.execution_paused && requested && !clear) {
+            if (now >= next_log) {
+                next_log = now + 100;
+                LOG_INF("diagnostic execution paused; RC fresh=%d", rc.fresh);
+            }
+            deadline.wait();
+            continue;
         }
         if (clear && topology_error == 0) {
             suspend(WaitReason::Reference);
             ret = group.clearFault();
-            if (ret == 0 || ret == -EALREADY) { estop = hard_fault = false; retry_ms = now + 100; }
+            if (ret == 0 || ret == -EALREADY) { hard_fault = false; retry_ms = now + 100; }
         }
         const auto sv = steer.snapshot(), dv = drive.snapshot();
         const auto fresh = [](const motor::MotorSnapshot &v, bool absolute) {
@@ -103,7 +121,7 @@ int main() {
         const bool transport = topology_error == 0 && steer_bus.status().state == motor::BusState::Running &&
             drive_bus.status().state == motor::BusState::Running;
         if (topology_error < 0) suspend(WaitReason::Configuration, topology_error, true);
-        else if (estop || hard_fault) suspend(WaitReason::Drive, -ECANCELED, true);
+        else if (hard_fault) suspend(WaitReason::Drive, -ECANCELED, true);
         else if (!transport || !cycle || !healthy) suspend(!transport ? WaitReason::Transport :
             !cycle ? WaitReason::Cycle : WaitReason::Feedback, -ESTALE);
         else {

@@ -7,3 +7,5 @@ common:
   build_only: true
 tests:
   sample.robotics.big_yaw: {}
+  sample.robotics.big_yaw.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf

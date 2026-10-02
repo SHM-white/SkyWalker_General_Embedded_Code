@@ -7,3 +7,11 @@ common:
   build_only: true
 tests:
   sample.skywalker.motor.mixed_topology: {}
+  sample.skywalker.motor.mixed_topology.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf
+  sample.skywalker.motor.mixed_topology.dm_shared_master:
+    extra_args: MIXED_TOPOLOGY=dm_shared_master
+  sample.skywalker.motor.mixed_topology.cross_can_group:
+    extra_args: MIXED_TOPOLOGY=cross_can_group
+  sample.skywalker.motor.mixed_topology.cross_can_isolation:
+    extra_args: MIXED_TOPOLOGY=cross_can_isolation

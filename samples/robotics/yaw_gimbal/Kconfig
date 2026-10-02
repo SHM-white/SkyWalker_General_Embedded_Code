@@ -1,0 +1,4 @@
+mainmenu "SkyWalker RC bench"
+
+source "Kconfig.zephyr"
+rsource "../common/sample_control.Kconfig"

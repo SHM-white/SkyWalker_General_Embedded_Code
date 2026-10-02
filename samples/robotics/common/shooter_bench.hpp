@@ -4,9 +4,11 @@
 #include <robotics/command/command_manager.hpp>
 #include <robotics/command/receiver_sources.hpp>
 #include <robotics/vehicle/shooter_profile.hpp>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/sys/printk.h>
 #include "../command_gimbal/src/board_config.hpp"
+#include "rc_controls.hpp"
+#include "sample_diagnostics.hpp"
+#include "shooter_rc.hpp"
 
 namespace skywalker::samples::shooter {
 using namespace robotics;
@@ -66,7 +68,7 @@ private:
 
 inline int run(bool with_gimbal, bool unloaded_feed) {
     static communication::AsyncUart::DmaBuffers remote_dma __nocache;
-    static communication::RemoteReceiver receiver(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, {});
+    static communication::RemoteReceiver receiver(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, control::receiverConfig());
     static RemoteSource source(receiver);
     static const CommandManager::Config policy = [] {
         auto c = board_config::command_policy;
@@ -80,43 +82,32 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
     if (ret == 0) ret = manager.start();
     if (ret < 0) return ret;
     const int setup = hardware.start(with_gimbal);
-    const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
     printk("shared DJI CAN yaw/friction/dial; setup=%d; unloaded_feed=%d\n", setup, unloaded_feed);
-    printk("RC arms friction; f single, c continuous, h hold/stop feed, ! estop, r clear; p source pause, x execution pause\n");
+    printk("RC left Down=stop, neutral Down/Down 500ms then left Middle=arm; right Middle=spin, Middle->Up=single/hold continuous\n");
     CommandSnapshot frame{};
     ShooterCommand local_request{};
     ShooterStatus shooter{};
     RunStatus gimbal{};
-    bool estop = false, paused = false, source_paused = false, continuous = false;
-    std::uint32_t event_id = 0;
-    MessageStamp event_stamp{};
+    control::RcControlAdapter controls;
+    control::SampleDiagnostics diagnostics;
+    control::RcShooterRequest firing;
+    communication::RemoteReceiver::Snapshot operator_cache{};
     std::uint64_t next_log = 0;
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now = now_us / 1000;
-        bool clear = false;
-        unsigned char key = 0;
-        while (uart_poll_in(console, &key) == 0) {
-            if (key == '!') estop = true;
-            if (key == 'r') { estop = false; clear = true; continuous = false; }
-            if (key == 'p') source_paused = !source_paused;
-            if (key == 'x') paused = !paused;
-            if (key == 'c') continuous = true;
-            if (key == 'h') { continuous = false; event_stamp.valid = false; }
-            if (key == 'f' && event_id != UINT32_MAX) {
-                event_stamp = {now, ++event_id, true}; continuous = false;
-            }
-        }
-        if (!source_paused) (void)manager.snapshot(frame);
-        local_request = frame.decision.command.shooter;
-        if (local_request.mode != ShooterMode::Disabled) {
-            local_request.mode = continuous ? ShooterMode::FireContinuous : event_stamp.valid ? ShooterMode::FireSingle : ShooterMode::Ready;
-            local_request.fire_rate_hz = continuous ? 2 : 1;
-            local_request.fire_event_id = event_id; local_request.fire_event_stamp = event_stamp;
-        }
-        if (!paused || clear || estop) {
+        (void)receiver.snapshot(operator_cache);
+        const auto &operator_state = controls.update(operator_cache.remote, now);
+        const auto exercise = diagnostics.update(now, shooter.friction.state == RunState::Active,
+            !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
+        const bool clear = operator_state.clear_fault;
+        const bool estop = board_config::emergencyStopRequested();
+        if (!exercise.input_paused) (void)manager.snapshot(frame);
+        local_request = firing.update(operator_state, frame, shooter, now);
+        if (!exercise.execution_paused || clear || estop || !operator_state.run_allowed) {
             if (with_gimbal) {
                 GimbalExecutionInputs gi{};
                 gi.command = frame.decision.command.gimbal; gi.source_stamp = sourceStamp(frame, gi.command.source);
+                if (!operator_state.run_allowed) gi.command.mode = GimbalMode::Disabled;
                 gi.transport_ready = hardware.running(); gi.emergency_stop = estop; gi.clear_fault = clear;
                 gimbal = hardware.gimbal.update(gi, now_us);
             }
@@ -137,7 +128,7 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                 }
             }
         }
-        if (now >= next_log) {
+        if (!exercise.status_paused && now >= next_log) {
             next_log = now + 200;
             printk("src=%u cmd=%u gimbal=%u friction=%u ready=%d feed=%u wait=%u gen=%u/%u event=%u shots=%u busy=%d jam=%d bus=%u\n",
                 frame.observed.remote.stamp.sequence, local_request.stamp.sequence, unsigned(gimbal.state),

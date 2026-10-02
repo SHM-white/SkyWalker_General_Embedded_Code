@@ -8,3 +8,5 @@ tests:
   sample.skywalker.robotics.shooter_bench: {}
   sample.skywalker.robotics.shooter_bench.loaded:
     extra_args: EXTRA_CONF_FILE=loaded.conf
+  sample.skywalker.robotics.shooter_bench.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf

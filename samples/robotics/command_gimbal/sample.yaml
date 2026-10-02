@@ -13,3 +13,5 @@ tests:
     extra_args: EXTRA_CONF_FILE=vision_observe.conf
   sample.skywalker.robotics.command_gimbal.vision_execute:
     extra_args: EXTRA_CONF_FILE=vision_execute.conf
+  sample.skywalker.robotics.command_gimbal.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf

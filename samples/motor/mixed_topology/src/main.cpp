@@ -3,7 +3,8 @@
 #include <cmath>
 
 #include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
+#include "../../../robotics/common/rc_controls.hpp"
+#include "../../../robotics/common/sample_diagnostics.hpp"
 #if defined(CONFIG_BOARD_DM_MC02) && !defined(MIXED_TOPOLOGY_DJI_SHARED_FRAME)
 #include <zephyr/drivers/regulator.h>
 #endif
@@ -53,6 +54,49 @@ constexpr const char *kTopologyName = "linked M3508/DM across CAN1/CAN2 plus one
 #else
 #error "Select a MIXED_TOPOLOGY in CMakeLists.txt"
 #endif
+
+using samples::control::RcControlAdapter;
+using samples::control::DiagnosticScenario;
+static_assert(samples::control::diagnostic_scenario == DiagnosticScenario::None ||
+              samples::control::diagnostic_scenario == DiagnosticScenario::InputPause ||
+              samples::control::diagnostic_scenario == DiagnosticScenario::ExecutionPause);
+
+// Each independently faulted group requires its own released channel before
+// another rising request. A failed group never withdraws another group's RC.
+struct GroupRequest {
+    bool released = false;
+    bool issued = false;
+    void update(motor::Group &group, bool allowed, float channel, bool safe, bool clear) {
+        auto state = group.status();
+        if (clear) {
+            group.disable();
+            const int ret = group.clearFault();
+            LOG_INF("group clear=%d", ret);
+            issued = released = false;
+            return;
+        }
+        if (!allowed) {
+            if (state.active || state.enable_pending) group.disable();
+            issued = false;
+            released = channel <= .3f;
+            return;
+        }
+        if (issued && !state.active && !state.enable_pending) {
+            issued = false;
+            released = false;
+        }
+        if (channel <= .3f) {
+            if (state.active || state.enable_pending) group.disable();
+            issued = false;
+            released = true;
+        } else if (channel > .6f && released && !issued) {
+            released = false;
+            const int ret = safe ? group.enable() : -EAGAIN;
+            issued = ret == 0;
+            LOG_INF("group enable=%d", ret);
+        }
+    }
+};
 
 struct Topology {
 #if defined(MIXED_TOPOLOGY_DJI_SHARED_FRAME)
@@ -135,60 +179,36 @@ struct Topology {
         return 0;
     }
 
-    void onKey(unsigned char key) {
-        int ret = 0;
+    GroupRequest request1{}, request2{}, request3{};
+
+    void updateRemote(const samples::control::RcControlState &rc, bool source_fresh) {
+        const bool allowed = rc.run_allowed && source_fresh;
+        const float first_channel = RcControlAdapter::normalize(rc.remote.analog.left_y);
+        const float second_channel = RcControlAdapter::normalize(rc.remote.analog.right_y);
+        const float third_channel = RcControlAdapter::normalize(rc.remote.analog.wheel);
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_GROUP) || defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-        if (key == 'e') {
-            ret = safeToEnable(first) && safeToEnable(second) ? linked_group.enable() : -EAGAIN;
-            LOG_INF("linked enable request: %d", ret);
-        }
+        request1.update(linked_group, allowed, first_channel,
+                        safeToEnable(first) && safeToEnable(second), rc.clear_fault);
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-        else if (key == '3') {
-            ret = safeToEnable(third) ? third_group.enable() : -EAGAIN;
-            LOG_INF("CAN1 independent enable request: %d", ret);
-        }
-        else if (key == '4') {
-            ret = safeToEnable(fourth) ? fourth_group.enable() : -EAGAIN;
-            LOG_INF("CAN2 independent enable request: %d", ret);
-        }
-#endif
-        else if (key == 'x') {
-            linked_group.disable();
-#if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-            third_group.disable();
-            fourth_group.disable();
-#endif
-            LOG_INF("all groups disabled");
-        }
-        else if (key == 'r') {
-            ret = linked_group.clearFault();
-#if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-            const int third_ret = third_group.clearFault();
-            const int fourth_ret = fourth_group.clearFault();
-            LOG_INF("clear fault requests: linked=%d CAN1=%d CAN2=%d", ret, third_ret, fourth_ret);
+        request2.update(third_group, allowed, second_channel, safeToEnable(third), rc.clear_fault);
+        request3.update(fourth_group, allowed, third_channel, safeToEnable(fourth), rc.clear_fault);
 #else
-            LOG_INF("linked clear fault request: %d", ret);
+        (void)second_channel; (void)third_channel;
 #endif
-        }
 #else
-        if (key == '1') {
-            ret = safeToEnable(first) ? first_group.enable() : -EAGAIN;
-            LOG_INF("motor 1 enable request: %d", ret);
-        }
-        else if (key == '2') {
-            ret = safeToEnable(second) ? second_group.enable() : -EAGAIN;
-            LOG_INF("motor 2 enable request: %d", ret);
-        }
-        else if (key == 'x') {
-            first_group.disable();
-            second_group.disable();
-            LOG_INF("both groups disabled");
-        }
-        else if (key == 'r') {
-            const int first_ret = first_group.clearFault();
-            const int second_ret = second_group.clearFault();
-            LOG_INF("clear fault requests: %d / %d", first_ret, second_ret);
-        }
+        request1.update(first_group, allowed, first_channel, safeToEnable(first), rc.clear_fault);
+        request2.update(second_group, allowed, second_channel, safeToEnable(second), rc.clear_fault);
+        (void)third_channel;
+#endif
+    }
+
+    bool active() const {
+#if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
+        return linked_group.active() || third_group.active() || fourth_group.active();
+#elif defined(MIXED_TOPOLOGY_CROSS_CAN_GROUP)
+        return linked_group.active();
+#else
+        return first_group.active() || second_group.active();
 #endif
     }
 
@@ -349,33 +369,36 @@ struct Topology {
 } // namespace
 
 int main() {
-    const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    if (!device_is_ready(console))
-        return -ENODEV;
-
+    static communication::AsyncUart::DmaBuffers remote_dma __nocache;
+    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
+                                                 samples::control::receiverConfig());
+    const int remote_error = remote.start();
+    if (remote_error < 0) return remote_error;
     static Topology topology{};
     LOG_INF("topology: %s", kTopologyName);
     const int ret = topology.start();
-    if (ret < 0) {
-        LOG_ERR("topology start failed: %d", ret);
-        return ret;
-    }
-
-#if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-    LOG_INF("No automatic enable. e linked, 3 independent CAN1, 4 independent CAN2, x disable all, r clear faults.");
-#elif defined(MIXED_TOPOLOGY_CROSS_CAN_GROUP)
-    LOG_INF("No automatic enable. e enable linked group, x disable, r clear fault. Support all axes.");
-#else
-    LOG_INF("No automatic enable. 1 enable motor 1, 2 enable motor 2, x disable both, r clear faults.");
-#endif
+    if (ret < 0) { LOG_ERR("topology start failed: %d", ret); return ret; }
+    LOG_INF("RC: safe+center 0.5s then left Middle; left/right Y and wheel hold groups, safe stops all");
+    communication::RemoteReceiver::Snapshot snapshot{};
+    RcControlAdapter adapter;
+    samples::control::SampleDiagnostics diagnostics;
+    samples::control::RcControlState produced{};
     std::int64_t next_log_ms = 0;
     for (;;) {
-        unsigned char key = 0;
-        if (uart_poll_in(console, &key) == 0)
-            topology.onKey(key);
-        topology.tick();
-        const auto now_ms = k_uptime_get();
-        if (now_ms >= next_log_ms) {
+        const auto now_ms = static_cast<std::uint64_t>(k_uptime_get());
+        (void)remote.snapshot(snapshot);
+        const auto &rc = adapter.update(snapshot.remote, now_ms);
+        const auto diagnostic = diagnostics.update(now_ms, topology.active(),
+            !rc.fresh || rc.remote.left_switch == robotics::RcSwitch::Down);
+        if (!diagnostic.input_paused) produced = rc;
+        // Explicit stop/clear bypass the paused producer and retain live RC ownership.
+        produced.run_allowed = produced.run_allowed && rc.run_allowed;
+        produced.clear_fault = rc.clear_fault;
+        const bool source_fresh = produced.fresh && robotics::isFresh(produced.remote.stamp, now_ms, 100);
+        if (rc.run_allowed && !source_fresh) adapter.withdraw();
+        topology.updateRemote(produced, source_fresh);
+        if (!diagnostic.execution_paused) topology.tick();
+        if (now_ms >= static_cast<std::uint64_t>(next_log_ms)) {
             topology.logStatus();
             next_log_ms = now_ms + 500;
         }

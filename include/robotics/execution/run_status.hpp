@@ -13,7 +13,7 @@ struct RunStatus {
     // Produced by the execution owner, never refreshed by a reader or sender.
     MessageStamp stamp{};
 };
-// Explicit mapping preserves the V1 wire enum values. Diagnostics never request an estop.
+// Convert execution status to the current protocol's mechanism summary.
 inline ChassisFeedbackSummary wireFeedback(const RunStatus &s) {
     ChassisFeedbackSummary f{};
     f.execution_state = s.state == RunState::Active ? ExecutionState::Active
@@ -39,8 +39,7 @@ inline ChassisFeedbackSummary wireFeedback(const RunStatus &s) {
     return f;
 }
 // A live communication thread cannot keep a stopped execution owner ready.
-// V1 bytes/enums remain unchanged: stale production maps to its existing
-// Waiting state and FeedbackStale reason instead of forwarding old authority.
+// Stale production is Waiting with FeedbackStale instead of old authority.
 inline ChassisFeedbackSummary wireFeedback(const RunStatus &s, std::uint64_t now_ms,
                                           std::uint32_t timeout_ms) {
     if (isFresh(s.stamp, now_ms, timeout_ms)) return wireFeedback(s);

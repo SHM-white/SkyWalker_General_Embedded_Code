@@ -1,0 +1,3 @@
+mainmenu "gimbal_control physical remote sample"
+rsource "../common/sample_control.Kconfig"
+source "Kconfig.zephyr"

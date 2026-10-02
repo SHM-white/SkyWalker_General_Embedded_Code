@@ -21,7 +21,7 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
             control_ = {};
             constraint_ = {};
             feedback_ = {};
-            capabilities_ = {};
+            operator_control_ = {};
             big_yaw_request_ = {};
             big_yaw_feedback_ = {};
         }
@@ -53,21 +53,21 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
     case MessageId::ChassisFeedback:
         ret = InterBoardCodec::decodeChassisFeedback(m, p, n, feedback_);
         break;
-    case MessageId::CapabilitiesV2: {
-        InterBoardCapabilities c{};
-        ret = InterBoardCodec::decodeCapabilities(m, p, n, c);
-        if (ret == 0 && c.sender_boot_id == heartbeat_.sender_boot_id) capabilities_ = c;
+    case MessageId::OperatorControl: {
+        OperatorControl c{};
+        ret = InterBoardCodec::decodeOperatorControl(m, p, n, c);
+        if (ret == 0 && c.sender_boot_id == heartbeat_.sender_boot_id) operator_control_ = c;
         else if (ret == 0) ret = -ESTALE;
         break;
     }
-    case MessageId::BigYawRequestV2: {
+    case MessageId::BigYawRequest: {
         BigYawRequest r{};
         ret = InterBoardCodec::decodeBigYawRequest(m, p, n, r);
         if (ret == 0 && (!big_yaw_request_.stamp.valid ||
             sequenceAfter(r.stamp.sequence, big_yaw_request_.stamp.sequence))) big_yaw_request_ = r;
         break;
     }
-    case MessageId::BigYawFeedbackV2:
+    case MessageId::BigYawFeedback:
         ret = InterBoardCodec::decodeBigYawFeedback(m, p, n, big_yaw_feedback_);
         break;
     default:
@@ -125,9 +125,9 @@ int InterBoardLink::latestChassisFeedback(ChassisFeedbackSummary &out) const {
     return 0;
 }
 
-int InterBoardLink::latestCapabilities(InterBoardCapabilities &out) const {
-    if (!capabilities_.stamp.valid) return -EAGAIN;
-    out = capabilities_; return 0;
+int InterBoardLink::latestOperatorControl(OperatorControl &out) const {
+    if (!operator_control_.stamp.valid) return -EAGAIN;
+    out = operator_control_; return 0;
 }
 int InterBoardLink::latestBigYawRequest(BigYawRequest &out) const {
     if (!big_yaw_request_.stamp.valid) return -EAGAIN;

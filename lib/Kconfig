@@ -64,7 +64,7 @@ config SKYWALKER_REFEREE
     depends on SKYWALKER_LIB_COMMUNICATION
 
 config SKYWALKER_INTERBOARD
-    bool "Interboard V1 codec, parser and session"
+    bool "Interboard codec, parser and session"
     default y
     depends on SKYWALKER_LIB_COMMUNICATION
 

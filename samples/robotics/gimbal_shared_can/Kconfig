@@ -5,4 +5,5 @@ config SHOOTER_UNLOADED_FEED
     help
         Empty mechanism only. Loaded shooting requires live heat and permission
         sources; these must be wired before disabling this bench bypass.
+rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"

@@ -6,3 +6,5 @@ common:
   build_only: true
 tests:
   sample.skywalker.robotics.gimbal_shared_can: {}
+  sample.skywalker.robotics.gimbal_shared_can.diagnostic:
+    extra_args: EXTRA_CONF_FILE=diagnostic.conf

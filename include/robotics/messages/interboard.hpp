@@ -53,13 +53,18 @@ struct ChassisConstraint {
     // 板间底盘约束消息的时间戳与序号。
     MessageStamp stamp{};
 };
-// V2 extension. V1 heartbeat and chassis messages retain their original layout.
-inline constexpr std::uint16_t kBigYawContractVersion = 2;
-inline constexpr std::uint32_t kBigYawCapability = 1u << 0;
-struct InterBoardCapabilities {
-    std::uint16_t contract_version = kBigYawContractVersion;
-    std::uint32_t features = kBigYawCapability;
-    std::uint64_t sender_boot_id = 0;
+// One management producer owns the original ages and peer binding. Repeated
+// publication/transmission must preserve the original RC and clear-event age.
+struct OperatorControl {
+    bool run_allowed = false;
+    bool emergency_stop = false;
+    std::uint32_t source_sequence = 0;
+    std::uint32_t source_age_ms = UINT32_MAX;
+    std::uint32_t clear_event_id = 0;
+    std::uint32_t clear_event_age_ms = UINT32_MAX;
+    std::uint64_t sender_boot_id = 0; // Filled by the sending endpoint.
+    std::uint64_t receiver_boot_id = 0; // Bound when produced, never on retry.
+    // TX: local production time; RX: local receive time and wire sequence.
     MessageStamp stamp{};
 };
 enum class BigYawMode : std::uint8_t { Disabled, FollowCenter };
