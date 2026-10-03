@@ -6,7 +6,7 @@
 
 一块 MC02 或 RoboMaster C 板、DR16 接收机。板级 `remote-uart` 为 100000 baud、8E1、RX DMA：MC02 使用 UART5（PD2 RX），C 板使用 USART3（PC11 RX）。接收机 TX 接主控 RX，并共地；确认板卡 DBUS 通路的电平与反相。
 
-VOFA 使用独立的板级 `telemetry-uart`，均为 115200 baud、8N1：MC02 为 USART1（PA9 TX），C 板为 USART6（PG14 TX）。USB 转串口模块的 RX 接对应 TX，并共地；确认模块的电平与板卡匹配。板级 console 仍为 MC02 的 USART10 或 C 板的 USART1，可用来查看初始化和异常日志。不要将 VOFA 与 DR16 或 console 接到同一个 UART 设备。
+默认 `app.overlay` 将 `telemetry-uart` 指向板载 USB CDC ACM。用数据线连接主控板的 USB 数据接口，在电脑上打开新出现的 `SkyWalker Telemetry` 串口；Horco CMSIS-DAP 的串口是调试器日志通路，不是这个遥测串口。板级 console 仍为 MC02 的 USART10 或 C 板的 USART1，可用来查看初始化和异常日志。
 
 ## 构建与刷写
 
@@ -17,11 +17,21 @@ west flash -d build/bench_dr16
 
 C 板使用 `-b rm_typec/stm32f407xx` 和独立构建目录，无需添加 overlay。
 
+本示例的 CMake 显式追加 `app.overlay`，确保 IDE 缓存的 overlay 选择不会遗漏 USB 遥测绑定；编译期同时要求 `telemetry-uart` 指向 CDC ACM。已有构建目录建议使用上述 `-p always` 完整重新配置，并从同一个目录刷写。
+
+启动日志的 `Telemetry device=...` 应包含 `cdc_acm_uart0`。如果是 `serial@40011000`，说明运行的固件仍将遥测发往 MC02 的 USART1，而不是 USB。此时即使 USB 枚举成功、`queued` 持续增长，USB 串口也收不到遥测；应检查刷写目录和固件版本。USB 栈启动成功不代表应用选中了 USB 串口。
+
 ## 操作与 VOFA 通道
 
-先在 console 确认 `Remote UART init: 0` 和 `VOFA init=0`。遥控初始化失败时，接收模块持续发布离线和失败状态；VOFA 初始化失败时其线程停止。两端独立运行；应检查对应设备、引脚和串口配置。
+先在 console 确认 `DR16 receive and VOFA telemetry threads started` 和 `VOFA init=0`。前者表示接收线程已启动，不代表已收到有效遥控帧；后者只表示遥测 UART 绑定成功，不代表 USB 主机已经打开串口。遥控初始化失败时，接收模块持续发布离线和失败状态；VOFA 初始化失败时其线程停止。
 
-在 VOFA+ 选择连接遥测串口、115200 baud、JustFloat 协议。监视线程约每 100 ms 发送一帧 16 通道，按下表顺序命名；JustFloat 帧不携带通道名称。
+在 VOFA+ 选择主控板的 USB 遥测串口、115200 baud、JustFloat 协议，沿用 hello 示例可用的连接设置。USB CDC 的波特率不决定物理 USB 传输速率。监视线程约每 100 ms 提交一帧 16 通道（68 字节），按下表顺序命名；JustFloat 帧不携带通道名称。普通文本串口助手不能把这种二进制数据直接显示成通道数值。
+
+发送方式与 hello 一致，不以 DTR 为发送前提，DTR 只用于日志诊断。每秒 console 输出 `Telemetry queued=... send=...; DR16 state=... online=... seq=... rx_chunks=...`：`queued` 是累计入队成功帧数，不代表电脑已收到；`send` 是最近一次入队返回值；`state` 为 0=未启动、1=启动中、2=运行中、3=初始化失败。正常时 `queued` 约每秒增加 10；即使遥控器离线也应持续发送。
+
+如果 USB 能连接但没有帧，保留这些周期日志及 `USB DTR=... query=...`。`send=-ENOBUFS` 表明应用发送队列已满，需要继续排查 CDC 消费路径；`queued` 持续增长但上位机接收字节数为 0 时，需要继续定位驱动到主机的传输。若接收字节数增长却没有曲线，检查 JustFloat 解析和通道选择。hello 每帧是 8 字节，本示例每帧是 68 字节，不能按 hello 的单通道固定帧长接收。
+
+`usbd_ch9` 的 `80 06 00 06 00 00 0a 00` 是主机请求 Device Qualifier 描述符；控制器仅支持全速时，Zephyr 返回不支持，这是该请求的预期处理，不能单凭这条日志判定枚举失败。`Spurious resume event` 也不能单独证明遥测故障。多次启动横幅表示发生过多次启动，仅凭这些日志无法确定复位原因。
 
 | 序号 | 建议名称 | 含义 |
 |---:|---|---|
@@ -37,7 +47,7 @@ C 板使用 `-b rm_typec/stm32f407xx` 和独立构建目录，无需添加 overl
 
 依次移动摇杆并拨动开关，核实通道与物理输入的对应关系。断开接收机约 100 ms 后 `online` 变为 0；其他通道保留最后一次有效帧的数据，不能当成新输入。若 `rx_chunks` 增长而 `seq` 不变，应排查串口格式、反相和协议；若 `rx_chunks` 不增长，应排查接线与 RX DMA。序号和累计计数转为 float 后，超过 16777216 不再保证逐一精确表示，适合短时台架观察。
 
-VOFA 口只输出二进制 JustFloat 数据；console 只输出初始化信息以及 UART 连续性或 VOFA 队列错误。VOFA 发送返回 0 只表示帧已入队，不保证上位机收到。队列满时当前帧会被拒绝，程序在 console 报告错误，下一周期继续发送。
+VOFA 口只输出二进制 JustFloat 数据；console 输出初始化信息、每秒诊断状态以及 UART 连续性或 VOFA 队列错误。VOFA 发送返回 0 只表示帧已入队，不保证上位机收到。队列满时当前帧会被拒绝，程序在 console 报告错误，下一周期继续发送。
 
 ## 线程与解析边界
 
