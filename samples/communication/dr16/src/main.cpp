@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <communication/remote/remote_receiver.hpp>
 #include <lib/vofa/vofa.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -27,6 +28,9 @@ void vofaTask(void *, void *, void *) {
     std::uint32_t last_resets = 0;
     unsigned last_dropped = 0;
     int last_uart_error = 0, last_send_error = 0;
+    std::uint32_t queued_frames = 0;
+    std::uint64_t next_status_ms = 0;
+    LOG_INF("Telemetry device=%s, JustFloat: 16 channels, 68 bytes/frame", bench::telemetry_uart->name);
     for (;;) {
         // Keep the previous snapshot on contention, then check its original age.
         receiver.snapshot(snapshot);
@@ -54,7 +58,10 @@ void vofaTask(void *, void *, void *) {
         };
         constexpr auto channel_count = sizeof(channels) / sizeof(channels[0]);
         static_assert(channel_count <= VOFA_MAX_FLOATS);
+        // Match hello: DTR is diagnostic only, never a condition for sending.
         const int send_ret = vofa_send(&vofa, channels, static_cast<std::uint8_t>(channel_count));
+        if (send_ret == 0)
+            ++queued_frames;
         if (send_ret != last_send_error) {
             if (send_ret < 0)
                 LOG_WRN("VOFA send failed: %d", send_ret);
@@ -69,6 +76,17 @@ void vofaTask(void *, void *, void *) {
             LOG_WRN("DR16 RX continuity: resets=%u dropped=%u", snapshot.resets, snapshot.dropped);
             last_resets = snapshot.resets;
             last_dropped = snapshot.dropped;
+        }
+        if (now >= next_status_ms) {
+            next_status_ms = now + 1000;
+            LOG_INF("Telemetry queued=%u send=%d; DR16 state=%u online=%u seq=%u rx_chunks=%u",
+                    queued_frames, send_ret, static_cast<unsigned>(snapshot.state),
+                    static_cast<unsigned>(fresh), snapshot.remote.stamp.sequence, snapshot.rx_chunks);
+            if constexpr (DT_NODE_HAS_COMPAT(DT_ALIAS(telemetry_uart), zephyr_cdc_acm_uart)) {
+                std::uint32_t dtr = 0;
+                const int ret = uart_line_ctrl_get(bench::telemetry_uart, UART_LINE_CTRL_DTR, &dtr);
+                LOG_INF("USB DTR=%u query=%d (diagnostic only)", dtr, ret);
+            }
         }
         k_sleep(K_MSEC(100));
     }
