@@ -46,6 +46,22 @@ struct TxResult {
     std::uint64_t completed_ms = 0;
 };
 
+// Captured by the I/O worker before stopping/restarting the controller.
+// Successful recovery/TX does not erase this record. Hardware may already
+// have entered automatic bus-off recovery by the time the worker runs.
+struct BusRecoverySnapshot {
+    std::uint64_t count = 0;
+    std::uint64_t occurred_ms = 0;
+    FaultReason reason = FaultReason::None;
+    int error = 0;
+    can_state controller_state = CAN_STATE_STOPPED;
+    int query_error = 0;
+    can_bus_err_cnt error_counts{};
+    TxResult last_tx{};
+    bool stats_valid = false;
+    std::uint32_t bit0 = 0, bit1 = 0, stuff = 0, crc = 0, form = 0, ack = 0;
+};
+
 struct BusStatus {
     BusState state = BusState::Unstarted;
     int last_error = 0;
@@ -54,6 +70,7 @@ struct BusStatus {
     std::uint64_t superseded_batches = 0;
     std::uint64_t rx_overflows = 0;
     std::uint64_t rx_invalid_frames = 0;
+    BusRecoverySnapshot last_recovery{};
 };
 
 class CanBus {
@@ -187,6 +204,7 @@ private:
     std::uint64_t next_operation_id_ = 1;
     std::uint64_t next_recovery_ms_ = 0;
     bool controller_started_ = false;
+    bool recovery_restarted_ = false;
     bool thread_started_ = false;
 
     mutable k_spinlock state_lock_{};

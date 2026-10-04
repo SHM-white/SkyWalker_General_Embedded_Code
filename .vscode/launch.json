@@ -2,6 +2,34 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "MC02: Build and Run (no RTOS)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "servertype": "openocd",
+            "preLaunchTask": "Zephyr IDE: Build Active",
+            "executable": "${command:zephyr-ide.get-zephyr-elf}",
+            "gdbPath": "${command:zephyr-ide.get-gdb-path}",
+            "serverpath": "${env:HOME}/zephyr-sdk-1.0.1/hosttools/sysroots/x86_64-pokysdk-linux/usr/bin/openocd",
+            "searchDir": [
+                "${env:HOME}/zephyr-sdk-1.0.1/hosttools/sysroots/x86_64-pokysdk-linux/usr/share/openocd/scripts"
+            ],
+            "configFiles": [
+                "${workspaceFolder}/boards/damiao/dm_mc02/support/openocd.cfg"
+            ],
+            "serverArgs": [
+                "-c", "adapter speed 1000"
+            ],
+            "breakAfterReset": false,
+            "postLaunchCommands": [
+                "monitor cortex_m vector_catch hard_err"
+            ],
+            "postRestartCommands": [
+                "monitor cortex_m vector_catch hard_err"
+            ],
+            "showDevDebugOutput": "raw"
+        },
+        {
             "name": "Zephyr IDE: Build and Debug (F5)",
             "type": "zephyr-ide-cortex",
             "request": "launch",
