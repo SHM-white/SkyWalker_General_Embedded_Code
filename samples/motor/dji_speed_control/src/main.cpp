@@ -41,7 +41,7 @@ float requestedVelocityForTime(std::int64_t elapsed_ms) {
 control_motor_velocity_config makeVelocityLoopConfig() {
     control_motor_velocity_config config{};
     config.regulator.feedback = {
-        .kp = 0.02f,
+        .kp = 0.03f,
         .ki = 0.05f,
         .kd = 0.0f,
         .derivative_tau_s = 0.0f,
@@ -89,12 +89,12 @@ int main() {
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can2));
     if (!device_is_ready(uart) || !device_is_ready(can))
         return -ENODEV;
-    static skywalker::motor::Motor drive{skywalker::motor::dji::gm6020({
-        .id = 2,
+    static skywalker::motor::Motor drive{skywalker::motor::dji::m3508({
+        .id = 3,
         .current_limit_a = 3.0f,
-        .encoder_zero_ticks = 0,
-        .current_mode_confirmed = true,
-        // .gear_ratio = 19.0f,
+        // .encoder_zero_ticks = 0,
+        // .current_mode_confirmed = true,
+        .gear_ratio = 19.0f,
         .timing = {20, 20, 20, 100},
     })};
     static skywalker::motor::CanBus bus{can};
