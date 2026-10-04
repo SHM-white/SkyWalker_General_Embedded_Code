@@ -9,8 +9,8 @@
 namespace bench {
 // This single-module harness is independent of the full chassis calibration.
 inline const device *steer_can = DEVICE_DT_GET(DT_NODELABEL(can1));
-inline const device *drive_can = DEVICE_DT_GET(DT_NODELABEL(can3));
-inline constexpr bool hardware_confirmed = true; // GM6020 ID2 and M3508 ID2; ports are defined above.
+inline const device *drive_can = DEVICE_DT_GET(DT_NODELABEL(can2));
+inline constexpr bool hardware_confirmed = true; // GM6020 ID3 and M3508 ID3; ports are defined above.
 // Assumes GM6020 current-mode firmware; this driver does not support voltage mode.
 inline constexpr bool steer_current_mode = true;
 inline constexpr bool capture_startup_zero = false;

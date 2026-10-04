@@ -5,6 +5,17 @@
 
 namespace skywalker::motor {
 
+Group::Group(std::span<Motor *const> members) {
+    if (members.empty() || members.size() > kMaxGroupMembers) {
+        config_error_ = -EINVAL;
+        return;
+    }
+    for (auto *member : members) {
+        if (!member) { config_error_ = -EINVAL; continue; }
+        addMember(*member);
+    }
+}
+
 void Group::addMember(Motor &member) {
     // Topology is built before any bus starts. Keep the first owner so both
     // groups can detect an overlap during start validation.

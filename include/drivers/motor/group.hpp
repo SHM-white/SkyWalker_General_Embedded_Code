@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include <zephyr/kernel.h>
 
@@ -30,6 +31,8 @@ public:
         addMember(first);
         (addMember(others), ...);
     }
+
+    explicit Group(std::span<Motor *const> members);
 
     Group(const Group &) = delete;
     Group &operator=(const Group &) = delete;

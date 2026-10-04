@@ -15,6 +15,14 @@
 LOG_MODULE_REGISTER(skywalker_motor_bus);
 
 namespace skywalker::motor {
+
+bool CanBus::exclusivelyOwnedBy(const Group &group) const {
+    if (motor_count_ == 0) return false;
+    for (std::size_t i = 0; i < motor_count_; ++i)
+        if (motors_[i]->group_ != &group) return false;
+    return true;
+}
+
 namespace {
 
 #ifndef CONFIG_SKYWALKER_MOTOR_MAX_BUSES
