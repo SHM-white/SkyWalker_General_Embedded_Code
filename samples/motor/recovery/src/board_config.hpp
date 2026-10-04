@@ -13,7 +13,8 @@ inline constexpr float target_velocity_rad_s = 2.0f;
 inline skywalker::control::VelocityMotor::Config motorConfig() {
     skywalker::control::VelocityMotor::Config config{};
     config.effort_unit = dm ? skywalker::control::EffortUnit::NewtonMeter : skywalker::control::EffortUnit::Ampere;
-    config.safety = {12.0f, 70.0f};
+    // M2006/C610 has no temperature feedback; retain DM temperature protection.
+    config.safety = {12.0f, dm ? 70.0f : 0.0f};
     config.loop.regulator.feedback = {.kp = .03f,
                                       .ki = .1f,
                                       .kd = 0.0f,

@@ -1,6 +1,6 @@
 # 单电机断电恢复
 
-一块 MC02 + 一台电机。默认 CAN1 上的 GM6020 电流模式 ID1，电流上限 0.5 A；可选 DM J4310 MIT ID1、Master 0x11、力矩上限 0.5 N·m。电机需独立供电、CAN 终端正确且与控制板共地。MC02 逻辑供电保持不断，控制台使用板定义的 USART10、115200 baud。
+一块 MC02 + 一台电机。默认 CAN1 上的 M2006/C610 ID1，减速比 36:1，反馈 ID 为 0x201，命令 ID 为 0x200。驱动电流上限 0.5 A，速度控制器输出上限 0.3 A，目标为输出轴 2 rad/s。M2006 无温度反馈，因此此配置不启用温度反馈保护。可选 DM J4310 MIT ID1、Master 0x11、力矩上限 0.5 N·m，保留其温度保护。电机需独立供电、CAN 终端正确且与控制板共地。MC02 逻辑供电保持不断，控制台使用 USART10、115200 baud（PE3 TX 接 USB 转串口 RX，PE2 RX 接 USB 转串口 TX，并共地）；板载 USB 不承担此 sample 的按键输入。
 
 ## 构建与刷写
 
@@ -12,7 +12,11 @@ west flash -d build/bench_recovery
 DM MIT 配置：
 
 ```sh
-west build -b dm_mc02/stm32h723xx samples/motor/recovery -d build/bench_recovery_dm -- -DRECOVERY_DM=ON
+
+QE+w
+
+320.e
+st build -b dm_mc02/stm32h723xx samples/motor/recovery -d build/bench_recovery_dm -- -DRECOVERY_DM=ON
 west flash -d build/bench_recovery_dm
 ```
 

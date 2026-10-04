@@ -449,10 +449,10 @@ void CanBus::processTx() {
     }
 }
 
-void CanBus::checkDeadlines(std::uint64_t now_ms) {
+void CanBus::checkDeadlines() {
     const auto key = k_spin_lock(&tx_lock_);
     const bool timed_out = in_flight_.busy && !in_flight_.callback_seen &&
-                           elapsed(now_ms, in_flight_.submitted_ms, options_.tx_timeout_ms);
+                           elapsed(nowMs(), in_flight_.submitted_ms, options_.tx_timeout_ms);
     k_spin_unlock(&tx_lock_, key);
     if (timed_out) {
         enterRecovery(-ETIMEDOUT, FaultReason::TransportError);
@@ -472,6 +472,7 @@ void CanBus::checkDeadlines(std::uint64_t now_ms) {
     for (std::size_t i = 0; i < motor_count_; ++i) {
         Motor &motor = *motors_[i];
         const MotorSnapshot snapshot = motor.snapshot();
+        const auto now_ms = nowMs();
         if (std::holds_alternative<dm::Config>(motor.config_) && snapshot.stop.progress == StopProgress::TxComplete) {
             const auto motor_key = k_spin_lock(&motor.lock_);
             const auto safety_completed_ms = motor.safe_first_tx_completed_ms_;
@@ -493,12 +494,13 @@ void CanBus::checkDeadlines(std::uint64_t now_ms) {
             const bool tx_done = motor.enable_tx_done_;
             const bool feedback_after_tx = motor.enable_tx_completed_order_ != 0u &&
                                            motor.feedback_event_order_ > motor.enable_tx_completed_order_;
+            const auto enable_check_ms = nowMs();
             k_spin_unlock(&motor.lock_, motor_key);
-            if (elapsed(now_ms, requested_ms, timing.enable_timeout_ms)) {
-                motor.raiseFault({FaultReason::EnableTimeout, -ETIMEDOUT, &motor, now_ms});
+            if (elapsed(enable_check_ms, requested_ms, timing.enable_timeout_ms)) {
+                motor.raiseFault({FaultReason::EnableTimeout, -ETIMEDOUT, &motor, enable_check_ms});
                 continue;
             }
-            if (!safe || !motor.feedbackFresh(now_ms))
+            if (!safe || !motor.feedbackFresh(enable_check_ms))
                 continue;
             if (std::holds_alternative<dji::Config>(motor.config_) ||
                 (tx_done && snapshot.native_drive_status_valid &&
@@ -509,18 +511,25 @@ void CanBus::checkDeadlines(std::uint64_t now_ms) {
             continue;
         }
 
-        StagedCommand published{};
+        // The producer can preempt this worker and publish a newer timestamp.
+        // Sample time after reading the command, with publication and lifecycle
+        // locked, so elapsed() never compares it against an earlier loop time.
         const auto publication_key = k_spin_lock(&publication_lock_);
-        published = published_[i];
-        k_spin_unlock(&publication_lock_, publication_key);
-        std::uint64_t activated_ms = 0;
+        const auto &published = published_[i];
         const auto motor_key = k_spin_lock(&motor.lock_);
-        activated_ms = motor.activated_ms_;
+        const auto command_check_ms = nowMs();
+        const bool current_command = published.valid &&
+                                     published.enable_generation == motor.snapshot_.enable_generation;
+        const auto command_stamp_ms = current_command ? published.written_ms : motor.activated_ms_;
+        const bool command_expired = motor.snapshot_.state == MotorState::Active &&
+                                     elapsed(command_check_ms, command_stamp_ms, timing.command_timeout_ms);
         k_spin_unlock(&motor.lock_, motor_key);
-        const bool current_command = published.valid && published.enable_generation == snapshot.enable_generation;
-        if ((current_command && elapsed(now_ms, published.written_ms, timing.command_timeout_ms)) ||
-            (!current_command && elapsed(now_ms, activated_ms, timing.command_timeout_ms))) {
-            motor.raiseFault({FaultReason::CommandExpired, -ETIMEDOUT, &motor, now_ms});
+        k_spin_unlock(&publication_lock_, publication_key);
+        if (command_expired) {
+            motor.raiseFault({FaultReason::CommandExpired, -ETIMEDOUT, &motor, command_check_ms});
+            LOG_WRN("Command expired: check=%llu stamp=%llu limit=%u ms",
+                    static_cast<unsigned long long>(command_check_ms),
+                    static_cast<unsigned long long>(command_stamp_ms), unsigned(timing.command_timeout_ms));
         }
     }
 }
@@ -947,7 +956,8 @@ bool CanBus::pumpTarget(std::uint64_t now_ms) {
         --targets_remaining_;
         k_spin_unlock(&publication_lock_, key);
         captureCandidate(index, TxPurpose::Target);
-        const int ret = buildTarget(now_ms);
+        // captureCandidate() may observe a publication newer than pumpTx's time.
+        const int ret = buildTarget(nowMs());
         if (ret == -ENOENT)
             continue;
         if (ret < 0) {
@@ -1152,7 +1162,7 @@ void CanBus::ioMain() {
             recoverController(now);
         }
         else {
-            checkDeadlines(now);
+            checkDeadlines();
             if (status().state == BusState::Running)
                 pumpTx(now);
         }

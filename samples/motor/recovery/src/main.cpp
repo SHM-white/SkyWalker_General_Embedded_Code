@@ -15,8 +15,10 @@ int main() {
     using namespace skywalker;
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
     const device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    if (!device_is_ready(can) || !device_is_ready(console))
+    if (!device_is_ready(can) || !device_is_ready(console)) {
+        LOG_ERR("CAN or console device not ready");
         return -ENODEV;
+    }
 #ifdef SKYWALKER_RECOVERY_DM
     static motor::Motor drive{motor::dm::j4310Mit({
         .id = 1,
@@ -28,11 +30,10 @@ int main() {
         .timing = {50, 20, 50, 3000},
     })};
 #else
-    static motor::Motor drive{motor::dji::gm6020({
+    static motor::Motor drive{motor::dji::m2006({
         .id = 1,
         .current_limit_a = 0.5f,
-        .encoder_zero_ticks = 0,
-        .current_mode_confirmed = true,
+        .gear_ratio = 36.0f,
         .timing = {20, 20, 20, 100},
     })};
 #endif
@@ -52,7 +53,11 @@ int main() {
     if (configured == 0)
         configured = axis.configure();
     LOG_INF("configure=%d family=%s; e enable, space disable, ! estop, r clear fault; power cycling requires a new e",
-            configured, bench::dm ? "DM MIT" : "DJI");
+            configured, bench::dm ? "DM MIT" : "M2006/C610 CAN1 ID1");
+    if (configured < 0)
+        return configured;
+    LOG_INF("Console=%s; state: 0 offline, 1 disabled, 2 enabling, 3 active, 4 fault",
+            console->name);
 
     bool run = false, estop = false;
     auto previous_ms = k_uptime_get();
@@ -63,28 +68,38 @@ int main() {
         previous_ms = now;
         unsigned char key;
         if (uart_poll_in(console, &key) == 0) {
-            if (key == 'e' && !estop && configured == 0 && drive.ready()) {
-                int ret = axis.reset();
-                if (ret == 0)
-                    ret = drive.enable();
-                run = ret == 0;
-                LOG_INF("enable=%d", ret);
+            if (key == 'e') {
+                if (estop || !drive.ready()) {
+                    LOG_WRN("enable blocked: estop=%d ready=%d; r clears estop/fault, then wait for ready=1",
+                            estop, drive.ready());
+                } else {
+                    int ret = axis.reset();
+                    if (ret == 0)
+                        ret = drive.enable();
+                    run = ret == 0;
+                    LOG_INF("enable=%d", ret);
+                }
             }
             if (key == ' ' || key == '!') {
                 run = false;
                 estop |= key == '!';
-                (void)drive.disable();
+                const int ret = drive.disable();
+                LOG_INF("disable=%d estop=%d", ret, estop);
             }
             if (key == 'r') {
                 estop = false;
                 run = false;
+                // Clearing the local run flag alone leaves the old command
+                // permitted until its deadline. Request safe output now.
+                const int ret = drive.disable();
+                LOG_INF("reset: disable=%d; press e again after ready=1", ret);
                 const auto snapshot = drive.snapshot();
                 if (snapshot.state == motor::MotorState::Fault)
                     LOG_INF("clearFault=%d", drive.clearFault());
             }
         }
         const auto snapshot = drive.snapshot();
-        if (snapshot.state == motor::MotorState::Fault || snapshot.state == motor::MotorState::Offline)
+        if (snapshot.state != motor::MotorState::Active && snapshot.state != motor::MotorState::Enabling)
             run = false;
         if (configured == 0 && run && drive.active()) {
             int ret = axis.update(bench::target_velocity_rad_s, dt_s);
