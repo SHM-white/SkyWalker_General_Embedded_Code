@@ -7,7 +7,8 @@
 #include <zephyr/logging/log.h>
 
 #include <control/velocity_motor.hpp>
-#include <drivers/motor/can_bus.hpp>
+#include <control/motor_session.hpp>
+#include <core/clock.hpp>
 #include <lib/vofa/vofa.h>
 
 LOG_MODULE_REGISTER(dji_speed_control, LOG_LEVEL_INF);
@@ -22,7 +23,7 @@ constexpr std::int64_t kControlPeriodMs = 5;
 constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 constexpr std::int64_t kRunDurationMs = 300000;
 
-constexpr float kRequestedVelocityRadS = 2.0f;
+constexpr float kRequestedVelocityRadS = 5.0f;
 constexpr float kRequestedVelocityAbsMaxRadS = 50.0f;
 constexpr float kSoftwareCurrentAbsMaxA = 0.8f;
 constexpr float kDeadbandRadS = 0.20f;
@@ -41,12 +42,12 @@ float requestedVelocityForTime(std::int64_t elapsed_ms) {
 control_motor_velocity_config makeVelocityLoopConfig() {
     control_motor_velocity_config config{};
     config.regulator.feedback = {
-        .kp = 0.03f,
-        .ki = 0.05f,
+        .kp = 0.4f,
+        .ki = 0.1f,
         .kd = 0.0f,
         .derivative_tau_s = 0.0f,
-        .integral_min = -0.1f,
-        .integral_max = 0.1f,
+        .integral_min = -0.5f,
+        .integral_max = 0.5f,
         .output_min = -kSoftwareCurrentAbsMaxA,
         .output_max = kSoftwareCurrentAbsMaxA,
         .deadband = 0.0f,
@@ -99,56 +100,39 @@ int main() {
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::VelocityMotor axis{drive, makeMotorConfig()};
+    static const skywalker::control::MotorSession::Member members[] = {
+        {"drive", &drive, &bus, &axis, skywalker::control::ReferencePolicy::NotRequired},
+    };
+    static skywalker::control::MotorSession session(members);
     static Vofa vofa{};
     vofa_init(&vofa, uart);
-    int ret = bus.attach(drive);
-    if (ret == 0)
-        ret = bus.start();
-    if (ret == 0)
-        ret = axis.configure();
+    const int ret = session.configure();
     if (ret < 0) {
         LOG_ERR("configuration blocked: %d", ret);
         return ret;
     }
-    const auto ready_deadline = k_uptime_get() + 3000;
-    while (!drive.ready() && k_uptime_get() < ready_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.ready())
-        return -ETIMEDOUT;
-    ret = axis.reset(); // Check speed, temperature and reference before enabling.
-    if (ret == 0)
-        ret = drive.enable();
-    if (ret < 0)
-        return ret;
-    const auto active_deadline = k_uptime_get() + 3000;
-    while (!drive.active() && k_uptime_get() < active_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.active()) {
-        (void)drive.disable();
-        return -ETIMEDOUT;
-    }
-    const auto started_ms = k_uptime_get();
-    auto previous_ms = started_ms;
+    // Preserve the bench's one-shot automatic start. A fault never retries it.
+    std::uint64_t target_sequence = 0;
+    auto previous_us = skywalker::core::monotonicTimeUs();
     std::uint32_t telemetry_divider = 0;
     for (;;) {
-        k_sleep(K_MSEC(kControlPeriodMs));
-        const auto now = k_uptime_get();
-        const float dt_s = float(now - previous_ms) / 1000.0f;
-        previous_ms = now;
-        if (!drive.active()) {
-            LOG_ERR("motor stopped: reason=%u error=%d", unsigned(drive.snapshot().last_fault.reason),
-                    drive.snapshot().last_fault.error);
-            return -EHOSTDOWN;
-        }
-        const float target = requestedVelocityForTime((now - started_ms) % kRunDurationMs);
-        ret = axis.update(target, dt_s);
-        if (ret == 0)
-            ret = bus.commit().error;
-        if (ret < 0) {
-            (void)drive.disable();
-            LOG_ERR("cycle stopped: %d", ret);
-            return ret;
-        }
+        const auto wake_us = previous_us + kControlPeriodMs * 1000;
+        if (skywalker::core::monotonicTimeUs() < wake_us) k_sleep(K_TIMEOUT_ABS_US(wake_us));
+        else k_sleep(K_TICKS(1));
+        const auto now_us = skywalker::core::monotonicTimeUs();
+        previous_us = now_us;
+        const auto before = session.status();
+        const auto elapsed_ms = before.state == skywalker::control::SessionState::Running
+            ? (now_us - before.started_us) / 1000 : 0;
+        const float target = requestedVelocityForTime(elapsed_ms % kRunDurationMs);
+        const double targets[] = {target};
+        const skywalker::core::Stamp stamp{now_us, ++target_sequence, true};
+        session.step({.enabled = true, .start_sequence = 1, .source = stamp,
+                      .target_stamp = stamp, .targets = targets}, now_us);
+        const auto state = session.status();
+        if (state.state == skywalker::control::SessionState::Blocked)
+            return state.last_stop.error;
+        if (state.state != skywalker::control::SessionState::Running) continue;
         const auto data = axis.telemetry();
         const auto &feedback = data.motor.feedback;
         const auto &output = data.output;

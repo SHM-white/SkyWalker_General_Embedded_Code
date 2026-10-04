@@ -94,6 +94,9 @@ public:
     // different buses. Success acknowledges publication, not CAN completion.
     [[nodiscard]] CommitResult commit();
     BusStatus status() const;
+    // Topology query for setup only, before start(). No concurrent attachment.
+    bool exclusivelyOwnedBy(const Group &group) const;
+    const device *busDevice() const { return can_; }
 
 private:
     friend class Group;

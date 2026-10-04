@@ -7,7 +7,8 @@
 #include <zephyr/logging/log.h>
 
 #include <control/position_motor.hpp>
-#include <drivers/motor/can_bus.hpp>
+#include <control/motor_session.hpp>
+#include <core/clock.hpp>
 #include <lib/vofa/vofa.h>
 
 LOG_MODULE_REGISTER(dji_position_control, LOG_LEVEL_INF);
@@ -135,63 +136,43 @@ int main() {
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
+    static const skywalker::control::MotorSession::Member members[] = {
+        {"drive", &drive, &bus, &axis, kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
+            ? skywalker::control::ReferencePolicy::UseCalibratedAbsolute
+            : skywalker::control::ReferencePolicy::CaptureOnExplicitStart},
+    };
+    static skywalker::control::MotorSession session(members);
     static Vofa vofa{};
     vofa_init(&vofa, uart);
-    int ret = bus.attach(drive);
-    if (ret == 0)
-        ret = bus.start();
-    if (ret == 0)
-        ret = axis.configure();
+    const int ret = session.configure();
     if (ret < 0) {
         LOG_ERR("configuration blocked: %d", ret);
         return ret;
     }
-    const auto ready_deadline = k_uptime_get() + 3000;
-    while (!drive.ready() && k_uptime_get() < ready_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.ready())
-        return -ETIMEDOUT;
-    const auto initial = drive.snapshot();
-    if ((initial.feedback.valid & skywalker::motor::FeedbackAbsolutePosition) == 0u)
-        return -ENODATA;
-    // Preserve the old GM6020 continuous coordinate seeded from encoder zero.
-    ret = drive.reseedPosition(initial.feedback.absolute_position_rad);
-    if (ret < 0)
-        return ret;
-    ret = axis.reset(); // Check speed, temperature and reference before enabling.
-    if (ret == 0)
-        ret = drive.enable();
-    if (ret < 0)
-        return ret;
-    const auto active_deadline = k_uptime_get() + 3000;
-    while (!drive.active() && k_uptime_get() < active_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.active()) {
-        (void)drive.disable();
-        return -ETIMEDOUT;
-    }
-    const auto started_ms = k_uptime_get();
-    auto previous_ms = started_ms;
+    // Preserve the bench's one-shot automatic start. A fault never retries it.
+    std::uint64_t target_sequence = 0;
+    auto previous_us = skywalker::core::monotonicTimeUs();
     std::uint32_t telemetry_divider = 0;
     for (;;) {
-        k_sleep(K_MSEC(kControlPeriodMs));
-        const auto now = k_uptime_get();
-        const float dt_s = float(now - previous_ms) / 1000.0f;
-        previous_ms = now;
-        if (!drive.active())
-            return -EHOSTDOWN;
-        const auto elapsed_ms = now - started_ms;
+        const auto wake_us = previous_us + kControlPeriodMs * 1000;
+        if (skywalker::core::monotonicTimeUs() < wake_us) k_sleep(K_TIMEOUT_ABS_US(wake_us));
+        else k_sleep(K_TICKS(1));
+        const auto now_us = skywalker::core::monotonicTimeUs();
+        previous_us = now_us;
+        const auto before = session.status();
+        const auto elapsed_ms = before.state == skywalker::control::SessionState::Running
+            ? (now_us - before.started_us) / 1000 : 0;
         const float target = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
                                  ? requestedAbsolutePositionRad(elapsed_ms)
                                  : static_cast<float>((elapsed_ms % 10000) / 2500) * kTargetOffsetRad;
-        ret = axis.update(target, dt_s);
-        if (ret == 0)
-            ret = bus.commit().error;
-        if (ret < 0) {
-            (void)drive.disable();
-            LOG_ERR("cycle stopped: %d", ret);
-            return ret;
-        }
+        const double targets[] = {target};
+        const skywalker::core::Stamp stamp{now_us, ++target_sequence, true};
+        session.step({.enabled = true, .start_sequence = 1, .source = stamp,
+                      .target_stamp = stamp, .targets = targets}, now_us);
+        const auto state = session.status();
+        if (state.state == skywalker::control::SessionState::Blocked)
+            return state.last_stop.error;
+        if (state.state != skywalker::control::SessionState::Running) continue;
         if (++telemetry_divider >= kTelemetryPeriodCycles) {
             telemetry_divider = 0;
             const auto data = axis.telemetry();

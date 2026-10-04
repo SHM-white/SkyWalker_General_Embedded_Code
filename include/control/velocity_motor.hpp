@@ -26,20 +26,23 @@ public:
         EffortUnit effort_unit = EffortUnit::Unspecified;
         bool valid = false;
         int error = 0;
+        ControlIssue issue = ControlIssue::None;
     };
 
     VelocityMotor(motor::Motor &motor, const Config &config);
     VelocityMotor(const VelocityMotor &) = delete;
     VelocityMotor &operator=(const VelocityMotor &) = delete;
 
-    [[nodiscard]] int configure();
+    [[nodiscard]] int configure(ControlFailurePolicy policy = ControlFailurePolicy::StopMotor);
+    ControlCheck preflight() const;
+    motor::Motor &motor() const { return motor_; }
     [[nodiscard]] int update(float target_rad_s, float dt_s);
     [[nodiscard]] int reset();
     Telemetry telemetry() const;
 
 private:
     int resetFrom(const motor::MotorSnapshot &snapshot);
-    int fail(int error, const motor::MotorSnapshot &snapshot, bool active);
+    int fail(int error, const motor::MotorSnapshot &snapshot, bool active, ControlIssue issue = ControlIssue::OutputRejected);
     void publish(const Telemetry &next);
 
     motor::Motor &motor_;
@@ -49,6 +52,7 @@ private:
     Telemetry telemetry_{};
     std::uint64_t observed_enable_generation_ = 0;
     std::uint64_t observed_reference_generation_ = 0;
+    ControlFailurePolicy failure_policy_ = ControlFailurePolicy::StopMotor;
     bool configured_ = false;
     bool history_valid_ = false;
 };

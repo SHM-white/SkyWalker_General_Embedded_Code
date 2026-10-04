@@ -1,4 +1,4 @@
-/* Single module: CAN2 GM6020 ID2, CAN1 M3508 ID2.
+/* Single module: motor IDs and CAN ports are configured in src/board_config.hpp.
  * CAN clocks/timing and remote UART configuration come from the board DTS,
  * matching dji_speed_control. Only USB telemetry is overridden here.
  */

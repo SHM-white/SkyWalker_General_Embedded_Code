@@ -35,13 +35,16 @@ public:
         EffortUnit effort_unit = EffortUnit::Unspecified;
         bool valid = false;
         int error = 0;
+        ControlIssue issue = ControlIssue::None;
     };
 
     PositionMotor(motor::Motor &motor, const Config &config);
     PositionMotor(const PositionMotor &) = delete;
     PositionMotor &operator=(const PositionMotor &) = delete;
 
-    [[nodiscard]] int configure();
+    [[nodiscard]] int configure(ControlFailurePolicy policy = ControlFailurePolicy::StopMotor);
+    ControlCheck preflight() const;
+    motor::Motor &motor() const { return motor_; }
     [[nodiscard]] int update(double target_position_rad, float dt_s);
     [[nodiscard]] int reset();
     Telemetry telemetry() const;
@@ -51,7 +54,7 @@ public:
 
 private:
     int resetFrom(const motor::MotorSnapshot &snapshot, bool explicit_reset);
-    int fail(int error, const motor::MotorSnapshot &snapshot, bool active);
+    int fail(int error, const motor::MotorSnapshot &snapshot, bool active, ControlIssue issue = ControlIssue::OutputRejected);
     void publish(const Telemetry &next);
 
     motor::Motor &motor_;
@@ -64,6 +67,7 @@ private:
     std::uint64_t anchor_reference_generation_ = 0;
     std::uint64_t observed_enable_generation_ = 0;
     std::uint64_t observed_reference_generation_ = 0;
+    ControlFailurePolicy failure_policy_ = ControlFailurePolicy::StopMotor;
     bool configured_ = false;
     bool history_valid_ = false;
     bool explicit_reset_anchor_valid_ = false;

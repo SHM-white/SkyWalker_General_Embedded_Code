@@ -48,37 +48,41 @@ int validateEffort(const motor::MotorInfo &info, EffortUnit unit, float requeste
     return 0;
 }
 
-int validateMeasurement(const motor::MotorSnapshot &snapshot, const MotorSafety &safety, std::uint32_t required) {
+ControlCheck checkMeasurement(const motor::MotorSnapshot &snapshot, const MotorSafety &safety, std::uint32_t required) {
     if (!snapshot.feedback_fresh)
-        return -ESTALE;
+        return {ControlIssue::FeedbackStale, -ESTALE};
     const auto &feedback = snapshot.feedback;
     if ((feedback.valid & required) != required)
-        return -ENODATA;
+        return {ControlIssue::MissingFeedback, -ENODATA};
     if (!std::isfinite(feedback.velocity_rad_s) ||
         ((required & motor::FeedbackPosition) != 0u && !std::isfinite(feedback.position_rad)) ||
         ((required & motor::FeedbackAbsolutePosition) != 0u && !std::isfinite(feedback.absolute_position_rad)))
-        return -EINVAL;
+        return {ControlIssue::InvalidMeasurement, -EINVAL};
     if (std::fabs(feedback.velocity_rad_s) > safety.velocity_abs_max_rad_s)
-        return -ERANGE;
+        return {ControlIssue::SpeedLimit, -ERANGE};
     if (safety.temperature_max_c > 0.0f) {
         if ((feedback.valid & motor::FeedbackTemperature) == 0u)
-            return -ENODATA;
+            return {ControlIssue::MissingFeedback, -ENODATA};
         if (!std::isfinite(feedback.temperature_c))
-            return -EINVAL;
+            return {ControlIssue::InvalidMeasurement, -EINVAL};
         if (feedback.temperature_c >= safety.temperature_max_c)
-            return -ERANGE;
+            return {ControlIssue::TemperatureLimit, -ERANGE};
         // DM exposes rotor temperature in the generic feedback and MOS
         // temperature separately. Both protected the old MIT bench loops.
         if (snapshot.native_temperatures_valid) {
             if (!std::isfinite(snapshot.native_mos_temperature_c) ||
                 !std::isfinite(snapshot.native_rotor_temperature_c))
-                return -EINVAL;
+                return {ControlIssue::InvalidMeasurement, -EINVAL};
             if (snapshot.native_mos_temperature_c >= safety.temperature_max_c ||
                 snapshot.native_rotor_temperature_c >= safety.temperature_max_c)
-                return -ERANGE;
+                return {ControlIssue::TemperatureLimit, -ERANGE};
         }
     }
-    return 0;
+    return {};
+}
+
+int validateMeasurement(const motor::MotorSnapshot &s, const MotorSafety &safety, std::uint32_t required) {
+    return checkMeasurement(s, safety, required).error;
 }
 
 int validateDt(float dt_s, float minimum, float maximum) {
@@ -92,7 +96,7 @@ int validateDt(float dt_s, float minimum, float maximum) {
 VelocityMotor::VelocityMotor(motor::Motor &motor, const Config &config) : motor_(motor), config_(config) {
 }
 
-int VelocityMotor::configure() {
+int VelocityMotor::configure(ControlFailurePolicy policy) {
     if (configured_)
         return -EALREADY;
     int ret = control_motor_velocity_validate(&config_.loop);
@@ -113,8 +117,14 @@ int VelocityMotor::configure() {
                               motor::FeedbackVelocity, false);
     if (ret < 0)
         return ret;
+    failure_policy_ = policy;
     configured_ = true;
     return 0;
+}
+
+ControlCheck VelocityMotor::preflight() const {
+    if (!configured_) return {ControlIssue::NotConfigured, -EACCES};
+    return checkMeasurement(motor_.snapshot(), config_.safety, motor::FeedbackVelocity);
 }
 
 int VelocityMotor::resetFrom(const motor::MotorSnapshot &snapshot) {
@@ -151,13 +161,14 @@ int VelocityMotor::reset() {
     return reset_error;
 }
 
-int VelocityMotor::fail(int error, const motor::MotorSnapshot &snapshot, bool active) {
+int VelocityMotor::fail(int error, const motor::MotorSnapshot &snapshot, bool active, ControlIssue issue) {
     Telemetry next{};
     next.motor = snapshot;
     next.effort_unit = config_.effort_unit;
     next.error = error;
+    next.issue = issue;
     publish(next);
-    if (active)
+    if (active && failure_policy_ == ControlFailurePolicy::StopMotor)
         motor_.rejectControl(error);
     return error;
 }
@@ -178,22 +189,22 @@ VelocityMotor::Telemetry VelocityMotor::telemetry() const {
 int VelocityMotor::update(float target_rad_s, float dt_s) {
     const motor::MotorSnapshot snapshot = motor_.snapshot();
     if (!configured_ || snapshot.state != motor::MotorState::Active)
-        return fail(-EACCES, snapshot, false);
+        return fail(-EACCES, snapshot, false, configured_ ? ControlIssue::NotActive : ControlIssue::NotConfigured);
     if (!snapshot.feedback_fresh)
-        return fail(-ESTALE, snapshot, true);
+        return fail(-ESTALE, snapshot, true, ControlIssue::FeedbackStale);
     if (!snapshot.output_permitted || !motor_.active())
-        return fail(-EACCES, snapshot, false);
+        return fail(-EACCES, snapshot, false, configured_ ? ControlIssue::NotActive : ControlIssue::NotConfigured);
     if (!std::isfinite(target_rad_s))
-        return fail(-EINVAL, snapshot, true);
+        return fail(-EINVAL, snapshot, true, ControlIssue::InvalidTarget);
     if (std::fabs(target_rad_s) > config_.loop.requested_velocity_abs_max_rad_s)
-        return fail(-ERANGE, snapshot, true);
+        return fail(-ERANGE, snapshot, true, ControlIssue::InvalidTarget);
     const auto &pid = config_.loop.regulator.feedback;
     int ret = validateDt(dt_s, pid.dt_min_s, pid.dt_max_s);
     if (ret < 0)
-        return fail(ret, snapshot, true);
-    ret = validateMeasurement(snapshot, config_.safety, motor::FeedbackVelocity);
-    if (ret < 0)
-        return fail(ret, snapshot, true);
+        return fail(ret, snapshot, true, ControlIssue::InvalidPeriod);
+    const auto measurement = checkMeasurement(snapshot, config_.safety, motor::FeedbackVelocity);
+    if (measurement.error < 0)
+        return fail(measurement.error, snapshot, true, measurement.issue);
 
     const bool new_generation = !history_valid_ || snapshot.enable_generation != observed_enable_generation_ ||
                                 snapshot.reference_generation != observed_reference_generation_;
@@ -247,7 +258,7 @@ int VelocityMotor::update(float target_rad_s, float dt_s) {
 PositionMotor::PositionMotor(motor::Motor &motor, const Config &config) : motor_(motor), config_(config) {
 }
 
-int PositionMotor::configure() {
+int PositionMotor::configure(ControlFailurePolicy policy) {
     if (configured_)
         return -EALREADY;
     int ret = control_motor_position_validate(&config_.loop);
@@ -280,8 +291,21 @@ int PositionMotor::configure() {
                               true);
     if (ret < 0)
         return ret;
+    failure_policy_ = policy;
     configured_ = true;
     return 0;
+}
+
+ControlCheck PositionMotor::preflight() const {
+    if (!configured_) return {ControlIssue::NotConfigured, -EACCES};
+    const auto snapshot = motor_.snapshot();
+    // Check speed/temperature even while a lost position reference is recoverable.
+    auto check = checkMeasurement(snapshot, config_.safety, motor::FeedbackVelocity);
+    if (check.error < 0) return check;
+    if (!snapshot.position_reference_valid) return {ControlIssue::ReferenceLost, -ENODATA};
+    auto required = motor::FeedbackPosition | motor::FeedbackVelocity;
+    if (config_.reference == PositionReference::AbsoluteNearest) required |= motor::FeedbackAbsolutePosition;
+    return checkMeasurement(snapshot, config_.safety, required);
 }
 
 int PositionMotor::resetFrom(const motor::MotorSnapshot &snapshot, bool explicit_reset) {
@@ -330,13 +354,14 @@ int PositionMotor::reset() {
     return reset_error;
 }
 
-int PositionMotor::fail(int error, const motor::MotorSnapshot &snapshot, bool active) {
+int PositionMotor::fail(int error, const motor::MotorSnapshot &snapshot, bool active, ControlIssue issue) {
     Telemetry next{};
     next.motor = snapshot;
     next.effort_unit = config_.effort_unit;
     next.error = error;
+    next.issue = issue;
     publish(next);
-    if (active)
+    if (active && failure_policy_ == ControlFailurePolicy::StopMotor)
         motor_.rejectControl(error);
     return error;
 }
@@ -357,27 +382,27 @@ PositionMotor::Telemetry PositionMotor::telemetry() const {
 int PositionMotor::update(double target_position_rad, float dt_s) {
     const motor::MotorSnapshot snapshot = motor_.snapshot();
     if (!configured_ || snapshot.state != motor::MotorState::Active)
-        return fail(-EACCES, snapshot, false);
+        return fail(-EACCES, snapshot, false, configured_ ? ControlIssue::NotActive : ControlIssue::NotConfigured);
     if (!snapshot.feedback_fresh)
-        return fail(-ESTALE, snapshot, true);
+        return fail(-ESTALE, snapshot, true, ControlIssue::FeedbackStale);
     if (!snapshot.output_permitted || !motor_.active())
-        return fail(-EACCES, snapshot, false);
+        return fail(-EACCES, snapshot, false, configured_ ? ControlIssue::NotActive : ControlIssue::NotConfigured);
     if (!std::isfinite(target_position_rad))
-        return fail(-EINVAL, snapshot, true);
+        return fail(-EINVAL, snapshot, true, ControlIssue::InvalidTarget);
     const auto &position_pid = config_.loop.position;
     const auto &velocity_pid = config_.loop.velocity.regulator.feedback;
     int ret = validateDt(dt_s, std::max(position_pid.dt_min_s, velocity_pid.dt_min_s),
                          std::min(position_pid.dt_max_s, velocity_pid.dt_max_s));
     if (ret < 0)
-        return fail(ret, snapshot, true);
+        return fail(ret, snapshot, true, ControlIssue::InvalidPeriod);
     if (!snapshot.position_reference_valid)
-        return fail(-ENODATA, snapshot, true);
+        return fail(-ENODATA, snapshot, true, ControlIssue::ReferenceLost);
     std::uint32_t required = motor::FeedbackPosition | motor::FeedbackVelocity;
     if (config_.reference == PositionReference::AbsoluteNearest)
         required |= motor::FeedbackAbsolutePosition;
-    ret = validateMeasurement(snapshot, config_.safety, required);
-    if (ret < 0)
-        return fail(ret, snapshot, true);
+    const auto measurement = checkMeasurement(snapshot, config_.safety, required);
+    if (measurement.error < 0)
+        return fail(measurement.error, snapshot, true, measurement.issue);
 
     const bool new_generation = !history_valid_ || snapshot.enable_generation != observed_enable_generation_ ||
                                 snapshot.reference_generation != observed_reference_generation_;
@@ -392,7 +417,7 @@ int PositionMotor::update(double target_position_rad, float dt_s) {
         resolved += initial_position_rad_;
     if (config_.reference == PositionReference::AbsoluteNearest) {
         if (!finiteFloat(target_position_rad))
-            return fail(-ERANGE, snapshot, true);
+            return fail(-ERANGE, snapshot, true, ControlIssue::InvalidTarget);
         float error = 0.0f;
         ret = control_shortest_angle_error(static_cast<float>(target_position_rad),
                                            snapshot.feedback.absolute_position_rad, &error);
@@ -401,7 +426,7 @@ int PositionMotor::update(double target_position_rad, float dt_s) {
         resolved = static_cast<double>(snapshot.feedback.position_rad) + static_cast<double>(error);
     }
     if (!finiteFloat(resolved))
-        return fail(-ERANGE, snapshot, true);
+        return fail(-ERANGE, snapshot, true, ControlIssue::InvalidTarget);
 
     if (new_generation) {
         ret = config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, 0.0f)
@@ -426,14 +451,14 @@ int PositionMotor::update(double target_position_rad, float dt_s) {
     if (std::fabs(static_cast<double>(snapshot.feedback.position_rad) - next_origin) > 128.0) {
         const double shift = static_cast<double>(snapshot.feedback.position_rad) - next_origin;
         if (!finiteFloat(shift))
-            return fail(-ERANGE, snapshot, true);
+            return fail(-ERANGE, snapshot, true, ControlIssue::InvalidTarget);
         next_state.position.previous_measurement -= static_cast<float>(shift);
         next_origin = snapshot.feedback.position_rad;
     }
     const double local_target = resolved - next_origin;
     const double local_position = static_cast<double>(snapshot.feedback.position_rad) - next_origin;
     if (!finiteFloat(local_target) || !finiteFloat(local_position))
-        return fail(-ERANGE, snapshot, true);
+        return fail(-ERANGE, snapshot, true, ControlIssue::InvalidTarget);
     const control_motor_position_input input = {
         .continuous_target_rad = static_cast<float>(local_target),
         .continuous_position_rad = static_cast<float>(local_position),
