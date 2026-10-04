@@ -1,4 +1,44 @@
-/* MC02 CAN1: GM6020 steer ID1. CAN3: M3508 wheel ID1.
- * Wiring and calibrated hardware values live in robotics/vehicle/calibration.hpp.
+/* Single module: CAN2 GM6020 ID2, CAN1 M3508 ID2.
+ * Remote UART pin/format/DMA configuration comes from the board DTS.
  */
-/ {};
+#include <zephyr/dt-bindings/clock/stm32h7_clock.h>
+
+/ {
+    aliases {
+        telemetry-uart = &cdc_acm_uart0;
+    };
+};
+
+&zephyr_udc0 {
+    cdc_acm_uart0: cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "VOFA";
+    };
+};
+
+&can1 {
+    status = "okay";
+    /* FDCANSEL and the CCU divider are shared by all three controllers.
+     * Select HSE consistently, including the unused CAN3 instance, so its
+     * boot initialization cannot restore the board's PLL1Q selection.
+     * Only CAN1 configures the common CCU: bypass calibration, divide by 1.
+     */
+    clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
+             <&rcc STM32_SRC_HSE FDCAN_SEL(0)>;
+    clk-divider = <1>;
+    bitrate = <1000000>;
+    /* Explicit nominal timing for this bench's CAN error investigation. */
+    sample-point = <875>;
+};
+&can2 {
+    status = "okay";
+    clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
+             <&rcc STM32_SRC_HSE FDCAN_SEL(0)>;
+    bitrate = <1000000>;
+    sample-point = <875>;
+};
+
+&can3 {
+    clocks = <&rcc STM32_CLOCK(APB1_2, 8U)>,
+             <&rcc STM32_SRC_HSE FDCAN_SEL(0)>;
+};

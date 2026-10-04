@@ -983,13 +983,35 @@ bool CanBus::pumpTarget(std::uint64_t now_ms) {
 }
 
 void CanBus::enterRecovery(int error, FaultReason reason) {
+    // Only the I/O worker enters recovery. Capture outside the spinlock and
+    // before recoverController(): can_start() resets the controller statistics.
+    if (status().state == BusState::Recovering)
+        return;
+    BusRecoverySnapshot recovery{};
+    recovery.occurred_ms = nowMs();
+    recovery.reason = reason;
+    recovery.error = error;
+    recovery.query_error = can_get_state(can_, &recovery.controller_state, &recovery.error_counts);
+#ifdef CONFIG_CAN_STATS
+    recovery.stats_valid = true;
+    recovery.bit0 = can_stats_get_bit0_errors(can_);
+    recovery.bit1 = can_stats_get_bit1_errors(can_);
+    recovery.stuff = can_stats_get_stuff_errors(can_);
+    recovery.crc = can_stats_get_crc_errors(can_);
+    recovery.form = can_stats_get_form_errors(can_);
+    recovery.ack = can_stats_get_ack_errors(can_);
+#endif
     const auto key = k_spin_lock(&state_lock_);
     if (status_.state == BusState::Recovering) {
         k_spin_unlock(&state_lock_, key);
         return;
     }
+    recovery.count = status_.last_recovery.count + 1;
+    recovery.last_tx = status_.last_tx;
+    status_.last_recovery = recovery;
     status_.state = BusState::Recovering;
     status_.last_error = error;
+    recovery_restarted_ = false;
     ++bus_generation_;
     next_recovery_ms_ = nowMs();
     k_spin_unlock(&state_lock_, key);
@@ -1006,7 +1028,7 @@ void CanBus::enterRecovery(int error, FaultReason reason) {
 void CanBus::recoverController(std::uint64_t now_ms) {
     if (now_ms < next_recovery_ms_)
         return;
-    if (controller_started_) {
+    if (!recovery_restarted_ && controller_started_) {
         const int stop_error = can_stop(can_);
         if (stop_error < 0 && stop_error != -EALREADY) {
             const auto key = k_spin_lock(&state_lock_);
@@ -1025,17 +1047,37 @@ void CanBus::recoverController(std::uint64_t now_ms) {
         next_recovery_ms_ = now_ms + options_.recovery_retry_ms;
         return;
     }
-    // A successful stop terminates pending callbacks; starting the controller
-    // resets its bus-off state. can_recover() is invalid while stopped.
-    const int ret = can_start(can_);
-    if (ret < 0 && ret != -EALREADY) {
-        next_recovery_ms_ = now_ms + options_.recovery_retry_ms;
+    if (!recovery_restarted_) {
+        // Restart once, then let the controller complete automatic bus-off
+        // recovery. can_start() alone does not establish a usable bus.
+        const int ret = can_start(can_);
+        if (ret < 0 && ret != -EALREADY) {
+            next_recovery_ms_ = nowMs() + options_.recovery_retry_ms;
+            const auto key = k_spin_lock(&state_lock_);
+            status_.last_error = ret;
+            k_spin_unlock(&state_lock_, key);
+            return;
+        }
+        controller_started_ = true;
+        recovery_restarted_ = true;
+        next_recovery_ms_ = nowMs() + options_.recovery_retry_ms;
+        return;
+    }
+
+    can_state state{};
+    const int state_error = can_get_state(can_, &state, nullptr);
+    if (state_error < 0 || state == CAN_STATE_BUS_OFF || state == CAN_STATE_STOPPED) {
+        // Do not keep restarting a bus-off controller: that prevents its
+        // hardware recovery from progressing and can starve other threads.
+        if (state_error < 0 || state == CAN_STATE_STOPPED)
+            recovery_restarted_ = false;
+        next_recovery_ms_ = nowMs() + options_.recovery_retry_ms;
         const auto key = k_spin_lock(&state_lock_);
-        status_.last_error = ret;
+        status_.last_error = state_error < 0 ? state_error :
+            state == CAN_STATE_BUS_OFF ? -ENETUNREACH : -ENETDOWN;
         k_spin_unlock(&state_lock_, key);
         return;
     }
-    controller_started_ = true;
     for (std::size_t i = 0; i < motor_count_; ++i)
         motors_[i]->requestDisable();
     const auto key = k_spin_lock(&state_lock_);
@@ -1044,6 +1086,14 @@ void CanBus::recoverController(std::uint64_t now_ms) {
 }
 
 std::uint32_t CanBus::nextWaitMs(std::uint64_t now_ms) const {
+    if (status().state == BusState::Recovering) {
+        // Recovery owns the controller. Queued work and expired TX deadlines
+        // cannot be serviced until the next recovery attempt.
+        return next_recovery_ms_ <= now_ms
+                   ? 0
+                   : static_cast<std::uint32_t>(
+                         std::min<std::uint64_t>(next_recovery_ms_ - now_ms, options_.recovery_retry_ms));
+    }
     // Controller state currently has no callback, so keep a 2 ms probe bound.
     // All software deadlines can shorten this wait; queued work never sleeps.
     std::uint64_t wait = 2;
@@ -1070,14 +1120,6 @@ std::uint32_t CanBus::nextWaitMs(std::uint64_t now_ms) const {
     k_spin_unlock(&tx_lock_, tx_key);
     if (completed)
         return 0;
-    if (status().state == BusState::Recovering) {
-        // While recovery waits for cancellation/retry, a past TX deadline is
-        // already handled and must not make the worker spin.
-        return next_recovery_ms_ <= now_ms
-                   ? 0
-                   : static_cast<std::uint32_t>(
-                         std::min<std::uint64_t>(next_recovery_ms_ - now_ms, options_.recovery_retry_ms));
-    }
     for (std::size_t i = 0; i < motor_count_; ++i) {
         const Motor &motor = *motors_[i];
         StagedCommand command{};
@@ -1123,6 +1165,7 @@ std::uint32_t CanBus::nextWaitMs(std::uint64_t now_ms) const {
 }
 
 void CanBus::ioMain() {
+    unsigned immediate_passes = 0;
     for (;;) {
         processTx();
         bool overflowed = false;
@@ -1169,10 +1212,17 @@ void CanBus::ioMain() {
 
         const auto wait_ms = nextWaitMs(nowMs());
         if (wait_ms == 0) {
-            // Another bounded pass, including TX/deadlines, before more RX.
-            k_yield();
+            // k_yield() only gives equal/higher priorities a turn. Bound a
+            // sustained ready-work burst so remote RX and logging can run.
+            if (++immediate_passes >= 8) {
+                immediate_passes = 0;
+                k_sleep(K_TICKS(1));
+            } else {
+                k_yield();
+            }
             continue;
         }
+        immediate_passes = 0;
         (void)k_sem_take(&wake_sem_, K_MSEC(wait_ms));
     }
 }

@@ -37,6 +37,14 @@ public:
     RcControlAdapter() = default;
     explicit RcControlAdapter(Config config) : config_(config) {}
 
+    // Read-only arming diagnostics; use the received frame's time, not wall time.
+    bool controlsCentered() const { return centered(state_.remote); }
+    bool armReady() const { return neutral_ready_; }
+    std::uint64_t neutralHeldMs() const {
+        return neutral_timing_ && state_.remote.stamp.timestamp_ms >= neutral_since_
+            ? state_.remote.stamp.timestamp_ms - neutral_since_ : 0;
+    }
+
     static float normalize(std::int16_t raw) {
         const float value = std::clamp(float(raw) / 660.0f, -1.0f, 1.0f);
         return std::fabs(value) <= .03f ? 0.0f

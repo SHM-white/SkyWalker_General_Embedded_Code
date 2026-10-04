@@ -6,8 +6,8 @@ namespace skywalker::samples::chassis {
 // skip missed periods instead of issuing a burst of near-zero-dt updates.
 class PeriodicDeadline {
 public:
-    PeriodicDeadline() : deadline_(k_uptime_ticks()),
-        period_(k_us_to_ticks_ceil64(robotics::vehicle::chassis_period_us)) {}
+    explicit PeriodicDeadline(core::TimeUs period_us = robotics::vehicle::chassis_period_us)
+        : deadline_(k_uptime_ticks()), period_(k_us_to_ticks_ceil64(period_us)) {}
     void wait() {
         deadline_ += period_;
         const auto now = k_uptime_ticks();

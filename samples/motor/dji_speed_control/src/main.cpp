@@ -22,7 +22,7 @@ constexpr std::int64_t kControlPeriodMs = 5;
 constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 constexpr std::int64_t kRunDurationMs = 300000;
 
-constexpr float kRequestedVelocityRadS = 20.0f;
+constexpr float kRequestedVelocityRadS = 2.0f;
 constexpr float kRequestedVelocityAbsMaxRadS = 50.0f;
 constexpr float kSoftwareCurrentAbsMaxA = 0.8f;
 constexpr float kDeadbandRadS = 0.20f;
@@ -86,14 +86,15 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+    const device *can = DEVICE_DT_GET(DT_NODELABEL(can2));
     if (!device_is_ready(uart) || !device_is_ready(can))
         return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::gm6020({
-        .id = 4,
+        .id = 2,
         .current_limit_a = 3.0f,
         .encoder_zero_ticks = 0,
         .current_mode_confirmed = true,
+        // .gear_ratio = 19.0f,
         .timing = {20, 20, 20, 100},
     })};
     static skywalker::motor::CanBus bus{can};
