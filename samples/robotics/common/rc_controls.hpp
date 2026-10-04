@@ -20,6 +20,7 @@ struct RcControlState {
     robotics::RemoteState remote{};
     bool fresh = false;
     bool run_allowed = false;
+    std::uint64_t start_event_id = 0;
     bool clear_fault = false;
     std::uint32_t clear_event_id = 0;
     robotics::MessageStamp clear_stamp{};
@@ -106,8 +107,11 @@ public:
             } else clear_timing_ = false;
         } else {
             if (left == RcSwitch::Middle && previous_left_ == RcSwitch::Down &&
-                neutral_ready_ && neutral && right == RcSwitch::Down)
+                neutral_ready_ && neutral && right == RcSwitch::Down &&
+                state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
+                ++state_.start_event_id;
                 state_.run_allowed = true;
+            }
             neutral_timing_ = neutral_ready_ = safe_baseline_ = clear_timing_ = false;
             if (left == RcSwitch::Up && !config_.allow_auto) withdraw();
             state_.friction_requested = state_.run_allowed && right != RcSwitch::Down;
