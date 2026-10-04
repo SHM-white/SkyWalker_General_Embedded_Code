@@ -51,7 +51,9 @@ int SwerveKinematics::solve(const ChassisCommand &c, ModuleTargets &out) {
     }
     const float scale = maximum > config_.max_wheel_velocity_m_s ? config_.max_wheel_velocity_m_s / maximum : 1;
     for (unsigned i = 0; i < 4; ++i) {
-        next[i].wheel_velocity_m_s *= scale;
+        // The multiply after normalization can round just above the ceiling.
+        next[i].wheel_velocity_m_s = std::min(next[i].wheel_velocity_m_s * scale,
+                                             config_.max_wheel_velocity_m_s);
         last_angle_rad_[i] = next[i].angle_rad;
     }
     moving_ = moving;

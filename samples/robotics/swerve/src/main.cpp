@@ -10,7 +10,6 @@
 #include "../../common/rc_controls.hpp"
 #include "../../common/sample_diagnostics.hpp"
 #include <zephyr/kernel.h>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
 #include "board_config.hpp"
 LOG_MODULE_REGISTER(swerve_bench, LOG_LEVEL_INF);
@@ -60,37 +59,6 @@ void logCanState(const char *name, const device *dev, const skywalker::motor::Bu
             static_cast<unsigned long long>(fault.last_tx.completed_ms));
     }
 }
-int configureCanTiming(const char *name, const device *dev, std::uint32_t bitrate,
-                       std::uint16_t sample_point) {
-    if (!device_is_ready(dev)) return -ENODEV;
-    std::uint32_t clock_hz = 0;
-    can_timing timing{};
-    int ret = can_get_core_clock(dev, &clock_hz);
-    constexpr std::uint32_t expected_clock_hz = DT_PROP(DT_NODELABEL(clk_hse), clock_frequency);
-    if (ret == 0 && clock_hz != expected_clock_hz) {
-        LOG_ERR("%s shared CAN clock=%u; expected HSE / 1=%u", name, clock_hz, expected_clock_hz);
-        return -EINVAL;
-    }
-    if (ret == 0) ret = can_calc_timing(dev, &timing, bitrate, sample_point);
-    if (ret >= 0) {
-        // Use the full legal phase-segment correction window. At 24 MHz,
-        // 1 Mbit/s and 87.5%, SJW=3 tq (125 ns); the default would be 1 tq.
-        timing.sjw = std::min({timing.phase_seg1, timing.phase_seg2, can_get_timing_max(dev)->sjw});
-        ret = can_set_timing(dev, &timing);
-    }
-    if (ret < 0) {
-        LOG_ERR("%s timing configuration failed: %d", name, ret);
-        return ret;
-    }
-    const auto quanta = 1U + timing.prop_seg + timing.phase_seg1 + timing.phase_seg2;
-    LOG_INF("%s clock=%u bitrate=%u sample_permille=%u prescaler=%u seg1=%u seg2=%u sjw=%u",
-        name, clock_hz, clock_hz / (timing.prescaler * quanta),
-        1000U * (1U + timing.prop_seg + timing.phase_seg1) / quanta,
-        unsigned(timing.prescaler), unsigned(timing.prop_seg + timing.phase_seg1),
-        unsigned(timing.phase_seg2), unsigned(timing.sjw));
-    return 0;
-}
-
 const char *feedbackIssue(const skywalker::motor::MotorSnapshot &v, bool absolute, bool reference) {
     using namespace skywalker::motor;
     auto required = FeedbackVelocity | FeedbackCurrent;
@@ -121,19 +89,19 @@ int main() {
     static motor::CanBus steer_bus(bench::steer_can), drive_bus(bench::drive_can);
     const auto module_config = bench::moduleConfig();
     SwerveModule module(module_config);
+    const auto kinematics_config = bench::kinematicsConfig(module_config);
+    SwerveKinematics kinematics(kinematics_config);
     const float dt_min = std::max({module_config.steer.position.dt_min_s,
         module_config.steer.velocity.regulator.feedback.dt_min_s, module_config.drive.regulator.feedback.dt_min_s});
     const float dt_max = std::min({module_config.steer.position.dt_max_s,
         module_config.steer.velocity.regulator.feedback.dt_max_s, module_config.drive.regulator.feedback.dt_max_s});
     RecoveryGate recovery({100, 100000});
     int ret = bench::hardware_confirmed ? module.validate() : -ENODEV;
+    if (ret == 0) ret = kinematics.validate();
     if (ret == 0 && bench::steer_can == bench::drive_can) ret = -EINVAL;
     if (ret == 0) ret = steer_bus.attach(steer);
     if (ret == 0) ret = drive_bus.attach(drive);
-    if (ret == 0) ret = configureCanTiming("CAN2_6020", bench::steer_can,
-        DT_PROP(DT_NODELABEL(can2), bitrate), DT_PROP(DT_NODELABEL(can2), sample_point));
-    if (ret == 0) ret = configureCanTiming("CAN1_3508", bench::drive_can,
-        DT_PROP(DT_NODELABEL(can1), bitrate), DT_PROP(DT_NODELABEL(can1), sample_point));
+    // Use the board/driver CAN timing, as in dji_speed_control.
     if (ret == 0) ret = steer_bus.start();
     if (ret == 0) ret = drive_bus.start();
     const int topology_error = ret;
@@ -157,6 +125,9 @@ int main() {
     LOG_INF("startup_zero=%d current_mode=%d max_command_speed=%.2f limits=%.2f/%.2f A",
         bench::capture_startup_zero, bench::steer_current_mode, double(bench::test_speed_m_s),
         double(bench::steer_current_limit_a), double(bench::drive_current_limit_a));
+    LOG_INF("speed_limits requested=%.6f effective=%.6f wheel_rad_s=%.3f",
+        double(bench::test_speed_m_s), double(kinematics_config.max_wheel_velocity_m_s),
+        double(module_config.drive.requested_velocity_abs_max_rad_s));
     LOG_INF("fixed_zero_ticks=%u equivalent_radius=%.5f ratio=%.5f", unsigned(bench::steer_zero_ticks),
         double(bench::wheel_radius_m), double(bench::drive_gear_ratio));
     bool requested = false, seeded = false, ready = false, hard_fault = false;
@@ -164,7 +135,6 @@ int main() {
     std::uint64_t steer_reference = 0, drive_reference = 0;
     std::uint64_t next_vofa = 0, next_vofa_warning = 0;
     std::uint32_t loop_count = 0, vofa_queued = 0, vofa_dropped = 0;
-    bool vofa_connected = false;
     std::uint32_t stop_count = 0;
     WaitReason last_stop_reason = WaitReason::None;
     int last_stop_error = 0;
@@ -174,7 +144,6 @@ int main() {
     core::Stamp source{};
     ChassisCommand command{};
     command.source = ControlSource::Remote;
-    SwerveKinematics kinematics(bench::kinematicsConfig());
     float steer_zero_rad = 0;
     bool zero_captured = !bench::capture_startup_zero;
     const auto module_feedback = [&](const motor::MotorSnapshot &sv, const motor::MotorSnapshot &dv) {
@@ -211,10 +180,11 @@ int main() {
         hard_fault = hard_fault || blocked;
         if (had_authority) {
             // Output is revoked before formatting the failing cycle's diagnostics.
-            LOG_WRN("STOP reason=%s operation=%s err=%d blocked=%d ms=%llu dt_us=%llu group_fault=%u/%d",
+            LOG_WRN("STOP reason=%s operation=%s err=%d blocked=%d ms=%llu dt_us=%llu group_fault=%u/%d fault_ms=%llu",
                 waitReasonName(reason), operation, error, blocked,
                 static_cast<unsigned long long>(last_stop_ms), static_cast<unsigned long long>(cycle_us),
-                unsigned(state.last_fault.reason), state.last_fault.error);
+                unsigned(state.last_fault.reason), state.last_fault.error,
+                static_cast<unsigned long long>(state.last_fault.occurred_ms));
             const auto log_motor = [&](const char *name, const motor::MotorSnapshot &v, bool absolute) {
                 const char *issue = feedbackIssue(v, absolute, absolute);
                 LOG_WRN("STOP %s state=%u feedback=%s valid=0x%x stamp_ms=%llu fault=%u/%d speed=%.3f current=%.3f temp=%.1f",
@@ -229,6 +199,12 @@ int main() {
                 double(stopped_output.alignment_error_rad), stopped_output.drive_enabled,
                 double(stopped_output.drive_target_rad_s), double(bench::steer_direction * stopped_output.steer_effort),
                 double(bench::drive_direction * stopped_output.drive_effort));
+            // step() preserves the last successful output on failure; targets
+            // retains the input that caused a module_step error.
+            LOG_WRN("STOP last_module_target speed=%.6f wheel_rad_s=%.6f limit_rad_s=%.6f",
+                double(targets[0].wheel_velocity_m_s),
+                double(targets[0].wheel_velocity_m_s / module_config.wheel_radius_m),
+                double(module_config.drive.requested_velocity_abs_max_rad_s));
             logCanState("STOP CAN2_6020", bench::steer_can, steer_bus.status());
             logCanState("STOP CAN1_3508", bench::drive_can, drive_bus.status());
         }
@@ -376,15 +352,10 @@ int main() {
                 suspend(WaitReason::Transport, steer_error < 0 ? steer_error : drive_error);
             }
         }
-        const bool vofa_due = vofa_error == 0 && now >= next_vofa;
-        if (vofa_due) {
+        if (vofa_error == 0 && now >= next_vofa) {
             next_vofa = now + 10;
-            std::uint32_t dtr = 0;
-            vofa_connected = uart_line_ctrl_get(telemetry_uart, UART_LINE_CTRL_DTR, &dtr) == 0 && dtr != 0;
-        }
-        if (vofa_due && vofa_connected) {
             const bool active = group.active();
-            // DTR gates enqueueing; a slow connected host still cannot block control.
+            // Send without requiring host DTR; queueing never waits for USB.
             // Channel order and units are documented in README.md.
             const float channels[] = {
                 command.vx_m_s, command.vy_m_s,
@@ -413,8 +384,8 @@ int main() {
                 (rc.remote.left_switch != RcSwitch::Down || rc.remote.right_switch != RcSwitch::Down)
                     ? "return_both_down" : !adapter.controlsCentered() ? "center_controls" :
                 adapter.armReady() ? "move_left_to_middle" : "hold_down_500ms";
-            LOG_INF("alive ms=%llu loops=%u vofa_connected=%d vofa_queued=%u vofa_drop=%u can_err=%d/%d",
-                static_cast<unsigned long long>(now), loop_count, vofa_connected, vofa_queued, vofa_dropped,
+            LOG_INF("alive ms=%llu loops=%u vofa_enabled=%d vofa_queued=%u vofa_drop=%u can_err=%d/%d",
+                static_cast<unsigned long long>(now), loop_count, vofa_error == 0, vofa_queued, vofa_dropped,
                 sb.last_error, db.last_error);
             LOG_INF("active=%d pending=%d ready=%d healthy=%d source=%u age=%llu gen=%u reason=%u err=%d can=%u/%u target=%.3f angle=%.3f wheel=%.3f",
                 group.active(), group.status().enable_pending, ready, healthy, command.stamp.sequence,
