@@ -154,7 +154,7 @@ private:
     void ioMain();
     void processRx(const RxEvent &event);
     void processTx();
-    void checkDeadlines(std::uint64_t now_ms);
+    void checkDeadlines();
     void pumpTx(std::uint64_t now_ms);
     bool pumpTarget(std::uint64_t now_ms);
     void enterRecovery(int error, FaultReason reason);

@@ -1,2 +1,2 @@
-/* The DJI bench configuration is declared in src/main.cpp. */
+/* Default: M2006/C610, CAN1, ID 1, 36:1. Configured in src/main.cpp. */
 / {};

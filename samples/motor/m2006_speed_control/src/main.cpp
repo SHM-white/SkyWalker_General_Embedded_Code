@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -166,6 +167,19 @@ int main() {
         ret = bus.commit().error;
         if (ret < 0)
             return stop_with_error("bus.commit", ret);
+#if DT_NODE_HAS_COMPAT(VOFA_UART_NODE, zephyr_cdc_acm_uart)
+        // USB enumeration does not mean a host is consuming telemetry. Keep
+        // controlling the motor, but do not fill VOFA's queue before port open.
+        std::uint32_t dtr = 0;
+        const int line_error = uart_line_ctrl_get(uart, UART_LINE_CTRL_DTR, &dtr);
+        if (line_error < 0 || dtr == 0) {
+            if (line_error < 0 && now >= next_vofa_warning_ms) {
+                LOG_WRN("VOFA DTR query failed: %d; control loop continues", line_error);
+                next_vofa_warning_ms = now + 1000;
+            }
+            continue;
+        }
+#endif
         const auto data = axis.telemetry();
         const auto &feedback = data.motor.feedback;
         const auto &output = data.output;
