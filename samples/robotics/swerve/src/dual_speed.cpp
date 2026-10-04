@@ -77,8 +77,8 @@ void logCanState(const char *name, const device *dev, const skywalker::motor::Bu
     can_state state = CAN_STATE_STOPPED;
     can_bus_err_cnt counts{};
     const int error = can_get_state(dev, &state, &counts);
-    LOG_INF("%s bus=%u hw=%u query_err=%d TEC=%u REC=%u last_err=%d tx_err=%d tx_ms=%llu bit0=%u bit1=%u stuff=%u crc=%u form=%u ack=%u",
-        name, unsigned(bus.state), unsigned(state), error, unsigned(counts.tx_err_cnt),
+    LOG_INF("%s device=%s bus=%u hw=%u query_err=%d TEC=%u REC=%u last_err=%d tx_err=%d tx_ms=%llu bit0=%u bit1=%u stuff=%u crc=%u form=%u ack=%u",
+        name, dev->name, unsigned(bus.state), unsigned(state), error, unsigned(counts.tx_err_cnt),
         unsigned(counts.rx_err_cnt), bus.last_error, bus.last_tx.error,
         static_cast<unsigned long long>(bus.last_tx.completed_ms),
         can_stats_get_bit0_errors(dev), can_stats_get_bit1_errors(dev),
@@ -127,8 +127,8 @@ int main() {
     if (ret == 0) ret = drive_axis.configure();
     if (ret == 0) ret = remote.start();
     if (ret < 0) { LOG_ERR("DUAL_SPEED init failed=%d", ret); return ret; }
-    LOG_INF("DUAL_SPEED: CAN2 GM6020 ID2 POSITION amplitude=%.3f rad; CAN1 M3508 ID2 constant=%.3f output rad/s",
-        double(bench::dual_steer_amplitude_rad), double(bench::dual_drive_rad_s));
+    LOG_INF("DUAL_SPEED: GM6020 ID2 device=%s POSITION amplitude=%.3f rad; M3508 ID2 device=%s constant=%.3f output rad/s",
+        bench::steer_can->name, double(bench::dual_steer_amplitude_rad), bench::drive_can->name, double(bench::dual_drive_rad_s));
     LOG_INF("6020 POSITION reciprocating period_ms=%u; center captured at each enable", unsigned(bench::dual_steer_period_ms));
     LOG_INF("6020 swerve position cascade; 3508 dji_speed_control PI; period=5 ms; temp limit=70 C");
     LOG_INF("Arm: both switches Down + all axes centered 500 ms, then left Middle. Left Down stops. Sticks do not change speed.");
@@ -158,11 +158,11 @@ int main() {
             LOG_ERR("STOP reason=%s err=%d ms=%llu dt_us=%llu group_fault=%u/%d source=%s fault_ms=%llu",
                 reason, error, static_cast<unsigned long long>(now), static_cast<unsigned long long>(dt_us),
                 unsigned(gs.last_fault.reason), gs.last_fault.error,
-                gs.last_fault.source_motor == &steer ? "CAN2/6020" : gs.last_fault.source_motor == &drive ? "CAN1/3508" : "none",
+                gs.last_fault.source_motor == &steer ? "6020" : gs.last_fault.source_motor == &drive ? "3508" : "none",
                 static_cast<unsigned long long>(gs.last_fault.occurred_ms));
             logMotor("STOP 6020", ss); logMotor("STOP 3508", ds);
-            logCanState("STOP CAN2", bench::steer_can, sb);
-            logCanState("STOP CAN1", bench::drive_can, db);
+            logCanState("STOP steer/6020", bench::steer_can, sb);
+            logCanState("STOP drive/3508", bench::drive_can, db);
         };
         if (rc.clear_fault && !engaged) {
             const int error = group.clearFault();
@@ -202,13 +202,13 @@ int main() {
             const char *operation = "6020_update";
             ret = steer_axis.update(st, dt);
             if (ret == 0) { operation = "3508_update"; ret = drive_axis.update(dr, dt); }
-            if (ret == 0) { operation = "CAN2_commit"; ret = steer_bus.commit().error; }
-            if (ret == 0) { operation = "CAN1_commit"; ret = drive_bus.commit().error; }
+            if (ret == 0) { operation = "steer_commit"; ret = steer_bus.commit().error; }
+            if (ret == 0) { operation = "drive_commit"; ret = drive_bus.commit().error; }
             if (ret < 0) stop(operation, ret);
         }
         const motor::BusStatus buses[] = {steer_bus.status(), drive_bus.status()};
         const device *devices[] = {bench::steer_can, bench::drive_can};
-        const char *names[] = {"CAN2", "CAN1"};
+        const char *names[] = {"steer/6020", "drive/3508"};
         for (unsigned i = 0; i < 2; ++i) {
             const auto &fault = buses[i].last_recovery;
             if (fault.count != recovery_seen[i]) {
@@ -222,7 +222,7 @@ int main() {
         }
         if (now >= next_log) {
             next_log = now + 1000;
-            LOG_INF("DUAL active=%d pending=%d ready=%d rc=%d arm_ready=%d centered=%d dt_us=%llu first_ms=%llu/%llu",
+            LOG_INF("DUAL active=%d pending=%d ready=%d rc=%d arm_ready=%d centered=%d dt_us=%llu first_ms_steer_drive=%llu/%llu",
                 group.active(), group.status().enable_pending, group.ready(), rc.fresh,
                 adapter.armReady(), adapter.controlsCentered(), static_cast<unsigned long long>(dt_us),
                 static_cast<unsigned long long>(first_recovery[0].occurred_ms),
@@ -232,8 +232,8 @@ int main() {
                 position.valid && running, position.requested_position_rad, position.position_rad,
                 double(position.effort_command));
             logMotor("6020", steer.snapshot()); logMotor("3508", drive.snapshot());
-            logCanState("CAN2", bench::steer_can, buses[0]);
-            logCanState("CAN1", bench::drive_can, buses[1]);
+            logCanState("steer/6020", bench::steer_can, buses[0]);
+            logCanState("drive/3508", bench::drive_can, buses[1]);
         }
     }
 }
