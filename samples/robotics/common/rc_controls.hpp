@@ -21,7 +21,7 @@ struct RcControlState {
     bool fresh = false;
     bool run_allowed = false;
     std::uint64_t start_event_id = 0;
-    bool clear_fault = false;
+    bool clear_estop = false;
     std::uint32_t clear_event_id = 0;
     robotics::MessageStamp clear_stamp{};
     std::uint32_t shot_event_id = 0;
@@ -52,8 +52,8 @@ public:
             : std::copysign((std::fabs(value) - .03f) / .97f, value);
     }
 
-    // Call when the affected execution group loses authority, not on every
-    // preparation tick. Independent motor groups have their own release gate.
+    // Withdraw only for user stop/emergency or an expired real input/link.
+    // Motor and CAN execution states never withdraw this input intent.
     void withdraw() {
         state_.run_allowed = false;
         state_.friction_requested = state_.continuous_requested = false;
@@ -65,7 +65,7 @@ public:
     const RcControlState &update(const robotics::RemoteState &remote, std::uint64_t now_ms) {
         using robotics::RcSwitch;
         state_.remote = remote;
-        state_.clear_fault = false;
+        state_.clear_estop = false;
         state_.fresh = remote.online && robotics::isFresh(remote.stamp, now_ms, 100) &&
             remote.left_switch != RcSwitch::Unknown && remote.right_switch != RcSwitch::Unknown;
         if (!state_.fresh) {
@@ -101,7 +101,7 @@ public:
                     state_.clear_event_id != std::numeric_limits<std::uint32_t>::max()) {
                     ++state_.clear_event_id;
                     state_.clear_stamp = remote.stamp;
-                    state_.clear_fault = true;
+                    state_.clear_estop = true;
                     safe_baseline_ = neutral_ready_ = neutral_timing_ = clear_timing_ = false;
                 }
             } else clear_timing_ = false;

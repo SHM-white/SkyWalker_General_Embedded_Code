@@ -24,8 +24,9 @@ struct J4310Options {
     float torque_max_nm = 0.0f;
     // 应用允许的最大命令力矩绝对值，单位 N·m，不得超过 TMAX。
     float torque_limit_nm = 0.0f;
-    // 该电机的反馈、命令、恢复和使能超时设置。
-    Timing timing{50, 20, 50, 3000};
+    // 该电机的反馈、命令、协议超时和重试间隔。
+    Timing timing{.feedback_timeout_ms = 50, .command_timeout_ms = 20,
+                  .enable_timeout_ms = 3000, .retry_interval_ms = 100};
 };
 
 struct Config {
@@ -41,8 +42,9 @@ struct Config {
     Limits limits{};
     // 应用允许的最大命令力矩绝对值，单位 N·m，不得超过 TMAX。
     float torque_limit_nm = 0.0f;
-    // 该电机的反馈、命令、恢复和使能超时设置。
-    Timing timing{50, 20, 50, 3000};
+    // 该电机的反馈、命令、协议超时和重试间隔。
+    Timing timing{.feedback_timeout_ms = 50, .command_timeout_ms = 20,
+                  .enable_timeout_ms = 3000, .retry_interval_ms = 100};
 };
 
 Config j4310Mit(const J4310Options &options);

@@ -1,7 +1,9 @@
 // Reciprocating steer / constant-speed drive CAN diagnostic. Original swerve control remains in main.cpp.
 #include <cerrno>
 #include <cmath>
-#include <control/motor_session.hpp>
+#include <control/velocity_motor.hpp>
+#include <control/position_motor.hpp>
+#include <drivers/motor/can_bus.hpp>
 #include <core/clock.hpp>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -53,7 +55,7 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
     skywalker::control::VelocityMotor::Config config{};
     config.loop = makeVelocityLoopConfig();
     config.effort_unit = skywalker::control::EffortUnit::Ampere;
-    config.safety = {1.5f * kRequestedVelocityAbsMaxRadS, 70.0f};
+
     return config;
 }
 
@@ -65,8 +67,8 @@ skywalker::control::PositionMotor::Config makeSteerConfig() {
     config.loop.position.output_max = bench::dual_steer_speed_limit_rad_s;
     config.loop.velocity.requested_velocity_abs_max_rad_s = bench::dual_steer_speed_limit_rad_s;
     config.effort_unit = skywalker::control::EffortUnit::Ampere;
-    config.safety = {75.0f, 70.0f};
-    config.reference = skywalker::control::PositionReference::StartupRelative;
+
+    config.reference = skywalker::control::PositionReference::AbsoluteNearest;
     return config;
 }
 
@@ -80,62 +82,73 @@ int main() {
     static motor::CanBus steer_bus(bench::steer_can), drive_bus(bench::drive_can);
     static control::PositionMotor steer_axis(steer, makeSteerConfig());
     static control::VelocityMotor drive_axis(drive, makeMotorConfig());
-    static const control::MotorSession::Member members[] = {
-        {"steer/6020", &steer, &steer_bus, &steer_axis, control::ReferencePolicy::CaptureOnExplicitStart},
-        {"drive/3508", &drive, &drive_bus, &drive_axis, control::ReferencePolicy::NotRequired},
-    };
-    static control::MotorSession session(members);
     static communication::AsyncUart::DmaBuffers remote_dma __nocache;
     static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, input::receiverConfig());
     int ret = bench::hardware_confirmed && bench::steer_can != bench::drive_can ? 0 : -EINVAL;
+    if (ret == 0) ret = steer_bus.attach(steer);
+    if (ret == 0) ret = drive_bus.attach(drive);
+    if (ret == 0) ret = steer_bus.start();
+    if (ret == 0) ret = drive_bus.start();
+    if (ret == 0) ret = steer_axis.configure();
+    if (ret == 0) ret = drive_axis.configure();
     if (ret == 0) ret = remote.start();
-    if (ret == 0) ret = session.configure();
-    if (ret < 0) { LOG_ERR("DUAL_SPEED init failed=%d", ret); return ret; }
-    LOG_INF("DUAL_SPEED GM6020 ID%u %s POSITION amplitude=%.3f rad; M3508 ID%u %s speed=%.3f rad/s",
-        unsigned(steer_config.id), bench::steer_can->name, double(bench::dual_steer_amplitude_rad),
-        unsigned(drive_config.id), bench::drive_can->name, double(bench::dual_drive_rad_s));
-    LOG_INF("Arm: both switches Down + axes centered 500 ms, then left Middle. Left Down stops.");
-    LOG_INF("Fault acknowledgement: left Down, axes centered, right Up 1000 ms after neutral baseline; then re-arm.");
+    if (ret < 0) return ret;
+    LOG_INF("DUAL_SPEED GM6020 ID%u %s POSITION; M3508 ID%u %s speed=%.3f rad/s",
+        unsigned(steer_config.id), bench::steer_can->name, unsigned(drive_config.id), bench::drive_can->name,
+        double(bench::dual_drive_rad_s));
+    LOG_INF("RC both Down + centered 500ms then left Middle. Motor recovery needs no re-arm.");
     input::RcControlAdapter adapter;
     communication::RemoteReceiver::Snapshot remote_snapshot{};
-    std::uint64_t next_log = 0, target_sequence = 0;
+    bool previous_requested = false, center_valid = false;
+    float center = 0;
+    core::TimeUs started_us = 0, next_log_us = 0;
     auto previous_us = core::monotonicTimeUs();
+    int last_call_error = 0;
     for (;;) {
-        const auto wake_us = previous_us + bench::control_period_us;
-        if (core::monotonicTimeUs() < wake_us) k_sleep(K_TIMEOUT_ABS_US(wake_us));
-        else k_sleep(K_TICKS(1));
+        k_sleep(K_USEC(bench::control_period_us));
         const auto now_us = core::monotonicTimeUs();
+        const float dt = now_us > previous_us ? float(now_us - previous_us) / 1000000 : 0;
         previous_us = now_us;
-        remote.snapshot(remote_snapshot);
+        (void)remote.snapshot(remote_snapshot);
         const auto &rc = adapter.update(remote_snapshot.remote, now_us / 1000);
-        const auto before = session.status();
-        const auto elapsed_ms = before.state == control::SessionState::Running
-            ? (now_us - before.started_us) / 1000 : 0;
+        const bool requested = rc.run_allowed;
+        if (requested && !previous_requested) { started_us = now_us; center_valid = false; }
+        previous_requested = requested;
+        const auto elapsed_ms = requested ? (now_us - started_us) / 1000 : 0;
         const auto phase_ms = elapsed_ms < 500 ? 0 : (elapsed_ms - 500) % bench::dual_steer_period_ms;
         const double phase = 6.28318530718 * double(phase_ms) / double(bench::dual_steer_period_ms);
-        const double targets[] = {
-            elapsed_ms < 500 ? 0.0 : bench::dual_steer_amplitude_rad * std::sin(phase),
-            elapsed_ms < 500 ? 0.0 : double(bench::dual_drive_rad_s),
-        };
-        session.step({
-            .enabled = rc.run_allowed,
-            .start_sequence = rc.start_event_id,
-            .acknowledge_sequence = rc.clear_event_id,
-            .source = {rc.remote.stamp.timestamp_ms * 1000, rc.remote.stamp.sequence, rc.fresh},
-            .target_stamp = {now_us, ++target_sequence, true},
-            .targets = targets,
-        }, now_us);
-        if (now_us >= next_log) {
-            next_log = now_us + 1000000;
-            const auto status = session.status();
+        const float relative_target = elapsed_ms < 500 ? 0 : bench::dual_steer_amplitude_rad * std::sin(phase);
+        const float drive_target = elapsed_ms < 500 ? 0 : bench::dual_drive_rad_s;
+        const auto sv = steer.snapshot();
+        if (requested && !center_valid && sv.feedback_fresh &&
+            (sv.feedback.valid & motor::FeedbackAbsolutePosition) && std::isfinite(sv.feedback.absolute_position_rad)) {
+            center = sv.feedback.absolute_position_rad;
+            center_valid = true;
+        }
+        const int se = requested ? steer.enable() : steer.disable();
+        const int de = requested ? drive.enable() : drive.disable();
+        if (se < 0) last_call_error = se;
+        if (de < 0) last_call_error = de;
+        if (requested) {
+            if (center_valid) {
+                const int error = steer_axis.update(center + relative_target, dt);
+                if (error < 0) last_call_error = error;
+            } else (void)steer_axis.reset();
+            const int error = drive_axis.update(drive_target, dt);
+            if (error < 0) last_call_error = error;
+        }
+        const int sb = steer_bus.commit().error, db = drive_bus.commit().error;
+        if (sb < 0) last_call_error = sb;
+        if (db < 0) last_call_error = db;
+        if (now_us >= next_log_us) {
+            next_log_us = now_us + 1000000;
             const auto position = steer_axis.telemetry();
-            LOG_INF("DUAL state=%s can_start=%d rc=%d arm_ready=%d blocker=%s last_stop=%s stop_event=%llu stop_progress=%u/%u",
-                control::sessionStateName(status.state), status.can_start, rc.fresh, adapter.armReady(),
-                control::sessionCauseName(status.current_blocker), control::sessionCauseName(status.last_stop),
-                static_cast<unsigned long long>(status.stop_event), unsigned(status.stops[0].progress), unsigned(status.stops[1].progress));
-            LOG_INF("6020 target=%.3f actual=%.3f current=%.3f; 3508 speed=%.3f",
-                position.requested_position_rad, position.position_rad, double(position.effort_command),
-                double(drive.snapshot().feedback.velocity_rad_s));
+            const auto velocity = drive_axis.telemetry();
+            LOG_INF("run=%d center=%d elapsed=%llu relative=%.3f 6020 target=%.3f actual=%.3f output=%d wait=%u; 3508 target=%.3f actual=%.3f output=%d wait=%u call=%d",
+                requested, center_valid, static_cast<unsigned long long>(elapsed_ms), double(relative_target),
+                position.requested_position_rad, position.position_rad, position.output_valid && requested,
+                unsigned(position.issue), double(velocity.target_rad_s), double(velocity.motor.feedback.velocity_rad_s),
+                velocity.output_valid && requested, unsigned(velocity.issue), last_call_error);
         }
     }
 }

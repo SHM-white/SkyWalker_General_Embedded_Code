@@ -12,12 +12,7 @@ public:
                                     const robotics::ShooterStatus &status, std::uint64_t now_ms) {
         using namespace robotics;
         ShooterCommand command = frame.decision.command.shooter;
-        const bool lost_friction = previous_.friction.state == RunState::Active &&
-            (status.friction.state != RunState::Active || status.friction.generation != previous_.friction.generation);
-        const bool lost_feed = previous_.feed.state == RunState::Active &&
-            (status.feed.state != RunState::Active || status.feed.generation != previous_.feed.generation);
-        previous_ = status;
-        if (lost_friction || lost_feed || status.jammed) release_required_ = true;
+        if (status.jammed) release_required_ = true;
         if (rc.fresh && rc.remote.right_switch == RcSwitch::Down) release_required_ = false;
         if (!rc.fresh || !rc.run_allowed || !rc.friction_requested || release_required_) {
             consumed_ = rc.shot_event_id;
@@ -50,7 +45,6 @@ public:
         return command;
     }
 private:
-    robotics::ShooterStatus previous_{};
     std::uint32_t consumed_ = 0;
     bool release_required_ = false;
 };

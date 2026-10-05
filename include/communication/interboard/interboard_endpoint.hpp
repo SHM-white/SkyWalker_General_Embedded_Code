@@ -66,11 +66,9 @@ private:
     std::array<std::uint64_t, kMessageCount> next_message_ms_{};
     std::array<std::uint32_t, kMessageCount> wire_sequence_{};
     std::uint64_t peer_boot_ = 0;
-    std::uint32_t peer_generation_ = 0, baseline_sequence_ = 0;
+    std::uint32_t baseline_sequence_ = 0, big_yaw_baseline_sequence_ = 0;
     bool peer_online_ = false, have_baseline_ = false;
-    bool big_yaw_context_valid_ = false, have_big_yaw_baseline_ = false;
-    std::uint64_t big_yaw_peer_boot_ = 0;
-    std::uint32_t big_yaw_peer_generation_ = 0, big_yaw_baseline_sequence_ = 0;
+    bool have_big_yaw_baseline_ = false;
     int error_ = 0;
 };
 }

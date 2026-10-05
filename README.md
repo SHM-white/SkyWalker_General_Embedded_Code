@@ -54,7 +54,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - `AsyncUart`：固定缓冲、异步 UART、溢出代际检测和单线程消费约定。
 - DR16：18 字节帧解码、摇杆死区、拨杆、鼠标/键盘和在线判断。
 - 裁判系统：RM2026 V1.3 profile、CRC8/CRC16、权限和功率快照。
-- 板间协议：固定帧格式、CRC16、序列号、boot_id、resume generation 和四类底盘消息。
+- 板间协议：统一 v4 帧格式、CRC16、生产者序号、boot_id 和原始输入年龄；电机独立自动恢复。
 - 机器人算法：CommandArbiter 同步仲裁；CommandManager 注册来源并后台发布快照；GimbalAxis、SwerveChassis 和应用私有执行器分别完成子系统计算与本地恢复。
 
 ## 构建一个样例

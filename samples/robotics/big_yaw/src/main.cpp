@@ -44,12 +44,12 @@ int main() {
     std::uint64_t next_log = 0;
     BigYawRequest request{};
     RunStatus published{};
-    bool authority_started = false;
+    int commit_error = 0;
     for (;;) {
         const auto now = core::monotonicTimeUs(), ms = now / 1000;
         (void)remote.snapshot(snapshot);
         const auto &rc = adapter.update(snapshot.remote, ms);
-        const auto diagnostic = diagnostics.update(ms, drive.active(),
+        const auto diagnostic = diagnostics.update(ms, rc.run_allowed,
             !rc.fresh || rc.remote.left_switch == RcSwitch::Down);
         if (!diagnostic.input_paused && rc.fresh &&
             (!request.stamp.valid || sequenceAfter(rc.remote.stamp.sequence, request.stamp.sequence))) {
@@ -58,7 +58,6 @@ int main() {
             request.stamp = rc.remote.stamp;
             request.source_sequence = rc.remote.stamp.sequence;
             request.receiver_boot_id = 1;
-            request.resume_generation = axis.status().generation;
             request.permission = {rc.fresh, vehicle::connections_confirmed && rc.run_allowed, rc.remote.stamp};
         }
         if (!rc.run_allowed) {
@@ -66,30 +65,24 @@ int main() {
             request.target_rate_rad_s = 0;
             request.permission.enabled = false;
         }
-        if (!diagnostic.execution_paused || !rc.run_allowed || rc.clear_fault) {
+        if (!diagnostic.execution_paused || !rc.run_allowed || rc.clear_estop) {
             if (started) {
                 BigYawExecutionInputs in{};
                 in.request = request; in.local_boot_id = 1; in.peer_online = true;
-                in.transport_ready = bus.status().state == motor::BusState::Running;
-                in.clear_fault = rc.clear_fault;
+                in.transport_ready = started;
+                in.clear_estop = rc.clear_estop;
                 axis.update(in, now);
-                const int error = bus.commit().error;
-                if (error < 0) axis.suspend(now, WaitReason::Transport, error);
+                commit_error = bus.commit().error;
             } else axis.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
             if (!diagnostic.status_paused) published = axis.status();
         }
-        const auto motor_state = drive.snapshot().state;
-        const bool authority_now = motor_state == motor::MotorState::Active || motor_state == motor::MotorState::Enabling;
-        if (rc.run_allowed && ((authority_started && !authority_now) || axis.status().state == RunState::Blocked))
-            adapter.withdraw();
-        authority_started = rc.run_allowed && authority_now;
         if (ms >= next_log) {
             next_log = ms + 200;
             const auto f = axis.feedback();
-            LOG_INF("run=%u wait=%u gen=%u ready=%d active=%d target=%f actual=%f status_seq=%u fresh=%d error=%d rc=%d",
-                unsigned(published.state), unsigned(published.reason), published.generation, published.ready, f.armed,
+            LOG_INF("requested=%d run=%u wait=%u ready=%d active=%d target=%f actual=%f status_seq=%u fresh=%d error=%d commit=%d rc=%d",
+                published.requested, unsigned(published.state), unsigned(published.reason), published.ready, f.armed,
                 double(request.target_rate_rad_s), double(f.actual_rate_rad_s), published.stamp.sequence,
-                isFresh(published.stamp, ms, 100), published.error, rc.fresh);
+                isFresh(published.stamp, ms, 100), published.error, commit_error, rc.fresh);
         }
         k_sleep(K_MSEC(5));
     }

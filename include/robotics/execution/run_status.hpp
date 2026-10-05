@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <robotics/messages/feedback.hpp>
 namespace skywalker::robotics {
 enum class RunState : std::uint8_t { Disabled, Recovering, Active, Blocked };
@@ -8,7 +9,8 @@ struct RunStatus {
     WaitReason reason = WaitReason::None;
     int error = 0;
     bool ready = false;
-    std::uint32_t generation = 0;
+    bool requested = false;
+    std::size_t member_count = 0, active_count = 0, waiting_count = 0;
     std::uint32_t last_command_sequence = 0;
     // Produced by the execution owner, never refreshed by a reader or sender.
     MessageStamp stamp{};

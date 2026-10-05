@@ -28,9 +28,7 @@ struct AxisCommand {
 class GimbalAxis {
 public:
     struct Status {
-        bool ready_for_enable = false; // Disabled and prepared; false while Active is normal.
         bool feedback_healthy = false;
-        std::uint64_t ready_since_ms = 0; // Last false -> true transition, retained while not ready.
         int error = 0;                    // Current feedback/reference preparation error, not a latched drive fault.
     };
 
@@ -64,13 +62,12 @@ private:
     control::PositionMotor position_;
     GimbalAxisConfig config_;
     Status status_{};
-    double target_angle_rad_ = 0;
+    double target_angle_rad_ = 0, pending_rate_delta_rad_ = 0;
     SafetyAction previous_action_ = SafetyAction::Disable;
     GimbalMode previous_mode_ = GimbalMode::Disabled;
     bool configured_ = false;
     bool reference_seeded_ = false;
     bool initialized_ = false;
-    std::uint64_t generation_ = 0;
 };
 
 } // namespace skywalker::robotics

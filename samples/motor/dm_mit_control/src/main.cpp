@@ -32,13 +32,7 @@ float targetTorqueNm() {
 } // namespace
 
 int main() {
-    const struct device *vofa_uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(vofa_uart)) {
-        LOG_ERR("VOFA UART device not ready");
-        return -ENODEV;
-    }
-
-    // CAN callbacks and the I/O thread retain this session for the firmware lifetime.
+    const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     static skywalker::samples::dm::Session session{DEVICE_DT_GET(DT_NODELABEL(can1)),
                                                    skywalker::motor::dm::j4310Mit({.id = 1,
                                                                                    .master_id = 0x11,
@@ -46,71 +40,37 @@ int main() {
                                                                                    .velocity_max_rad_s = 30.0f,
                                                                                    .torque_max_nm = 10.0f,
                                                                                    .torque_limit_nm = 10.0f,
-                                                                                   .timing = {50, 20, 50, 3000}})};
+                                                                                   .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100}})};
     int ret = skywalker::samples::dm::prepare(session);
-    if (ret < 0) {
-        return ret;
-    }
-    if ((session.motor.info().capabilities & skywalker::motor::CommandTorque) == 0U) {
-        LOG_ERR("MIT torque capability unavailable; check motor control mode");
-        return -ENOTSUP;
-    }
-
-    const float target_torque_nm = targetTorqueNm();
-    if (!std::isfinite(target_torque_nm) || std::fabs(target_torque_nm) > session.descriptor.torque_limit_nm) {
-        LOG_ERR("invalid torque target: %d mNm, limit=%d mNm", static_cast<int>(target_torque_nm * 1000.0f),
-                static_cast<int>(session.descriptor.torque_limit_nm * 1000.0f));
-        return -ERANGE;
-    }
-
-    // The asynchronous UART callback also outlives main on a failure/stop path.
+    if (ret < 0) return ret;
     static Vofa vofa{};
-    vofa_init(&vofa, vofa_uart);
-    ret = skywalker::samples::dm::arm(session);
-    if (ret < 0) {
-        return ret;
-    }
-
-    LOG_INF("MIT torque test started: target=%d mNm duration=%lld ms", static_cast<int>(target_torque_nm * 1000.0f),
-            kRunDurationMs);
-    const std::int64_t started_ms = k_uptime_get();
-    while (k_uptime_get() - started_ms < kRunDurationMs) {
-        skywalker::motor::MotorSnapshot view{};
-        ret = skywalker::samples::dm::readSafeFeedback(session, kVelocityCutoffRadS, kTemperatureCutoffC, view);
-        if (ret < 0) {
-            return skywalker::samples::dm::stopAfterFailure(session, ret);
+    const int vofa_error = vofa_init(&vofa, uart);
+    const auto started_ms = k_uptime_get();
+    std::int64_t next_log_ms = 0;
+    int last_call_error = 0;
+    for (;;) {
+        const auto now = k_uptime_get();
+        const bool requested = now - started_ms < kRunDurationMs;
+        const float target = targetTorqueNm();
+        const int request_error = requested ? session.motor.enable() : session.motor.disable();
+        if (request_error < 0) last_call_error = request_error;
+        if (requested) {
+            const int error = session.motor.setTorque(target);
+            if (error < 0) last_call_error = error;
         }
-
-        ret = session.motor.setTorque(target_torque_nm);
-        if (ret < 0) {
-            return skywalker::samples::dm::stopAfterFailure(session, ret);
+        const int commit_error = session.bus.commit().error;
+        if (commit_error < 0) last_call_error = commit_error;
+        const auto view = session.motor.snapshot();
+        if (vofa_error == 0) {
+            const float channels[6] = {target, view.native_position_rad, view.feedback.velocity_rad_s,
+                view.feedback.torque_nm, view.native_mos_temperature_c, view.native_rotor_temperature_c};
+            (void)vofa_send(&vofa, channels, 6);
         }
-        ret = skywalker::samples::dm::flush(session);
-        if (ret < 0) {
-            return skywalker::samples::dm::stopAfterFailure(session, ret);
+        if (now >= next_log_ms) {
+            next_log_ms = now + 1000;
+            LOG_INF("run=%d requested=%d state=%u target=%.3f fresh=%d call=%d", requested,
+                view.enabled_requested, unsigned(view.state), double(target), view.feedback_fresh, last_call_error);
         }
-
-        const auto &feedback = view.feedback;
-        const float channels[6] = {
-            target_torque_nm,   view.native_position_rad,      feedback.velocity_rad_s,
-            feedback.torque_nm, view.native_mos_temperature_c, view.native_rotor_temperature_c,
-        };
-        vofa_send(&vofa, channels, 6);
         k_sleep(K_MSEC(kControlPeriodMs));
     }
-
-    ret = session.motor.setTorque(0.0f);
-    if (ret < 0) {
-        return skywalker::samples::dm::stopAfterFailure(session, ret);
-    }
-    ret = skywalker::samples::dm::flush(session);
-    if (ret < 0) {
-        return skywalker::samples::dm::stopAfterFailure(session, ret);
-    }
-    ret = skywalker::samples::dm::stop(session);
-    if (ret < 0) {
-        return ret;
-    }
-    LOG_INF("MIT torque test completed and motor disabled");
-    return 0;
 }

@@ -52,19 +52,16 @@ int main() {
             unsigned(transport.kind()), unsigned(bench::role), kInterBoardProtocolVersion);
     ChassisCommand command{};
     RunStatus status{};
-    status.ready = true; status.generation = 1;
+    status.ready = true;
     std::uint64_t next_command = 0, next_log = 0;
     std::uint32_t sequence = 0, status_sequence = 0;
     BigYawRequest big_yaw_request{};
     BigYawFeedback big_yaw_feedback{};
-    big_yaw_feedback.resume_generation = 1;
     for (;;) {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const auto previous = link.snapshot();
         const auto diagnostic = diagnostics.update(now, previous.online, false);
         transport.invalid_protocol = diagnostic.invalid_protocol;
-        if (diagnostic.wheel_generation) ++status.generation;
-        if (diagnostic.big_yaw_generation) ++big_yaw_feedback.resume_generation;
         if (bench::role == BoardRole::GimbalController && !diagnostic.input_paused && now >= next_command) {
             next_command = now + 10;
             command.mode = ChassisMode::BodyVelocity; command.source = ControlSource::Autonomous;
@@ -84,11 +81,14 @@ int main() {
         }
         if (!diagnostic.execution_paused && !diagnostic.status_paused) {
             const bool fresh = isFresh(previous.control.command.stamp, now, 100);
-            const bool context = previous.local_boot_id && previous.control.receiver_boot_id == previous.local_boot_id &&
-                previous.control.resume_generation == status.generation;
+            const bool context = previous.local_boot_id && previous.control.receiver_boot_id == previous.local_boot_id;
             const bool allowed = previous.operator_control_valid && previous.operator_control.run_allowed &&
                 !previous.operator_control.emergency_stop;
-            status.state = previous.online && allowed && fresh && context ? RunState::Active : RunState::Recovering;
+            status.requested = previous.online && allowed && fresh && context;
+            status.member_count = 1;
+            status.active_count = status.requested ? 1 : 0;
+            status.waiting_count = 0;
+            status.state = status.requested ? RunState::Active : RunState::Disabled;
             status.reason = previous.online ? WaitReason::Command : WaitReason::Transport;
             if (status.state == RunState::Active) status.reason = WaitReason::None;
             status.last_command_sequence = previous.control.command.stamp.sequence;
@@ -99,7 +99,6 @@ int main() {
                 forwardedFresh(request.stamp, request.source_age_ms, now, 100) &&
                 forwardedFresh(request.stamp, request.command_age_ms, now, 100) &&
                 request.receiver_boot_id == previous.local_boot_id &&
-                request.resume_generation == big_yaw_feedback.resume_generation &&
                 request.mode == BigYawMode::FollowCenter && request.permission.valid && request.permission.enabled &&
                 forwardedFresh(request.permission.stamp, request.permission_age_ms, now, 300);
             big_yaw_feedback.execution_state = active ? ExecutionState::Active : ExecutionState::Ready;
@@ -113,14 +112,13 @@ int main() {
         if (now >= next_log) {
             next_log = now + 200;
             const auto rx = link.snapshot();
-            LOG_INF("transport=%u error=%d online=%d boot=%llx gen=%u localGen=%u cmd=%u authority=%d inputPause=%d statusPause=%d CRC=%u versionErrors=%u",
+            LOG_INF("transport=%u error=%d online=%d boot=%llx cmd=%u authority=%d inputPause=%d statusPause=%d CRC=%u versionErrors=%u",
                     unsigned(rx.transport), rx.error, rx.online, rx.peer.sender_boot_id,
-                    rx.peer.resume_generation, status.generation, rx.control.command.stamp.sequence,
+                    rx.control.command.stamp.sequence,
                     rx.operator_control_valid, diagnostic.input_paused,
                     diagnostic.execution_paused || diagnostic.status_paused,
                     rx.parser_stats.crc_errors, rx.parser_stats.version_errors);
-            LOG_INF("bigYaw localGen=%u peerGen=%u source=%u age=%u ready=%d valid=%d",
-                    big_yaw_feedback.resume_generation, rx.big_yaw_feedback.resume_generation,
+            LOG_INF("bigYaw source=%u age=%u ready=%d valid=%d",
                     rx.big_yaw_request.source_sequence, rx.big_yaw_request.source_age_ms,
                     rx.big_yaw_feedback.ready, rx.big_yaw_feedback.valid);
         }

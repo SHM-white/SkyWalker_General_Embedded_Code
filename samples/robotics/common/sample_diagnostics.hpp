@@ -4,12 +4,12 @@
 namespace skywalker::samples::control {
 enum class DiagnosticScenario : unsigned {
     None, InputPause, ExecutionPause, StatusPause, HeadPause, VisionPause,
-    PermissionPause, MeasurementPause, WheelGeneration, BigYawGeneration, InvalidProtocol
+    PermissionPause, MeasurementPause, InvalidProtocol
 };
 struct DiagnosticState {
     bool input_paused = false, execution_paused = false, status_paused = false;
     bool head_paused = false, vision_paused = false, permission_paused = false, measurement_paused = false;
-    bool wheel_generation = false, big_yaw_generation = false, invalid_protocol = false;
+    bool invalid_protocol = false;
 };
 #ifdef CONFIG_SAMPLE_DIAGNOSTIC_SCENARIO
 inline constexpr auto diagnostic_scenario = static_cast<DiagnosticScenario>(CONFIG_SAMPLE_DIAGNOSTIC_SCENARIO);
@@ -36,12 +36,6 @@ public:
             if (now_ms < stable_since_ || now_ms - stable_since_ < 3000) return state;
             triggered_ = true;
             triggered_at_ = now_ms;
-            if (scenario_ == DiagnosticScenario::WheelGeneration || scenario_ == DiagnosticScenario::BigYawGeneration) {
-                state.wheel_generation = scenario_ == DiagnosticScenario::WheelGeneration;
-                state.big_yaw_generation = scenario_ == DiagnosticScenario::BigYawGeneration;
-                done_ = true;
-                return state;
-            }
         }
         if (now_ms < triggered_at_ || now_ms - triggered_at_ >= 1500) { done_ = true; return state; }
         switch (scenario_) {

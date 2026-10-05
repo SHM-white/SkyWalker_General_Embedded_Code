@@ -45,6 +45,7 @@ struct Observation {
     core::Stamp head_stamp{};
     core::TimeUs duration_us = 0;
     std::uint32_t overruns = 0;
+    int yaw_commit_error = 0, pitch_commit_error = 0;
 };
 SnapshotCache<Observation> observation;
 K_SEM_DEFINE(telemetry_ready, 0, 1);
@@ -62,19 +63,19 @@ void telemetryTask(void *, void *, void *) {
         const float age_ms = seen.head_stamp.valid && now_ms * 1000 >= seen.head_stamp.time_us
             ? float(now_ms * 1000 - seen.head_stamp.time_us) * 0.001f : -1;
         const float values[] = {a.head_yaw_rad, a.head_pitch_rad, a.yaw_error_rad, a.pitch_error_rad,
-            a.command.yaw_rate_rad_s, a.command.pitch_rate_rad_s, float(a.status.generation),
-            float(seen.execution.generation), float(unsigned(seen.execution.state)),
+            a.command.yaw_rate_rad_s, a.command.pitch_rate_rad_s, float(a.yaw_output_valid),
+            float(seen.execution.active_count), float(unsigned(seen.execution.state)),
             float(unsigned(seen.execution.reason)), float(a.stabilization_valid), age_ms,
             float(seen.duration_us), float(seen.overruns), float(yaw_bus.status().last_error),
             float(pitch_bus.status().last_error)};
         if (ret == 0) (void)vofa_send(&vofa, values, 16);
         if (now_ms >= next_log_ms) {
             next_log_ms = now_ms + 1000;
-            LOG_INF("head_seq=%llu head_age_ms=%d session=%u run=%u wait=%u recovery=%u stable=%d cycle_us=%u overruns=%u",
-                seen.head_stamp.sequence, int(age_ms), a.status.generation, unsigned(seen.execution.state),
-                unsigned(seen.execution.reason), seen.execution.generation,
-                a.stabilization_valid && seen.execution.state == RunState::Active,
-                unsigned(seen.duration_us), seen.overruns);
+            LOG_INF("head_seq=%llu head_age_ms=%d requested=%d run=%u wait=%u active=%zu waiting=%zu stable=%d cycle_us=%u overruns=%u commit=%d/%d",
+                seen.head_stamp.sequence, int(age_ms), seen.execution.requested, unsigned(seen.execution.state),
+                unsigned(seen.execution.reason), seen.execution.active_count, seen.execution.waiting_count,
+                a.stabilization_valid, unsigned(seen.duration_us), seen.overruns,
+                seen.yaw_commit_error, seen.pitch_commit_error);
         }
         k_sleep(K_MSEC(50));
     }
@@ -117,8 +118,9 @@ int main() {
         atomic_set(&execution_paused, exercise.execution_paused);
         atomic_set(&status_paused, exercise.status_paused);
         atomic_set(&head_paused, exercise.head_paused);
-        if (operator_state.clear_fault) atomic_set(&clear_requested, 1);
-        if (atomic_get(&execution_paused) && operator_state.run_allowed && !operator_state.clear_fault) {
+        if (operator_state.clear_estop) atomic_set(&clear_requested, 1);
+        if (atomic_get(&execution_paused) && operator_state.run_allowed && !operator_state.clear_estop &&
+            !board_config::emergencyStopRequested()) {
             k_sleep(K_MSEC(5)); continue;
         }
         const auto now = core::monotonicTimeUs();
@@ -141,8 +143,6 @@ int main() {
         CommandSnapshot frame{};
         (void)commands.snapshot(frame);
         if (!atomic_get(&head_paused)) head_cache = head.snapshot();
-        const bool transport = configured && yaw_bus.status().state == motor::BusState::Running &&
-            (!split || pitch_bus.status().state == motor::BusState::Running);
         InertialGimbalInputs inertial{};
         inertial.head = head_cache;
         inertial.yaw = yaw.snapshot();
@@ -150,33 +150,20 @@ int main() {
         inertial.command = frame.decision.command.gimbal;
         if (!operator_state.run_allowed) inertial.command.mode = GimbalMode::Disabled;
         inertial.source_stamp = sourceStamp(frame, inertial.command.source);
-        inertial.prerequisites_ready = transport && inertial_bench::mounting_configured;
+        inertial.prerequisites_ready = configured && inertial_bench::mounting_configured;
         current.inertial = adapter.update(inertial, now);
         GimbalExecutionInputs request{};
         request.command = current.inertial.command;
         request.source_stamp = current.inertial.source_stamp;
-        request.transport_ready = transport;
+        request.transport_ready = configured;
+        request.yaw_output_valid = current.inertial.yaw_output_valid;
+        request.pitch_output_valid = current.inertial.pitch_output_valid;
         request.emergency_stop = atomic_get(&estop) || board_config::emergencyStopRequested();
-        request.clear_fault = atomic_set(&clear_requested, 0) || board_config::takeEmergencyResetRequest();
-        const auto previous_run = current.execution;
+        request.clear_estop = atomic_set(&clear_requested, 0) || board_config::takeEmergencyResetRequest();
         current.execution = configured ? executor.update(request, now)
             : executor.suspend(now, blocked ? WaitReason::Configuration : WaitReason::Transport, setup_error, blocked);
-        if (yaw_started && pitch_started) {
-            const int y = yaw_bus.commit().error;
-            const int p = split ? pitch_bus.commit().error : 0;
-            if (y < 0 || p < 0)
-                current.execution = executor.suspend(now, WaitReason::Transport, y < 0 ? y : p);
-        }
-        // Executor recovery and IMU reference sessions both withdraw old goals.
-        // Do not reset repeatedly during the motor's Enabling handshake.
-        if (current.execution.generation != previous_run.generation ||
-            (previous_run.state == RunState::Active && current.execution.state != RunState::Active))
-            current.inertial = adapter.suspend(now, WaitReason::Reference, -ESTALE);
-        current.inertial.stabilization_valid = current.inertial.stabilization_valid &&
-            current.execution.state == RunState::Active;
-        if (operator_state.run_allowed && previous_run.state == RunState::Active &&
-            (current.execution.state != RunState::Active || current.execution.generation != previous_run.generation))
-            controls.withdraw();
+        current.yaw_commit_error = yaw_started ? yaw_bus.commit().error : 0;
+        current.pitch_commit_error = split && pitch_started ? pitch_bus.commit().error : 0;
         current.head_stamp = head_cache.sample.orientation.stamp;
         current.duration_us = core::monotonicTimeUs() - now;
         if (!atomic_get(&status_paused)) observation.publish(current);

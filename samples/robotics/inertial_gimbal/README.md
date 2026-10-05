@@ -1,18 +1,18 @@
-# 头部惯性云台实板入口
+# 头部惯性云台持续控制入口
 
-RemoteReceiver → RemoteSource → CommandManager → InertialGimbalAdapter → GimbalExecutor，头部姿态来自真实的 DmImuRs485Source / ImuReceiver。应用线程每 5 ms 执行一次，两条物理 CAN 分别统一提交；默认配置锁定 Pitch，仅验证载体手动旋转时的小 Yaw 补偿。
+`RemoteReceiver → CommandManager → InertialGimbalAdapter → GimbalExecutor`，头部姿态来自真实的DmImuRs485Source / ImuReceiver。应用每5ms推进，物理CAN分别提交。默认锁Pitch，先观察手动转动载体时的小Yaw补偿。
 
-接线为 MC02 CAN1 小 Yaw GM6020、CAN2 Pitch DM4310、UART5 遥控、RS485-2 头部 IMU、USART1 VOFA。电机标定复用 `command_gimbal`，IMU 安装变换和确认开关使用 `include/robotics/vehicle/calibration.hpp`。连接与 IMU 确认默认关闭；TODO 标明尚需测量的变换、方向、限位、参数和质量策略。
-
-构建：
+MC02接线：CAN1小Yaw GM6020、CAN2 Pitch DM4310、UART5遥控、RS485-2头部IMU、USART1 VOFA。电机配置复用command_gimbal，IMU安装变换来自中央calibration。连接和IMU确认默认关闭。
 
 ```sh
 west build -b dm_mc02/stm32h723xx samples/robotics/inertial_gimbal -d build/inertial_gimbal
 west build -b dm_mc02/stm32h723xx samples/robotics/inertial_gimbal -d build/inertial_gimbal_pitch -- -DEXTRA_CONF_FILE=pitch_free.conf
 ```
 
-完成机械云台和 `dual_imu` 标定后，先锁 Pitch、低速手动转大 Yaw 载体，再使用 `pitch_free.conf`。VOFA 仅输出遥测；物理遥控使用统一的安全档解锁、停机与复位手势，诊断构建选择输入/执行/状态/头部暂停场景（1/2/3/4）；暂停读取头部快照保留原始生产时间，让适配器自然判定断流。遥控恢复、参考变化和执行器恢复代次变化都建立新会话，之后的新源输入才可再次使能。头部误差合格且机械执行器 Active 时才向后续回中逻辑报告稳定。
+惯性目标在电机恢复期间保留。适配器逐轴报告yaw_output_valid/pitch_output_valid，执行器分别推进有效轴；Motor和CAN状态不作为全机构准入条件。缺少本轴机械测量或头部数学参考时只等待相应计算。输出恢复后本轴控制历史自动重置，不建立恢复授权代次。
 
-TODO(实板验收)：记录源序号、头部原始年龄、参考代次、两级恢复代次、角误差、实际机械反馈、周期超限、输出撤销延迟及断流恢复。尚未取得实板验收记录。
+VOFA16通道依次为头部Yaw/Pitch、两角误差、两目标角速度、yaw计算输出有效性、实际Active轴数、RunState、WaitReason、稳定标志、头部年龄、控制耗时、周期超限和两CAN错误。日志显示运行意图、活动/等待轴数及提交错误。
 
-操作见 [统一遥控操作](../common/REMOTE_CONTROL.md)。第五通道已启用，左 Up 在本例禁用。`diagnostic.conf` 默认选择输入暂停：稳定 Active 3 秒后暂停 1.5 秒，遥控管理始终继续运行。
+诊断支持1输入、2执行、3状态、4头部暂停。暂停读取仍保留原始测量时间；源过期会停止对应目标，正常设备恢复不要求新启动。头部稳定依据真实计算，不依赖Group全员Active。
+
+先完成机械云台与dual_imu标定，再释放Pitch。物理操作见 [统一遥控操作](../common/REMOTE_CONTROL.md)。尚无本次方向、参考、停止延迟和断电恢复的实板记录。

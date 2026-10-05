@@ -3,7 +3,8 @@
 #include <control/position_motor.hpp>
 #include <control/velocity_motor.hpp>
 #include <drivers/motor/group.hpp>
-#include <robotics/execution/recovery_gate.hpp>
+#include <robotics/execution/run_status.hpp>
+#include <robotics/command/command_source.hpp>
 
 namespace skywalker::robotics {
 struct ShooterHeatState {
@@ -25,7 +26,7 @@ struct ShooterExecutionInputs {
     RunStatus gimbal{};
     bool transport_ready = false, allow_feed = false;
     bool require_permission = true, require_heat = true, require_gimbal = true;
-    bool emergency_stop = false, clear_fault = false;
+    bool emergency_stop = false, clear_estop = false;
 };
 struct ShooterStatus {
     RunStatus friction{}, feed{};
@@ -37,11 +38,12 @@ struct ShooterStatus {
 };
 
 // Single execution-thread owner; topology and physical CAN publication belong
-// to the application. Friction pair and dial have distinct fault/recovery groups.
+// to the application. Friction pair and dial have separate batch groups.
 class ShooterExecutor {
 public:
     struct Config {
-        RecoveryGate::Config recovery{};
+        std::uint32_t command_timeout_ms = 100;
+        core::TimeUs source_timeout_us = 100000;
         std::uint32_t permission_timeout_ms = 300, heat_timeout_ms = 300, gimbal_timeout_ms = 100;
         std::uint32_t friction_dwell_ms = 200, dial_settle_ms = 30, jam_timeout_ms = 1500;
         core::TimeUs max_cycle_us = 20000;
@@ -70,7 +72,6 @@ private:
     control::VelocityMotor left_control_, right_control_;
     control::PositionMotor dial_control_;
     Config config_;
-    RecoveryGate friction_gate_, feed_gate_;
     ShooterStatus status_{};
     core::TimeUs previous_us_ = 0;
     std::uint64_t friction_good_since_ms_ = 0, step_started_ms_ = 0, dial_good_since_ms_ = 0;
@@ -78,6 +79,6 @@ private:
     std::uint32_t heat_sequence_ = 0, production_sequence_ = 0;
     int configuration_error_ = 0;
     bool configured_ = false, begin_attempted_ = false, have_time_ = false;
-    bool emergency_latched_ = false, clear_authorized_ = false, have_dial_reference_ = false;
+    bool have_dial_reference_ = false;
 };
 } // namespace skywalker::robotics

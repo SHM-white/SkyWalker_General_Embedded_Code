@@ -1,10 +1,10 @@
 config SAMPLE_DIAGNOSTIC_SCENARIO
     int "One-shot sample diagnostic scenario (0 disables injection)"
-    range 0 10
+    range 0 8
     default 0
     help
         1 input pause; 2 executor pause; 3 execution status pause; 4 head IMU;
-        5 vision; 6 referee permission; 7 measured power; 8 wheel generation;
-        9 big-Yaw generation; 10 incorrect interboard protocol identifier.
+        5 vision; 6 referee permission; 7 measured power;
+        8 incorrect interboard protocol identifier.
         A supported scenario runs once after 3 seconds of active operation.
         Pauses last 1.5 seconds. Operator stop cancels the exercise.

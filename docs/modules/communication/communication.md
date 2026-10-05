@@ -140,7 +140,7 @@ end     CRC16-CCITT little-endian
 
 - `frame_sequence` 用于拒绝重复和乱序帧。
 - `sender_boot_id` 用于识别远端重启；检测到变化时清空控制、约束和反馈快照。
-- `resume_generation` 表示一次新的本地恢复上下文；它阻止断线前的旧命令跨恢复边界继续生效。
+- v4 不含恢复授权 generation；电机独立恢复。真实板启动身份、原始输入年龄和生产者序号仍保护命令有效期。
 - `peerOnline()` 默认要求最近 200 ms 内收到 heartbeat。
 - `forwardedFresh()` 同时检查消息年龄和转发链路年龄，避免“消息本身新但转发已经过期”。
 
