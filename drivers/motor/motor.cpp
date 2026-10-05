@@ -293,8 +293,7 @@ bool Motor::feedbackFresh(std::uint64_t now_ms) const {
 
 bool Motor::active() const {
     const auto view = snapshot();
-    return view.enabled_requested && view.state == MotorState::Active &&
-           view.output_permitted && view.feedback_fresh;
+    return view.enabled_requested && view.state == MotorState::Active && view.output_permitted && view.feedback_fresh;
 }
 
 bool Motor::busStarted() const {
@@ -363,7 +362,8 @@ int Motor::requestDisable() {
     snapshot_.stop = {StopProgress::Pending, cancellation_generation_, 0};
     if (snapshot_.state != MotorState::Fault)
         snapshot_.state = isFresh(snapshot_.feedback.timestamp_ms, info().timing.feedback_timeout_ms, nowMs())
-                              ? MotorState::Disabled : MotorState::Offline;
+                              ? MotorState::Disabled
+                              : MotorState::Offline;
     next_retry_ms_ = nowMs();
     k_spin_unlock(&lock_, key);
     wakeBus();
@@ -374,8 +374,8 @@ int Motor::disable() {
     return busStarted() ? requestDisable() : -EACCES;
 }
 
-void Motor::markAttemptTxComplete(AttemptKind kind, std::uint64_t generation,
-                                  std::uint64_t completed_ms, std::uint64_t completed_order) {
+void Motor::markAttemptTxComplete(AttemptKind kind, std::uint64_t generation, std::uint64_t completed_ms,
+                                  std::uint64_t completed_order) {
     const auto key = k_spin_lock(&lock_);
     if (snapshot_.enabled_requested && attempt_ == kind && protocol_generation_ == generation) {
         attempt_tx_done_ = true;
@@ -387,8 +387,7 @@ void Motor::markAttemptTxComplete(AttemptKind kind, std::uint64_t generation,
 
 void Motor::markPrepared(std::uint64_t generation) {
     const auto key = k_spin_lock(&lock_);
-    if (snapshot_.enabled_requested && protocol_generation_ == generation &&
-        snapshot_.state != MotorState::Active) {
+    if (snapshot_.enabled_requested && protocol_generation_ == generation && snapshot_.state != MotorState::Active) {
         if (snapshot_.enable_generation == std::numeric_limits<std::uint64_t>::max()) {
             snapshot_.last_fault = {FaultReason::EnableTimeout, -EOVERFLOW, this, nowMs()};
             k_spin_unlock(&lock_, key);
@@ -406,8 +405,8 @@ void Motor::markPrepared(std::uint64_t generation) {
     wakeBus();
 }
 
-void Motor::markStopped(StopProgress progress, int tx_error, std::uint64_t generation,
-                        std::uint64_t completed_ms, std::uint64_t completed_order) {
+void Motor::markStopped(StopProgress progress, int tx_error, std::uint64_t generation, std::uint64_t completed_ms,
+                        std::uint64_t completed_order) {
     const auto key = k_spin_lock(&lock_);
     if (!snapshot_.enabled_requested && snapshot_.stop.request_generation == generation) {
         if (snapshot_.stop.progress != StopProgress::DriveConfirmed || progress != StopProgress::TxComplete)
@@ -432,7 +431,8 @@ void Motor::markFaultCleared(std::uint64_t generation) {
         attempt_ = AttemptKind::None;
         attempt_tx_done_ = false;
         snapshot_.state = isFresh(snapshot_.feedback.timestamp_ms, info().timing.feedback_timeout_ms, nowMs())
-                              ? MotorState::Disabled : MotorState::Offline;
+                              ? MotorState::Disabled
+                              : MotorState::Offline;
         snapshot_.output_permitted = false;
         next_retry_ms_ = nowMs();
     }
@@ -454,7 +454,7 @@ int Motor::bindProducer(const void *producer) {
 }
 
 int Motor::stage(const Command &command, const void *producer, bool computed_effort,
-                  std::uint64_t sampled_enable_generation) {
+                 std::uint64_t sampled_enable_generation) {
     const int check = std::visit([&](const auto &cfg) { return checkCommand(cfg, command); }, config_);
     if (check < 0)
         return check;
@@ -583,7 +583,8 @@ int Motor::reseedPosition(double position) {
             error = -ERANGE;
         else
             state->total_encoder_ticks = static_cast<std::int64_t>(std::llround(ticks));
-    } else {
+    }
+    else {
         auto &dm_state = std::get<DmRuntime>(protocol_state_);
         dm_state.position_offset_rad = position - dm_state.accumulated_native_rad;
     }
@@ -748,26 +749,22 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     snapshot_.native_position_valid = true;
     snapshot_.native_drive_status = static_cast<std::uint32_t>(decoded.raw.status);
     snapshot_.native_drive_status_valid = true;
-    if (decoded.raw.status == dm::DriveStatus::Disabled && stop_tx_done_ &&
-        stop_tx_completed_order_ != 0u && callback_order > stop_tx_completed_order_ &&
-        !snapshot_.enabled_requested)
+    if (decoded.raw.status == dm::DriveStatus::Disabled && stop_tx_done_ && stop_tx_completed_order_ != 0u &&
+        callback_order > stop_tx_completed_order_ && !snapshot_.enabled_requested)
         snapshot_.stop.progress = StopProgress::DriveConfirmed;
-    unexpected_disabled = snapshot_.state == MotorState::Active &&
-                          decoded.raw.status == dm::DriveStatus::Disabled;
+    unexpected_disabled = snapshot_.state == MotorState::Active && decoded.raw.status == dm::DriveStatus::Disabled;
     drive_fault = dm::isFaultStatus(decoded.raw.status);
     clear_generation = protocol_generation_;
-    clear_confirmed = attempt_ == AttemptKind::ClearFault && attempt_tx_done_ &&
-                      attempt_tx_completed_order_ != 0u && callback_order > attempt_tx_completed_order_ &&
-                      decoded.raw.status == dm::DriveStatus::Disabled;
-    const bool enable_confirmed = snapshot_.enabled_requested && attempt_ == AttemptKind::Enable &&
-                                  attempt_tx_done_ && attempt_tx_completed_order_ != 0u &&
-                                  callback_order > attempt_tx_completed_order_ &&
+    clear_confirmed = attempt_ == AttemptKind::ClearFault && attempt_tx_done_ && attempt_tx_completed_order_ != 0u &&
+                      callback_order > attempt_tx_completed_order_ && decoded.raw.status == dm::DriveStatus::Disabled;
+    const bool enable_confirmed = snapshot_.enabled_requested && attempt_ == AttemptKind::Enable && attempt_tx_done_ &&
+                                  attempt_tx_completed_order_ != 0u && callback_order > attempt_tx_completed_order_ &&
                                   decoded.raw.status == dm::DriveStatus::Enabled;
     const auto enable_generation = protocol_generation_;
     if (!snapshot_.enabled_requested && !drive_fault)
         snapshot_.state = MotorState::Disabled;
-    if (decoded.raw.status == dm::DriveStatus::Enabled && !snapshot_.enabled_requested &&
-        !stop_pending_ && nowMs() >= next_retry_ms_) {
+    if (decoded.raw.status == dm::DriveStatus::Enabled && !snapshot_.enabled_requested && !stop_pending_ &&
+        nowMs() >= next_retry_ms_) {
         stop_pending_ = true;
         retry_disable = true;
     }
@@ -795,8 +792,9 @@ void Motor::raiseFault(const FaultInfo &fault) {
     const auto key = k_spin_lock(&lock_);
     const bool communication = record.reason == FaultReason::FeedbackExpired ||
                                record.reason == FaultReason::TransportError || record.reason == FaultReason::RxOverflow;
-    const auto next_state = record.reason == FaultReason::DriveFault ? MotorState::Fault :
-                            communication ? MotorState::Offline : MotorState::Disabled;
+    const auto next_state = record.reason == FaultReason::DriveFault ? MotorState::Fault
+                            : communication                          ? MotorState::Offline
+                                                                     : MotorState::Disabled;
     const bool changed = snapshot_.state != next_state;
     snapshot_.last_fault = record;
     snapshot_.output_permitted = false;

@@ -19,12 +19,17 @@ constexpr std::uint32_t status_timeout_ms = 100;
 enum class Fault : std::uint8_t { None, InputPaused, GimbalStopped, ChassisCycle, GimbalReference };
 
 Fault faultAt(std::uint64_t now_ms) {
-    if (!IS_ENABLED(CONFIG_EXECUTION_SKELETON_AUTORUN)) return Fault::None;
+    if (!IS_ENABLED(CONFIG_EXECUTION_SKELETON_AUTORUN))
+        return Fault::None;
     const auto phase_ms = now_ms % 20000;
-    if (phase_ms >= 3000 && phase_ms < 4500) return Fault::InputPaused;
-    if (phase_ms >= 7000 && phase_ms < 8500) return Fault::GimbalStopped;
-    if (phase_ms >= 11000 && phase_ms < 11150) return Fault::ChassisCycle;
-    if (phase_ms >= 14000 && phase_ms < 15000) return Fault::GimbalReference;
+    if (phase_ms >= 3000 && phase_ms < 4500)
+        return Fault::InputPaused;
+    if (phase_ms >= 7000 && phase_ms < 8500)
+        return Fault::GimbalStopped;
+    if (phase_ms >= 11000 && phase_ms < 11150)
+        return Fault::ChassisCycle;
+    if (phase_ms >= 14000 && phase_ms < 15000)
+        return Fault::GimbalReference;
     return Fault::None;
 }
 
@@ -32,11 +37,16 @@ Fault faultAt(std::uint64_t now_ms) {
 // EAGAIN, preserving the last input stamp while arbitration continues running.
 class PausableOperator final : public ICommandSource {
 public:
-    SourceRole role() const override { return SourceRole::Operator; }
-    int start() override { return 0; }
+    SourceRole role() const override {
+        return SourceRole::Operator;
+    }
+    int start() override {
+        return 0;
+    }
     int sample(SourceSample &out) override {
         const auto now_ms = core::monotonicTimeUs() / 1000;
-        if (faultAt(now_ms) == Fault::InputPaused) return -EAGAIN;
+        if (faultAt(now_ms) == Fault::InputPaused)
+            return -EAGAIN;
         RemoteState remote{};
         remote.online = true;
         remote.left_switch = RcSwitch::Middle;
@@ -49,6 +59,7 @@ public:
         out.value = remote;
         return 0;
     }
+
 private:
     std::uint32_t sequence_ = 0;
 };
@@ -81,7 +92,8 @@ struct Observation {
 // Consumers retain the latest target independently of current execution ability.
 class SimulatedExecutor {
 public:
-    explicit SimulatedExecutor(bool is_gimbal) : is_gimbal_(is_gimbal) {}
+    explicit SimulatedExecutor(bool is_gimbal) : is_gimbal_(is_gimbal) {
+    }
 
     bool paused(Fault fault) const {
         return is_gimbal_ ? fault == Fault::GimbalStopped : fault == Fault::ChassisCycle;
@@ -91,18 +103,19 @@ public:
         ++observation_.cycles;
         observation_.last_cycle_ms = have_cycle_ ? static_cast<std::uint32_t>(now_ms - previous_cycle_ms_) : 0;
         const bool cycle_valid = !have_cycle_ ||
-            (now_ms >= previous_cycle_ms_ && now_ms - previous_cycle_ms_ <= maximum_cycle_ms);
+                                 (now_ms >= previous_cycle_ms_ && now_ms - previous_cycle_ms_ <= maximum_cycle_ms);
         previous_cycle_ms_ = now_ms;
         have_cycle_ = true;
-        if (!cycle_valid) ++observation_.cycle_overruns;
+        if (!cycle_valid)
+            ++observation_.cycle_overruns;
 
         CommandSnapshot frame{};
         const int ret = manager.snapshot(frame);
         if (ret == 0) {
             const auto &command = frame.decision.command;
             mode_requested_ = frame.decision.error == 0 &&
-                (is_gimbal_ ? command.gimbal.mode == GimbalMode::Rate
-                            : command.chassis.mode == ChassisMode::BodyVelocity);
+                              (is_gimbal_ ? command.gimbal.mode == GimbalMode::Rate
+                                          : command.chassis.mode == ChassisMode::BodyVelocity);
             observation_.command = is_gimbal_ ? command.gimbal.stamp : command.chassis.stamp;
             observation_.source = sourceStamp(frame, is_gimbal_ ? command.gimbal.source : command.chassis.source);
             observation_.target_a = is_gimbal_ ? command.gimbal.yaw_rate_rad_s : command.chassis.vx_m_s;
@@ -111,17 +124,19 @@ public:
         }
         auto &status = observation_.status;
         status.requested = mode_requested_ && isFresh(observation_.command, now_ms, 100) &&
-            core::fresh(observation_.source, now_ms * 1000, 100000);
+                           core::fresh(observation_.source, now_ms * 1000, 100000);
         status.member_count = is_gimbal_ ? 2 : 3;
         const bool reference_valid = !is_gimbal_ || faultAt(now_ms) != Fault::GimbalReference;
         status.active_count = status.requested && cycle_valid && reference_valid ? status.member_count : 0;
         status.waiting_count = status.requested ? status.member_count - status.active_count : 0;
         status.ready = status.active_count == status.member_count;
-        status.state = !status.requested ? RunState::Disabled
-                     : status.active_count ? RunState::Active : RunState::Recovering;
-        status.reason = !status.requested ? WaitReason::Command
-                      : !reference_valid ? WaitReason::Reference
-                      : !cycle_valid ? WaitReason::Cycle : WaitReason::None;
+        status.state = !status.requested     ? RunState::Disabled
+                       : status.active_count ? RunState::Active
+                                             : RunState::Recovering;
+        status.reason = !status.requested  ? WaitReason::Command
+                        : !reference_valid ? WaitReason::Reference
+                        : !cycle_valid     ? WaitReason::Cycle
+                                           : WaitReason::None;
         status.error = !status.requested ? 0 : !reference_valid ? -ESTALE : !cycle_valid ? -ETIMEDOUT : 0;
         if (!status.requested)
             observation_.target_a = observation_.target_b = observation_.target_c = 0;
@@ -130,7 +145,9 @@ public:
         (void)cache_.publish(observation_);
     }
 
-    int snapshot(Observation &out) const { return cache_.snapshot(out); }
+    int snapshot(Observation &out) const {
+        return cache_.snapshot(out);
+    }
 
 private:
     const bool is_gimbal_;
@@ -150,7 +167,8 @@ void execute(void *self, void *, void *) {
     auto &executor = *static_cast<SimulatedExecutor *>(self);
     for (;;) {
         const auto now_ms = core::monotonicTimeUs() / 1000;
-        if (!executor.paused(faultAt(now_ms))) executor.update(now_ms);
+        if (!executor.paused(faultAt(now_ms)))
+            executor.update(now_ms);
         k_sleep(K_MSEC(execution_period_ms));
     }
 }
@@ -161,14 +179,15 @@ std::uint64_t age(std::uint64_t stamp_ms, bool valid, std::uint64_t now_ms) {
 
 void emit(const char *name, const SimulatedExecutor &executor, std::uint64_t now_ms) {
     Observation observation{};
-    if (executor.snapshot(observation) < 0) return;
+    if (executor.snapshot(observation) < 0)
+        return;
     const auto &status = observation.status;
     const bool status_fresh = isFresh(status.stamp, now_ms, status_timeout_ms);
     LOG_INF("%s requested=%d state=%u active=%zu waiting=%zu reason=%u err=%d status_seq=%u status_age=%llu valid=%u "
             "command_seq=%u command_age=%llu source_seq=%llu source_age=%llu target=(%.3f,%.3f,%.3f) "
             "cycle=%u overruns=%u cycles=%u",
-            name, status.requested, unsigned(status.state), status.active_count, status.waiting_count, unsigned(status.reason),
-            status.error, status.stamp.sequence,
+            name, status.requested, unsigned(status.state), status.active_count, status.waiting_count,
+            unsigned(status.reason), status.error, status.stamp.sequence,
             static_cast<unsigned long long>(age(status.stamp.timestamp_ms, status.stamp.valid, now_ms)),
             unsigned(status_fresh), observation.command.sequence,
             static_cast<unsigned long long>(age(observation.command.timestamp_ms, observation.command.valid, now_ms)),
@@ -182,15 +201,16 @@ void emit(const char *name, const SimulatedExecutor &executor, std::uint64_t now
 
 int main() {
     int ret = manager.registerSource(operator_source);
-    if (ret == 0) ret = manager.start();
+    if (ret == 0)
+        ret = manager.start();
     if (ret < 0) {
         LOG_ERR("command service start: %d", ret);
         return ret;
     }
-    k_thread_create(&chassis_thread, chassis_stack, K_THREAD_STACK_SIZEOF(chassis_stack), execute,
-                    &chassis, nullptr, nullptr, 4, 0, K_NO_WAIT);
-    k_thread_create(&gimbal_thread, gimbal_stack, K_THREAD_STACK_SIZEOF(gimbal_stack), execute,
-                    &gimbal, nullptr, nullptr, 4, 0, K_NO_WAIT);
+    k_thread_create(&chassis_thread, chassis_stack, K_THREAD_STACK_SIZEOF(chassis_stack), execute, &chassis, nullptr,
+                    nullptr, 4, 0, K_NO_WAIT);
+    k_thread_create(&gimbal_thread, gimbal_stack, K_THREAD_STACK_SIZEOF(gimbal_stack), execute, &gimbal, nullptr,
+                    nullptr, 4, 0, K_NO_WAIT);
     LOG_INF("Real command service, independent chassis/gimbal consumers, simulated targets only; autorun=%u",
             unsigned(IS_ENABLED(CONFIG_EXECUTION_SKELETON_AUTORUN)));
     Fault last_fault = Fault::None;

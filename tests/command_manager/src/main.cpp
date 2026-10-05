@@ -11,10 +11,9 @@ namespace {
 using namespace skywalker;
 using namespace skywalker::robotics;
 
-void near(float actual, float expected)
-{
-    zassert_within(actual, expected, 1.0e-6f, "actual %f, expected %f",
-                   static_cast<double>(actual), static_cast<double>(expected));
+void near(float actual, float expected) {
+    zassert_within(actual, expected, 1.0e-6f, "actual %f, expected %f", static_cast<double>(actual),
+                   static_cast<double>(expected));
 }
 
 struct Scenario {
@@ -23,8 +22,7 @@ struct Scenario {
     CommandDecision out{};
     core::TimeUs now = 1000000;
 
-    void refresh()
-    {
+    void refresh() {
         input.remote.stamp = {now / 1000, 1, true};
         const OutputPermission permit{true, true, {now / 1000, 1, true}};
         input.referee.robot.chassis_output = permit;
@@ -32,22 +30,18 @@ struct Scenario {
         input.referee.robot.shooter_output = permit;
     }
 
-    void manual()
-    {
+    void manual() {
         input.remote.online = true;
         input.remote.left_switch = RcSwitch::Middle;
         input.remote.right_switch = RcSwitch::Middle;
         refresh();
     }
 
-    void vision(std::uint64_t sequence)
-    {
-        input.vision = {{true, true, {1, 1}, {0.25f, 0.1f, 1}, {-0.2f, 0, 0}},
-                        {now, sequence, true}};
+    void vision(std::uint64_t sequence) {
+        input.vision = {{true, true, {1, 1}, {0.25f, 0.1f, 1}, {-0.2f, 0, 0}}, {now, sequence, true}};
     }
 
-    void step()
-    {
+    void step() {
         input.now_us = now;
         out = manager.update(input);
         zassert_ok(out.error);
@@ -55,8 +49,7 @@ struct Scenario {
         zassert_true(out.command.stamp.valid);
     }
 
-    void establishVision()
-    {
+    void establishVision() {
         manual();
         input.remote.left_switch = RcSwitch::Up;
         vision(1);
@@ -71,8 +64,7 @@ struct Scenario {
     }
 };
 
-void disabled(const CommandDecision &out)
-{
+void disabled(const CommandDecision &out) {
     zassert_equal(out.command.chassis.mode, ChassisMode::Disabled);
     zassert_equal(out.command.gimbal.mode, GimbalMode::Disabled);
     zassert_equal(out.command.shooter.mode, ShooterMode::Disabled);
@@ -83,8 +75,7 @@ void disabled(const CommandDecision &out)
 }
 }
 
-ZTEST(command_manager, test_manual_mapper_analytic_values)
-{
+ZTEST(command_manager, test_manual_mapper_analytic_values) {
     ManualCommandMapper mapper(ManualCommandMapper::Config{});
     Scenario s;
     s.manual();
@@ -128,8 +119,7 @@ ZTEST(command_manager, test_manual_mapper_analytic_values)
     near(intent.chassis_vy_norm, 0);
 }
 
-ZTEST(command_manager, test_mapper_invalid_and_offline_inputs)
-{
+ZTEST(command_manager, test_mapper_invalid_and_offline_inputs) {
     std::array<ManualCommandMapper::Config, 3> invalid{};
     invalid[0].channel_range = 0;
     invalid[1].analog_deadband = 1;
@@ -153,8 +143,7 @@ ZTEST(command_manager, test_mapper_invalid_and_offline_inputs)
     near(output.chassis_vx_norm, 0);
 }
 
-ZTEST(command_manager, test_manual_scaling_and_publication_stamps)
-{
+ZTEST(command_manager, test_manual_scaling_and_publication_stamps) {
     Scenario s;
     s.manual();
     s.input.remote.analog = {660, -660, 660, 660, -660};
@@ -167,10 +156,10 @@ ZTEST(command_manager, test_manual_scaling_and_publication_stamps)
     near(s.out.command.gimbal.pitch_rate_rad_s, -2);
     zassert_equal(s.out.command.shooter.mode, ShooterMode::Disabled);
     const auto stamp = s.out.command.stamp;
-    const std::array<MessageStamp, 7> stamps{
-        s.out.command.chassis.stamp, s.out.command.gimbal.stamp, s.out.command.shooter.stamp,
-        s.out.requested.stamp, s.out.requested.chassis.stamp, s.out.requested.gimbal.stamp,
-        s.out.requested.shooter.stamp};
+    const std::array<MessageStamp, 7> stamps{s.out.command.chassis.stamp,   s.out.command.gimbal.stamp,
+                                             s.out.command.shooter.stamp,   s.out.requested.stamp,
+                                             s.out.requested.chassis.stamp, s.out.requested.gimbal.stamp,
+                                             s.out.requested.shooter.stamp};
     for (const auto &part : stamps) {
         zassert_true(part.valid);
         zassert_equal(part.sequence, stamp.sequence);
@@ -180,8 +169,7 @@ ZTEST(command_manager, test_manual_scaling_and_publication_stamps)
     zassert_equal(s.out.command.stamp.sequence, stamp.sequence + 1);
 }
 
-ZTEST(command_manager, test_operator_safety_and_timeout_boundaries)
-{
+ZTEST(command_manager, test_operator_safety_and_timeout_boundaries) {
     Scenario s;
     s.step();
     disabled(s.out);
@@ -221,8 +209,7 @@ ZTEST(command_manager, test_operator_safety_and_timeout_boundaries)
     zassert_true(result.reasons() & AutoUnavailable);
 }
 
-ZTEST(command_manager, test_permission_boundaries_and_individual_veto)
-{
+ZTEST(command_manager, test_permission_boundaries_and_individual_veto) {
     Scenario s;
     s.manual();
     s.input.referee.robot.chassis_output.stamp.timestamp_ms = s.now / 1000 - 300;
@@ -248,8 +235,7 @@ ZTEST(command_manager, test_permission_boundaries_and_individual_veto)
     zassert_true(s.out.chassis_reasons & PermissionStale);
 }
 
-ZTEST(command_manager, test_vision_new_frame_and_value_limits)
-{
+ZTEST(command_manager, test_vision_new_frame_and_value_limits) {
     Scenario s;
     s.establishVision();
     s.input.vision.value.yaw = {4.0f, 100.0f, 100.0f};
@@ -271,8 +257,7 @@ ZTEST(command_manager, test_vision_new_frame_and_value_limits)
     zassert_true(s.out.shooter_reasons & ShooterNotArmed);
 }
 
-ZTEST(command_manager, test_vision_invalid_values_reference_and_time)
-{
+ZTEST(command_manager, test_vision_invalid_values_reference_and_time) {
     Scenario s;
     s.establishVision();
     const auto good = s.input.vision;
@@ -312,8 +297,7 @@ ZTEST(command_manager, test_vision_invalid_values_reference_and_time)
     expect_hold(VisionStale);
 }
 
-ZTEST(command_manager, test_invalid_config_clock_regression_and_reset)
-{
+ZTEST(command_manager, test_invalid_config_clock_regression_and_reset) {
     std::array<CommandArbiter::Config, 6> configs{};
     configs[0].max_chassis_vx_m_s = -1;
     configs[1].max_vision_yaw_acceleration_rad_s2 = 0;
@@ -353,8 +337,7 @@ ZTEST(command_manager, test_invalid_config_clock_regression_and_reset)
     zassert_equal(s.out.command.gimbal.mode, GimbalMode::AbsoluteAngle);
 }
 
-ZTEST(command_manager, test_complete_arbitration_scenario)
-{
+ZTEST(command_manager, test_complete_arbitration_scenario) {
     Scenario s;
     s.step();
     zassert_equal(s.out.command.chassis.mode, ChassisMode::Disabled);
@@ -446,8 +429,7 @@ ZTEST(command_manager, test_complete_arbitration_scenario)
     zassert_true(s.out.reasons() & ClockRegression);
 }
 
-ZTEST(command_manager, test_algorithm_timings)
-{
+ZTEST(command_manager, test_algorithm_timings) {
     Scenario manual;
     manual.manual();
     manual.input.remote.analog.left_y = 330;
@@ -455,9 +437,8 @@ ZTEST(command_manager, test_algorithm_timings)
     ManualCommandMapper mapper(ManualCommandMapper::Config{});
     OperatorIntent intent{};
     int error = 0;
-    skywalker::test::benchmark("command.mapper", 2048, [&](std::uint32_t) {
-        error |= mapper.map(manual.input.remote, intent);
-    });
+    skywalker::test::benchmark("command.mapper", 2048,
+                               [&](std::uint32_t) { error |= mapper.map(manual.input.remote, intent); });
     zassert_ok(error);
     near(intent.chassis_vx_norm, 0.47f / 0.97f);
     skywalker::test::benchmark("command.arbiter.manual", 2048, [&](std::uint32_t) {

@@ -65,7 +65,8 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     out = n;
     return 0;
 }
-CommandArbiter::CommandArbiter(const Config &config) : config_(config), config_error_(validateConfig()) {}
+CommandArbiter::CommandArbiter(const Config &config) : config_(config), config_error_(validateConfig()) {
+}
 void CommandArbiter::reset() {
     sequence_ = 0;
     previous_mode_ = OperatorMode::Safe;
@@ -246,7 +247,8 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         const bool fire = i.mode == OperatorMode::Manual || manual_override_
                               ? i.fire_requested
                               : visual_control && in.vision.value.fire_requested &&
-                                (config_.mapper.input_profile != RemoteInputProfile::PhysicalRemote || i.fire_requested);
+                                    (config_.mapper.input_profile != RemoteInputProfile::PhysicalRemote ||
+                                     i.fire_requested);
         if (fire) {
             s.mode = ShooterMode::FireContinuous;
             s.source = visual_control ? ControlSource::Vision : i.source;
@@ -255,9 +257,15 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     }
     n.command = n.requested;
     const auto &robot = in.referee.robot;
-    const auto cr = config_.require_referee_for_motion ? permissionReason(robot.chassis_output, ms, config_.permission_timeout_ms) : 0u;
-    const auto gr = config_.require_referee_for_motion ? permissionReason(robot.gimbal_output, ms, config_.permission_timeout_ms) : 0u;
-    const auto sr = config_.require_referee_for_motion ? permissionReason(robot.shooter_output, ms, config_.permission_timeout_ms) : 0u;
+    const auto cr = config_.require_referee_for_motion
+                        ? permissionReason(robot.chassis_output, ms, config_.permission_timeout_ms)
+                        : 0u;
+    const auto gr = config_.require_referee_for_motion
+                        ? permissionReason(robot.gimbal_output, ms, config_.permission_timeout_ms)
+                        : 0u;
+    const auto sr = config_.require_referee_for_motion
+                        ? permissionReason(robot.shooter_output, ms, config_.permission_timeout_ms)
+                        : 0u;
     n.chassis_reasons |= cr;
     n.gimbal_reasons |= gr;
     n.shooter_reasons |= sr;

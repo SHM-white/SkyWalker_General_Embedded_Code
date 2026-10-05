@@ -68,9 +68,8 @@ void Telemetry::emit(const robotics::CommandSnapshot &f) {
             age(f.observed.remote.stamp, now), va, age(r.gimbal_output.stamp, now), age(r.chassis_output.stamp, now),
             age(r.shooter_output.stamp, now), unsigned(f.remote.state), unsigned(f.vision.state), f.remote.error,
             f.vision.error, f.permission.error, f.remote.dropped, f.vision.dropped,
-            f.permission.dropped_available ? static_cast<long long>(f.permission.dropped) : -1LL,
-            f.remote.sample_error, f.vision.sample_error, f.permission.sample_error,
-            vofa_rejected_, last_vofa_error_);
+            f.permission.dropped_available ? static_cast<long long>(f.permission.dropped) : -1LL, f.remote.sample_error,
+            f.vision.sample_error, f.permission.sample_error, vofa_rejected_, last_vofa_error_);
         if (d.selected_vision.stamp.valid) {
             const auto &v = d.selected_vision.value;
             LOG_INF("vision_seq=%llu reference=%u/%u acceleration=%.2f/%.2f",

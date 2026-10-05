@@ -94,7 +94,9 @@ public:
     // different buses. Success acknowledges publication, not CAN completion.
     [[nodiscard]] CommitResult commit();
     BusStatus status() const;
-    const device *busDevice() const { return can_; }
+    const device *busDevice() const {
+        return can_;
+    }
 
 private:
     friend class Motor;

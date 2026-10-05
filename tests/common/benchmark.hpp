@@ -12,16 +12,13 @@ extern "C" std::uint64_t skywalker_test_monotonic_ns(void);
 namespace skywalker::test {
 // Make inline-algorithm inputs unknown to the optimizer and retain each output.
 // This is a compiler barrier: it emits no clock, logging, or assertion calls.
-template <class T> void doNotOptimize(T &value)
-{
+template <class T> void doNotOptimize(T &value) {
     asm volatile("" : "+m"(value) : : "memory");
 }
 
 // The callable must retain its output and must not print or assert while timed.
 // min/max describe batch means, not the shortest/longest individual invocation.
-template <class Operation>
-void benchmark(const char *name, std::uint32_t iterations, Operation operation)
-{
+template <class Operation> void benchmark(const char *name, std::uint32_t iterations, Operation operation) {
     constexpr std::uint32_t warmup = 64, batches = 16;
     zassert_true(iterations >= batches, "benchmark needs at least 16 operations");
 #if !defined(CONFIG_BOARD_NATIVE_SIM)
@@ -48,8 +45,7 @@ void benchmark(const char *name, std::uint32_t iterations, Operation operation)
         asm volatile("" ::: "memory");
 #if defined(CONFIG_BOARD_NATIVE_SIM)
         const auto end = skywalker_test_monotonic_ns();
-        zassert_true(start != UINT64_MAX && end != UINT64_MAX && end >= start,
-                     "host monotonic clock failed");
+        zassert_true(start != UINT64_MAX && end != UINT64_MAX && end >= start, "host monotonic clock failed");
         const auto elapsed_ns = end - start;
 #else
         auto end = timing_counter_get();
@@ -68,10 +64,10 @@ void benchmark(const char *name, std::uint32_t iterations, Operation operation)
     timing_stop();
 #endif
     zassert_true(total_ns > 0, "timing clock cannot resolve this workload");
-    TC_PRINT("BENCH %s: iterations=%u total_ns=%llu avg_ns=%llu batch_min_ns=%llu batch_max_ns=%llu clock=%s\n",
-             name, static_cast<unsigned>(iterations), static_cast<unsigned long long>(total_ns),
-             static_cast<unsigned long long>(total_ns / iterations),
-             static_cast<unsigned long long>(minimum_ns), static_cast<unsigned long long>(maximum_ns),
+    TC_PRINT("BENCH %s: iterations=%u total_ns=%llu avg_ns=%llu batch_min_ns=%llu batch_max_ns=%llu clock=%s\n", name,
+             static_cast<unsigned>(iterations), static_cast<unsigned long long>(total_ns),
+             static_cast<unsigned long long>(total_ns / iterations), static_cast<unsigned long long>(minimum_ns),
+             static_cast<unsigned long long>(maximum_ns),
 #if defined(CONFIG_BOARD_NATIVE_SIM)
              "host_monotonic"
 #else

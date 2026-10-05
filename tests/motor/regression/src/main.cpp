@@ -333,8 +333,7 @@ const device second_fake_can = [] {
 
 skywalker::control::PositionMotor::Config gimbalLoop(bool torque) {
     skywalker::control::PositionMotor::Config config{};
-    config.effort_unit = torque ? skywalker::control::EffortUnit::NewtonMeter
-                               : skywalker::control::EffortUnit::Ampere;
+    config.effort_unit = torque ? skywalker::control::EffortUnit::NewtonMeter : skywalker::control::EffortUnit::Ampere;
     config.safety = {2.0f, 80.0f};
     config.reference = skywalker::control::PositionReference::DriverContinuous;
     config.loop.position = {.kp = 1.0f,
@@ -358,7 +357,7 @@ skywalker::control::PositionMotor::Config gimbalLoop(bool torque) {
 }
 
 skywalker::robotics::GimbalAxisConfig limitedAxis() {
-    return {skywalker::robotics::AxisTopology::Limited, -1.0f, 1.0f, 1.0f, true,
+    return {skywalker::robotics::AxisTopology::Limited,      -1.0f, 1.0f, 1.0f, true,
             skywalker::robotics::AxisReferenceInit::Preserve};
 }
 
@@ -366,8 +365,10 @@ struct GimbalFixture {
     Motor yaw{djiConfig(1)}, pitch{dmConfig()};
     CanBus yaw_bus{&fake_can}, pitch_bus{&second_fake_can};
     Group group{yaw, pitch};
-    GimbalExecutor executor{yaw, pitch, group, gimbalLoop(false), limitedAxis(),
-                            gimbalLoop(true), limitedAxis(), GimbalExecutor::Config{.fault_retry_ms = 1}};
+    GimbalExecutor executor{yaw,           pitch,
+                            group,         gimbalLoop(false),
+                            limitedAxis(), gimbalLoop(true),
+                            limitedAxis(), GimbalExecutor::Config{.fault_retry_ms = 1}};
     GimbalExecutionInputs inputs{};
     std::uint64_t clock_us = 0;
     std::uint32_t sequence = 0;
@@ -377,7 +378,8 @@ struct GimbalFixture {
         motor.snapshot_.state = MotorState::Disabled;
         motor.snapshot_.output_permitted = false;
         motor.snapshot_.position_reference_valid = true;
-        if (motor.snapshot_.reference_generation == 0) motor.snapshot_.reference_generation = 1;
+        if (motor.snapshot_.reference_generation == 0)
+            motor.snapshot_.reference_generation = 1;
         motor.snapshot_.feedback.position_rad = 0;
         motor.snapshot_.feedback.velocity_rad_s = 0;
         motor.snapshot_.feedback.temperature_c = 25;
@@ -417,7 +419,8 @@ struct GimbalFixture {
         clock_us += 5000;
         yaw.snapshot_.feedback.timestamp_ms = pitch.snapshot_.feedback.timestamp_ms = now();
         inputs.command.stamp = {clock_us / 1000, ++sequence, true};
-        if (new_source) inputs.source_stamp = {clock_us, sequence, true};
+        if (new_source)
+            inputs.source_stamp = {clock_us, sequence, true};
         return executor.update(inputs, clock_us);
     }
 
@@ -434,8 +437,8 @@ struct GimbalFixture {
     std::uint64_t requestEnable() {
         const auto status = tick();
         zassert_equal(status.state, RunState::Recovering);
-        zassert_true(group.status().enable_pending, "state=%u reason=%u error=%d",
-                     unsigned(status.state), unsigned(status.reason), status.error);
+        zassert_true(group.status().enable_pending, "state=%u reason=%u error=%d", unsigned(status.state),
+                     unsigned(status.reason), status.error);
         zassert_false(yaw.snapshot().output_permitted);
         zassert_false(pitch.snapshot().output_permitted);
         return group.status().enable_generation;

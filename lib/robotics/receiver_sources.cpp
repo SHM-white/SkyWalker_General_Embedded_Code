@@ -2,7 +2,9 @@
 #include <robotics/command/receiver_sources.hpp>
 namespace skywalker::robotics {
 #ifdef CONFIG_SKYWALKER_REMOTE_RECEIVER
-int RemoteSource::start() { return receiver_.start(); }
+int RemoteSource::start() {
+    return receiver_.start();
+}
 int RemoteSource::sample(SourceSample &out) {
     const int ret = receiver_.snapshot(cached_);
     out.value = cached_.remote;
@@ -17,7 +19,9 @@ int RemoteSource::sample(SourceSample &out) {
 }
 #endif
 #ifdef CONFIG_SKYWALKER_VISION_RECEIVER
-int VisionSource::start() { return receiver_.start(); }
+int VisionSource::start() {
+    return receiver_.start();
+}
 int VisionSource::sample(SourceSample &out) {
     const auto value = receiver_.snapshot();
     out.value = value.link.aim;
@@ -30,7 +34,9 @@ int VisionSource::sample(SourceSample &out) {
 }
 #endif
 #if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
-int RefereePermissionSource::start() { return 0; }
+int RefereePermissionSource::start() {
+    return 0;
+}
 int RefereePermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) {
     out = receiver_.poll(now_ms);
     diagnostics = {};

@@ -33,7 +33,8 @@ public:
         std::uint32_t rejected_frames = 0;
     };
     InterBoardEndpoint(InterBoardTransport &transport, const Config &config)
-        : config_(config), transport_(transport), link_(config.role) {}
+        : config_(config), transport_(transport), link_(config.role) {
+    }
     InterBoardEndpoint(const InterBoardEndpoint &) = delete;
     InterBoardEndpoint &operator=(const InterBoardEndpoint &) = delete;
     void submit(const robotics::ChassisCommand &);
@@ -47,6 +48,7 @@ public:
     void setBigYawFeedback(const robotics::BigYawFeedback &);
     Snapshot snapshot() const;
     void poll(std::uint64_t now_ms);
+
 private:
     struct Outgoing {
         robotics::ChassisCommand command{};

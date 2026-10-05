@@ -54,14 +54,15 @@ public:
         float heat_per_round = 10, max_fire_rate_hz = 5;
         bool allow_relative_dial_reseed = false; // Empty indexing bench only.
     };
-    ShooterExecutor(motor::Motor &left, motor::Motor &right, motor::Motor &dial,
-                    motor::Group &friction_group, motor::Group &dial_group,
-                    const control::VelocityMotor::Config &friction_control,
+    ShooterExecutor(motor::Motor &left, motor::Motor &right, motor::Motor &dial, motor::Group &friction_group,
+                    motor::Group &dial_group, const control::VelocityMotor::Config &friction_control,
                     const control::PositionMotor::Config &dial_control, const Config &);
     int begin(); // After application attach/start; no enable or commit.
     ShooterStatus update(const ShooterExecutionInputs &, core::TimeUs now_us);
     ShooterStatus suspend(core::TimeUs now_us, WaitReason, int error = 0);
-    ShooterStatus status() const { return status_; } // Execution owner only.
+    ShooterStatus status() const {
+        return status_;
+    } // Execution owner only.
 private:
     void stopFriction(WaitReason, int);
     void stopFeed(WaitReason, int);

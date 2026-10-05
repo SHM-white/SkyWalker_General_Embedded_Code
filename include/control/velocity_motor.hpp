@@ -35,7 +35,9 @@ public:
     VelocityMotor &operator=(const VelocityMotor &) = delete;
 
     [[nodiscard]] int configure();
-    motor::Motor &motor() const { return motor_; }
+    motor::Motor &motor() const {
+        return motor_;
+    }
     [[nodiscard]] int update(float target_rad_s, float dt_s);
     [[nodiscard]] int reset();
     Telemetry telemetry() const;

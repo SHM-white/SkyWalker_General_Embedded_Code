@@ -83,19 +83,27 @@ int main() {
     static control::PositionMotor steer_axis(steer, makeSteerConfig());
     static control::VelocityMotor drive_axis(drive, makeMotorConfig());
     static communication::AsyncUart::DmaBuffers remote_dma __nocache;
-    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, input::receiverConfig());
+    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
+                                                input::receiverConfig());
     int ret = bench::hardware_confirmed && bench::steer_can != bench::drive_can ? 0 : -EINVAL;
-    if (ret == 0) ret = steer_bus.attach(steer);
-    if (ret == 0) ret = drive_bus.attach(drive);
-    if (ret == 0) ret = steer_bus.start();
-    if (ret == 0) ret = drive_bus.start();
-    if (ret == 0) ret = steer_axis.configure();
-    if (ret == 0) ret = drive_axis.configure();
-    if (ret == 0) ret = remote.start();
-    if (ret < 0) return ret;
-    LOG_INF("DUAL_SPEED GM6020 ID%u %s POSITION; M3508 ID%u %s speed=%.3f rad/s",
-        unsigned(steer_config.id), bench::steer_can->name, unsigned(drive_config.id), bench::drive_can->name,
-        double(bench::dual_drive_rad_s));
+    if (ret == 0)
+        ret = steer_bus.attach(steer);
+    if (ret == 0)
+        ret = drive_bus.attach(drive);
+    if (ret == 0)
+        ret = steer_bus.start();
+    if (ret == 0)
+        ret = drive_bus.start();
+    if (ret == 0)
+        ret = steer_axis.configure();
+    if (ret == 0)
+        ret = drive_axis.configure();
+    if (ret == 0)
+        ret = remote.start();
+    if (ret < 0)
+        return ret;
+    LOG_INF("DUAL_SPEED GM6020 ID%u %s POSITION; M3508 ID%u %s speed=%.3f rad/s", unsigned(steer_config.id),
+            bench::steer_can->name, unsigned(drive_config.id), bench::drive_can->name, double(bench::dual_drive_rad_s));
     LOG_INF("RC both Down + centered 500ms then left Middle. Motor recovery needs no re-arm.");
     input::RcControlAdapter adapter;
     communication::RemoteReceiver::Snapshot remote_snapshot{};
@@ -112,7 +120,10 @@ int main() {
         (void)remote.snapshot(remote_snapshot);
         const auto &rc = adapter.update(remote_snapshot.remote, now_us / 1000);
         const bool requested = rc.run_allowed;
-        if (requested && !previous_requested) { started_us = now_us; center_valid = false; }
+        if (requested && !previous_requested) {
+            started_us = now_us;
+            center_valid = false;
+        }
         previous_requested = requested;
         const auto elapsed_ms = requested ? (now_us - started_us) / 1000 : 0;
         const auto phase_ms = elapsed_ms < 500 ? 0 : (elapsed_ms - 500) % bench::dual_steer_period_ms;
@@ -120,31 +131,40 @@ int main() {
         const float relative_target = elapsed_ms < 500 ? 0 : bench::dual_steer_amplitude_rad * std::sin(phase);
         const float drive_target = elapsed_ms < 500 ? 0 : bench::dual_drive_rad_s;
         const auto sv = steer.snapshot();
-        if (requested && !center_valid && sv.feedback_fresh &&
-            (sv.feedback.valid & motor::FeedbackAbsolutePosition) && std::isfinite(sv.feedback.absolute_position_rad)) {
+        if (requested && !center_valid && sv.feedback_fresh && (sv.feedback.valid & motor::FeedbackAbsolutePosition) &&
+            std::isfinite(sv.feedback.absolute_position_rad)) {
             center = sv.feedback.absolute_position_rad;
             center_valid = true;
         }
         const int se = requested ? steer.enable() : steer.disable();
         const int de = requested ? drive.enable() : drive.disable();
-        if (se < 0) last_call_error = se;
-        if (de < 0) last_call_error = de;
+        if (se < 0)
+            last_call_error = se;
+        if (de < 0)
+            last_call_error = de;
         if (requested) {
             if (center_valid) {
                 const int error = steer_axis.update(center + relative_target, dt);
-                if (error < 0) last_call_error = error;
-            } else (void)steer_axis.reset();
+                if (error < 0)
+                    last_call_error = error;
+            }
+            else
+                (void)steer_axis.reset();
             const int error = drive_axis.update(drive_target, dt);
-            if (error < 0) last_call_error = error;
+            if (error < 0)
+                last_call_error = error;
         }
         const int sb = steer_bus.commit().error, db = drive_bus.commit().error;
-        if (sb < 0) last_call_error = sb;
-        if (db < 0) last_call_error = db;
+        if (sb < 0)
+            last_call_error = sb;
+        if (db < 0)
+            last_call_error = db;
         if (now_us >= next_log_us) {
             next_log_us = now_us + 1000000;
             const auto position = steer_axis.telemetry();
             const auto velocity = drive_axis.telemetry();
-            LOG_INF("run=%d center=%d elapsed=%llu relative=%.3f 6020 target=%.3f actual=%.3f output=%d wait=%u; 3508 target=%.3f actual=%.3f output=%d wait=%u call=%d",
+            LOG_INF(
+                "run=%d center=%d elapsed=%llu relative=%.3f 6020 target=%.3f actual=%.3f output=%d wait=%u; 3508 target=%.3f actual=%.3f output=%d wait=%u call=%d",
                 requested, center_valid, static_cast<unsigned long long>(elapsed_ms), double(relative_target),
                 position.requested_position_rad, position.position_rad, position.output_valid && requested,
                 unsigned(position.issue), double(velocity.target_rad_s), double(velocity.motor.feedback.velocity_rad_s),

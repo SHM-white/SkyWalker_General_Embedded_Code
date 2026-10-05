@@ -7,13 +7,16 @@ namespace skywalker::samples::chassis {
 class PeriodicDeadline {
 public:
     explicit PeriodicDeadline(core::TimeUs period_us = robotics::vehicle::chassis_period_us)
-        : deadline_(k_uptime_ticks()), period_(k_us_to_ticks_ceil64(period_us)) {}
+        : deadline_(k_uptime_ticks()), period_(k_us_to_ticks_ceil64(period_us)) {
+    }
     void wait() {
         deadline_ += period_;
         const auto now = k_uptime_ticks();
-        if (deadline_ <= now) deadline_ += ((now - deadline_) / period_ + 1) * period_;
+        if (deadline_ <= now)
+            deadline_ += ((now - deadline_) / period_ + 1) * period_;
         k_sleep(K_TIMEOUT_ABS_TICKS(deadline_));
     }
+
 private:
     std::int64_t deadline_, period_;
 };

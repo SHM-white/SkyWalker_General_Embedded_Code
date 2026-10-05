@@ -3,8 +3,7 @@
 #include <time.h>
 
 /* Compiled by the native runner against host headers, outside Zephyr's libc. */
-uint64_t skywalker_test_monotonic_ns(void)
-{
+uint64_t skywalker_test_monotonic_ns(void) {
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
         return UINT64_MAX;

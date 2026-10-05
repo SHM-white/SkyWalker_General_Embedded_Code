@@ -8,7 +8,8 @@ BUILD_ASSERT(CONFIG_SKYWALKER_COMMAND_PERIOD_MS > 0);
 namespace {
 using AimMeasurement = core::Measurement<communication::vision::AimCommand>;
 SourceValue emptyValue(SourceRole role) {
-    if (role == SourceRole::Aim) return AimMeasurement{};
+    if (role == SourceRole::Aim)
+        return AimMeasurement{};
     return RemoteState{};
 }
 bool matches(SourceRole role, const SourceValue &value) {
@@ -17,15 +18,21 @@ bool matches(SourceRole role, const SourceValue &value) {
 }
 }
 CommandManager::CommandManager(const Config &config)
-    : arbiter_(config), require_permissions_(config.require_referee_for_motion) {}
+    : arbiter_(config), require_permissions_(config.require_referee_for_motion) {
+}
 int CommandManager::registerSource(ICommandSource &source) {
-    if (k_is_in_isr()) return -EWOULDBLOCK;
-    if (start_attempted_) return -EBUSY;
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
+    if (start_attempted_)
+        return -EBUSY;
     const auto role = source.role();
-    if (role != SourceRole::Operator && role != SourceRole::Aim) return -EINVAL;
+    if (role != SourceRole::Operator && role != SourceRole::Aim)
+        return -EINVAL;
     for (std::size_t i = 0; i < source_count_; ++i)
-        if (sources_[i].source == &source || sources_[i].role == role) return -EEXIST;
-    if (source_count_ == sources_.size()) return -ENOSPC;
+        if (sources_[i].source == &source || sources_[i].role == role)
+            return -EEXIST;
+    if (source_count_ == sources_.size())
+        return -ENOSPC;
     auto &slot = sources_[source_count_++];
     slot.source = &source;
     slot.role = role;
@@ -33,9 +40,12 @@ int CommandManager::registerSource(ICommandSource &source) {
     return 0;
 }
 int CommandManager::bindPermissions(IPermissionSource &source) {
-    if (k_is_in_isr()) return -EWOULDBLOCK;
-    if (start_attempted_) return -EBUSY;
-    if (permissions_) return -EEXIST;
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
+    if (start_attempted_)
+        return -EBUSY;
+    if (permissions_)
+        return -EEXIST;
     permissions_ = &source;
     return 0;
 }
@@ -52,15 +62,20 @@ int CommandManager::failStart(int error, std::uint32_t reason) {
     return error;
 }
 int CommandManager::start() {
-    if (k_is_in_isr()) return -EWOULDBLOCK;
-    if (start_attempted_) return -EALREADY;
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
+    if (start_attempted_)
+        return -EALREADY;
     start_attempted_ = true;
-    if (arbiter_.configError() < 0) return failStart(arbiter_.configError(), InvalidManagerConfig);
+    if (arbiter_.configError() < 0)
+        return failStart(arbiter_.configError(), InvalidManagerConfig);
     bool have_operator = false;
     for (std::size_t i = 0; i < source_count_; ++i)
         have_operator = have_operator || sources_[i].role == SourceRole::Operator;
-    if (!have_operator) return failStart(-EINVAL, RcUnavailable);
-    if (require_permissions_ && !permissions_) return failStart(-ENODEV, PermissionMissing);
+    if (!have_operator)
+        return failStart(-EINVAL, RcUnavailable);
+    if (require_permissions_ && !permissions_)
+        return failStart(-ENODEV, PermissionMissing);
     for (std::size_t i = 0; i < source_count_; ++i) {
         auto &slot = sources_[i];
         const int ret = slot.source->start();
@@ -87,18 +102,22 @@ void CommandManager::publish(const CommandSnapshot &value) {
     k_spin_unlock(&output_lock_, key);
 }
 int CommandManager::current(RobotCommand &out) const {
-    if (k_is_in_isr()) return -EWOULDBLOCK;
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
     const auto key = k_spin_lock(&output_lock_);
     const int ret = have_output_ ? 0 : -EAGAIN;
-    if (ret == 0) out = output_.decision.command;
+    if (ret == 0)
+        out = output_.decision.command;
     k_spin_unlock(&output_lock_, key);
     return ret;
 }
 int CommandManager::snapshot(CommandSnapshot &out) const {
-    if (k_is_in_isr()) return -EWOULDBLOCK;
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
     const auto key = k_spin_lock(&output_lock_);
     const int ret = have_output_ ? 0 : -EAGAIN;
-    if (ret == 0) out = output_;
+    if (ret == 0)
+        out = output_;
     k_spin_unlock(&output_lock_, key);
     return ret;
 }
@@ -112,12 +131,15 @@ void CommandManager::run() {
             auto &slot = sources_[i];
             SourceSample sample{};
             int ret = slot.source->sample(sample);
-            if (ret == 0 && !matches(slot.role, sample.value)) ret = -EINVAL;
+            if (ret == 0 && !matches(slot.role, sample.value))
+                ret = -EINVAL;
             if (ret == 0) {
                 slot.cached = sample;
-            } else if (ret == -EAGAIN) {
+            }
+            else if (ret == -EAGAIN) {
                 slot.cached.diagnostics.sample_error = ret;
-            } else {
+            }
+            else {
                 slot.cached.value = emptyValue(slot.role);
                 slot.cached.diagnostics = sample.diagnostics;
                 slot.cached.diagnostics.sample_error = ret;
@@ -125,7 +147,8 @@ void CommandManager::run() {
             if (slot.role == SourceRole::Operator) {
                 next.observed.remote = *std::get_if<RemoteState>(&slot.cached.value);
                 next.remote = slot.cached.diagnostics;
-            } else {
+            }
+            else {
                 next.observed.vision = *std::get_if<AimMeasurement>(&slot.cached.value);
                 next.vision = slot.cached.diagnostics;
             }
@@ -137,9 +160,11 @@ void CommandManager::run() {
             if (ret == 0) {
                 permission_cache_ = candidate;
                 permission_diagnostics_ = diagnostics;
-            } else if (ret == -EAGAIN) {
+            }
+            else if (ret == -EAGAIN) {
                 permission_diagnostics_.sample_error = ret;
-            } else {
+            }
+            else {
                 permission_cache_ = {};
                 permission_diagnostics_ = diagnostics;
                 permission_diagnostics_.sample_error = ret;

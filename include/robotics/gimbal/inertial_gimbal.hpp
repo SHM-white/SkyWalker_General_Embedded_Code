@@ -45,7 +45,8 @@ public:
         bool allow_unknown_quality = false;
     };
 
-    explicit InertialGimbalAdapter(const Config &config) : config_(config) {}
+    explicit InertialGimbalAdapter(const Config &config) : config_(config) {
+    }
     InertialGimbalOutput update(const InertialGimbalInputs &, core::TimeUs now_us);
     InertialGimbalOutput suspend(core::TimeUs now_us, WaitReason reason, int error = 0);
 

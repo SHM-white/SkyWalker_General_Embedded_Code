@@ -17,15 +17,22 @@ int main() {
                   input::diagnostic_scenario == input::DiagnosticScenario::InputPause ||
                   input::diagnostic_scenario == input::DiagnosticScenario::ExecutionPause);
     static communication::AsyncUart::DmaBuffers remote_dma __nocache;
-    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, input::receiverConfig());
+    static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
+                                                input::receiverConfig());
     static motor::Motor drive(bench::motorHardware());
     static motor::CanBus bus(bench::can);
     static GimbalAxis yaw(drive, bench::motorConfig(), bench::yaw);
     int ret = remote.start();
-    if (ret == 0) ret = bus.attach(drive);
-    if (ret == 0) ret = bus.start();
-    if (ret == 0) ret = yaw.begin();
-    if (ret < 0) { LOG_ERR("configuration blocked: %d", ret); return ret; }
+    if (ret == 0)
+        ret = bus.attach(drive);
+    if (ret == 0)
+        ret = bus.start();
+    if (ret == 0)
+        ret = yaw.begin();
+    if (ret < 0) {
+        LOG_ERR("configuration blocked: %d", ret);
+        return ret;
+    }
     LOG_INF("RC safe+center 0.5s then left Middle; right X yaw, right switch Middle/Up absolute 0/0.5 rad");
     communication::RemoteReceiver::Snapshot snapshot{};
     input::RcControlAdapter adapter;
@@ -43,7 +50,7 @@ int main() {
         (void)remote.snapshot(snapshot);
         const auto &rc = adapter.update(snapshot.remote, now);
         const auto diagnostic = diagnostics.update(now, rc.run_allowed,
-            !rc.fresh || rc.remote.left_switch == RcSwitch::Down);
+                                                   !rc.fresh || rc.remote.left_switch == RcSwitch::Down);
         if (!diagnostic.input_paused && rc.fresh &&
             (!source.valid || sequenceAfter(rc.remote.stamp.sequence, source.sequence))) {
             source = rc.remote.stamp;
@@ -60,7 +67,8 @@ int main() {
                 const int enabled = drive.enable();
                 const int updated = yaw.update(command, SafetyAction::Active, dt);
                 control_error = enabled < 0 ? enabled : updated;
-            } else {
+            }
+            else {
                 control_error = drive.disable();
             }
             commit_error = bus.commit().error;
@@ -69,12 +77,13 @@ int main() {
             next_log = now + 100;
             const auto view_now = drive.snapshot();
             const auto telemetry = yaw.telemetry();
-            LOG_INF("requested=%d state=%u mode=%u activation=%llu target=%.3f absolute=%.3f velocity=%.3f effort=%.3f output=%d fault=%u control=%d commit=%d rc=%d source=%u",
+            LOG_INF(
+                "requested=%d state=%u mode=%u activation=%llu target=%.3f absolute=%.3f velocity=%.3f effort=%.3f output=%d fault=%u control=%d commit=%d rc=%d source=%u",
                 requested, unsigned(view_now.state), unsigned(command.mode),
                 static_cast<unsigned long long>(view_now.enable_generation), double(yaw.targetAngleRad()),
                 double(view_now.feedback.absolute_position_rad), double(view_now.feedback.velocity_rad_s),
-                double(telemetry.effort_command), telemetry.output_valid, unsigned(view_now.last_fault.reason), control_error, commit_error,
-                rc.fresh, source.sequence);
+                double(telemetry.effort_command), telemetry.output_valid, unsigned(view_now.last_fault.reason),
+                control_error, commit_error, rc.fresh, source.sequence);
         }
         k_sleep(K_MSEC(5));
     }

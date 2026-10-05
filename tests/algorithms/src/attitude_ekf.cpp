@@ -24,8 +24,8 @@ Quaternion referenceAttitude(double roll, double pitch, double yaw) {
     const double cr = std::cos(roll * 0.5), sr = std::sin(roll * 0.5);
     const double cp = std::cos(pitch * 0.5), sp = std::sin(pitch * 0.5);
     const double cy = std::cos(yaw * 0.5), sy = std::sin(yaw * 0.5);
-    return {float(cr * cp * cy + sr * sp * sy), float(sr * cp * cy - cr * sp * sy),
-            float(cr * sp * cy + sr * cp * sy), float(cr * cp * sy - sr * sp * cy)};
+    return {float(cr * cp * cy + sr * sp * sy), float(sr * cp * cy - cr * sp * sy), float(cr * sp * cy + sr * cp * sy),
+            float(cr * cp * sy - sr * sp * cy)};
 }
 
 Vec3 referenceGravity(double roll, double pitch) {
@@ -81,8 +81,13 @@ Vec3 add(Vec3 a, Vec3 b) {
 
 ZTEST(attitude_ekf, test_static_gravity_initializes_known_roll_and_pitch) {
     const std::array<std::array<double, 2>, 7> cases{{
-        {0.0, 0.0}, {pi / 6, 0.0}, {-pi / 3, 0.0}, {0.0, pi / 4},
-        {0.0, -pi / 3}, {0.55, -0.4}, {-0.7, 0.6},
+        {0.0, 0.0},
+        {pi / 6, 0.0},
+        {-pi / 3, 0.0},
+        {0.0, pi / 4},
+        {0.0, -pi / 3},
+        {0.55, -0.4},
+        {-0.7, 0.6},
     }};
     for (const auto &angles : cases) {
         const auto config = testConfig();
@@ -183,9 +188,9 @@ ZTEST(attitude_ekf, test_stationary_with_deterministic_sensor_noise) {
     for (unsigned i = 1; i <= 3000; ++i) {
         const double phase = i * 0.137;
         const Vec3 accel_noise{float(0.025 * std::sin(phase)), float(0.02 * std::cos(phase * 1.3)),
-                                float(0.015 * std::sin(phase * 0.7))};
+                               float(0.015 * std::sin(phase * 0.7))};
         const Vec3 gyro_noise{float(0.003 * std::sin(phase * 0.9)), float(0.002 * std::cos(phase * 1.1)),
-                               float(0.002 * std::sin(phase * 1.7))};
+                              float(0.002 * std::sin(phase * 1.7))};
         time += sample_us;
         zassert_ok(filter.update({add(gravity_vector, accel_noise), add(bias, gyro_noise), time}));
         zassert_equal(filter.quality(), Ekf::Quality::Tracking);
@@ -209,16 +214,16 @@ ZTEST(attitude_ekf, test_noisy_three_axis_trajectory_tracks_analytic_attitude) {
         const double roll = 0.25 * std::sin(0.7 * t), pitch = 0.18 * std::sin(0.5 * t), yaw = 0.45 * t;
         const double roll_rate = 0.175 * std::cos(0.7 * t), pitch_rate = 0.09 * std::cos(0.5 * t);
         const Vec3 rate{float(roll_rate - 0.45 * std::sin(pitch)),
-                         float(pitch_rate * std::cos(roll) + 0.45 * std::sin(roll) * std::cos(pitch)),
-                         float(-pitch_rate * std::sin(roll) + 0.45 * std::cos(roll) * std::cos(pitch))};
+                        float(pitch_rate * std::cos(roll) + 0.45 * std::sin(roll) * std::cos(pitch)),
+                        float(-pitch_rate * std::sin(roll) + 0.45 * std::cos(roll) * std::cos(pitch))};
         const double phase = i * 0.173;
         const Vec3 accel_noise{float(0.02 * std::sin(phase)), float(0.025 * std::cos(phase * 1.3)),
-                                float(0.015 * std::sin(phase * 0.7))};
+                               float(0.015 * std::sin(phase * 0.7))};
         const Vec3 gyro_noise{float(0.002 * std::sin(phase * 0.9)), float(0.003 * std::cos(phase * 1.1)),
-                               float(0.002 * std::sin(phase * 1.7))};
+                              float(0.002 * std::sin(phase * 1.7))};
         time += sample_us;
-        zassert_ok(filter.update({add(referenceGravity(roll, pitch), accel_noise), add(add(rate, bias), gyro_noise),
-                                 time}));
+        zassert_ok(
+            filter.update({add(referenceGravity(roll, pitch), accel_noise), add(add(rate, bias), gyro_noise), time}));
         zassert_equal(filter.quality(), Ekf::Quality::Tracking);
         const auto expected = referenceAttitude(roll, pitch, yaw);
         assertAttitude(filter.attitude(), expected, 0.025); // < 1.5 degree through the whole motion.
@@ -330,13 +335,12 @@ ZTEST(attitude_ekf, test_init_contract_and_invalid_configuration) {
     zassert_equal(uninitialized.generation(), generation);
 
     float Ekf::Config::*members[] = {
-        &Ekf::Config::dt_min_s, &Ekf::Config::dt_max_s, &Ekf::Config::gravity_m_s2,
+        &Ekf::Config::dt_min_s,        &Ekf::Config::dt_max_s,      &Ekf::Config::gravity_m_s2,
         &Ekf::Config::accel_gate_m_s2, &Ekf::Config::process_noise, &Ekf::Config::measurement_noise,
-        &Ekf::Config::innovation_gate, &Ekf::Config::accel_tau_s, &Ekf::Config::stationary_gyro_rad_s,
+        &Ekf::Config::innovation_gate, &Ekf::Config::accel_tau_s,   &Ekf::Config::stationary_gyro_rad_s,
         &Ekf::Config::bias_tau_s,
     };
-    const float invalid[] = {0, -1, std::numeric_limits<float>::quiet_NaN(),
-                              std::numeric_limits<float>::infinity()};
+    const float invalid[] = {0, -1, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()};
     for (auto member : members)
         for (float value : invalid) {
             auto config = good;
@@ -390,8 +394,7 @@ ZTEST(attitude_ekf, test_manual_reset_clears_previous_attitude_bias_and_history)
     time = 0;
     for (unsigned i = 0; i < config.initialization_samples; ++i) {
         time += sample_us;
-        zassert_equal(filter.update({{0, 0, gravity}, {}, time}),
-                      i + 1 == config.initialization_samples ? 0 : -EAGAIN);
+        zassert_equal(filter.update({{0, 0, gravity}, {}, time}), i + 1 == config.initialization_samples ? 0 : -EAGAIN);
     }
     for (unsigned i = 0; i < 1000; ++i) {
         time += sample_us;

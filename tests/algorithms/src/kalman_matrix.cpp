@@ -104,9 +104,8 @@ ZTEST(matrix_math, test_benchmark_product_and_inverse) {
     Matrix_Init(&b, 4, 4, b_data);
     Matrix_Init(&out, 4, 4, product);
     int failures = 0;
-    skywalker::test::benchmark("matrix.multiply.4x4", 4096, [&](std::uint32_t) {
-        failures += Matrix_Multiply(&a, &b, &out) != ARM_MATH_SUCCESS;
-    });
+    skywalker::test::benchmark("matrix.multiply.4x4", 4096,
+                               [&](std::uint32_t) { failures += Matrix_Multiply(&a, &b, &out) != ARM_MATH_SUCCESS; });
     zassert_equal(failures, 0);
     expect_values(product, a_data, 16);
     const float input[] = {4, 7, 2, 6};
@@ -275,8 +274,7 @@ ZTEST(linear_kalman, test_noisy_constant_reduces_rmse_and_matches_double_referen
             estimate_error += estimate_residual * estimate_residual;
         }
     }
-    zassert_true(std::sqrt(estimate_error / raw_error) < 0.2,
-                 "filtered RMSE must be below 20%% of measurement RMSE");
+    zassert_true(std::sqrt(estimate_error / raw_error) < 0.2, "filtered RMSE must be below 20%% of measurement RMSE");
 }
 
 ZTEST(linear_kalman, test_instances_and_reinitialization_are_independent) {

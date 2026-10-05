@@ -108,7 +108,8 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(can)) return -ENODEV;
+    if (!device_is_ready(can))
+        return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dm::j4310Mit({
         .id = 1,
         .master_id = 0x11,
@@ -116,17 +117,22 @@ int main() {
         .velocity_max_rad_s = 30.0f,
         .torque_max_nm = 10.0f,
         .torque_limit_nm = 1.0f,
-        .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100},
+        .timing =
+            {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
     const int vofa_error = vofa_init(&vofa, uart);
     int ret = bus.attach(drive);
-    if (ret == 0) ret = bus.start();
-    if (ret == 0) ret = skywalker::samples::dm::enableMotorPower();
-    if (ret == 0) ret = axis.configure();
-    if (ret < 0) return ret;
+    if (ret == 0)
+        ret = bus.start();
+    if (ret == 0)
+        ret = skywalker::samples::dm::enableMotorPower();
+    if (ret == 0)
+        ret = axis.configure();
+    if (ret < 0)
+        return ret;
     const auto started_ms = k_uptime_get();
     auto previous_ms = started_ms;
     bool initial_target_valid = false;
@@ -153,22 +159,31 @@ int main() {
         // update accepts the latest goal even when the continuous reference is unavailable.
         const int update_error = axis.update(target, dt);
         const int commit_error = bus.commit().error;
-        if (enable_error < 0) last_call_error = enable_error;
-        if (update_error < 0) last_call_error = update_error;
-        if (commit_error < 0) last_call_error = commit_error;
+        if (enable_error < 0)
+            last_call_error = enable_error;
+        if (update_error < 0)
+            last_call_error = update_error;
+        if (commit_error < 0)
+            last_call_error = commit_error;
         const auto data = axis.telemetry();
         if (vofa_error == 0) {
-            const float channels[10] = {targetPositionRad(elapsed_ms), singleTurnRad(float(data.position_rad)),
-                data.output.position.error, data.output.velocity.velocity_reference_rad_s,
-                data.motor.feedback.velocity_rad_s, data.output.velocity.velocity_error_rad_s,
-                data.output_valid ? data.effort_command : 0, data.motor.feedback.torque_nm,
-                data.motor.native_mos_temperature_c, data.motor.feedback.temperature_c};
+            const float channels[10] = {targetPositionRad(elapsed_ms),
+                                        singleTurnRad(float(data.position_rad)),
+                                        data.output.position.error,
+                                        data.output.velocity.velocity_reference_rad_s,
+                                        data.motor.feedback.velocity_rad_s,
+                                        data.output.velocity.velocity_error_rad_s,
+                                        data.output_valid ? data.effort_command : 0,
+                                        data.motor.feedback.torque_nm,
+                                        data.motor.native_mos_temperature_c,
+                                        data.motor.feedback.temperature_c};
             (void)vofa_send(&vofa, channels, 10);
         }
         if (now >= next_log_ms) {
             next_log_ms = now + 1000;
             LOG_INF("target=%.3f initial=%d seq=%llu output=%d wait=%u call=%d", target, initial_target_valid,
-                static_cast<unsigned long long>(data.target_sequence), data.output_valid, unsigned(data.issue), last_call_error);
+                    static_cast<unsigned long long>(data.target_sequence), data.output_valid, unsigned(data.issue),
+                    last_call_error);
         }
     }
 }

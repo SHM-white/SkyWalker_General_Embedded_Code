@@ -46,9 +46,13 @@ int main() {
                                                         .velocity_max_rad_s = 45.0f,
                                                         .torque_max_nm = 18.0f,
                                                         .torque_limit_nm = 0.05f,
-                                                        .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100}})};
+                                                        .timing = {.feedback_timeout_ms = 50,
+                                                                   .command_timeout_ms = 20,
+                                                                   .enable_timeout_ms = 3000,
+                                                                   .retry_interval_ms = 100}})};
     int ret = skywalker::samples::dm::prepare(session);
-    if (ret < 0) return ret;
+    if (ret < 0)
+        return ret;
     static Vofa vofa{};
     const int vofa_error = vofa_init(&vofa, uart);
     const auto started_ms = k_uptime_get();
@@ -59,23 +63,30 @@ int main() {
         const bool requested = true;
         const float target = targetPositionFromSavedZeroRad(((now - started_ms) / kPositionStepPeriodMs) % 2 != 0);
         const int request_error = requested ? session.motor.enable() : session.motor.disable();
-        if (request_error < 0) last_call_error = request_error;
+        if (request_error < 0)
+            last_call_error = request_error;
         if (requested) {
             const int error = session.motor.setPositionVelocity(target, positionVelocityLimitRadS());
-            if (error < 0) last_call_error = error;
+            if (error < 0)
+                last_call_error = error;
         }
         const int commit_error = session.bus.commit().error;
-        if (commit_error < 0) last_call_error = commit_error;
+        if (commit_error < 0)
+            last_call_error = commit_error;
         const auto view = session.motor.snapshot();
         if (vofa_error == 0) {
-            const float channels[6] = {target, view.native_position_rad, view.feedback.velocity_rad_s,
-                view.feedback.torque_nm, view.native_mos_temperature_c, view.native_rotor_temperature_c};
+            const float channels[6] = {target,
+                                       view.native_position_rad,
+                                       view.feedback.velocity_rad_s,
+                                       view.feedback.torque_nm,
+                                       view.native_mos_temperature_c,
+                                       view.native_rotor_temperature_c};
             (void)vofa_send(&vofa, channels, 6);
         }
         if (now >= next_log_ms) {
             next_log_ms = now + 1000;
-            LOG_INF("run=%d requested=%d state=%u target=%.3f fresh=%d call=%d", requested,
-                view.enabled_requested, unsigned(view.state), double(target), view.feedback_fresh, last_call_error);
+            LOG_INF("run=%d requested=%d state=%u target=%.3f fresh=%d call=%d", requested, view.enabled_requested,
+                    unsigned(view.state), double(target), view.feedback_fresh, last_call_error);
         }
         k_sleep(K_MSEC(kControlPeriodMs));
     }

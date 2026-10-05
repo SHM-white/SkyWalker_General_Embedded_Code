@@ -13,12 +13,11 @@ int KalmanFilter_Init(KalmanFilter *kf, uint16_t state_dim, uint16_t measure_dim
         return -EOVERFLOW;
     const size_t nn = n * n, nm = n * m, mm = m * m;
     /* Matrix helpers use int-promoted indices; byte sizes must also fit. */
-    if (nn > INT_MAX || nm > INT_MAX || mm > INT_MAX ||
-        nn > SIZE_MAX / sizeof(float) || nm > SIZE_MAX / sizeof(float) || mm > SIZE_MAX / sizeof(float))
+    if (nn > INT_MAX || nm > INT_MAX || mm > INT_MAX || nn > SIZE_MAX / sizeof(float) ||
+        nm > SIZE_MAX / sizeof(float) || mm > SIZE_MAX / sizeof(float))
         return -EOVERFLOW;
 
-    const KalmanBuffer storage[] = {buffers->F, buffers->H, buffers->R, buffers->X,
-                                    buffers->P, buffers->Q, buffers->K};
+    const KalmanBuffer storage[] = {buffers->F, buffers->H, buffers->R, buffers->X, buffers->P, buffers->Q, buffers->K};
     const size_t required[] = {nn, nm, mm, n, nn, nn, nm};
     for (size_t i = 0; i < sizeof(storage) / sizeof(storage[0]); ++i)
         if (!storage[i].data)

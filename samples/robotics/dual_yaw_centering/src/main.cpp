@@ -32,7 +32,8 @@ constexpr auto role = BoardRole::GimbalController;
 communication::AsyncUart::DmaBuffers link_dma __nocache;
 communication::ConfiguredInterBoardTransport::Config linkConfig() {
     communication::ConfiguredInterBoardTransport::Config c{};
-    c.uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart)); return c;
+    c.uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart));
+    return c;
 }
 communication::ConfiguredInterBoardTransport transport(linkConfig(), &link_dma);
 communication::InterBoardEndpoint::Config endpointConfig() {
@@ -41,7 +42,10 @@ communication::InterBoardEndpoint::Config endpointConfig() {
 communication::InterBoardEndpoint endpoint(transport, endpointConfig());
 atomic_t execution_paused = 0, input_paused = 0, status_paused = 0, estop = 0, clear_requested = 0;
 void commTask(void *, void *, void *) {
-    for (;;) { endpoint.poll(k_uptime_get()); k_sleep(K_MSEC(1)); }
+    for (;;) {
+        endpoint.poll(k_uptime_get());
+        k_sleep(K_MSEC(1));
+    }
 }
 #if !defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
 communication::AsyncUart::DmaBuffers remote_dma __nocache, head_dma __nocache;
@@ -49,8 +53,12 @@ communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, samp
 RemoteSource original_source(remote);
 class PausableSource final : public ICommandSource {
 public:
-    SourceRole role() const override { return original_source.role(); }
-    int start() override { return original_source.start(); }
+    SourceRole role() const override {
+        return original_source.role();
+    }
+    int start() override {
+        return original_source.start();
+    }
     int sample(SourceSample &out) override {
         return atomic_get(&input_paused) ? -EAGAIN : original_source.sample(out);
     }
@@ -62,21 +70,21 @@ motor::Motor yaw(board_config::yawHardware()), pitch(board_config::pitchHardware
 motor::Group group(yaw, pitch);
 motor::CanBus yaw_bus(board_config::yaw_can), pitch_bus(board_config::pitch_can);
 GimbalExecutor gimbal(yaw, pitch, group, board_config::yawMotorConfig(), board_config::yaw,
-    board_config::pitchMotorConfig(), board_config::pitch, board_config::execution_policy);
+                      board_config::pitchMotorConfig(), board_config::pitch, board_config::execution_policy);
 InertialGimbalAdapter adapter(inertial_bench::controller());
 YawCenteringController::Config centeringConfig() {
     YawCenteringController::Config c{};
     c.center_rad = vehicle::yaw_center_rad;
     // TODO(calibration): confirm large-yaw motor direction against joint-error decrease.
-    c.follow_direction = vehicle::small_yaw.direction; return c;
+    c.follow_direction = vehicle::small_yaw.direction;
+    return c;
 }
 YawCenteringController centering(centeringConfig());
 #endif
 }
 K_THREAD_DEFINE(interboard_worker, 4096, commTask, nullptr, nullptr, nullptr, 6, K_FP_REGS, 0);
 int main() {
-    LOG_INF("dualYaw role=%u controls=physical RC; confirmed=%d",
-        unsigned(role), vehicle::connections_confirmed);
+    LOG_INF("dualYaw role=%u controls=physical RC; confirmed=%d", unsigned(role), vehicle::connections_confirmed);
 #if defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
     static motor::Motor drive(vehicle::bigYawHardware());
     static motor::CanBus bus(skywalker::samples::chassis::big_yaw_can);
@@ -84,11 +92,15 @@ int main() {
     bool started = false;
     int ret = 0;
     if (vehicle::connections_confirmed) {
-        ret = bus.attach(drive); if (ret == 0) ret = bus.start();
+        ret = bus.attach(drive);
+        if (ret == 0)
+            ret = bus.start();
 #if defined(CONFIG_BOARD_DM_MC02)
-        if (ret == 0) ret = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
+        if (ret == 0)
+            ret = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
 #endif
-        if (ret == 0) ret = axis.begin();
+        if (ret == 0)
+            ret = axis.begin();
         started = ret == 0;
     }
     std::uint64_t next_log = 0;
@@ -97,50 +109,67 @@ int main() {
     BigYawRequest cached_request{};
     int commit_error = 0;
     for (;;) {
-        const auto now = core::monotonicTimeUs(); const auto rx = endpoint.snapshot();
+        const auto now = core::monotonicTimeUs();
+        const auto rx = endpoint.snapshot();
         const auto operator_state = operator_controls.update(rx, now / 1000);
         const auto exercise = diagnostics.update(now / 1000, axis.status().state == RunState::Active,
-            !operator_state.run_allowed);
-        if (!exercise.input_paused) cached_request = rx.big_yaw_request;
+                                                 !operator_state.run_allowed);
+        if (!exercise.input_paused)
+            cached_request = rx.big_yaw_request;
         if (!exercise.execution_paused || !operator_state.run_allowed || operator_state.clear_estop ||
             operator_state.emergency_stop) {
             BigYawExecutionInputs in{};
-            in.request = cached_request; in.local_boot_id = rx.local_boot_id;
-            if (!operator_state.run_allowed) in.request.mode = BigYawMode::Disabled;
+            in.request = cached_request;
+            in.local_boot_id = rx.local_boot_id;
+            if (!operator_state.run_allowed)
+                in.request.mode = BigYawMode::Disabled;
             in.peer_online = rx.online;
             in.transport_ready = started;
-            in.emergency_stop = operator_state.emergency_stop; in.clear_estop = operator_state.clear_estop;
+            in.emergency_stop = operator_state.emergency_stop;
+            in.clear_estop = operator_state.clear_estop;
             if (started) {
                 axis.update(in, now);
                 commit_error = bus.commit().error;
-            } else axis.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
-            if (!exercise.status_paused) endpoint.setBigYawFeedback(axis.feedback());
+            }
+            else
+                axis.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
+            if (!exercise.status_paused)
+                endpoint.setBigYawFeedback(axis.feedback());
         }
         if (now / 1000 >= next_log) {
             next_log = now / 1000 + 200;
-            const auto s = axis.status(); const auto f = axis.feedback();
+            const auto s = axis.status();
+            const auto f = axis.feedback();
             LOG_INF("operator=%d online=%d source=%u requested=%d run=%u reason=%u rate=%f error=%d commit=%d",
-                rx.operator_control_valid, rx.online, rx.big_yaw_request.source_sequence, s.requested,
-                unsigned(s.state), unsigned(s.reason), double(f.actual_rate_rad_s), s.error, commit_error);
+                    rx.operator_control_valid, rx.online, rx.big_yaw_request.source_sequence, s.requested,
+                    unsigned(s.state), unsigned(s.reason), double(f.actual_rate_rad_s), s.error, commit_error);
         }
         k_sleep(K_MSEC(5));
     }
 #else
     int ret = head.start();
-    if (ret == 0) ret = commands.registerSource(source);
-    if (ret == 0) ret = commands.start();
-    if (ret < 0) return ret;
+    if (ret == 0)
+        ret = commands.registerSource(source);
+    if (ret == 0)
+        ret = commands.start();
+    if (ret < 0)
+        return ret;
     const bool split = board_config::yaw_can != board_config::pitch_can;
     bool started = false;
     if (vehicle::connections_confirmed && board_config::connections_configured) {
         ret = split ? yaw_bus.attach(yaw) : yaw_bus.attach(yaw, pitch);
-        if (ret == 0 && split) ret = pitch_bus.attach(pitch);
-        if (ret == 0) ret = yaw_bus.start();
-        if (ret == 0 && split) ret = pitch_bus.start();
+        if (ret == 0 && split)
+            ret = pitch_bus.attach(pitch);
+        if (ret == 0)
+            ret = yaw_bus.start();
+        if (ret == 0 && split)
+            ret = pitch_bus.start();
 #if defined(CONFIG_BOARD_DM_MC02)
-        if (ret == 0) ret = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
+        if (ret == 0)
+            ret = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
 #endif
-        if (ret == 0) ret = gimbal.begin();
+        if (ret == 0)
+            ret = gimbal.begin();
         started = ret == 0;
     }
     std::uint64_t next_log = 0;
@@ -156,31 +185,42 @@ int main() {
         (void)remote.snapshot(operator_cache);
         const auto &operator_state = controls.update(operator_cache.remote, ms);
         const auto exercise = diagnostics.update(ms, run.state == RunState::Active,
-            !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
+                                                 !operator_state.fresh ||
+                                                     operator_state.remote.left_switch == RcSwitch::Down);
         atomic_set(&input_paused, exercise.input_paused);
         if (operator_controls.publish(endpoint, operator_state.run_allowed, board_config::emergencyStopRequested(),
-            operator_state.remote.stamp, operator_state.clear_event_id, operator_state.clear_stamp, ms))
+                                      operator_state.remote.stamp, operator_state.clear_event_id,
+                                      operator_state.clear_stamp, ms))
             controls.withdraw();
         if (exercise.execution_paused && operator_state.run_allowed && !operator_state.clear_estop &&
             !board_config::emergencyStopRequested()) {
-            k_sleep(K_MSEC(5)); continue;
+            k_sleep(K_MSEC(5));
+            continue;
         }
-        CommandSnapshot frame{}; (void)commands.snapshot(frame);
+        CommandSnapshot frame{};
+        (void)commands.snapshot(frame);
         InertialGimbalInputs input{};
-        if (!exercise.head_paused) head_cache = head.snapshot();
-        input.head = head_cache; input.yaw = yaw.snapshot(); input.pitch = pitch.snapshot();
-        input.command = frame.decision.command.gimbal; input.source_stamp = sourceStamp(frame, input.command.source);
-        if (!operator_state.run_allowed) input.command.mode = GimbalMode::Disabled;
+        if (!exercise.head_paused)
+            head_cache = head.snapshot();
+        input.head = head_cache;
+        input.yaw = yaw.snapshot();
+        input.pitch = pitch.snapshot();
+        input.command = frame.decision.command.gimbal;
+        input.source_stamp = sourceStamp(frame, input.command.source);
+        if (!operator_state.run_allowed)
+            input.command.mode = GimbalMode::Disabled;
         input.prerequisites_ready = started && inertial_bench::mounting_configured;
         auto inertial = adapter.update(input, now);
         GimbalExecutionInputs gimbal_input{};
-        gimbal_input.command = inertial.command; gimbal_input.source_stamp = inertial.source_stamp;
+        gimbal_input.command = inertial.command;
+        gimbal_input.source_stamp = inertial.source_stamp;
         gimbal_input.transport_ready = started;
         gimbal_input.yaw_output_valid = inertial.yaw_output_valid;
         gimbal_input.pitch_output_valid = inertial.pitch_output_valid;
         gimbal_input.emergency_stop = board_config::emergencyStopRequested();
         gimbal_input.clear_estop = operator_state.clear_estop || board_config::takeEmergencyResetRequest();
-        run = started ? gimbal.update(gimbal_input, now) : gimbal.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
+        run = started ? gimbal.update(gimbal_input, now)
+                      : gimbal.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
         if (started) {
             yaw_commit_error = yaw_bus.commit().error;
             pitch_commit_error = split ? pitch_bus.commit().error : 0;
@@ -188,31 +228,39 @@ int main() {
         const auto rx = endpoint.snapshot();
         YawCenteringInputs follow{};
         follow.joint_yaw_rad = input.yaw.feedback.position_rad;
-        follow.joint_stamp = {input.yaw.feedback.timestamp_ms * 1000, input.yaw.feedback.timestamp_ms, input.yaw.feedback_fresh};
+        follow.joint_stamp = {input.yaw.feedback.timestamp_ms * 1000, input.yaw.feedback.timestamp_ms,
+                              input.yaw.feedback_fresh};
         follow.source_stamp = input.source_stamp;
         follow.enabled = input.command.mode != GimbalMode::Disabled && operator_state.run_allowed;
         follow.head_stable = inertial.stabilization_valid;
         // Explicit unloaded bench permission. Vehicle integration uses referee authority.
-        follow.permission_valid = vehicle::connections_confirmed && operator_state.run_allowed && !gimbal_input.emergency_stop;
+        follow.permission_valid = vehicle::connections_confirmed && operator_state.run_allowed &&
+                                  !gimbal_input.emergency_stop;
         const auto centered = centering.update(follow, now);
         BigYawRequest request{};
         request.mode = centered.enabled ? BigYawMode::FollowCenter : BigYawMode::Disabled;
         request.target_rate_rad_s = centered.velocity_rad_s;
         request.source_sequence = static_cast<std::uint32_t>(input.source_stamp.sequence);
         request.source_age_ms = input.source_stamp.valid && now >= input.source_stamp.time_us
-            ? static_cast<std::uint32_t>(std::min<std::uint64_t>((now - input.source_stamp.time_us) / 1000, UINT32_MAX)) : UINT32_MAX;
+                                    ? static_cast<std::uint32_t>(
+                                          std::min<std::uint64_t>((now - input.source_stamp.time_us) / 1000,
+                                                                  UINT32_MAX))
+                                    : UINT32_MAX;
         request.command_age_ms = input.command.stamp.valid && ms >= input.command.stamp.timestamp_ms
-            ? static_cast<std::uint32_t>(std::min<std::uint64_t>(ms - input.command.stamp.timestamp_ms, UINT32_MAX)) : UINT32_MAX;
+                                     ? static_cast<std::uint32_t>(
+                                           std::min<std::uint64_t>(ms - input.command.stamp.timestamp_ms, UINT32_MAX))
+                                     : UINT32_MAX;
         request.stamp = centered.stamp;
         request.permission = {operator_state.fresh, follow.permission_valid, operator_state.remote.stamp};
         endpoint.submitBigYaw(request);
-        if (!exercise.status_paused) endpoint.setStatus(run);
+        if (!exercise.status_paused)
+            endpoint.setStatus(run);
         if (ms >= next_log) {
             next_log = ms + 200;
             LOG_INF("headStable=%d centerError=%f request=%f peerRate=%f online=%d ready=%d localRun=%u commit=%d/%d",
-                follow.head_stable, double(centered.center_error_rad), double(centered.velocity_rad_s),
-                double(rx.big_yaw_feedback.actual_rate_rad_s),
-                rx.online, rx.big_yaw_feedback.ready, unsigned(run.state), yaw_commit_error, pitch_commit_error);
+                    follow.head_stable, double(centered.center_error_rad), double(centered.velocity_rad_s),
+                    double(rx.big_yaw_feedback.actual_rate_rad_s), rx.online, rx.big_yaw_feedback.ready,
+                    unsigned(run.state), yaw_commit_error, pitch_commit_error);
         }
         k_sleep(K_MSEC(5));
     }

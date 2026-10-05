@@ -26,7 +26,8 @@ inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 1.5f, 4, 5670};
 inline constexpr MotorCalibration pitch{1, 0x11, 1, 1, 0.5f, 5, 0};
 inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 0.5f, 1, 0};
 inline constexpr std::array<MotorCalibration, 2> friction{{
-    {1, 0, 19, 1, 2, 60, 0}, {2, 0, 19, -1, 2, 60, 0},
+    {1, 0, 19, 1, 2, 60, 0},
+    {2, 0, 19, -1, 2, 60, 0},
 }};
 inline constexpr MotorCalibration dial{3, 0, 36, 1, 1, 10, 0};
 // Candidate records from h7_framework-main-source.zip (2026-10-02).
@@ -35,8 +36,10 @@ inline constexpr MotorCalibration dial{3, 0, 36, 1, 1, 10, 0};
 inline constexpr float wheel_gear_ratio = 3591.0f / 187.0f;
 inline constexpr float steer_bench_current_a = 0.8f, drive_bench_current_a = 0.5f;
 inline constexpr std::array<MotorCalibration, 4> steer{{
-    {1, 0, 1, 1, steer_bench_current_a, 4, 3060}, {2, 0, 1, 1, steer_bench_current_a, 4, 2421},
-    {3, 0, 1, 1, steer_bench_current_a, 4, 2383}, {4, 0, 1, 1, steer_bench_current_a, 4, 3097},
+    {1, 0, 1, 1, steer_bench_current_a, 4, 3060},
+    {2, 0, 1, 1, steer_bench_current_a, 4, 2421},
+    {3, 0, 1, 1, steer_bench_current_a, 4, 2383},
+    {4, 0, 1, 1, steer_bench_current_a, 4, 3097},
 }};
 inline constexpr std::array<MotorCalibration, 4> wheel{{
     {1, 0, wheel_gear_ratio, -1, drive_bench_current_a, 10, 0},
