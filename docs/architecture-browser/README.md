@@ -14,9 +14,9 @@
 bash docs/architecture-browser/run.sh
 ```
 
-打开 [http://127.0.0.1:4173/docs/architecture-browser/#overview](http://127.0.0.1:4173/docs/architecture-browser/#overview)。脚本只启动 Python 静态服务器，按 Ctrl+C 停止。自定义端口可运行 `bash docs/architecture-browser/run.sh 8000`；从任意工作目录运行该脚本，都以仓库根目录提供文件。
+打开 [http://127.0.0.1:4173/docs/architecture-browser/#overview](http://127.0.0.1:4173/docs/architecture-browser/#overview)。脚本启动 Python 文件服务器，并按请求扫描工作区 Markdown，按 Ctrl+C 停止。自定义端口可运行 `bash docs/architecture-browser/run.sh 8000`；从任意工作目录运行该脚本，都以仓库根目录提供文件。
 
-页面无需 npm、CDN 或后台服务。使用服务器打开，才能通过 `fetch` 读取 Markdown 和源码；直接双击 `index.html` 不适合文件阅读。旧服务器若仍在以 `docs/` 为根目录运行，先停止，再用新脚本启动。
+页面无需 npm、CDN 或额外服务；扫描器仅使用 Python 标准库。使用服务器打开，才能通过 `fetch` 读取 Markdown 和源码；直接双击 `index.html` 不适合文件阅读。旧服务器若仍在以 `docs/` 为根目录运行，先停止，再用新脚本启动。
 
 ## 怎么阅读
 
@@ -30,7 +30,7 @@ bash docs/architecture-browser/run.sh
 | Markdown 文档            | 保留已有目录结构，内嵌阅读模块正文、指南、开发记录及样例 README。                     |
 | 变更来历                 | Git 中何时加入增量覆盖层，注明的目的是什么？                                          |
 
-顶部搜索支持模块说明、接口签名、参数、示例、配置，以及文档标题和路径。按 `/` 聚焦搜索框；示例提供复制按钮。模块页的右侧目录可以直接跳到接口或示例，页面路由可收藏和分享给使用同一份本地服务器的人。
+顶部搜索支持模块说明、Markdown 接口签名、参数、示例、配置，以及文档标题和路径；接口检索文本由扫描器从 `docs/api` 自动提取，不需手工维护。按 `/` 聚焦搜索框；示例提供复制按钮。模块页的右侧目录可以直接跳到接口或示例，页面路由可收藏和分享给使用同一份本地服务器的人。
 
 示例分为具体工程中的周期片段和带构造上下文的使用示意，适用范围写在代码块下方。真实设备、PID、机械参数及完整线程入口仍以链接到的应用或样例源码为依据。
 
@@ -60,7 +60,7 @@ bash docs/architecture-browser/run.sh
 
 `32f07b9`（2026-09-30 03:30:05，北京时间）新增 `architecture-refresh.js`，`d860163`（03:30:47）在 HTML 中启用它，`a5054de`（03:31:07）说明目的是补视觉与独立 IMU。之后 `cedab2a` 继续追加命令服务覆盖，旧基础节点和后续描述同时保留，页面靠运行时替换维持当前说明。Git 记录没有说明要替代 Markdown 目录。
 
-新版移除旧刷新层与独立电机渲染脚本，用一个渲染入口和按职责组织的数据提供完整页面。电机链路的接口、生命周期、调用示例仍在 DJI、DM、电机控制器、恢复场景及[电机工作流正文](../guides/motor-workflow.md)中。
+新版移除旧刷新层与独立电机渲染脚本，用一个渲染入口、关系图摘要和独立 Markdown 接口正文提供完整页面。电机链路的接口、生命周期、调用示例仍在 DJI、DM、电机控制器、恢复场景及[电机工作流正文](../guides/motor-workflow.md)中。
 
 ## 维护文件
 
@@ -68,16 +68,29 @@ bash docs/architecture-browser/run.sh
 | ------------------------------- | ------------------------------------------------------------- |
 | `index.html` / `styles.css` | 页面骨架、导航、排版及图形外观                                |
 | `app.js`                      | 路由、页面渲染、关系高亮、搜索、示例复制、Markdown / 源码读取 |
-| `data.js`                     | 模块分类、依赖图布局、正式应用与执行器接口                    |
-| `modules-hardware.js`         | 板级、DJI/DM、IMU、Kalman、控制算法与电机控制器               |
-| `modules-systems.js`          | UART、遥控、裁判、板间、视觉、命令服务、云台、底盘与观测      |
+| `data.js`                     | 模块摘要、分类、状态、依赖图布局和 Markdown 参考路径          |
 | `architecture-data.js`        | Git 历史、当前调用路径、缺口、上车蓝图、场景与启动顺序        |
 | `vehicle-diagram.js`          | 当前与目标主图的节点、物理分区、显式数据连线及标签            |
-| `docs-index.js`               | Markdown / 样例的标题、路径与分组索引；不复制正文             |
-| `run.sh`                      | 以仓库根目录启动本地静态服务器                                |
+| `workspace_docs.py`          | 自动扫描 Markdown、提取标题与分组；本地动态索引和部署生成共用 |
+| `run.sh`                      | 以仓库根目录启动文件服务器和动态扫描端点                       |
 
-修改公开接口时同步对应模块数据和 Markdown 正文。模块数据保持主要接口签名、参数、返回值、线程/时序、错误、至少一个调用示例、生命周期、配置及应用接入状态。`depends` 使用已有模块 ID，供依赖图和上下游文字导航共用。
+修改公开接口时更新 `docs/api/*.md` 和模块主题正文；签名、参数、返回、时序、错误、示例、生命周期和配置只在 Markdown 中维护。`data.js` 保留导航摘要、依赖和实际接入状态，不再保存接口 / 示例数组。全部模块详情复用 Markdown 阅读器，编辑器和 GitHub 可直接阅读；浏览器的代码块仍支持复制。每轮更新按[文档同步清单](../maintenance.md)执行。`depends` 使用已有模块 ID，供依赖图和上下游文字导航共用。
 
 修改实际应用装配时同步当前链路、缺口和主图；蓝图仍待实现的连接不得标成已接入。主图中的节点使用仓库相对源码路径关联模块，不固定到历史提交。
 
-新增或改名文档时更新 `docs-index.js` 中的导航条目。常规模块正文和样例 README 进入目录；`docs/dev` 归入开发记录；旧 `docs/01…19` 迁移提示仍可通过原始链接访问。阅读器处理标题、段落、链接、代码块、表格、列表、引用和任务项，不执行 Markdown 内的 HTML 或脚本；原始文件入口始终保留。正文中的 Mermaid 显示源定义，交互架构图由本浏览器直接绘制。
+## 自动发现 Markdown
+
+无需维护文档列表。`run.sh` 以仓库根目录作为工作区，每次进入 Markdown 文档页、搜索或点击“刷新目录”时，页面请求 `docs-index.json`，服务器重新递归扫描 `.md` 文件（扩展名不区分大小写）。尚未提交的新增文件也会出现，删除、改名和标题修改在下次扫描后生效；读取正文仍直接请求原文件。
+
+标题来自第一个 Markdown 标题（支持 ATX 和 Setext，跳过围栏代码块），无标题时使用文件名。已知文档目录按入门、模块、应用、指南、开发记录分组，样例和其他目录按路径分组；根 README、旧迁移说明和自建目录也自动加入。隐藏文件/目录、`AGENTS.md`、符号链接、`build`/`build-*`、`dist`、`_site`、`node_modules`、`target`、`vendor`、`__pycache__`、`venv`、`env`、`coverage`、`htmlcov` 被排除，避免把依赖、内部指令或生成产物加入目录。
+
+GitHub Pages 的发布流程在仓库归档后自动生成索引。在线静态站点展示的是该次部署的 Markdown 快照，无法直接扫描访问者的本地磁盘；新增或删除文档在下一次部署后生效。其他静态部署在打包前运行（`_site` 是准备好的部署根目录）：
+
+```sh
+python3 docs/architecture-browser/workspace_docs.py \
+  --root _site --output _site/docs/architecture-browser/docs-index.json
+```
+
+普通 `python3 -m http.server` 不提供动态扫描，需要先生成同路径 JSON；使用 `run.sh` 不需要生成或提交它。生成文件已被 Git 忽略。目录加载失败时页面提供重试提示，并保留上次成功加载的结果；全局搜索和总览数量使用同一份目录。
+
+阅读器处理标题、段落、链接、代码块、表格、列表、引用和任务项，不执行 Markdown 内的 HTML 或脚本；原始文件入口始终保留。正文中的 Mermaid 显示源定义，交互架构图由本浏览器直接绘制。

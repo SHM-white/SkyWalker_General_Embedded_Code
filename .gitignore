@@ -18,6 +18,7 @@ __pycache__/
 
 # Generated
 compile_commands.json
+docs/architecture-browser/docs-index.json
 
 # OS
 .DS_Store

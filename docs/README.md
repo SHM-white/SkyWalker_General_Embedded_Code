@@ -9,13 +9,20 @@
 | 目标 | 阅读路线 |
 |---|---|
 | 首次构建和烧录 | [快速开始](getting-started/quickstart.md) → [板级支持](getting-started/boards.md) → [样例索引](getting-started/samples.md) |
+| 直接查接口，不开服务 | [独立 Markdown 接口参考](api/README.md)；签名、参数、示例和时序均可直接阅读 |
 | 理解源码分层 | [架构与构建](getting-started/architecture.md) → [模块目录](modules/README.md) |
-| 控制 DJI / 达妙电机 | [DJI](modules/drivers/motor-dji.md) 或 [达妙](modules/drivers/motor-dm.md) → [统一电机控制器](modules/control/motor-control.md) → [电机工作流](guides/motor-workflow.md) |
+| 控制 DJI / 达妙电机 | [公共电机模型](modules/drivers/motor.md) → [DJI](modules/drivers/motor-dji.md) / [达妙](modules/drivers/motor-dm.md) → [控制器](modules/control/motor-control.md) → [工作流](guides/motor-workflow.md)；旧代码见[迁移](guides/motor-migration.md) |
 | 读取 IMU 或姿态 | [IMU](modules/drivers/imu.md) → [Kalman 与矩阵](modules/drivers/kalman-matrix.md) → [双 IMU 样例](../samples/imu/dual_imu/README.md) |
 | 接收遥控、裁判或板间消息 | [通信模块](modules/communication/communication.md) → [调用示例](modules/call-examples.md) |
 | 从命令走到云台或底盘 | [命令来源服务](modules/robotics/command-service.md) → [机器人模块](modules/robotics/robotics.md) → [模块联动](applications/module-integration.md) |
 | 配置双主控应用 | [双主控应用](applications/dual-controller.md) → [模块联动](applications/module-integration.md) |
 | 查现场问题 | [调试与观测](guides/debugging.md) → [故障排查](guides/troubleshooting.md)；UART DMA 专项见 [说明](guides/uart-dma.md) |
+
+## 接口与维护
+
+- [独立接口参考](api/README.md)：21 个模块的契约、参数、错误、生命周期和示例；浏览器模块页读取同一 Markdown。
+- [文档同步清单](maintenance.md)：按源码变更定位文档，每次更新逐项完成接口、工作流、应用、图与发布。
+- [电机迁移](guides/motor-migration.md)：持续目标、逐轴自动恢复、取消 / 执行代次与旧 API 替换。
 
 ## 按源码层查找
 
@@ -39,6 +46,7 @@
 
 ### 工作流与应用
 
+- [电机公共模型](modules/drivers/motor.md)：运行意图、命令 / 参考代次、停止进度、共享帧与独立恢复。
 - [电机端到端链路](guides/motor-workflow.md)：反馈、控制目标、总线提交、停机与恢复。
 - [模块联动](applications/module-integration.md)：遥控到云台、双主控到舵轮底盘。
 - [双主控应用](applications/dual-controller.md)：应用线程、默认阻断和硬件配置。

@@ -10,4 +10,4 @@ fi
 port="$((10#$port))"
 printf '架构与接口手册：http://127.0.0.1:%s/docs/architecture-browser/#overview\n' "$port"
 printf '按 Ctrl+C 停止。Markdown 与源码均从当前仓库读取。\n'
-exec python3 -m http.server "$port" --bind 127.0.0.1 --directory "$repo_dir"
+exec python3 "$browser_dir/workspace_docs.py" --root "$repo_dir" --serve "$port"
