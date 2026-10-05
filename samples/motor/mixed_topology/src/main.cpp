@@ -23,8 +23,14 @@ using namespace skywalker;
 
 // The values below are bench examples. Check every ID, mode, range, gear ratio,
 // current/torque limit and direction against the connected hardware.
-constexpr motor::Timing kDjiTiming{.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100};
-constexpr motor::Timing kDmTiming{.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100};
+constexpr motor::Timing kDjiTiming{.feedback_timeout_ms = 20,
+                                   .command_timeout_ms = 20,
+                                   .enable_timeout_ms = 100,
+                                   .retry_interval_ms = 100};
+constexpr motor::Timing kDmTiming{.feedback_timeout_ms = 50,
+                                  .command_timeout_ms = 20,
+                                  .enable_timeout_ms = 3000,
+                                  .retry_interval_ms = 100};
 constexpr float kDjiTestCurrentA = 0.05f;
 constexpr float kDmTestTorqueNm = 0.02f;
 constexpr std::int64_t kControlPeriodMs = 5;
@@ -55,8 +61,8 @@ constexpr const char *kTopologyName = "batched M3508/DM across CAN1/CAN2 plus on
 #error "Select a MIXED_TOPOLOGY in CMakeLists.txt"
 #endif
 
-using samples::control::RcControlAdapter;
 using samples::control::DiagnosticScenario;
+using samples::control::RcControlAdapter;
 static_assert(samples::control::diagnostic_scenario == DiagnosticScenario::None ||
               samples::control::diagnostic_scenario == DiagnosticScenario::InputPause ||
               samples::control::diagnostic_scenario == DiagnosticScenario::ExecutionPause);
@@ -65,10 +71,14 @@ static_assert(samples::control::diagnostic_scenario == DiagnosticScenario::None 
 struct GroupRequest {
     bool requested = false;
     void update(motor::Group &group, bool allowed, float channel) {
-        if (!allowed || channel <= .3f) requested = false;
-        else if (channel > .6f) requested = true;
-        if (requested) (void)group.enable();
-        else group.disable();
+        if (!allowed || channel <= .3f)
+            requested = false;
+        else if (channel > .6f)
+            requested = true;
+        if (requested)
+            (void)group.enable();
+        else
+            group.disable();
     }
 };
 struct Topology {
@@ -138,7 +148,10 @@ struct Topology {
 
     GroupRequest request1{}, request2{}, request3{};
     int last_call_error = 0;
-    void record(int error) { if (error < 0) last_call_error = error; }
+    void record(int error) {
+        if (error < 0)
+            last_call_error = error;
+    }
     void updateRemote(const samples::control::RcControlState &rc, bool source_fresh) {
         const bool allowed = rc.run_allowed && source_fresh;
         const float a = RcControlAdapter::normalize(rc.remote.analog.left_y);
@@ -150,7 +163,8 @@ struct Topology {
         request2.update(third_group, allowed, b);
         request3.update(fourth_group, allowed, c);
 #else
-        (void)b; (void)c;
+        (void)b;
+        (void)c;
 #endif
 #else
         request1.update(first_group, allowed, a);
@@ -158,7 +172,9 @@ struct Topology {
         (void)c;
 #endif
     }
-    bool requested() const { return request1.requested || request2.requested || request3.requested; }
+    bool requested() const {
+        return request1.requested || request2.requested || request3.requested;
+    }
     void tick() {
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_GROUP) || defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
         if (request1.requested) {
@@ -166,43 +182,54 @@ struct Topology {
             record(second.setTorque(kDmTestTorqueNm));
         }
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-        if (request2.requested) record(third.setCurrent(kDjiTestCurrentA));
-        if (request3.requested) record(fourth.setTorque(kDmTestTorqueNm));
+        if (request2.requested)
+            record(third.setCurrent(kDjiTestCurrentA));
+        if (request3.requested)
+            record(fourth.setTorque(kDmTestTorqueNm));
 #endif
         record(can1.commit().error);
         record(can2.commit().error);
 #else
 #if defined(MIXED_TOPOLOGY_DJI_SHARED_FRAME)
-        if (request1.requested) record(first.setCurrent(kDjiTestCurrentA));
-        if (request2.requested) record(second.setCurrent(kDjiTestCurrentA));
+        if (request1.requested)
+            record(first.setCurrent(kDjiTestCurrentA));
+        if (request2.requested)
+            record(second.setCurrent(kDjiTestCurrentA));
 #else
-        if (request1.requested) record(first.setTorque(kDmTestTorqueNm));
-        if (request2.requested) record(second.setTorque(kDmTestTorqueNm));
+        if (request1.requested)
+            record(first.setTorque(kDmTestTorqueNm));
+        if (request2.requested)
+            record(second.setTorque(kDmTestTorqueNm));
 #endif
         record(can1.commit().error);
 #endif
     }
     static void logMotor(const char *name, const motor::Motor &drive) {
         const auto v = drive.snapshot();
-        LOG_INF("%s requested=%d state=%u fresh=%d fault=%u/%d", name, v.enabled_requested,
-            unsigned(v.state), v.feedback_fresh, unsigned(v.last_fault.reason), v.last_fault.error);
+        LOG_INF("%s requested=%d state=%u fresh=%d fault=%u/%d", name, v.enabled_requested, unsigned(v.state),
+                v.feedback_fresh, unsigned(v.last_fault.reason), v.last_fault.error);
     }
     static void logGroup(const char *name, const motor::Group &group) {
         const auto v = group.status();
         LOG_INF("%s members=%u enabled=%u active=%u offline=%u fault=%u", name, unsigned(v.member_count),
-            unsigned(v.enabled_count), unsigned(v.active_count), unsigned(v.offline_count), unsigned(v.fault_count));
+                unsigned(v.enabled_count), unsigned(v.active_count), unsigned(v.offline_count),
+                unsigned(v.fault_count));
     }
     void logStatus() const {
         LOG_INF("topology=%s requested=%d call=%d", kTopologyName, requested(), last_call_error);
-        logMotor("first", first); logMotor("second", second);
+        logMotor("first", first);
+        logMotor("second", second);
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_GROUP) || defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
         logGroup("batch", linked_group);
 #if defined(MIXED_TOPOLOGY_CROSS_CAN_ISOLATION)
-        logMotor("third", third); logMotor("fourth", fourth);
-        logGroup("third", third_group); logGroup("fourth", fourth_group);
+        logMotor("third", third);
+        logMotor("fourth", fourth);
+        logGroup("third", third_group);
+        logGroup("fourth", fourth_group);
 #endif
 #else
-        logGroup("first", first_group); logGroup("second", second_group);
+        logGroup("first", first_group);
+        logGroup("second", second_group);
 #endif
     }
 };
@@ -210,12 +237,14 @@ struct Topology {
 int main() {
     static communication::AsyncUart::DmaBuffers remote_dma __nocache;
     static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
-                                                 samples::control::receiverConfig());
+                                                samples::control::receiverConfig());
     const int remote_error = remote.start();
-    if (remote_error < 0) return remote_error;
+    if (remote_error < 0)
+        return remote_error;
     static Topology topology{};
     const int ret = topology.start();
-    if (ret < 0) return ret;
+    if (ret < 0)
+        return ret;
     communication::RemoteReceiver::Snapshot snapshot{};
     RcControlAdapter adapter;
     samples::control::SampleDiagnostics diagnostics;
@@ -226,14 +255,20 @@ int main() {
         (void)remote.snapshot(snapshot);
         const auto &rc = adapter.update(snapshot.remote, now);
         const auto diagnostic = diagnostics.update(now, topology.requested(),
-            !rc.fresh || rc.remote.left_switch == robotics::RcSwitch::Down);
-        if (!diagnostic.input_paused) produced = rc;
+                                                   !rc.fresh || rc.remote.left_switch == robotics::RcSwitch::Down);
+        if (!diagnostic.input_paused)
+            produced = rc;
         produced.run_allowed = produced.run_allowed && rc.run_allowed;
         const bool source_fresh = produced.fresh && robotics::isFresh(produced.remote.stamp, now, 100);
-        if (rc.run_allowed && !source_fresh) adapter.withdraw();
+        if (rc.run_allowed && !source_fresh)
+            adapter.withdraw();
         topology.updateRemote(produced, source_fresh);
-        if (!diagnostic.execution_paused) topology.tick();
-        if (now >= next_log_ms) { next_log_ms = now + 500; topology.logStatus(); }
+        if (!diagnostic.execution_paused)
+            topology.tick();
+        if (now >= next_log_ms) {
+            next_log_ms = now + 500;
+            topology.logStatus();
+        }
         k_sleep(K_MSEC(kControlPeriodMs));
     }
 }

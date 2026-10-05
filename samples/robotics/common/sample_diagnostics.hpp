@@ -3,8 +3,15 @@
 
 namespace skywalker::samples::control {
 enum class DiagnosticScenario : unsigned {
-    None, InputPause, ExecutionPause, StatusPause, HeadPause, VisionPause,
-    PermissionPause, MeasurementPause, InvalidProtocol
+    None,
+    InputPause,
+    ExecutionPause,
+    StatusPause,
+    HeadPause,
+    VisionPause,
+    PermissionPause,
+    MeasurementPause,
+    InvalidProtocol
 };
 struct DiagnosticState {
     bool input_paused = false, execution_paused = false, status_paused = false;
@@ -21,36 +28,67 @@ inline constexpr auto diagnostic_scenario = DiagnosticScenario::None;
 // producer. A run gets at most one exercise per boot; RC stop cancels it.
 class SampleDiagnostics {
 public:
-    explicit SampleDiagnostics(DiagnosticScenario scenario = diagnostic_scenario) : scenario_(scenario) {}
+    explicit SampleDiagnostics(DiagnosticScenario scenario = diagnostic_scenario) : scenario_(scenario) {
+    }
     DiagnosticState update(std::uint64_t now_ms, bool active, bool safe_or_offline = false) {
         DiagnosticState state{};
-        if (scenario_ == DiagnosticScenario::None || done_) return state;
+        if (scenario_ == DiagnosticScenario::None || done_)
+            return state;
         if (safe_or_offline) {
-            if (tracking_ || triggered_) done_ = true;
+            if (tracking_ || triggered_)
+                done_ = true;
             tracking_ = triggered_ = false;
             return state;
         }
         if (!triggered_) {
-            if (!active) { tracking_ = false; return state; }
-            if (!tracking_) { stable_since_ = now_ms; tracking_ = true; }
-            if (now_ms < stable_since_ || now_ms - stable_since_ < 3000) return state;
+            if (!active) {
+                tracking_ = false;
+                return state;
+            }
+            if (!tracking_) {
+                stable_since_ = now_ms;
+                tracking_ = true;
+            }
+            if (now_ms < stable_since_ || now_ms - stable_since_ < 3000)
+                return state;
             triggered_ = true;
             triggered_at_ = now_ms;
         }
-        if (now_ms < triggered_at_ || now_ms - triggered_at_ >= 1500) { done_ = true; return state; }
+        if (now_ms < triggered_at_ || now_ms - triggered_at_ >= 1500) {
+            done_ = true;
+            return state;
+        }
         switch (scenario_) {
-        case DiagnosticScenario::InputPause: state.input_paused = true; break;
-        case DiagnosticScenario::ExecutionPause: state.execution_paused = true; break;
-        case DiagnosticScenario::StatusPause: state.status_paused = true; break;
-        case DiagnosticScenario::HeadPause: state.head_paused = true; break;
-        case DiagnosticScenario::VisionPause: state.vision_paused = true; break;
-        case DiagnosticScenario::PermissionPause: state.permission_paused = true; break;
-        case DiagnosticScenario::MeasurementPause: state.measurement_paused = true; break;
-        case DiagnosticScenario::InvalidProtocol: state.invalid_protocol = true; break;
-        default: break;
+        case DiagnosticScenario::InputPause:
+            state.input_paused = true;
+            break;
+        case DiagnosticScenario::ExecutionPause:
+            state.execution_paused = true;
+            break;
+        case DiagnosticScenario::StatusPause:
+            state.status_paused = true;
+            break;
+        case DiagnosticScenario::HeadPause:
+            state.head_paused = true;
+            break;
+        case DiagnosticScenario::VisionPause:
+            state.vision_paused = true;
+            break;
+        case DiagnosticScenario::PermissionPause:
+            state.permission_paused = true;
+            break;
+        case DiagnosticScenario::MeasurementPause:
+            state.measurement_paused = true;
+            break;
+        case DiagnosticScenario::InvalidProtocol:
+            state.invalid_protocol = true;
+            break;
+        default:
+            break;
         }
         return state;
     }
+
 private:
     DiagnosticScenario scenario_;
     std::uint64_t stable_since_ = 0, triggered_at_ = 0;

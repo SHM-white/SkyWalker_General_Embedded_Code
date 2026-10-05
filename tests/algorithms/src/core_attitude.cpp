@@ -36,7 +36,9 @@ ZTEST(core_attitude, test_finite_norm_and_normalization_contract) {
     zassert_true(core::normalize(slight_error));
     assertQuaternion(slight_error, {1, 0, 0, 0});
     const std::array<core::Quaternion, 5> corrupt{{
-        {0, 0, 0, 0}, {1e-6f, 0, 0, 0}, {2, 0, 0, 0},
+        {0, 0, 0, 0},
+        {1e-6f, 0, 0, 0},
+        {2, 0, 0, 0},
         {std::numeric_limits<float>::quiet_NaN(), 0, 0, 0},
         {1, std::numeric_limits<float>::infinity(), 0, 0},
     }};

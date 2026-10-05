@@ -13,9 +13,14 @@ public:
         gap_ = true;
     }
     void push(const std::uint8_t *bytes, std::size_t size, std::uint64_t received_ms) {
-        if (!size) return;
-        if (size > InterBoardTransport::kTxCapacity) { gap(); return; }
-        if (count_ == 2) gap();
+        if (!size)
+            return;
+        if (size > InterBoardTransport::kTxCapacity) {
+            gap();
+            return;
+        }
+        if (count_ == 2)
+            gap();
         auto &batch = batches_[(head_ + count_) % 2];
         std::memcpy(batch.bytes, bytes, size);
         batch.size = size;
@@ -23,8 +28,12 @@ public:
         ++count_;
     }
     int read(InterBoardTransport::RxChunk &out) {
-        if (gap_) { gap_ = false; return -EOVERFLOW; }
-        if (!count_) return -EAGAIN;
+        if (gap_) {
+            gap_ = false;
+            return -EOVERFLOW;
+        }
+        if (!count_)
+            return -EAGAIN;
         const auto &batch = batches_[head_];
         InterBoardTransport::RxChunk next{};
         next.size = std::min(sizeof(next.bytes), batch.size - offset_);
@@ -39,6 +48,7 @@ public:
         out = next;
         return 0;
     }
+
 private:
     struct Batch {
         std::uint8_t bytes[InterBoardTransport::kTxCapacity]{};

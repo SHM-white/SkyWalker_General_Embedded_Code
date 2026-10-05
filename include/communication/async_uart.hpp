@@ -37,7 +37,9 @@ public:
         return atomic_get(&tx_busy_) != 0;
     }
     // Most recent transmission result, stable after txBusy() becomes false.
-    int txError() const { return static_cast<int>(atomic_get(&tx_error_)); }
+    int txError() const {
+        return static_cast<int>(atomic_get(&tx_error_));
+    }
     atomic_val_t droppedChunks() const {
         return atomic_get(&dropped_);
     }

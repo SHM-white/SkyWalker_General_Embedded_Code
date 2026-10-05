@@ -30,7 +30,8 @@ public:
         core::TimeUs feedback_timeout_us = 50000, source_timeout_us = 100000;
         core::TimeUs max_cycle_us = 20000;
     };
-    explicit YawCenteringController(const Config &config) : config_(config) {}
+    explicit YawCenteringController(const Config &config) : config_(config) {
+    }
     YawCenteringOutput update(const YawCenteringInputs &, core::TimeUs now_us);
     void reset();
 

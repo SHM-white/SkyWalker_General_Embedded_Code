@@ -20,13 +20,19 @@ public:
         switch (kind_) {
         case InterBoardTransportKind::Uart:
 #if defined(CONFIG_SKYWALKER_UART_TRANSPORT)
-            if (!dma) { error_ = -EINVAL; break; }
+            if (!dma) {
+                error_ = -EINVAL;
+                break;
+            }
             selected_ = &storage_.emplace<UartInterBoardTransport>(config.uart, *dma);
 #endif
             break;
         case InterBoardTransportKind::Rs485:
 #if defined(CONFIG_SKYWALKER_INTERBOARD_RS485)
-            if (!dma) { error_ = -EINVAL; break; }
+            if (!dma) {
+                error_ = -EINVAL;
+                break;
+            }
             selected_ = &storage_.emplace<Rs485InterBoardTransport>(config.rs485, *dma);
 #endif
             break;
@@ -39,25 +45,38 @@ public:
             error_ = -EINVAL;
         }
     }
-    InterBoardTransportKind kind() const override { return kind_; }
-    int service(std::uint64_t now_ms) override { return selected_ ? selected_->service(now_ms) : error_; }
-    int read(RxChunk &out) override { return selected_ ? selected_->read(out) : -EAGAIN; }
+    InterBoardTransportKind kind() const override {
+        return kind_;
+    }
+    int service(std::uint64_t now_ms) override {
+        return selected_ ? selected_->service(now_ms) : error_;
+    }
+    int read(RxChunk &out) override {
+        return selected_ ? selected_->read(out) : -EAGAIN;
+    }
     int send(const std::uint8_t *p, std::size_t n, std::uint32_t timeout_ms = 60) override {
         return selected_ ? selected_->send(p, n, timeout_ms) : error_;
     }
-    bool txBusy() const override { return selected_ && selected_->txBusy(); }
+    bool txBusy() const override {
+        return selected_ && selected_->txBusy();
+    }
+
 private:
     std::variant<std::monostate
 #if defined(CONFIG_SKYWALKER_UART_TRANSPORT)
-        , UartInterBoardTransport
+                 ,
+                 UartInterBoardTransport
 #endif
 #if defined(CONFIG_SKYWALKER_INTERBOARD_RS485)
-        , Rs485InterBoardTransport
+                 ,
+                 Rs485InterBoardTransport
 #endif
 #if defined(CONFIG_SKYWALKER_INTERBOARD_CAN)
-        , CanInterBoardTransport
+                 ,
+                 CanInterBoardTransport
 #endif
-    > storage_{};
+                 >
+        storage_{};
     InterBoardTransportKind kind_;
     InterBoardTransport *selected_ = nullptr;
     int error_ = -ENOTSUP;

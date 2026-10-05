@@ -29,7 +29,7 @@ class GimbalAxis {
 public:
     struct Status {
         bool feedback_healthy = false;
-        int error = 0;                    // Current feedback/reference preparation error, not a latched drive fault.
+        int error = 0; // Current feedback/reference preparation error, not a latched drive fault.
     };
 
     GimbalAxis(motor::Motor &drive, const control::PositionMotor::Config &position_config,

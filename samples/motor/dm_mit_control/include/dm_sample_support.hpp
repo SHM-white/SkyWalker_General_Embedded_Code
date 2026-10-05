@@ -4,7 +4,8 @@
 #include <drivers/motor/dm_motor.hpp>
 namespace skywalker::samples::dm {
 struct Session {
-    Session(const device *dev, motor::dm::Config cfg) : can(dev), config(cfg), motor(cfg), bus(dev) {}
+    Session(const device *dev, motor::dm::Config cfg) : can(dev), config(cfg), motor(cfg), bus(dev) {
+    }
     const device *can;
     motor::dm::Config config;
     motor::Motor motor;

@@ -377,8 +377,8 @@ ZTEST(control_feedforward_pid, test_benchmark_step) {
     int errors = 0;
     float checksum = 0.0f;
     skywalker::test::benchmark("feedforward_pid_step", benchmark_iterations, [&](std::uint32_t index) {
-        const control_feedforward_pid_input input{
-            {1.0f, (index & 1u) ? 0.25f : -0.25f, 0.001f, false}, {0.0f, 2.0f, 3.0f}};
+        const control_feedforward_pid_input input{{1.0f, (index & 1u) ? 0.25f : -0.25f, 0.001f, false},
+                                                  {0.0f, 2.0f, 3.0f}};
         errors |= control_feedforward_pid_step(&state, &config, &input, &result);
         checksum += result.output;
     });

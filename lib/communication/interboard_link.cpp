@@ -57,16 +57,19 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
     case MessageId::OperatorControl: {
         OperatorControl c{};
         ret = InterBoardCodec::decodeOperatorControl(m, p, n, c);
-        if (ret == 0 && c.sender_boot_id == heartbeat_.sender_boot_id) operator_control_ = c;
-        else if (ret == 0) ret = -ESTALE;
+        if (ret == 0 && c.sender_boot_id == heartbeat_.sender_boot_id)
+            operator_control_ = c;
+        else if (ret == 0)
+            ret = -ESTALE;
         break;
     }
     case MessageId::BigYawRequest: {
         BigYawRequest r{};
         ret = InterBoardCodec::decodeBigYawRequest(m, p, n, r);
         // Use the request producer sequence, not the transport frame sequence.
-        if (ret == 0 && (!big_yaw_request_.stamp.valid ||
-            sequenceAfter(r.stamp.sequence, big_yaw_request_.stamp.sequence))) big_yaw_request_ = r;
+        if (ret == 0 &&
+            (!big_yaw_request_.stamp.valid || sequenceAfter(r.stamp.sequence, big_yaw_request_.stamp.sequence)))
+            big_yaw_request_ = r;
         break;
     }
     case MessageId::BigYawFeedback:
@@ -128,15 +131,21 @@ int InterBoardLink::latestChassisFeedback(ChassisFeedbackSummary &out) const {
 }
 
 int InterBoardLink::latestOperatorControl(OperatorControl &out) const {
-    if (!operator_control_.stamp.valid) return -EAGAIN;
-    out = operator_control_; return 0;
+    if (!operator_control_.stamp.valid)
+        return -EAGAIN;
+    out = operator_control_;
+    return 0;
 }
 int InterBoardLink::latestBigYawRequest(BigYawRequest &out) const {
-    if (!big_yaw_request_.stamp.valid) return -EAGAIN;
-    out = big_yaw_request_; return 0;
+    if (!big_yaw_request_.stamp.valid)
+        return -EAGAIN;
+    out = big_yaw_request_;
+    return 0;
 }
 int InterBoardLink::latestBigYawFeedback(BigYawFeedback &out) const {
-    if (!big_yaw_feedback_.stamp.valid) return -EAGAIN;
-    out = big_yaw_feedback_; return 0;
+    if (!big_yaw_feedback_.stamp.valid)
+        return -EAGAIN;
+    out = big_yaw_feedback_;
+    return 0;
 }
 }

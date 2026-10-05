@@ -32,8 +32,12 @@ RemoteSource remote_source(remote);
 // receiver and its DMA worker continue independently.
 class PausableRemoteSource final : public ICommandSource {
 public:
-    SourceRole role() const override { return remote_source.role(); }
-    int start() override { return remote_source.start(); }
+    SourceRole role() const override {
+        return remote_source.role();
+    }
+    int start() override {
+        return remote_source.start();
+    }
     int sample(SourceSample &out) override {
         return atomic_get(&input_paused) ? -EAGAIN : remote_source.sample(out);
     }
@@ -45,7 +49,9 @@ communication::RefereeReceiver referee(referee_uart, referee_dma, communication:
 RefereePermissionSource referee_source(referee);
 class PausablePermissions final : public IPermissionSource {
 public:
-    int start() override { return referee_source.start(); }
+    int start() override {
+        return referee_source.start();
+    }
     int sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) override {
         return atomic_get(&permission_paused) ? -EAGAIN : referee_source.sample(now_ms, out, diagnostics);
     }
@@ -62,13 +68,17 @@ communication::vision::VisionReceiver::Config visionConfig() {
     c.feedback_period_us = 0;
     return c;
 }
-communication::vision::VisionReceiver vision(DEVICE_DT_GET(DT_ALIAS(vision_uart)), vision_dma,
-                                             vision_protocol, visionConfig());
+communication::vision::VisionReceiver vision(DEVICE_DT_GET(DT_ALIAS(vision_uart)), vision_dma, vision_protocol,
+                                             visionConfig());
 VisionSource vision_source(vision);
 class PausableVision final : public ICommandSource {
 public:
-    SourceRole role() const override { return vision_source.role(); }
-    int start() override { return vision_source.start(); }
+    SourceRole role() const override {
+        return vision_source.role();
+    }
+    int start() override {
+        return vision_source.start();
+    }
     int sample(SourceSample &out) override {
         return atomic_get(&vision_paused) ? -EAGAIN : vision_source.sample(out);
     }
@@ -85,7 +95,7 @@ motor::Motor yaw_drive(board_config::yawHardware()), pitch_drive(board_config::p
 motor::Group gimbal_group(yaw_drive, pitch_drive);
 motor::CanBus yaw_bus(board_config::yaw_can), pitch_bus(board_config::pitch_can);
 GimbalExecutor executor(yaw_drive, pitch_drive, gimbal_group, board_config::yawMotorConfig(), board_config::yaw,
-                         board_config::pitchMotorConfig(), board_config::pitch, board_config::execution_policy);
+                        board_config::pitchMotorConfig(), board_config::pitch, board_config::execution_policy);
 struct Observation {
     RunStatus run{};
     double yaw_target = 0, pitch_target = 0;
@@ -134,11 +144,21 @@ void telemetryTask(void *, void *, void *) {
         const auto &command = frame.decision.command.gimbal;
         const auto feedback = wireFeedback(observed.run, now_ms, board_config::command_timeout_ms);
         const float channels[] = {
-            float(frame.observed.remote.stamp.sequence), age(frame.observed.remote.stamp, now_ms),
-            float(command.stamp.sequence), age(command.stamp, now_ms), float(unsigned(observed.run.state)),
-            float(unsigned(observed.run.reason)), float(observed.run.active_count), age(observed.run.stamp, now_ms),
-            float(observed.run.last_command_sequence), yaw.feedback.position_rad, pitch.feedback.position_rad,
-            float(observed.yaw_target), float(observed.pitch_target), float(ybus.last_error), float(pbus.last_error),
+            float(frame.observed.remote.stamp.sequence),
+            age(frame.observed.remote.stamp, now_ms),
+            float(command.stamp.sequence),
+            age(command.stamp, now_ms),
+            float(unsigned(observed.run.state)),
+            float(unsigned(observed.run.reason)),
+            float(observed.run.active_count),
+            age(observed.run.stamp, now_ms),
+            float(observed.run.last_command_sequence),
+            yaw.feedback.position_rad,
+            pitch.feedback.position_rad,
+            float(observed.yaw_target),
+            float(observed.pitch_target),
+            float(ybus.last_error),
+            float(pbus.last_error),
             float(observed.cycle_overruns),
         };
         static_assert(sizeof(channels) / sizeof(channels[0]) <= VOFA_MAX_FLOATS);
@@ -146,30 +166,31 @@ void telemetryTask(void *, void *, void *) {
             (void)vofa_send(&vofa, channels, static_cast<std::uint8_t>(sizeof(channels) / sizeof(channels[0])));
         if (now_ms >= next_log_ms) {
             next_log_ms = now_ms + 1000;
-            LOG_INF("source=%u command=%u requested=%d run=%u wait=%u active=%zu waiting=%zu fresh=%d ready=%d error=%d cycle_us=%u overruns=%u commit=%d/%d",
-                    frame.observed.remote.stamp.sequence, command.stamp.sequence, observed.run.requested, unsigned(observed.run.state),
-                    unsigned(observed.run.reason), observed.run.active_count, observed.run.waiting_count,
-                    isFresh(observed.run.stamp, now_ms, board_config::command_timeout_ms), feedback.ready,
-                    observed.run.error, unsigned(observed.duration_us), observed.cycle_overruns,
-                    observed.yaw_commit_error, observed.pitch_commit_error);
+            LOG_INF(
+                "source=%u command=%u requested=%d run=%u wait=%u active=%zu waiting=%zu fresh=%d ready=%d error=%d cycle_us=%u overruns=%u commit=%d/%d",
+                frame.observed.remote.stamp.sequence, command.stamp.sequence, observed.run.requested,
+                unsigned(observed.run.state), unsigned(observed.run.reason), observed.run.active_count,
+                observed.run.waiting_count, isFresh(observed.run.stamp, now_ms, board_config::command_timeout_ms),
+                feedback.ready, observed.run.error, unsigned(observed.duration_us), observed.cycle_overruns,
+                observed.yaw_commit_error, observed.pitch_commit_error);
 #if defined(CONFIG_COMMAND_GIMBAL_VISION_OBSERVE) || defined(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE)
             const auto &aim = frame.observed.vision;
-            LOG_INF("vision_seq=%llu age_us=%llu control=%d source=%u ref=%u/%u reasons=%x auto=%d",
-                aim.stamp.sequence, aim.stamp.valid && now_ms * 1000 >= aim.stamp.time_us
-                    ? now_ms * 1000 - aim.stamp.time_us : UINT64_MAX,
-                aim.value.control_requested, unsigned(command.source), aim.value.reference.frame_id,
-                aim.value.reference.epoch, frame.decision.gimbal_reasons, board_config::command_policy.allow_auto);
+            LOG_INF("vision_seq=%llu age_us=%llu control=%d source=%u ref=%u/%u reasons=%x auto=%d", aim.stamp.sequence,
+                    aim.stamp.valid && now_ms * 1000 >= aim.stamp.time_us ? now_ms * 1000 - aim.stamp.time_us
+                                                                          : UINT64_MAX,
+                    aim.value.control_requested, unsigned(command.source), aim.value.reference.frame_id,
+                    aim.value.reference.epoch, frame.decision.gimbal_reasons, board_config::command_policy.allow_auto);
 #endif
 #ifdef CONFIG_COMMAND_GIMBAL_REFEREE
-            LOG_INF("referee_online=%d gimbal_allowed=%d permission_age_ms=%d",
-                frame.observed.referee.online, frame.observed.referee.robot.gimbal_output.enabled,
-                int(age(frame.observed.referee.robot.gimbal_output.stamp, now_ms)));
+            LOG_INF("referee_online=%d gimbal_allowed=%d permission_age_ms=%d", frame.observed.referee.online,
+                    frame.observed.referee.robot.gimbal_output.enabled,
+                    int(age(frame.observed.referee.robot.gimbal_output.stamp, now_ms)));
 #endif
 #ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
             LOG_INF("head_seq=%llu yaw_output=%d pitch_output=%d stable=%d head_yaw_mrad=%d head_pitch_mrad=%d",
-                observed.head_stamp.sequence, observed.inertial.yaw_output_valid, observed.inertial.pitch_output_valid,
-                observed.inertial.stabilization_valid,
-                int(observed.inertial.head_yaw_rad * 1000), int(observed.inertial.head_pitch_rad * 1000));
+                    observed.head_stamp.sequence, observed.inertial.yaw_output_valid,
+                    observed.inertial.pitch_output_valid, observed.inertial.stabilization_valid,
+                    int(observed.inertial.head_yaw_rad * 1000), int(observed.inertial.head_pitch_rad * 1000));
 #endif
         }
         k_sleep(K_MSEC(50));
@@ -182,13 +203,16 @@ K_THREAD_DEFINE(telemetry_thread, 4096, telemetryTask, nullptr, nullptr, nullptr
 int main() {
     int ret = commands.registerSource(pausable_source);
 #if defined(CONFIG_COMMAND_GIMBAL_VISION_OBSERVE) || defined(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE)
-    if (ret == 0) ret = commands.registerSource(pausable_vision);
+    if (ret == 0)
+        ret = commands.registerSource(pausable_vision);
 #endif
 #ifdef CONFIG_COMMAND_GIMBAL_REFEREE
-    if (ret == 0) ret = commands.bindPermissions(permission_source);
+    if (ret == 0)
+        ret = commands.bindPermissions(permission_source);
 #endif
 #ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
-    if (ret == 0) ret = head.start();
+    if (ret == 0)
+        ret = head.start();
 #endif
     if (ret == 0)
         ret = commands.start();
@@ -228,14 +252,16 @@ int main() {
         (void)remote.snapshot(operator_cache);
         const auto &operator_state = controls.update(operator_cache.remote, k_uptime_get());
         const auto exercise = diagnostics.update(k_uptime_get(), observation.run.state == RunState::Active,
-            !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
+                                                 !operator_state.fresh ||
+                                                     operator_state.remote.left_switch == RcSwitch::Down);
         atomic_set(&input_paused, exercise.input_paused);
         atomic_set(&execution_paused, exercise.execution_paused);
         atomic_set(&status_paused, exercise.status_paused);
         atomic_set(&head_paused, exercise.head_paused);
         atomic_set(&vision_paused, exercise.vision_paused);
         atomic_set(&permission_paused, exercise.permission_paused);
-        if (operator_state.clear_estop) atomic_set(&clear_requested, 1);
+        if (operator_state.clear_estop)
+            atomic_set(&clear_requested, 1);
         if (atomic_get(&execution_paused) && operator_state.run_allowed && !operator_state.clear_estop &&
             !board_config::emergencyStopRequested() && !atomic_get(&emergency_stop)) {
             // Deliberately freeze the execution producer while command and
@@ -273,7 +299,8 @@ int main() {
         (void)commands.snapshot(frame);
         GimbalExecutionInputs inputs{};
         inputs.command = frame.decision.command.gimbal;
-        if (!operator_state.run_allowed) inputs.command.mode = GimbalMode::Disabled;
+        if (!operator_state.run_allowed)
+            inputs.command.mode = GimbalMode::Disabled;
 #ifndef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
         inputs.command.yaw_rate_rad_s *= board_config::yaw_command_sign;
         inputs.command.pitch_rate_rad_s *= board_config::pitch_command_sign;
@@ -287,7 +314,8 @@ int main() {
         inputs.permission = frame.observed.referee.robot.gimbal_output;
 #endif
 #ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE
-        if (!atomic_get(&head_paused)) head_cache = head.snapshot();
+        if (!atomic_get(&head_paused))
+            head_cache = head.snapshot();
         InertialGimbalInputs inertial{};
         inertial.head = head_cache;
         inertial.yaw = yaw_drive.snapshot();
@@ -295,28 +323,30 @@ int main() {
         inertial.command = inputs.command;
         inertial.source_stamp = inputs.source_stamp;
         inertial.prerequisites_ready = inputs.transport_ready && vehicle::imu_mounting_confirmed &&
-            !inputs.emergency_stop && !inputs.clear_estop;
+                                       !inputs.emergency_stop && !inputs.clear_estop;
         const bool vision_reference = inputs.command.source != ControlSource::Vision ||
-            frame.decision.selected_vision.value.reference == head_cache.sample.reference;
+                                      frame.decision.selected_vision.value.reference == head_cache.sample.reference;
         observation.inertial = vision_reference ? inertial_adapter.update(inertial, now_us)
-            : inertial_adapter.suspend(now_us, WaitReason::Reference, -ESTALE);
+                                                : inertial_adapter.suspend(now_us, WaitReason::Reference, -ESTALE);
         inputs.command = observation.inertial.command;
         inputs.source_stamp = observation.inertial.source_stamp;
         inputs.yaw_output_valid = observation.inertial.yaw_output_valid;
         inputs.pitch_output_valid = observation.inertial.pitch_output_valid;
         observation.head_stamp = head_cache.sample.orientation.stamp;
         communication::vision::Feedback feedback{};
-        feedback.mode = frame.decision.operator_mode == OperatorMode::Auto
-            ? communication::vision::Mode::AutoAim : communication::vision::Mode::Idle;
+        feedback.mode = frame.decision.operator_mode == OperatorMode::Auto ? communication::vision::Mode::AutoAim
+                                                                           : communication::vision::Mode::Idle;
         feedback.reference = head_cache.sample.reference;
         feedback.orientation = head_cache.sample.orientation;
         feedback.gyro_rad_s = head_cache.sample.gyro_rad_s;
         // No shooting sensor exists on this bench; unset measurements remain invalid.
         (void)vision.setFeedback(feedback);
- #endif
-        observation.run = executor_started ? executor.update(inputs, now_us)
-            : executor.suspend(now_us, setup_blocked ? WaitReason::Configuration : WaitReason::Transport,
-                                setup_error, setup_blocked);
+#endif
+        observation.run = executor_started
+                              ? executor.update(inputs, now_us)
+                              : executor.suspend(now_us,
+                                                 setup_blocked ? WaitReason::Configuration : WaitReason::Transport,
+                                                 setup_error, setup_blocked);
         // Future shared-CAN mechanisms stage here, in this same thread.
         observation.yaw_commit_error = yaw_started ? yaw_bus.commit().error : 0;
         observation.pitch_commit_error = split_buses && pitch_started ? pitch_bus.commit().error : 0;

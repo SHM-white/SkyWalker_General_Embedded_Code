@@ -58,7 +58,7 @@ struct OperatorControl {
     std::uint32_t source_age_ms = UINT32_MAX;
     std::uint32_t clear_event_id = 0;
     std::uint32_t clear_event_age_ms = UINT32_MAX;
-    std::uint64_t sender_boot_id = 0; // Filled by the sending endpoint.
+    std::uint64_t sender_boot_id = 0;   // Filled by the sending endpoint.
     std::uint64_t receiver_boot_id = 0; // Bound when produced, never on retry.
     // TX: local production time; RX: local receive time and wire sequence.
     MessageStamp stamp{};

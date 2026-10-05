@@ -44,7 +44,9 @@ public:
     PositionMotor &operator=(const PositionMotor &) = delete;
 
     [[nodiscard]] int configure();
-    motor::Motor &motor() const { return motor_; }
+    motor::Motor &motor() const {
+        return motor_;
+    }
     [[nodiscard]] int update(double target_position_rad, float dt_s);
     [[nodiscard]] int reset();
     Telemetry telemetry() const;

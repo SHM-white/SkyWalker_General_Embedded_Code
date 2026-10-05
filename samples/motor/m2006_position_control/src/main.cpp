@@ -35,8 +35,8 @@ constexpr float kPi = 3.14159265358979323846f;
 
 // 拨弹盘参数：单位为减速器输出轴 rad；若还有外部传动，计入 kRadPerRound。
 constexpr double kRadPerRound = 2.0 * kPi / 8.0; // 每发转角：示例为 8 个弹位直连
-constexpr double kRoundsPerSecond = 1.0;        // 推进频率；不代表实际出弹计数
-constexpr double kFeedDirection = 1.0;          // +1 或 -1
+constexpr double kRoundsPerSecond = 1.0;         // 推进频率；不代表实际出弹计数
+constexpr double kFeedDirection = 1.0;           // +1 或 -1
 constexpr double kFeedSpeedRadS = kRadPerRound * kRoundsPerSecond;
 
 // 卡弹：位置落后、低速和大反馈电流同时持续指定时间。
@@ -128,21 +128,26 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(can)) return -ENODEV;
+    if (!device_is_ready(can))
+        return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::m2006({
         .id = 1,
         .current_limit_a = 10.0f,
         .gear_ratio = 36.0f,
-        .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
+        .timing =
+            {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
     const int vofa_error = vofa_init(&vofa, uart);
     int ret = bus.attach(drive);
-    if (ret == 0) ret = bus.start();
-    if (ret == 0) ret = axis.configure();
-    if (ret < 0) return ret;
+    if (ret == 0)
+        ret = bus.start();
+    if (ret == 0)
+        ret = axis.configure();
+    if (ret < 0)
+        return ret;
     const auto started_ms = k_uptime_get();
     auto previous_ms = started_ms;
     double target = 0, reverse_target = 0;
@@ -161,40 +166,51 @@ int main() {
                 const double step = kReverseSpeedRadS * dt;
                 const double left = reverse_target - target;
                 target += std::copysign(std::min(std::fabs(left), step), left);
-            } else target += kFeedDirection * kFeedSpeedRadS * dt;
+            }
+            else
+                target += kFeedDirection * kFeedSpeedRadS * dt;
         }
         const int enable_error = drive.enable();
         const int update_error = axis.update(target, dt);
         const int commit_error = bus.commit().error;
-        if (enable_error < 0) last_call_error = enable_error;
-        if (update_error < 0) last_call_error = update_error;
-        if (commit_error < 0) last_call_error = commit_error;
+        if (enable_error < 0)
+            last_call_error = enable_error;
+        if (update_error < 0)
+            last_call_error = update_error;
+        if (commit_error < 0)
+            last_call_error = commit_error;
         const auto data = axis.telemetry();
         const auto &f = data.motor.feedback;
         if (!data.output_valid) {
             jam_since_ms = settled_since_ms = -1;
-        } else if (f.timestamp_ms > observed_feedback_ms) {
+        }
+        else if (f.timestamp_ms > observed_feedback_ms) {
             observed_feedback_ms = f.timestamp_ms;
             const auto feedback_ms = static_cast<std::int64_t>(f.timestamp_ms);
             if (reversing) {
                 const bool settled = std::fabs(target - reverse_target) < 1e-6 &&
-                    std::fabs(data.position_rad - reverse_target) <= kReverseToleranceRad &&
-                    std::fabs(f.velocity_rad_s) <= kJamSpeedRadS;
-                if (!settled) settled_since_ms = -1;
-                else if (settled_since_ms < 0) settled_since_ms = feedback_ms;
+                                     std::fabs(data.position_rad - reverse_target) <= kReverseToleranceRad &&
+                                     std::fabs(f.velocity_rad_s) <= kJamSpeedRadS;
+                if (!settled)
+                    settled_since_ms = -1;
+                else if (settled_since_ms < 0)
+                    settled_since_ms = feedback_ms;
                 if ((settled_since_ms >= 0 && feedback_ms - settled_since_ms >= kReverseSettleMs) ||
                     now - reverse_started_ms >= kReverseTimeoutMs) {
                     reversing = false;
                     target = data.position_rad;
                     jam_since_ms = settled_since_ms = -1;
                 }
-            } else {
+            }
+            else {
                 const double lead = kFeedDirection * (target - data.position_rad);
                 const bool jam = now - started_ms >= kStartupGraceMs && lead >= kJamErrorRad &&
-                    (f.valid & skywalker::motor::FeedbackCurrent) && std::fabs(f.velocity_rad_s) <= kJamSpeedRadS &&
-                    std::fabs(f.current_a) >= kJamCurrentA;
-                if (!jam) jam_since_ms = -1;
-                else if (jam_since_ms < 0) jam_since_ms = feedback_ms;
+                                 (f.valid & skywalker::motor::FeedbackCurrent) &&
+                                 std::fabs(f.velocity_rad_s) <= kJamSpeedRadS && std::fabs(f.current_a) >= kJamCurrentA;
+                if (!jam)
+                    jam_since_ms = -1;
+                else if (jam_since_ms < 0)
+                    jam_since_ms = feedback_ms;
                 if (jam_since_ms >= 0 && feedback_ms - jam_since_ms >= kJamConfirmMs) {
                     reversing = true;
                     ++recovery_attempts;
@@ -207,18 +223,29 @@ int main() {
         }
         if (vofa_error == 0) {
             const auto &o = data.output;
-            const float channels[16] = {float(target), float(data.target_position_rad), float(data.position_rad),
-                f.current_a, o.position.error, o.position.output, o.velocity.velocity_reference_rad_s,
-                f.velocity_rad_s, o.velocity.velocity_error_rad_s, o.velocity.regulator.feedback.p,
-                o.velocity.regulator.feedback.i, data.output_valid ? o.effort_command : 0, dt * 1000,
-                float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0), float(reversing), float(recovery_attempts)};
+            const float channels[16] = {float(target),
+                                        float(data.target_position_rad),
+                                        float(data.position_rad),
+                                        f.current_a,
+                                        o.position.error,
+                                        o.position.output,
+                                        o.velocity.velocity_reference_rad_s,
+                                        f.velocity_rad_s,
+                                        o.velocity.velocity_error_rad_s,
+                                        o.velocity.regulator.feedback.p,
+                                        o.velocity.regulator.feedback.i,
+                                        data.output_valid ? o.effort_command : 0,
+                                        dt * 1000,
+                                        float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0),
+                                        float(reversing),
+                                        float(recovery_attempts)};
             (void)vofa_send(&vofa, channels, 16);
         }
         if (now >= next_log_ms) {
             next_log_ms = now + 1000;
             LOG_INF("target=%.3f seq=%llu output=%d wait=%u reverse=%d attempts=%u call=%d", target,
-                static_cast<unsigned long long>(data.target_sequence), data.output_valid, unsigned(data.issue),
-                reversing, recovery_attempts, last_call_error);
+                    static_cast<unsigned long long>(data.target_sequence), data.output_valid, unsigned(data.issue),
+                    reversing, recovery_attempts, last_call_error);
         }
     }
 }

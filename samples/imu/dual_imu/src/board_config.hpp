@@ -22,9 +22,10 @@ inline const device *external_uart = DEVICE_DT_GET(DT_ALIAS(rs485_2));
 inline const device *telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
 inline constexpr skywalker::control::QuaternionEkf::Config estimator{};
 inline constexpr skywalker::imu::Bmi088Imu::Config onboard{.reference = chassis_board ? calibration::chassis_reference
-                                                                                                   : calibration::carrier_reference,
-                                                           .sensor_to_body = chassis_board ? calibration::chassis_sensor_to_body
-                                                                                                        : calibration::carrier_sensor_to_body,
+                                                                                      : calibration::carrier_reference,
+                                                           .sensor_to_body = chassis_board
+                                                                                 ? calibration::chassis_sensor_to_body
+                                                                                 : calibration::carrier_sensor_to_body,
                                                            .freshness = {20000, 20000, 20000, 200000}};
 inline constexpr skywalker::imu::DmImuRs485Source::Config external{.protocol = {1, 20000},
                                                                    .reference = calibration::head_reference,

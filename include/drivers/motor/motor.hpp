@@ -169,8 +169,8 @@ private:
     int requestDisable();
     void markStarted();
     bool busStarted() const;
-    void markAttemptTxComplete(AttemptKind kind, std::uint64_t generation,
-                               std::uint64_t completed_ms, std::uint64_t completed_order);
+    void markAttemptTxComplete(AttemptKind kind, std::uint64_t generation, std::uint64_t completed_ms,
+                               std::uint64_t completed_order);
     void markPrepared(std::uint64_t generation);
     void markStopped(StopProgress progress, int tx_error, std::uint64_t request_generation,
                      std::uint64_t completed_ms = 0, std::uint64_t completed_order = 0);

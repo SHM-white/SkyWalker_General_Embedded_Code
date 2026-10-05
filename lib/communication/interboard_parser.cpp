@@ -22,9 +22,12 @@ int messageIndex(MessageId id) {
         return 2;
     case MessageId::ChassisFeedback:
         return 3;
-    case MessageId::OperatorControl: return 4;
-    case MessageId::BigYawRequest: return 5;
-    case MessageId::BigYawFeedback: return 6;
+    case MessageId::OperatorControl:
+        return 4;
+    case MessageId::BigYawRequest:
+        return 5;
+    case MessageId::BigYawFeedback:
+        return 6;
     default:
         return -1;
     }

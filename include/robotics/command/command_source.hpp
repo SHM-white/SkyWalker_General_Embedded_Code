@@ -20,7 +20,7 @@ class ICommandSource {
 public:
     virtual ~ICommandSource() = default;
     virtual SourceRole role() const = 0; // Fixed for this object's lifetime.
-    virtual int start() = 0; // 0 schedules reception, not necessarily online.
+    virtual int start() = 0;             // 0 schedules reception, not necessarily online.
     // Bounded, preserve original timestamps. 0 writes a complete sample (which
     // may be offline/invalid); -EAGAIN retains cache; other errors invalidate it.
     virtual int sample(SourceSample &out) = 0;
@@ -44,7 +44,8 @@ inline core::Stamp sourceStamp(const CommandSnapshot &frame, ControlSource sourc
         const auto &s = frame.observed.remote.stamp;
         return {s.timestamp_ms * 1000, s.sequence, s.valid && frame.observed.remote.online};
     }
-    if (source == ControlSource::Vision) return frame.decision.selected_vision.stamp;
+    if (source == ControlSource::Vision)
+        return frame.decision.selected_vision.stamp;
     return {};
 }
 }

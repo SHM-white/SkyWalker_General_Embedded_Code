@@ -26,6 +26,7 @@ public:
     // refreshes timestamps: consumers must still enforce command expiry.
     int current(RobotCommand &out) const;
     int snapshot(CommandSnapshot &out) const;
+
 private:
     struct Slot {
         ICommandSource *source = nullptr;
