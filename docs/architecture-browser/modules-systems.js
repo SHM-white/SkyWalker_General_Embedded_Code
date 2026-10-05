@@ -61,147 +61,1368 @@ window.SKYWALKER_MODULES = (window.SKYWALKER_MODULES || []).concat([
     config: [{name: 'CONFIG_SKYWALKER_REFEREE / CONFIG_SKYWALKER_UART_TRANSPORT', description: '启用纯 parser 与 UART 接收能力；纯 parser 不要求 Receiver。'}, {name: 'RefereeVersion', description: '必须显式绑定实际兼容版本；sentry_gimbal 当前 Unspecified 是待配置项。'}, {name: 'timeout_ms 与 permission_timeout_ms', description: '接收器默认离线 500 ms；仲裁器默认按机构许可 300 ms 判断，两者职责不同。'}]
   },
   {
-    id: 'interboard', title: '双主控板间通信', category: '通信与输入',
-    summary: '用同一 Endpoint 交换心跳、底盘命令、裁判约束和反馈；初始化时选择 UART、RS485 或 CAN。',
-    responsibility: 'transport 推进外设与恢复，Link 校验帧/序号/会话，Endpoint 把应用值副本转成业务消息。远端 boot_id 与恢复 generation 阻止断线前命令跨恢复边界执行。',
-    status: 'ready', statusNote: 'UART、两节点硬件 DE RS485、经典 CAN 三个后端均有实现；两端应用默认 UART，硬件收发和整车接入需按板级配置完成。',
-    source: [{label: '统一 Endpoint', path: 'include/communication/interboard/interboard_endpoint.hpp'}, {label: '统一传输契约', path: 'include/communication/interboard/interboard_transport.hpp'}, {label: '后端选择', path: 'include/communication/interboard/configured_interboard_transport.hpp'}, {label: '会话与协议层', path: 'include/communication/interboard/interboard_link.hpp'}, {label: 'Endpoint 实现', path: 'lib/communication/interboard_endpoint.cpp'}],
-    docs: [{label: 'UART / RS485 / CAN 完整说明', path: 'docs/modules/communication/interboard-transports.md'}, {label: '双板台架样例', path: 'samples/communication/interboard/README.md'}, {label: '双主控应用', path: 'docs/applications/dual-controller.md'}],
-    depends: ['uart', 'boards'],
-    interfaces: [
-      {signature: 'ConfiguredInterBoardTransport(const Config &config, AsyncUart::DmaBuffers *dma = nullptr)', description: '在对象内部只构造选定后端，不分配堆、不启动其他设备；不能运行中切换 kind。', parameters: [{name: 'config.kind', meaning: 'InterBoardTransportKind::Uart / Rs485 / Can'}, {name: 'config.uart / rs485 / can', meaning: '选中后端对应设备、RS485 角色或 CAN TX/RX ID'}, {name: 'dma', meaning: 'UART/RS485 必填专属静态 __nocache 缓冲；CAN 可为 nullptr'}], returns: '实现 InterBoardTransport 的固定后端对象。', context: '静态生命周期；所有 transport 方法由唯一通信线程调用。', errors: '未编译所选后端 -ENOTSUP；缺少 DMA 或非法 kind -EINVAL，经 service/send 报告。'},
-      {signature: 'InterBoardEndpoint(InterBoardTransport &transport, const Config &config); void InterBoardEndpoint::poll(std::uint64_t now_ms)', description: '构造绑定传输与本板角色；poll 懒初始化并推进收包、会话、心跳、发送与恢复。', parameters: [{name: 'transport', meaning: '固定的后端对象，生命周期长于 Endpoint'}, {name: 'config', meaning: 'role、command_timeout_ms、heartbeat_timeout_ms、tx_timeout_ms'}, {name: 'now_ms', meaning: '本机当前单调 ms'}], returns: 'poll 无返回；读取 snapshot().error 获取结果。', context: '唯一通信线程调用 poll，建议约 1 ms，包括出错期间；无 start/stop 接口。', errors: 'snapshot.error 记录最近服务错误；-EAGAIN 恢复等待保留此前错误；online 由心跳判断，不由本地驱动成功决定。'},
-      {signature: 'void InterBoardEndpoint::submit(const robotics::ChassisCommand &command); void InterBoardEndpoint::setReferee(const robotics::RefereeState &referee); void InterBoardEndpoint::setStatus(const robotics::RunStatus &status)', description: '应用线程发布最新命令、裁判约束与执行状态的值副本；背压时保留最新值，不建立无限历史命令队列。', parameters: [{name: 'command', meaning: '授权后的底盘目标，保留本次命令 stamp'}, {name: 'referee', meaning: '保留各许可/功率字段时间的裁判副本'}, {name: 'status', meaning: '本板 RunStatus，含 state、ready、generation、error 与等待原因'}], returns: 'void；提交不代表对端收到或执行。', context: '跨线程交换副本，内部短 spinlock；不得在锁内做设备 I/O。', errors: '业务新鲜度与会话仍在发送/接收和应用执行阶段判断；submit 不刷新旧来源时间。'},
-      {signature: 'InterBoardEndpoint::Snapshot InterBoardEndpoint::snapshot() const', description: '返回同一次发布的 peer/control/constraint/feedback、本地 boot_id、在线与传输诊断。', parameters: [], returns: '值副本；包含 transport、parser_stats、rejected_frames、error。', context: '其他线程可独立读取，不消费；poll 的 owner 仍只有一个。', errors: 'online=true 仅证明心跳新鲜；消费 control 时还要核对命令 stamp、receiver_boot_id 与 resume_generation。'},
-      {signature: 'int InterBoardTransport::service(std::uint64_t now_ms); int InterBoardTransport::read(RxChunk &out); int InterBoardTransport::send(const std::uint8_t *bytes, std::size_t size, std::uint32_t timeout_ms = 60); bool InterBoardTransport::txBusy() const', description: '自定义 Endpoint 或传输线程的统一契约：恢复、取出完整批次的字节块、整批接受发送及查询背压。', parameters: [{name: 'now_ms', meaning: '当前本机单调 ms'}, {name: 'out', meaning: '最多 64 字节与原始接收时间'}, {name: 'bytes / size', meaning: '一个完整批次，1～240 字节'}, {name: 'timeout_ms', meaning: '整批从接受到完成的总期限，1～1000 ms'}], returns: 'service：0 本地可服务、-EAGAIN 恢复；read：0 有数据、-EAGAIN 空、-EOVERFLOW 断流；send：0 接受，不表示送达。', context: '所有方法属于唯一通信线程；Endpoint 使用者一般无需直接调用。', errors: 'send 忙 -EAGAIN、参数 -EINVAL、容量 -EMSGSIZE、未就绪 -EACCES；其他驱动错误；read 溢出必须清 V1 半帧。'},
-      {signature: 'int InterBoardLink::processRxBytes(const std::uint8_t *bytes, std::size_t size, std::uint64_t now_ms); bool InterBoardLink::peerOnline(std::uint64_t now_ms, std::uint32_t timeout_ms = 200) const', description: '纯会话层入口，可脱离硬件解析 V1 字节流；latestHeartbeat/latestChassisControl/latestChassisConstraint/latestChassisFeedback 复制最近有效消息。', parameters: [{name: 'bytes / size', meaning: 'V1 字节流；nullptr/0 推进半帧超时'}, {name: 'now_ms', meaning: '字节接收时刻，或 online 检查当前时间'}, {name: 'timeout_ms', meaning: '底层 Link 心跳期限默认 200 ms；Endpoint 默认另设 100 ms'}], returns: '解析返回 0/负 errno；latest* 返回 0 或无消息错误；peerOnline 返回布尔值。', context: '整个 Link 单线程；业务线程通过 Endpoint 或自建短锁读取副本。', errors: '重复、乱序、错误角色或 boot/session 不匹配帧会拒绝；discardPartial 清半帧，invalidateControl 清控制/约束/反馈缓存。'}
-    ],
-    examples: [{title: '固定后端，1 ms 推进双板端点', language: 'cpp', code: '#include <communication/interboard/configured_interboard_transport.hpp>\n#include <communication/interboard/interboard_endpoint.hpp>\n#include "board_config.hpp"\nusing namespace skywalker;\nstatic communication::AsyncUart::DmaBuffers dma __nocache;\nstatic communication::ConfiguredInterBoardTransport transport(bench::transport, &dma);\nstatic communication::InterBoardEndpoint link(transport, {bench::role});\n\n// 命令线程：command 必须来自当前有效仲裁结果。\nvoid publishCommand(const robotics::ChassisCommand &command,\n                    const robotics::RefereeState &referee) {\n    link.submit(command);\n    link.setReferee(referee);\n}\n// 通信线程：任何状态下都持续 poll。\nvoid linkTask() {\n    for (;;) {\n        link.poll(static_cast<std::uint64_t>(k_uptime_get()));\n        k_sleep(K_MSEC(1));\n    }\n}\n// 底盘执行线程读取，之后还需检查 command stamp 与 boot/generation。\nauto readLink() { return link.snapshot(); }', notes: 'bench::transport 与 bench::role 直接参考 samples/communication/interboard/src/board_config.hpp。云台/底盘角色相反；RS485 Coordinator/Responder 相反；CAN TX/RX ID 对调。'}],
-    lifecycle: ['两端先选择同一种传输；确定 GimbalController / ChassisController 角色。', '静态构造 transport 和 Endpoint；唯一通信线程持续 poll，自动交换心跳。', '云台提交最终底盘命令和裁判约束，底盘发布 RunStatus/反馈；其他线程只交换副本。', '执行前同时要求心跳、消息与转发链路新鲜，receiver_boot_id 等于本机 boot_id，resume_generation 等于本地恢复代次。', '断线、远端重启或本地恢复后丢弃旧命令，等待新上下文和新命令。'],
-    pitfalls: ['UART 是 V1 原始字节流；RS485 与 CAN 额外封装完整批次，两端固件必须兼容相同后端。', 'RS485 当前只有两节点硬件 DE，协调端轮询、应答端只能在授权窗口回复；不是 DM-IMU 或 Modbus 后端。', 'CAN 后端独占整个控制器，不能与 motor::CanBus 共用同一 controller；默认板间 CAN3 与电机 CAN1 分开。', 'CAN 每片最多 6 字节数据，最大批次需 41 片；轮询、仲裁和排队都计入发送期限。', '传输 send 成功、CAN ACK、心跳在线分别是不同层面的事实，都不能代替执行层授权。'],
-    config: [{name: 'Endpoint::Config', description: 'role 必填；command_timeout_ms=100、heartbeat_timeout_ms=100、tx_timeout_ms=60。'}, {name: 'RS485::Config', description: 'role=Coordinator/Responder；poll_interval_ms=5、response_window_ms=20、turnaround_ms=1；要求 UART 支持硬件 DE 与 8N1。'}, {name: 'CAN::Config', description: '默认 TX=0x600 / RX=0x601，extended_id=false；reassembly_timeout_ms=60、recovery_retry_ms=100。对端 ID 对调。'}, {name: 'CONFIG_SKYWALKER_INTERBOARD / ENDPOINT', description: '启用 V1 与 Endpoint，Endpoint 需要 ENTROPY_GENERATOR 生成本地 boot_id。'}, {name: 'CONFIG_SKYWALKER_UART_TRANSPORT / INTERBOARD_RS485 / INTERBOARD_CAN', description: '按所选后端编译；UART/RS485 需要 DMA，CAN 需要独占设备与正确波特率。'}]
-  },
+  "id": "interboard",
+  "title": "双主控板间通信",
+  "category": "通信与输入",
+  "summary": "统一 v4 字节契约，七类消息、boot/生产序号与原年龄，UART/RS485/CAN 三后端。",
+  "responsibility": "Transport 管物理批次；Endpoint 唯一通信线程推进收发，其他线程复制输入/状态，不根据电机 ready 决定目标发送。",
+  "status": "ready",
+  "statusNote": "v4 已实现，旧版本直接拒绝；恢复授权 generation 删除。真实两板应使用同版固件，整车默认 USART1 UART。",
+  "source": [
+    {
+      "label": "interboard_protocol.hpp",
+      "path": "include/communication/interboard/interboard_protocol.hpp"
+    },
+    {
+      "label": "interboard_endpoint.hpp",
+      "path": "include/communication/interboard/interboard_endpoint.hpp"
+    },
+    {
+      "label": "interboard.hpp",
+      "path": "include/robotics/messages/interboard.hpp"
+    },
+    {
+      "label": "interboard_endpoint.cpp",
+      "path": "lib/communication/interboard_endpoint.cpp"
+    },
+    {
+      "label": "interboard_codec.cpp",
+      "path": "lib/communication/interboard_codec.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "communication.md",
+      "path": "docs/modules/communication/communication.md"
+    },
+    {
+      "label": "interboard-transports.md",
+      "path": "docs/modules/communication/interboard-transports.md"
+    }
+  ],
+  "depends": [
+    "uart",
+    "boards"
+  ],
+  "interfaces": [
+    {
+      "signature": "ConfiguredInterBoardTransport(const Config &, AsyncUart::DmaBuffers *dma = nullptr)",
+      "description": "一次选择 UART/RS485/CAN；对象和所选设备独占，纯 CAN 不需要 DMA。",
+      "parameters": [],
+      "returns": "构造不启动，后续 service/poll 推进。",
+      "errors": "后端未编译/电气配置不支持 -ENOTSUP。",
+      "context": "唯一通信线程使用，static 存活。"
+    },
+    {
+      "signature": "InterBoardEndpoint(InterBoardTransport &, const Config &); void poll(uint64_t now_ms)",
+      "description": "唯一通信 owner 约 1 ms 推进；命令/心跳/status 默认 100 ms，TX 默认 60 ms。",
+      "parameters": [],
+      "returns": "void；服务、解析和在线诊断由 snapshot 返回。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "poll 仅一个通信线程，其他 API 交换短锁值副本。"
+    },
+    {
+      "signature": "void submit(const ChassisCommand &); void setReferee(const RefereeState &); void setStatus(const RunStatus &); void submitBigYaw(const BigYawRequest &); void setBigYawFeedback(const BigYawFeedback &)",
+      "description": "复制原生产值与年龄；反复提交/重发同 producer 不续期，状态 stamp 由执行 owner 生产。",
+      "parameters": [],
+      "returns": "void；发送机会由 poll 安排，接受不代表远端执行。",
+      "errors": "目标不会等待 ready/armed；真实 boot/link、原输入和数值仍需有效。",
+      "context": "应用线程可发布值副本，不能修改源 stamp。"
+    },
+    {
+      "signature": "int submitOperatorControl(const OperatorControl &); Snapshot snapshot() const",
+      "description": "独立操作管理传 run_allowed/estop/clear event 与 boot/原年龄；snapshot 含七类消息、online/error/transport/parser_stats。",
+      "parameters": [],
+      "returns": "submit 0=复制；snapshot 为值副本。",
+      "errors": "非云台 producer -EACCES，矛盾运行/停止/清除请求 -EINVAL；重复事件不改绑新 boot。",
+      "context": "线程上下文，短锁交换。"
+    },
+    {
+      "signature": "int InterBoardTransport::service(uint64_t); int read(RxChunk &); int send(const uint8_t *, size_t, uint32_t timeout_ms = 60)",
+      "description": "批次完整复制，背压不积压运动目标；原始接收时刻随 chunk 保留。",
+      "parameters": [],
+      "returns": "0 成功；无数据/背压 -EAGAIN，断流 -EOVERFLOW。",
+      "errors": "非法 -EINVAL，过大 -EMSGSIZE，未就绪 -EACCES；溢出丢半帧。",
+      "context": "唯一通信 owner，不在电机执行 ISR 调用。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "独立通信与生产者",
+      "language": "cpp",
+      "code": "// 执行线程：RunStatus.stamp 来自本次实际 update。\nendpoint.setStatus(status);\nendpoint.submitBigYaw(fresh_request);\n// 通信线程：\nendpoint.poll(k_uptime_get());\nconst auto rx = endpoint.snapshot();\n// rx.online 只代表心跳，原输入和状态年龄分别检查。",
+      "notes": "应用周期片段，构造与实物配置以链接源码为准。"
+    }
+  ],
+  "lifecycle": [
+    "两端同版 v4，选择同后端并绑定独占资源。",
+    "静态构造 Transport/Endpoint 与 DMA，持续 poll。",
+    "执行/管理 owner 发布保留源年龄的目标与状态。",
+    "按真实 boot/link 更新上下文；Motor 恢复不改变输入身份。",
+    "状态停止生产后撤销旧 ready/armed，通信心跳可继续。"
+  ],
+  "pitfalls": [
+    "v4 没有 resume_generation；不要用旧恢复教程。",
+    "frame sequence 是发送次数，不是 producer sequence。",
+    "RS485 主动 IMU 协议不是板间轮询封装。",
+    "底盘电机占满 CAN1/2/3，默认板间 UART；不能共享控制器给 CAN 后端。"
+  ],
+  "config": [
+    {
+      "name": "kInterBoardProtocolVersion",
+      "description": "4；最大 payload 128、frame 142 B，CRC16、小端；七类消息。"
+    },
+    {
+      "name": "状态年龄",
+      "description": "RunStatus/BigYawFeedback 原始生产年龄；反复发送不续期。"
+    }
+  ]
+},
   {
-    id: 'vision', title: '视觉链路与 AB 协议', category: '通信与输入',
-    summary: '接收独立的 yaw/pitch 目标请求，提供带参考系与有效期的值；反馈由应用复制姿态等实测数据。',
-    responsibility: 'AbProtocol 定义 29 字节下行/43 字节上行线协议；VisionLink 校验参考、时间与反馈；VisionReceiver 驱动独占 UART。模块不持有 IMU，不仲裁机器人命令，不操作电机和发射机构。',
-    status: 'ready', statusNote: '独立 receiver、AB codec、三源命令台架已实现；sentry_gimbal 当前未注册 VisionSource，自动模式和姿态回传仍需应用组装。',
-    source: [{label: 'VisionReceiver', path: 'include/communication/vision/vision_receiver.hpp'}, {label: 'VisionLink', path: 'include/communication/vision/vision_link.hpp'}, {label: 'AB codec', path: 'include/communication/vision/ab_protocol.hpp'}, {label: '目标与反馈值类型', path: 'include/communication/vision/vision_types.hpp'}, {label: '链路校验实现', path: 'lib/communication/vision_link.cpp'}],
-    docs: [{label: 'AB 字节布局与坐标约定', path: 'docs/modules/communication/vision.md'}, {label: '视觉台架样例', path: 'samples/communication/vision/README.md'}, {label: '视觉/IMU 流程场景', path: 'tests/vision_imu/README.md'}],
-    depends: ['uart'],
-    interfaces: [
-      {signature: 'VisionReceiver(const device *uart, AsyncUart::DmaBuffers &dma, VisionProtocol &protocol, const Config &config); int VisionReceiver::start()', description: '绑定 UART、DMA 与长生命周期 codec；start 初始化 Link 并启动独立 worker。反馈周期默认 0，仅收包。', parameters: [{name: 'uart', meaning: '专属视觉串口'}, {name: 'dma', meaning: '专属静态 __nocache 缓冲'}, {name: 'protocol', meaning: 'AbProtocol 或其他实现 VisionProtocol 的对象，必须持续存活'}, {name: 'config', meaning: 'Link 的超时配置与 feedback_period_us'}], returns: 'start：0 表示 worker 创建；UART 就绪由 Snapshot::state 与 uart_error 表示。', context: '线程上下文，启动一次，无停止/销毁后重建 API；交给 VisionSource 时由 manager 启动。', errors: '-EALREADY：已启动；其他值为 Link/codec 的配置错误。线程创建成功也可能随后 InitFailed 并重试 UART。'},
-      {signature: 'VisionReceiver::Snapshot VisionReceiver::snapshot() const', description: '读取命令、协议统计和 RX/TX 诊断；在读者侧按当前时间重新计算 aim_fresh。', parameters: [], returns: '值副本：link.aim、link.aim_fresh、state、uart_error、dropped、resets、tx_frames、tx_skipped、tx_error。', context: '多个线程可读，内部短锁；读取不产生新命令、不刷新时间。', errors: '必须同时检查 aim_fresh、aim.stamp.valid 与 aim.value.control_requested；合法 stop 可能是新鲜消息，但不能控制电机。'},
-      {signature: 'int VisionReceiver::setFeedback(const Feedback &feedback); int VisionLink::setFeedback(const Feedback &feedback)', description: '复制应用提供的反馈，保留姿态、gyro、弹速、计数各自的原始时间；不填造任何缺失测量。', parameters: [{name: 'feedback', meaning: 'mode、reference、Hamilton wxyz 四元数（B→W）、body-frame gyro(rad/s)、弹速(m/s)、累计计数，均带各自 stamp'}], returns: '0：保存副本；负 errno：拒绝。', context: 'Link 初始化后其他线程可设置；实际编码与 UART 发送由唯一 worker 进行。', errors: '-EACCES：Link 尚未初始化；-EINVAL：未知 mode、未来时间、非法参考/非有限值、无效四元数或负弹速。'},
-      {signature: 'int VisionLink::init(); int VisionLink::processRxBytes(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us); void VisionLink::discardPartial()', description: '不使用 Receiver 时的纯链路入口；init 校验配置并清状态，processRxBytes 流式解析，零长度推进半帧超时，断流时 discardPartial。', parameters: [{name: 'bytes / size', meaning: '原始字节流，nullptr 只允许 size=0'}, {name: 'rx_us', meaning: '接收时间 μs；AsyncUart timestamp_ms 乘 1000'}], returns: '0 或负 errno；命令更新为新的 Measurement<AimCommand> 本地序号。', context: 'processRxBytes/discardPartial/encodeFeedback 只允许一个 owner；snapshot/setFeedback 可以由其他线程调用。', errors: '-EALREADY：重复 init；-EACCES：未 init；-EINVAL：配置、空指针、未来时间或目标非法；-ESTALE：接收时间回退。'},
-      {signature: 'int VisionLink::encodeFeedback(std::uint8_t *out, std::size_t capacity)', description: '在当前时刻判断各测量有效期和姿态/gyro 时间差，再交给 codec 编码；AB 输出完整 43 字节。', parameters: [{name: 'out', meaning: '输出字节数组'}, {name: 'capacity', meaning: 'AB 至少 43 字节'}], returns: '正数：编码字节数；负 errno：此次不能发送。', context: '唯一协议 owner 编码；worker 忙时跳过本周期，下一周期取最新反馈。', errors: '-EACCES：未初始化；-EINVAL：空输出或值非法；-EMSGSIZE：容量不足；-ENODATA：必要字段无效/过期；-ESTALE：参考不一致或姿态/gyro 不同步；-ERANGE：ZYX pitch 接近 ±π/2。'},
-      {signature: 'AbProtocol(const Config &config); int AbProtocol::validateConfig() const; int AbProtocol::consume(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us, CommandSink &sink)', description: 'AB 下行 mode=0 停止、1 控制、2 控制并请求开火；yaw/pitch 角度 rad、速度 rad/s、加速度 rad/s²，float32 小端，帧经 CRC 校验后调用 sink。', parameters: [{name: 'config.command_reference', meaning: '固定本地约定 {frame_id, epoch}，默认 {1,1}；AB 线上没有此字段'}, {name: 'config.assembly_timeout_us', meaning: '半帧装配超时，默认 20000 μs'}, {name: 'sink', meaning: '完整目标请求的接受者，VisionLink 内部实现'}], returns: '0 或负 errno；statistics() 给出 frames/crc_errors/invalid_frames/assembly_timeouts。', context: '单 owner 的有状态流式 codec；statistics 不跨线程直接读。', errors: '未知 mode/非有限 active 目标/坏 CRC 会拒绝；AB 没有会话号，不能把本地序号当远端采样序号。'}
-    ],
-    examples: [{title: '独立接收视觉请求并正确识别停止', language: 'cpp', code: '#include <communication/vision/vision_receiver.hpp>\n#include <communication/vision/ab_protocol.hpp>\n#include "board_config.hpp"\nnamespace vision = skywalker::communication::vision;\nstatic skywalker::communication::AsyncUart::DmaBuffers dma __nocache;\nstatic vision::AbProtocol protocol({.command_reference = {1, 1}});\nstatic vision::VisionReceiver receiver(bench::vision_uart, dma, protocol, {});\n\nint main() {\n    const int ret = receiver.start();\n    if (ret < 0) return ret;\n    for (;;) {\n        const auto frame = receiver.snapshot();\n        const bool requested = frame.link.aim_fresh &&\n                               frame.link.aim.value.control_requested;\n        if (requested) {\n            const float yaw_rad = frame.link.aim.value.yaw.angle_rad;\n            // 目标先进入 VisionSource/CommandArbiter；这里不驱动电机。\n            (void)yaw_rad;\n        }\n        k_sleep(K_MSEC(10));\n    }\n}', notes: 'bench::vision_uart 来自 samples/communication/vision/src/board_config.hpp。这是 RX-only 示例；上行需设 feedback_period_us>0 并持续 setFeedback 传真实数据。'}, {title: '应用把实测反馈送给 receiver', language: 'cpp', code: '// 参数必须是保存原始时间的实测值；由应用/IMU owner 提供。\nint publishVisionFeedback(vision::VisionReceiver &receiver,\n                          const vision::Feedback &measurements) {\n    return receiver.setFeedback(measurements);\n}\n// measurements.orientation 与 gyro_rad_s 的 stamp 不改成发送时刻。\n// 无效/过期字段保留无效状态，AB 编码器会拒绝不完整反馈。', notes: '正式架构需由应用桥接 IMU → vision::Feedback，接收器本身不拥有 IMU。'}],
-    lifecycle: ['静态构造 codec、DMA 和 Receiver，并统一应用/视觉的参考系约定。', 'start 初始化 Link 后启动 UART worker；通过快照区分串口状态和请求新鲜度。', 'VisionSource 把 Measurement 原样送仲裁，不更改时间；mode=0 清空旧目标。', '需要回传时，应用复制 IMU 和发射机构实测值，设 feedback_period_us 并调用 setFeedback。', '执行层仍检查本地位置参考与授权；fire_requested 只是电平请求。'],
-    pitfalls: ['aim_fresh 只说明消息年龄；停止帧也可以 fresh，必须同时检查 control_requested。', 'AB 线上不携带 frame_id、epoch、valid bits 或远端 sequence；参考一致性是双方明确约定。', 'body-frame gyro.z/gyro.y 在任意姿态下不等于 Euler yaw_vel/pitch_vel；codec 负责转换。', '没有反馈测量时不能发送伪造弹速或姿态；默认 feedback_period_us=0。', '连续快照可能读到同一 fire_requested，不能把每次读取当成一次开火事件。'],
-    config: [{name: 'CONFIG_SKYWALKER_VISION / VISION_AB / VISION_RECEIVER', description: '分别启用独立 Link、AB codec、UART worker；与 REFEREE 可独立编译。'}, {name: 'VisionLink::Config', description: 'aim=100000 μs；orientation/gyro=20000 μs；bullet_speed/count=1000000 μs；max_feedback_skew=20000 μs。'}, {name: 'VisionReceiver::Config::feedback_period_us', description: '默认 0，只接收；正值启用周期回传，TX 忙时跳过。'}, {name: 'CONFIG_SKYWALKER_VISION_RX_STACK_SIZE / PRIORITY', description: '默认栈 4096 字节、优先级 6；AB 参考样例使用 115200、8N1。'}]
-  },
+  "id": "vision",
+  "title": "视觉链路与 AB 协议",
+  "category": "通信与输入",
+  "summary": "接收独立的 yaw/pitch 目标请求，提供带参考系与有效期的值；反馈由应用复制姿态等实测数据。",
+  "responsibility": "AbProtocol 定义 29 字节下行/43 字节上行线协议；VisionLink 校验参考、时间与反馈；VisionReceiver 驱动独占 UART。模块不持有 IMU，不仲裁机器人命令，不操作电机和发射机构。",
+  "status": "ready",
+  "statusNote": "AB 接收已接入整车可选观察/执行阶段；自动执行要求头部参考匹配。弹速/弹数来源与显式视觉会话待补，反馈 TX 默认关闭。",
+  "source": [
+    {
+      "label": "VisionReceiver",
+      "path": "include/communication/vision/vision_receiver.hpp"
+    },
+    {
+      "label": "VisionLink",
+      "path": "include/communication/vision/vision_link.hpp"
+    },
+    {
+      "label": "AB codec",
+      "path": "include/communication/vision/ab_protocol.hpp"
+    },
+    {
+      "label": "目标与反馈值类型",
+      "path": "include/communication/vision/vision_types.hpp"
+    },
+    {
+      "label": "链路校验实现",
+      "path": "lib/communication/vision_link.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "AB 字节布局与坐标约定",
+      "path": "docs/modules/communication/vision.md"
+    },
+    {
+      "label": "视觉台架样例",
+      "path": "samples/communication/vision/README.md"
+    },
+    {
+      "label": "视觉/IMU 流程场景",
+      "path": "tests/vision_imu/README.md"
+    }
+  ],
+  "depends": [
+    "uart"
+  ],
+  "interfaces": [
+    {
+      "signature": "VisionReceiver(const device *uart, AsyncUart::DmaBuffers &dma, VisionProtocol &protocol, const Config &config); int VisionReceiver::start()",
+      "description": "绑定 UART、DMA 与长生命周期 codec；start 初始化 Link 并启动独立 worker。反馈周期默认 0，仅收包。",
+      "parameters": [
+        {
+          "name": "uart",
+          "meaning": "专属视觉串口"
+        },
+        {
+          "name": "dma",
+          "meaning": "专属静态 __nocache 缓冲"
+        },
+        {
+          "name": "protocol",
+          "meaning": "AbProtocol 或其他实现 VisionProtocol 的对象，必须持续存活"
+        },
+        {
+          "name": "config",
+          "meaning": "Link 的超时配置与 feedback_period_us"
+        }
+      ],
+      "returns": "start：0 表示 worker 创建；UART 就绪由 Snapshot::state 与 uart_error 表示。",
+      "context": "线程上下文，启动一次，无停止/销毁后重建 API；交给 VisionSource 时由 manager 启动。",
+      "errors": "-EALREADY：已启动；其他值为 Link/codec 的配置错误。线程创建成功也可能随后 InitFailed 并重试 UART。"
+    },
+    {
+      "signature": "VisionReceiver::Snapshot VisionReceiver::snapshot() const",
+      "description": "读取命令、协议统计和 RX/TX 诊断；在读者侧按当前时间重新计算 aim_fresh。",
+      "parameters": [],
+      "returns": "值副本：link.aim、link.aim_fresh、state、uart_error、dropped、resets、tx_frames、tx_skipped、tx_error。",
+      "context": "多个线程可读，内部短锁；读取不产生新命令、不刷新时间。",
+      "errors": "必须同时检查 aim_fresh、aim.stamp.valid 与 aim.value.control_requested；合法 stop 可能是新鲜消息，但不能控制电机。"
+    },
+    {
+      "signature": "int VisionReceiver::setFeedback(const Feedback &feedback); int VisionLink::setFeedback(const Feedback &feedback)",
+      "description": "复制应用提供的反馈，保留姿态、gyro、弹速、计数各自的原始时间；不填造任何缺失测量。",
+      "parameters": [
+        {
+          "name": "feedback",
+          "meaning": "mode、reference、Hamilton wxyz 四元数（B→W）、body-frame gyro(rad/s)、弹速(m/s)、累计计数，均带各自 stamp"
+        }
+      ],
+      "returns": "0：保存副本；负 errno：拒绝。",
+      "context": "Link 初始化后其他线程可设置；实际编码与 UART 发送由唯一 worker 进行。",
+      "errors": "-EACCES：Link 尚未初始化；-EINVAL：未知 mode、未来时间、非法参考/非有限值、无效四元数或负弹速。"
+    },
+    {
+      "signature": "int VisionLink::init(); int VisionLink::processRxBytes(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us); void VisionLink::discardPartial()",
+      "description": "不使用 Receiver 时的纯链路入口；init 校验配置并清状态，processRxBytes 流式解析，零长度推进半帧超时，断流时 discardPartial。",
+      "parameters": [
+        {
+          "name": "bytes / size",
+          "meaning": "原始字节流，nullptr 只允许 size=0"
+        },
+        {
+          "name": "rx_us",
+          "meaning": "接收时间 μs；AsyncUart timestamp_ms 乘 1000"
+        }
+      ],
+      "returns": "0 或负 errno；命令更新为新的 Measurement<AimCommand> 本地序号。",
+      "context": "processRxBytes/discardPartial/encodeFeedback 只允许一个 owner；snapshot/setFeedback 可以由其他线程调用。",
+      "errors": "-EALREADY：重复 init；-EACCES：未 init；-EINVAL：配置、空指针、未来时间或目标非法；-ESTALE：接收时间回退。"
+    },
+    {
+      "signature": "int VisionLink::encodeFeedback(std::uint8_t *out, std::size_t capacity)",
+      "description": "在当前时刻判断各测量有效期和姿态/gyro 时间差，再交给 codec 编码；AB 输出完整 43 字节。",
+      "parameters": [
+        {
+          "name": "out",
+          "meaning": "输出字节数组"
+        },
+        {
+          "name": "capacity",
+          "meaning": "AB 至少 43 字节"
+        }
+      ],
+      "returns": "正数：编码字节数；负 errno：此次不能发送。",
+      "context": "唯一协议 owner 编码；worker 忙时跳过本周期，下一周期取最新反馈。",
+      "errors": "-EACCES：未初始化；-EINVAL：空输出或值非法；-EMSGSIZE：容量不足；-ENODATA：必要字段无效/过期；-ESTALE：参考不一致或姿态/gyro 不同步；-ERANGE：ZYX pitch 接近 ±π/2。"
+    },
+    {
+      "signature": "AbProtocol(const Config &config); int AbProtocol::validateConfig() const; int AbProtocol::consume(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us, CommandSink &sink)",
+      "description": "AB 下行 mode=0 停止、1 控制、2 控制并请求开火；yaw/pitch 角度 rad、速度 rad/s、加速度 rad/s²，float32 小端，帧经 CRC 校验后调用 sink。",
+      "parameters": [
+        {
+          "name": "config.command_reference",
+          "meaning": "固定本地约定 {frame_id, epoch}，默认 {1,1}；AB 线上没有此字段"
+        },
+        {
+          "name": "config.assembly_timeout_us",
+          "meaning": "半帧装配超时，默认 20000 μs"
+        },
+        {
+          "name": "sink",
+          "meaning": "完整目标请求的接受者，VisionLink 内部实现"
+        }
+      ],
+      "returns": "0 或负 errno；statistics() 给出 frames/crc_errors/invalid_frames/assembly_timeouts。",
+      "context": "单 owner 的有状态流式 codec；statistics 不跨线程直接读。",
+      "errors": "未知 mode/非有限 active 目标/坏 CRC 会拒绝；AB 没有会话号，不能把本地序号当远端采样序号。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "独立接收视觉请求并正确识别停止",
+      "language": "cpp",
+      "code": "#include <communication/vision/vision_receiver.hpp>\n#include <communication/vision/ab_protocol.hpp>\n#include \"board_config.hpp\"\nnamespace vision = skywalker::communication::vision;\nstatic skywalker::communication::AsyncUart::DmaBuffers dma __nocache;\nstatic vision::AbProtocol protocol({.command_reference = {1, 1}});\nstatic vision::VisionReceiver receiver(bench::vision_uart, dma, protocol, {});\n\nint main() {\n    const int ret = receiver.start();\n    if (ret < 0) return ret;\n    for (;;) {\n        const auto frame = receiver.snapshot();\n        const bool requested = frame.link.aim_fresh &&\n                               frame.link.aim.value.control_requested;\n        if (requested) {\n            const float yaw_rad = frame.link.aim.value.yaw.angle_rad;\n            // 目标先进入 VisionSource/CommandArbiter；这里不驱动电机。\n            (void)yaw_rad;\n        }\n        k_sleep(K_MSEC(10));\n    }\n}",
+      "notes": "bench::vision_uart 来自 samples/communication/vision/src/board_config.hpp。这是 RX-only 示例；上行需设 feedback_period_us>0 并持续 setFeedback 传真实数据。"
+    },
+    {
+      "title": "应用把实测反馈送给 receiver",
+      "language": "cpp",
+      "code": "// 参数必须是保存原始时间的实测值；由应用/IMU owner 提供。\nint publishVisionFeedback(vision::VisionReceiver &receiver,\n                          const vision::Feedback &measurements) {\n    return receiver.setFeedback(measurements);\n}\n// measurements.orientation 与 gyro_rad_s 的 stamp 不改成发送时刻。\n// 无效/过期字段保留无效状态，AB 编码器会拒绝不完整反馈。",
+      "notes": "正式架构需由应用桥接 IMU → vision::Feedback，接收器本身不拥有 IMU。"
+    }
+  ],
+  "lifecycle": [
+    "静态构造 codec、DMA 和 Receiver，并统一应用/视觉的参考系约定。",
+    "start 初始化 Link 后启动 UART worker；通过快照区分串口状态和请求新鲜度。",
+    "VisionSource 把 Measurement 原样送仲裁，不更改时间；mode=0 清空旧目标。",
+    "需要回传时，应用复制 IMU 和发射机构实测值，设 feedback_period_us 并调用 setFeedback。",
+    "执行层仍检查本地位置参考与授权；fire_requested 只是电平请求。"
+  ],
+  "pitfalls": [
+    "aim_fresh 只说明消息年龄；停止帧也可以 fresh，必须同时检查 control_requested。",
+    "AB 线上不携带 frame_id、epoch、valid bits 或远端 sequence；参考一致性是双方明确约定。",
+    "body-frame gyro.z/gyro.y 在任意姿态下不等于 Euler yaw_vel/pitch_vel；codec 负责转换。",
+    "没有反馈测量时不能发送伪造弹速或姿态；默认 feedback_period_us=0。",
+    "连续快照可能读到同一 fire_requested，不能把每次读取当成一次开火事件。"
+  ],
+  "config": [
+    {
+      "name": "CONFIG_SKYWALKER_VISION / VISION_AB / VISION_RECEIVER",
+      "description": "分别启用独立 Link、AB codec、UART worker；与 REFEREE 可独立编译。"
+    },
+    {
+      "name": "VisionLink::Config",
+      "description": "aim=100000 μs；orientation/gyro=20000 μs；bullet_speed/count=1000000 μs；max_feedback_skew=20000 μs。"
+    },
+    {
+      "name": "VisionReceiver::Config::feedback_period_us",
+      "description": "默认 0，只接收；正值启用周期回传，TX 忙时跳过。"
+    },
+    {
+      "name": "CONFIG_SKYWALKER_VISION_RX_STACK_SIZE / PRIORITY",
+      "description": "默认栈 4096 字节、优先级 6；AB 参考样例使用 115200、8N1。"
+    }
+  ]
+},
   {
-    id: 'command', title: '命令仲裁与后台服务', category: '机器人与仲裁',
-    summary: '按 Safe/Manual/Auto、输入新鲜度、参考系、人工接管和裁判许可发布完整机器人命令。',
-    responsibility: 'CommandArbiter 是同步策略核心；CommandManager 注册静态来源、启动来源并周期采样/仲裁，发布非消费快照。执行器负责本地电机反馈、使能与恢复。',
-    status: 'ready', statusNote: '三源仲裁和后台服务已实现，command_manager 是观测台架；sentry_gimbal 当前只组装遥控+裁判，不含 VisionSource，allow_auto=false。',
-    source: [{label: '后台服务 API', path: 'include/robotics/command/command_manager.hpp'}, {label: '仲裁核心 API', path: 'include/robotics/command/command_arbiter.hpp'}, {label: '决策与原因位', path: 'include/robotics/command/command_inputs.hpp'}, {label: '后台发布实现', path: 'lib/robotics/command_manager.cpp'}, {label: 'RobotCommand 单位与字段', path: 'include/robotics/messages/command.hpp'}],
-    docs: [{label: '注册来源与线程契约', path: 'docs/modules/robotics/command-service.md'}, {label: '命令与执行恢复', path: 'docs/modules/robotics/command-recovery.md'}, {label: '三源台架', path: 'samples/robotics/command_manager/README.md'}],
-    depends: ['command-sources'],
-    interfaces: [
-      {signature: 'explicit CommandManager(const Config &config); int CommandManager::registerSource(ICommandSource &source)', description: '构造策略服务并在启动前注册来源。一个 Operator 必须存在，Aim 可选，每个角色最多一个，总容量两个。', parameters: [{name: 'config', meaning: 'CommandArbiter::Config 的别名，包含限速、输入超时、视觉参考、许可策略'}, {name: 'source', meaning: '静态来源对象，role 在整个生命周期固定'}], returns: 'registerSource：0 注册成功；不启动来源。', context: '同一个启动线程完成注册/绑定/start；所有公共调用只能在线程上下文。', errors: '-EWOULDBLOCK：ISR；-EBUSY：已尝试启动；-EINVAL：非法 role；-EEXIST：对象或角色重复；-ENOSPC：容量已满。注册顺序不代表优先级。'},
-      {signature: 'int CommandManager::bindPermissions(IPermissionSource &source)', description: '绑定单独的裁判许可来源。许可是对目标的约束，不是第三个运动目标角色。', parameters: [{name: 'source', meaning: '长生命周期 IPermissionSource，例如 RefereePermissionSource'}], returns: '0：绑定成功。', context: '启动前同一个启动线程调用。', errors: '-EWOULDBLOCK：ISR；-EBUSY：已尝试 start；-EEXIST：已有许可来源。'},
-      {signature: 'int CommandManager::start()', description: '校验策略与必要来源，依次启动来源和许可源，最后创建后台 worker；一次启动尝试后不能重启对象。', parameters: [], returns: '0：worker 已创建，尚不保证发布/输入在线；负 errno：配置或来源启动错误。', context: '线程上下文，只尝试一次；manager、来源、receiver、codec 与 DMA 均静态存活，即使启动中途失败。', errors: '-EWOULDBLOCK：ISR；-EALREADY：重复尝试；-EINVAL：配置错误或缺少 Operator；-ENODEV：策略要求裁判但未绑定；其他值透传来源 start。失败时发布 invalid/Disabled 决策。'},
-      {signature: 'int CommandManager::current(RobotCommand &out) const; int CommandManager::snapshot(CommandSnapshot &out) const', description: 'current 复制最终命令；snapshot 同时复制 observed、decision 与 remote/vision/permission 诊断，供执行和观测读者独立使用。', parameters: [{name: 'out', meaning: '由当前读者拥有的输出值'}], returns: '0：复制当前值，可能仍是同一序号；-EAGAIN：尚未首次发布；错误不修改 out。', context: '多个线程可读，短锁保护；非消费、不刷新 stamp，ISR 返回 -EWOULDBLOCK。', errors: '读取 0 不代表命令 Active；应检查模式、decision.error、原因位和 command.stamp。执行器继续强制过期，防止 worker 停滞时重用旧目标。'},
-      {signature: 'explicit CommandArbiter(const Config &config); int CommandArbiter::configError() const; CommandDecision CommandArbiter::update(const CommandInputs &inputs); void CommandArbiter::reset()', description: '同步入口适合应用自行采集/调度。update 生成 requested 候选与按裁判裁剪后的 command，保留最终采用视觉的完整 selected_vision；reset 清仲裁历史，不操作硬件。', parameters: [{name: 'inputs.now_us', meaning: '本次仲裁时刻，μs'}, {name: 'inputs.remote / vision / referee', meaning: '保留来源原始 stamp 的完整值副本'}], returns: 'configError：0 或 -EINVAL；update：完整 CommandDecision，error 表示错误，reasons 给出各机构的禁止/限幅原因。', context: '单写入者；update/reset 由调用者串行化，不适用于 ISR。', errors: '时间倒退可产生 -ESTALE/ClockRegression；非法配置/输入产生 -EINVAL；来源离线、Safe、视觉缺失和许可撤销可正常返回 error=0 但命令 Disabled/Hold。'}
-    ],
-    examples: [{title: '真实后台服务：注册三源、读取同帧诊断', language: 'cpp', code: '#include <robotics/command/command_manager.hpp>\n#include <robotics/command/receiver_sources.hpp>\nusing namespace skywalker;\n\n// remote / vision / referee 需按各模块接口静态构造。\nint startService(robotics::CommandManager &manager,\n                 robotics::RemoteSource &remote_source,\n                 robotics::VisionSource &vision_source,\n                 robotics::RefereePermissionSource &permission_source) {\n    int ret = manager.registerSource(remote_source);\n    if (ret == 0) ret = manager.registerSource(vision_source);\n    if (ret == 0) ret = manager.bindPermissions(permission_source);\n    if (ret == 0) ret = manager.start();\n    return ret;\n}\n\nvoid observeCommand(const robotics::CommandManager &manager) {\n    robotics::CommandSnapshot frame{};\n    if (manager.snapshot(frame) == 0) {\n        const auto &command = frame.decision.command;\n        const auto reasons = frame.decision.reasons();\n        // command 是最终授权结果；requested 仅供诊断。\n        (void)command; (void)reasons;\n    }\n}', notes: '完整静态对象与参数见 samples/robotics/command_manager/src/main.cpp 和 board_config.hpp；所有引用对象需要覆盖 worker 生命周期。'}, {title: '直接使用同步仲裁核心', language: 'cpp', code: '#include <core/clock.hpp>\n#include <robotics/command/command_arbiter.hpp>\nusing namespace skywalker;\n\nrobotics::CommandDecision arbitrate(\n    robotics::CommandArbiter &arbiter, robotics::CommandInputs inputs) {\n    inputs.now_us = core::monotonicTimeUs();\n    // 只设置本次仲裁时钟，不改 remote/vision/referee 的 stamp。\n    return arbiter.update(inputs);\n}\n// 构造后先检查 arbiter.configError()；所有调用必须串行。', notes: 'CommandManager 不接受 CommandInputs，也没有 update、configError、reset 或 stop；这些同步入口属于 CommandArbiter。'}],
-    lifecycle: ['静态构造 receiver/codec/source/manager；策略与参考系先确定。', '一个启动线程 registerSource(Operator)，按需注册 Aim，bindPermissions，然后 start 一次。', 'worker 按周期 sample → 原始时间有效性 → CommandArbiter::update → 发布整帧。', '执行线程 current/snapshot 后检查目标模式和命令年龄，交本地执行器。', '遥控 Safe、输入过期、参考不匹配或裁判许可撤销都会约束命令；本地恢复还需新的有效目标与恢复上下文。'],
-    pitfalls: ['不要使用已移除的 GlobalSafetyManager/GimbalLocalSafety/ChassisLocalSafety；开发指南中的拟议接口不代表当前 API。', 'decision.requested 是未按裁判裁剪的候选，电机只能消费 decision.command。', '启动成功不代表输入上线；命令被禁止也可能 error=0，需看模式和原因位。', 'Auto 进入或人工接管释放后需要新的视觉目标；旧视觉快照不能跨新自动上下文直接采用。', 'shooting 命令类型已存在，但当前 sentry 应用没有完整发射执行链。'],
-    config: [{name: 'CONFIG_SKYWALKER_LIB_ROBOTICS / ROBOTICS_COMMAND / COMMAND_SERVICE', description: '启用同步仲裁与后台注册服务；来源另外启用对应接收模块。'}, {name: 'CONFIG_SKYWALKER_COMMAND_PERIOD_MS / PRIORITY / STACK_SIZE', description: '默认周期 10 ms、优先级 5、栈 6144 字节；服务发布与执行控制周期分开。'}, {name: '新鲜度与参考', description: 'input_timeout_ms=100、permission_timeout_ms=300、vision_timeout_us=100000，expected_vision_reference={1,1}。'}, {name: '模式与人工接管', description: 'require_referee_for_motion=true、allow_auto=true；override_enter_norm=0.15、exit=0.05、释放安静期 200000 μs。应用没有视觉时设 allow_auto=false。'}, {name: '目标上限', description: '默认底盘 vx/vy=3 m/s、wz=6 rad/s；云台 yaw=3/pitch=2 rad/s；视觉加速度上限 30/20 rad/s²；射速请求 5 Hz。'}]
-  },
+  "id": "command",
+  "title": "命令仲裁与后台服务",
+  "category": "机器人与仲裁",
+  "summary": "按 Safe/Manual/Auto、输入新鲜度、参考系、人工接管和裁判许可发布完整机器人命令。",
+  "responsibility": "CommandArbiter 是同步策略核心；CommandManager 注册静态来源、启动来源并周期采样/仲裁，发布非消费快照。执行器负责本地电机反馈、使能与恢复。",
+  "status": "ready",
+  "statusNote": "注册来源与后台服务已实现；整车手动默认 Remote，裁判/视觉按 VEHICLE_* 阶段配置注册，不改变原输入年龄。",
+  "source": [
+    {
+      "label": "后台服务 API",
+      "path": "include/robotics/command/command_manager.hpp"
+    },
+    {
+      "label": "仲裁核心 API",
+      "path": "include/robotics/command/command_arbiter.hpp"
+    },
+    {
+      "label": "决策与原因位",
+      "path": "include/robotics/command/command_inputs.hpp"
+    },
+    {
+      "label": "后台发布实现",
+      "path": "lib/robotics/command_manager.cpp"
+    },
+    {
+      "label": "RobotCommand 单位与字段",
+      "path": "include/robotics/messages/command.hpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "注册来源与线程契约",
+      "path": "docs/modules/robotics/command-service.md"
+    },
+    {
+      "label": "命令与执行恢复",
+      "path": "docs/modules/robotics/command-recovery.md"
+    },
+    {
+      "label": "三源台架",
+      "path": "samples/robotics/command_manager/README.md"
+    }
+  ],
+  "depends": [
+    "command-sources"
+  ],
+  "interfaces": [
+    {
+      "signature": "explicit CommandManager(const Config &config); int CommandManager::registerSource(ICommandSource &source)",
+      "description": "构造策略服务并在启动前注册来源。一个 Operator 必须存在，Aim 可选，每个角色最多一个，总容量两个。",
+      "parameters": [
+        {
+          "name": "config",
+          "meaning": "CommandArbiter::Config 的别名，包含限速、输入超时、视觉参考、许可策略"
+        },
+        {
+          "name": "source",
+          "meaning": "静态来源对象，role 在整个生命周期固定"
+        }
+      ],
+      "returns": "registerSource：0 注册成功；不启动来源。",
+      "context": "同一个启动线程完成注册/绑定/start；所有公共调用只能在线程上下文。",
+      "errors": "-EWOULDBLOCK：ISR；-EBUSY：已尝试启动；-EINVAL：非法 role；-EEXIST：对象或角色重复；-ENOSPC：容量已满。注册顺序不代表优先级。"
+    },
+    {
+      "signature": "int CommandManager::bindPermissions(IPermissionSource &source)",
+      "description": "绑定单独的裁判许可来源。许可是对目标的约束，不是第三个运动目标角色。",
+      "parameters": [
+        {
+          "name": "source",
+          "meaning": "长生命周期 IPermissionSource，例如 RefereePermissionSource"
+        }
+      ],
+      "returns": "0：绑定成功。",
+      "context": "启动前同一个启动线程调用。",
+      "errors": "-EWOULDBLOCK：ISR；-EBUSY：已尝试 start；-EEXIST：已有许可来源。"
+    },
+    {
+      "signature": "int CommandManager::start()",
+      "description": "校验策略与必要来源，依次启动来源和许可源，最后创建后台 worker；一次启动尝试后不能重启对象。",
+      "parameters": [],
+      "returns": "0：worker 已创建，尚不保证发布/输入在线；负 errno：配置或来源启动错误。",
+      "context": "线程上下文，只尝试一次；manager、来源、receiver、codec 与 DMA 均静态存活，即使启动中途失败。",
+      "errors": "-EWOULDBLOCK：ISR；-EALREADY：重复尝试；-EINVAL：配置错误或缺少 Operator；-ENODEV：策略要求裁判但未绑定；其他值透传来源 start。失败时发布 invalid/Disabled 决策。"
+    },
+    {
+      "signature": "int CommandManager::current(RobotCommand &out) const; int CommandManager::snapshot(CommandSnapshot &out) const",
+      "description": "current 复制最终命令；snapshot 同时复制 observed、decision 与 remote/vision/permission 诊断，供执行和观测读者独立使用。",
+      "parameters": [
+        {
+          "name": "out",
+          "meaning": "由当前读者拥有的输出值"
+        }
+      ],
+      "returns": "0：复制当前值，可能仍是同一序号；-EAGAIN：尚未首次发布；错误不修改 out。",
+      "context": "多个线程可读，短锁保护；非消费、不刷新 stamp，ISR 返回 -EWOULDBLOCK。",
+      "errors": "读取 0 不代表命令 Active；应检查模式、decision.error、原因位和 command.stamp。执行器继续强制过期，防止 worker 停滞时重用旧目标。"
+    },
+    {
+      "signature": "explicit CommandArbiter(const Config &config); int CommandArbiter::configError() const; CommandDecision CommandArbiter::update(const CommandInputs &inputs); void CommandArbiter::reset()",
+      "description": "同步入口适合应用自行采集/调度。update 生成 requested 候选与按裁判裁剪后的 command，保留最终采用视觉的完整 selected_vision；reset 清仲裁历史，不操作硬件。",
+      "parameters": [
+        {
+          "name": "inputs.now_us",
+          "meaning": "本次仲裁时刻，μs"
+        },
+        {
+          "name": "inputs.remote / vision / referee",
+          "meaning": "保留来源原始 stamp 的完整值副本"
+        }
+      ],
+      "returns": "configError：0 或 -EINVAL；update：完整 CommandDecision，error 表示错误，reasons 给出各机构的禁止/限幅原因。",
+      "context": "单写入者；update/reset 由调用者串行化，不适用于 ISR。",
+      "errors": "时间倒退可产生 -ESTALE/ClockRegression；非法配置/输入产生 -EINVAL；来源离线、Safe、视觉缺失和许可撤销可正常返回 error=0 但命令 Disabled/Hold。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "真实后台服务：注册三源、读取同帧诊断",
+      "language": "cpp",
+      "code": "#include <robotics/command/command_manager.hpp>\n#include <robotics/command/receiver_sources.hpp>\nusing namespace skywalker;\n\n// remote / vision / referee 需按各模块接口静态构造。\nint startService(robotics::CommandManager &manager,\n                 robotics::RemoteSource &remote_source,\n                 robotics::VisionSource &vision_source,\n                 robotics::RefereePermissionSource &permission_source) {\n    int ret = manager.registerSource(remote_source);\n    if (ret == 0) ret = manager.registerSource(vision_source);\n    if (ret == 0) ret = manager.bindPermissions(permission_source);\n    if (ret == 0) ret = manager.start();\n    return ret;\n}\n\nvoid observeCommand(const robotics::CommandManager &manager) {\n    robotics::CommandSnapshot frame{};\n    if (manager.snapshot(frame) == 0) {\n        const auto &command = frame.decision.command;\n        const auto reasons = frame.decision.reasons();\n        // command 是最终授权结果；requested 仅供诊断。\n        (void)command; (void)reasons;\n    }\n}",
+      "notes": "完整静态对象与参数见 samples/robotics/command_manager/src/main.cpp 和 board_config.hpp；所有引用对象需要覆盖 worker 生命周期。"
+    },
+    {
+      "title": "直接使用同步仲裁核心",
+      "language": "cpp",
+      "code": "#include <core/clock.hpp>\n#include <robotics/command/command_arbiter.hpp>\nusing namespace skywalker;\n\nrobotics::CommandDecision arbitrate(\n    robotics::CommandArbiter &arbiter, robotics::CommandInputs inputs) {\n    inputs.now_us = core::monotonicTimeUs();\n    // 只设置本次仲裁时钟，不改 remote/vision/referee 的 stamp。\n    return arbiter.update(inputs);\n}\n// 构造后先检查 arbiter.configError()；所有调用必须串行。",
+      "notes": "CommandManager 不接受 CommandInputs，也没有 update、configError、reset 或 stop；这些同步入口属于 CommandArbiter。"
+    }
+  ],
+  "lifecycle": [
+    "静态构造 receiver/codec/source/manager；策略与参考系先确定。",
+    "一个启动线程 registerSource(Operator)，按需注册 Aim，bindPermissions，然后 start 一次。",
+    "worker 按周期 sample → 原始时间有效性 → CommandArbiter::update → 发布整帧。",
+    "执行线程 current/snapshot 后检查目标模式和命令年龄，交本地执行器。",
+    "遥控 Safe、输入过期、参考不匹配或裁判许可撤销都会约束命令；本地恢复还需新的有效目标与恢复上下文。"
+  ],
+  "pitfalls": [
+    "不要使用已移除的 GlobalSafetyManager/GimbalLocalSafety/ChassisLocalSafety；开发指南中的拟议接口不代表当前 API。",
+    "decision.requested 是未按裁判裁剪的候选，电机只能消费 decision.command。",
+    "启动成功不代表输入上线；命令被禁止也可能 error=0，需看模式和原因位。",
+    "Auto 进入或人工接管释放后需要新的视觉目标；旧视觉快照不能跨新自动上下文直接采用。",
+    "shooting 命令类型已存在，但当前 sentry 应用没有完整发射执行链。"
+  ],
+  "config": [
+    {
+      "name": "CONFIG_SKYWALKER_LIB_ROBOTICS / ROBOTICS_COMMAND / COMMAND_SERVICE",
+      "description": "启用同步仲裁与后台注册服务；来源另外启用对应接收模块。"
+    },
+    {
+      "name": "CONFIG_SKYWALKER_COMMAND_PERIOD_MS / PRIORITY / STACK_SIZE",
+      "description": "默认周期 10 ms、优先级 5、栈 6144 字节；服务发布与执行控制周期分开。"
+    },
+    {
+      "name": "新鲜度与参考",
+      "description": "input_timeout_ms=100、permission_timeout_ms=300、vision_timeout_us=100000，expected_vision_reference={1,1}。"
+    },
+    {
+      "name": "模式与人工接管",
+      "description": "require_referee_for_motion=true、allow_auto=true；override_enter_norm=0.15、exit=0.05、释放安静期 200000 μs。应用没有视觉时设 allow_auto=false。"
+    },
+    {
+      "name": "目标上限",
+      "description": "默认底盘 vx/vy=3 m/s、wz=6 rad/s；云台 yaw=3/pitch=2 rad/s；视觉加速度上限 30/20 rad/s²；射速请求 5 Hz。"
+    }
+  ]
+},
   {
-    id: 'command-sources', title: '来源适配与手动映射', category: '机器人与仲裁',
-    summary: '把接收器快照接到固定 Operator/Aim 角色；裁判单独作为 Permission，保留原始时间与诊断。',
-    responsibility: 'ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionSource、RefereePermissionSource 适配接收器。ManualCommandMapper 把遥控值变成归一化操作意图，不输出电机电流。',
-    status: 'ready', statusNote: '三种内置来源已实现并用于三源台架；自定义来源需遵守有界采样、值类型匹配与静态生命周期。自主导航来源尚未由 sentry 应用组装。',
-    source: [{label: '来源契约与快照', path: 'include/robotics/command/command_source.hpp'}, {label: '接收器适配器', path: 'include/robotics/command/receiver_sources.hpp'}, {label: '适配实现', path: 'lib/robotics/receiver_sources.cpp'}, {label: '手动映射', path: 'include/robotics/command/manual_command_mapper.hpp'}, {label: '映射实现', path: 'lib/robotics/command.cpp'}],
-    docs: [{label: '来源与后台服务说明', path: 'docs/modules/robotics/command-service.md'}, {label: '来源样例', path: 'samples/robotics/command_manager/README.md'}],
-    depends: ['remote', 'vision', 'referee'],
-    interfaces: [
-      {signature: 'virtual SourceRole ICommandSource::role() const = 0; virtual int ICommandSource::start() = 0; virtual int ICommandSource::sample(SourceSample &out) = 0', description: '输入扩展接口。role 固定为 Operator 或 Aim；SourceValue 是 RemoteState 或 Measurement<AimCommand> 的 variant，必须和角色相匹配。', parameters: [{name: 'out', meaning: '0 时写完整 value 与 diagnostics；value 即使离线/无效也应完整写出'}], returns: 'start：0 已调度；sample：0 更新缓存、-EAGAIN 保留上次缓存、其他负值清空该来源有效值。', context: 'startup owner 只调用一次 start；只有 manager worker 调用 sample；采样应有界、不等待 I/O。', errors: '角色/variant 不匹配由 manager 视为 -EINVAL；其他错误进入诊断，不能留旧值继续有效。'},
-      {signature: 'virtual int IPermissionSource::start() = 0; virtual int IPermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) = 0', description: '单独的许可约束接口；不占据 Operator/Aim 来源槽。', parameters: [{name: 'now_ms', meaning: 'manager 的本机当前 ms，供接收轮询和过期判断'}, {name: 'out', meaning: '完整裁判快照，保留字段时间'}, {name: 'diagnostics', meaning: 'error、sample_error、state 与可用丢包计数'}], returns: '0 更新、-EAGAIN 保留、其他负值使许可缓存失效。', context: 'start 单次；sample 只有 manager worker 所有。', errors: '缺少必需许可来源时 manager.start=-ENODEV；合法离线数据可返回 0，由仲裁按原始 stamp 决定。'},
-      {signature: 'explicit RemoteSource(communication::RemoteReceiver &receiver); int RemoteSource::start(); int RemoteSource::sample(SourceSample &out)', description: '固定 Operator；start 转发 receiver.start，sample 拷贝 RemoteState、UART 状态与 dropped 诊断。', parameters: [{name: 'receiver', meaning: '静态遥控接收器；不要先手动启动'}, {name: 'out', meaning: 'variant 中的 RemoteState 与同次接收诊断'}], returns: 'start 透传；sample 把 receiver 的 -EAGAIN 转成保留且已执行读者侧过期的 0，其余错误透传。', context: '只给一个 manager 注册；receiver 与 source 持续存活。', errors: '预先 start 接收器会导致 manager 再启动时 -EALREADY；dropped_available=true。'},
-      {signature: 'explicit VisionSource(communication::vision::VisionReceiver &receiver); int VisionSource::start(); int VisionSource::sample(SourceSample &out)', description: '固定 Aim；从 receiver.snapshot 提取原始 Measurement，不把读快照的时刻写到目标 stamp。', parameters: [{name: 'receiver', meaning: '静态视觉接收器及其 codec/DMA'}, {name: 'out', meaning: 'variant 中的 Measurement<AimCommand> 与 UART/丢包诊断'}], returns: 'start 透传；sample 返回 0，目标可以无效/过期，由仲裁器判断。', context: 'manager worker 采样；receiver 自己的 worker 接收字节。', errors: 'UART error 放在 diagnostics.error；样本存在不代表视觉请求正在控制；dropped_available=true。'},
-      {signature: 'explicit RefereePermissionSource(communication::RefereeReceiver &receiver); int RefereePermissionSource::start(); int RefereePermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics)', description: 'start 为 0，真正 I/O 由 sample 调用 receiver.poll；裁判没有单独 worker。', parameters: [{name: 'receiver', meaning: '唯一裁判 UART owner'}, {name: 'now_ms', meaning: '本机当前 ms'}, {name: 'out / diagnostics', meaning: '裁判值与 receiver.error'}], returns: 'start/sample 当前均返回 0；在线、许可与接收错误在值/诊断中表达。', context: 'manager worker 独占 poll；应用不能并行轮询同一裁判 receiver。', errors: 'RefereeReceiver 未公开丢块数，因此 dropped_available=false，不伪造为可用计数。'},
-      {signature: 'explicit ManualCommandMapper(const Config &config); int ManualCommandMapper::map(const RemoteState &remote, OperatorIntent &out) const', description: '将中心化遥控值变为 [-1,1] 意图。左开关 Down=Safe/Middle=Manual/Up=Auto；右开关 Up=KeyboardMouse，其余合法档=Remote。', parameters: [{name: 'remote', meaning: '合法遥控快照，带在线与 stamp'}, {name: 'out', meaning: '模式、来源、归一化速度、摩擦轮/射击请求及原始 stamp'}], returns: '0：映射；离线输入映射成 Safe/零值；-EINVAL：配置或开关非法。', context: '纯值映射，无 I/O；后续 CommandArbiter 应用物理限速和许可。', errors: 'mapper 不自行按当前时刻判断 stamp 年龄，仲裁器必须先检查新鲜度。默认 DR16 不解 wheel，底盘旋转请求因此可能为 0。'}
-    ],
-    examples: [{title: '用内置适配器连接现有接收器', language: 'cpp', code: '#include <robotics/command/receiver_sources.hpp>\n#include <robotics/command/command_manager.hpp>\nusing namespace skywalker;\n\n// 示例调用位置：接收器构造后，manager.start 之前。\nint connectInputs(robotics::CommandManager &manager,\n                  robotics::ICommandSource &operator_source,\n                  robotics::ICommandSource &aim_source,\n                  robotics::IPermissionSource &permissions) {\n    int ret = manager.registerSource(operator_source);\n    if (ret == 0) ret = manager.registerSource(aim_source);\n    if (ret == 0) ret = manager.bindPermissions(permissions);\n    return ret;\n}\n// 实际静态对象声明：\n// robotics::RemoteSource operator_source(remote);\n// robotics::VisionSource aim_source(vision);\n// robotics::RefereePermissionSource permissions(referee);', notes: 'source 对象及依赖长期存活，所有注册完成后统一 manager.start，不单独调用内置 source.sample。'}, {title: '解释遥控映射，而后交仲裁器限速', language: 'cpp', code: '#include <robotics/command/manual_command_mapper.hpp>\nusing namespace skywalker::robotics;\n\nint inspectIntent(const RemoteState &remote, OperatorIntent &intent) {\n    const ManualCommandMapper mapper({});\n    return mapper.map(remote, intent);\n}\n// intent.chassis_vx_norm 为归一化值，不能直接送电机。\n// CommandArbiter 会将它乘 max_chassis_vx_m_s 并施加裁判许可。', notes: '遥控 left_y→vx，-left_x→vy，wheel→wz，-right_x→yaw_rate，right_y→pitch_rate；键鼠 W/S、A/D 与鼠标按固定映射提供意图。'}],
-    lifecycle: ['先构造接收器，再构造内置 source 引用。', '固定来源 role，在同一启动线程注册并绑定许可。', '由 manager.start 启动来源；之后只有 manager worker sample。', '采样复制原始值与时间，按明确返回契约替换/保留/失效缓存。'],
-    pitfalls: ['不要在 sample 中无限等待串口或重新刷新旧值时间；后台周期不能因此停滞。', 'SourceRole 只有 Operator/Aim；没有直接把所有消息源塞入同一优先级队列的接口。', '注册多个 Operator 或 Aim 返回 -EEXIST；来源最多两个。', '自定义来源不得发布与 role 不匹配的 variant；诊断的 unavailable 与数值 0 不同。'],
-    config: [{name: 'ManualCommandMapper::Config', description: 'analog_deadband=0.03、channel_range=660、mouse_yaw_scale/mouse_pitch_scale=0.002。'}, {name: '来源编译条件', description: 'RemoteSource 需 REMOTE_RECEIVER，VisionSource 需 VISION_RECEIVER，RefereePermissionSource 需 REFEREE 与 UART_TRANSPORT。'}, {name: '对象所有权', description: 'source 只引用接收器；manager 只引用 source，不拥有它们，不负责释放。'}]
-  },
+  "id": "command-sources",
+  "title": "来源适配与手动映射",
+  "category": "机器人与仲裁",
+  "summary": "把接收器快照接到固定 Operator/Aim 角色；裁判单独作为 Permission，保留原始时间与诊断。",
+  "responsibility": "ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionSource、RefereePermissionSource 适配接收器。ManualCommandMapper 把遥控值变成归一化操作意图，不输出电机电流。",
+  "status": "ready",
+  "statusNote": "注册来源与后台服务已实现；整车手动默认 Remote，裁判/视觉按 VEHICLE_* 阶段配置注册，不改变原输入年龄。",
+  "source": [
+    {
+      "label": "来源契约与快照",
+      "path": "include/robotics/command/command_source.hpp"
+    },
+    {
+      "label": "接收器适配器",
+      "path": "include/robotics/command/receiver_sources.hpp"
+    },
+    {
+      "label": "适配实现",
+      "path": "lib/robotics/receiver_sources.cpp"
+    },
+    {
+      "label": "手动映射",
+      "path": "include/robotics/command/manual_command_mapper.hpp"
+    },
+    {
+      "label": "映射实现",
+      "path": "lib/robotics/command.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "来源与后台服务说明",
+      "path": "docs/modules/robotics/command-service.md"
+    },
+    {
+      "label": "来源样例",
+      "path": "samples/robotics/command_manager/README.md"
+    }
+  ],
+  "depends": [
+    "remote",
+    "vision",
+    "referee"
+  ],
+  "interfaces": [
+    {
+      "signature": "virtual SourceRole ICommandSource::role() const = 0; virtual int ICommandSource::start() = 0; virtual int ICommandSource::sample(SourceSample &out) = 0",
+      "description": "输入扩展接口。role 固定为 Operator 或 Aim；SourceValue 是 RemoteState 或 Measurement<AimCommand> 的 variant，必须和角色相匹配。",
+      "parameters": [
+        {
+          "name": "out",
+          "meaning": "0 时写完整 value 与 diagnostics；value 即使离线/无效也应完整写出"
+        }
+      ],
+      "returns": "start：0 已调度；sample：0 更新缓存、-EAGAIN 保留上次缓存、其他负值清空该来源有效值。",
+      "context": "startup owner 只调用一次 start；只有 manager worker 调用 sample；采样应有界、不等待 I/O。",
+      "errors": "角色/variant 不匹配由 manager 视为 -EINVAL；其他错误进入诊断，不能留旧值继续有效。"
+    },
+    {
+      "signature": "virtual int IPermissionSource::start() = 0; virtual int IPermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) = 0",
+      "description": "单独的许可约束接口；不占据 Operator/Aim 来源槽。",
+      "parameters": [
+        {
+          "name": "now_ms",
+          "meaning": "manager 的本机当前 ms，供接收轮询和过期判断"
+        },
+        {
+          "name": "out",
+          "meaning": "完整裁判快照，保留字段时间"
+        },
+        {
+          "name": "diagnostics",
+          "meaning": "error、sample_error、state 与可用丢包计数"
+        }
+      ],
+      "returns": "0 更新、-EAGAIN 保留、其他负值使许可缓存失效。",
+      "context": "start 单次；sample 只有 manager worker 所有。",
+      "errors": "缺少必需许可来源时 manager.start=-ENODEV；合法离线数据可返回 0，由仲裁按原始 stamp 决定。"
+    },
+    {
+      "signature": "explicit RemoteSource(communication::RemoteReceiver &receiver); int RemoteSource::start(); int RemoteSource::sample(SourceSample &out)",
+      "description": "固定 Operator；start 转发 receiver.start，sample 拷贝 RemoteState、UART 状态与 dropped 诊断。",
+      "parameters": [
+        {
+          "name": "receiver",
+          "meaning": "静态遥控接收器；不要先手动启动"
+        },
+        {
+          "name": "out",
+          "meaning": "variant 中的 RemoteState 与同次接收诊断"
+        }
+      ],
+      "returns": "start 透传；sample 把 receiver 的 -EAGAIN 转成保留且已执行读者侧过期的 0，其余错误透传。",
+      "context": "只给一个 manager 注册；receiver 与 source 持续存活。",
+      "errors": "预先 start 接收器会导致 manager 再启动时 -EALREADY；dropped_available=true。"
+    },
+    {
+      "signature": "explicit VisionSource(communication::vision::VisionReceiver &receiver); int VisionSource::start(); int VisionSource::sample(SourceSample &out)",
+      "description": "固定 Aim；从 receiver.snapshot 提取原始 Measurement，不把读快照的时刻写到目标 stamp。",
+      "parameters": [
+        {
+          "name": "receiver",
+          "meaning": "静态视觉接收器及其 codec/DMA"
+        },
+        {
+          "name": "out",
+          "meaning": "variant 中的 Measurement<AimCommand> 与 UART/丢包诊断"
+        }
+      ],
+      "returns": "start 透传；sample 返回 0，目标可以无效/过期，由仲裁器判断。",
+      "context": "manager worker 采样；receiver 自己的 worker 接收字节。",
+      "errors": "UART error 放在 diagnostics.error；样本存在不代表视觉请求正在控制；dropped_available=true。"
+    },
+    {
+      "signature": "explicit RefereePermissionSource(communication::RefereeReceiver &receiver); int RefereePermissionSource::start(); int RefereePermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics)",
+      "description": "start 为 0，真正 I/O 由 sample 调用 receiver.poll；裁判没有单独 worker。",
+      "parameters": [
+        {
+          "name": "receiver",
+          "meaning": "唯一裁判 UART owner"
+        },
+        {
+          "name": "now_ms",
+          "meaning": "本机当前 ms"
+        },
+        {
+          "name": "out / diagnostics",
+          "meaning": "裁判值与 receiver.error"
+        }
+      ],
+      "returns": "start/sample 当前均返回 0；在线、许可与接收错误在值/诊断中表达。",
+      "context": "manager worker 独占 poll；应用不能并行轮询同一裁判 receiver。",
+      "errors": "RefereeReceiver 未公开丢块数，因此 dropped_available=false，不伪造为可用计数。"
+    },
+    {
+      "signature": "explicit ManualCommandMapper(const Config &config); int ManualCommandMapper::map(const RemoteState &remote, OperatorIntent &out) const",
+      "description": "将中心化遥控值变为 [-1,1] 意图。左开关 Down=Safe/Middle=Manual/Up=Auto；右开关 Up=KeyboardMouse，其余合法档=Remote。",
+      "parameters": [
+        {
+          "name": "remote",
+          "meaning": "合法遥控快照，带在线与 stamp"
+        },
+        {
+          "name": "out",
+          "meaning": "模式、来源、归一化速度、摩擦轮/射击请求及原始 stamp"
+        }
+      ],
+      "returns": "0：映射；离线输入映射成 Safe/零值；-EINVAL：配置或开关非法。",
+      "context": "纯值映射，无 I/O；后续 CommandArbiter 应用物理限速和许可。",
+      "errors": "mapper 不自行按当前时刻判断 stamp 年龄，仲裁器必须先检查新鲜度。默认 DR16 不解 wheel，底盘旋转请求因此可能为 0。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "用内置适配器连接现有接收器",
+      "language": "cpp",
+      "code": "#include <robotics/command/receiver_sources.hpp>\n#include <robotics/command/command_manager.hpp>\nusing namespace skywalker;\n\n// 示例调用位置：接收器构造后，manager.start 之前。\nint connectInputs(robotics::CommandManager &manager,\n                  robotics::ICommandSource &operator_source,\n                  robotics::ICommandSource &aim_source,\n                  robotics::IPermissionSource &permissions) {\n    int ret = manager.registerSource(operator_source);\n    if (ret == 0) ret = manager.registerSource(aim_source);\n    if (ret == 0) ret = manager.bindPermissions(permissions);\n    return ret;\n}\n// 实际静态对象声明：\n// robotics::RemoteSource operator_source(remote);\n// robotics::VisionSource aim_source(vision);\n// robotics::RefereePermissionSource permissions(referee);",
+      "notes": "source 对象及依赖长期存活，所有注册完成后统一 manager.start，不单独调用内置 source.sample。"
+    },
+    {
+      "title": "解释遥控映射，而后交仲裁器限速",
+      "language": "cpp",
+      "code": "#include <robotics/command/manual_command_mapper.hpp>\nusing namespace skywalker::robotics;\n\nint inspectIntent(const RemoteState &remote, OperatorIntent &intent) {\n    const ManualCommandMapper mapper({});\n    return mapper.map(remote, intent);\n}\n// intent.chassis_vx_norm 为归一化值，不能直接送电机。\n// CommandArbiter 会将它乘 max_chassis_vx_m_s 并施加裁判许可。",
+      "notes": "遥控 left_y→vx，-left_x→vy，wheel→wz，-right_x→yaw_rate，right_y→pitch_rate；键鼠 W/S、A/D 与鼠标按固定映射提供意图。"
+    }
+  ],
+  "lifecycle": [
+    "先构造接收器，再构造内置 source 引用。",
+    "固定来源 role，在同一启动线程注册并绑定许可。",
+    "由 manager.start 启动来源；之后只有 manager worker sample。",
+    "采样复制原始值与时间，按明确返回契约替换/保留/失效缓存。"
+  ],
+  "pitfalls": [
+    "不要在 sample 中无限等待串口或重新刷新旧值时间；后台周期不能因此停滞。",
+    "SourceRole 只有 Operator/Aim；没有直接把所有消息源塞入同一优先级队列的接口。",
+    "注册多个 Operator 或 Aim 返回 -EEXIST；来源最多两个。",
+    "自定义来源不得发布与 role 不匹配的 variant；诊断的 unavailable 与数值 0 不同。"
+  ],
+  "config": [
+    {
+      "name": "ManualCommandMapper::Config",
+      "description": "analog_deadband=0.03、channel_range=660、mouse_yaw_scale/mouse_pitch_scale=0.002。"
+    },
+    {
+      "name": "来源编译条件",
+      "description": "RemoteSource 需 REMOTE_RECEIVER，VisionSource 需 VISION_RECEIVER，RefereePermissionSource 需 REFEREE 与 UART_TRANSPORT。"
+    },
+    {
+      "name": "对象所有权",
+      "description": "source 只引用接收器；manager 只引用 source，不拥有它们，不负责释放。"
+    }
+  ]
+},
   {
-    id: 'gimbal', title: '云台单轴与本地执行', category: '机器人与仲裁',
-    summary: 'GimbalAxis 将 Hold/Rate/AbsoluteAngle 变成位置环目标；应用执行器管理总线、可信参考和显式使能。',
-    responsibility: '单轴封装限速、限位、参考准备与 PositionMotor 更新。它不判断遥控/裁判新鲜度，不执行 Motor enable/disable，不提交 CAN；Yaw/Pitch 的组合与故障策略属于应用。',
-    status: 'ready', statusNote: '通用 GimbalAxis 与 yaw_gimbal/gimbal_control 样例已实现；sentry_gimbal 当前是单 yaw 应用，尚未形成 pitch+视觉+发射完整云台。',
-    source: [{label: 'GimbalAxis API', path: 'include/robotics/gimbal/gimbal_axis.hpp'}, {label: '轴参考与控制实现', path: 'lib/robotics/gimbal_axis.cpp'}, {label: '当前应用执行器', path: 'applications/sentry_gimbal/src/gimbal_executor.hpp'}, {label: '双轴样例', path: 'samples/robotics/gimbal_control/src/main.cpp'}],
-    docs: [{label: '机器人模块', path: 'docs/modules/robotics/robotics.md'}, {label: '双轴遥控样例', path: 'samples/robotics/gimbal_control/README.md'}, {label: 'Yaw 样例', path: 'samples/robotics/yaw_gimbal/README.md'}, {label: '执行恢复', path: 'docs/modules/robotics/command-recovery.md'}],
-    depends: ['motor-control', 'motor-dji', 'motor-dm'],
-    interfaces: [
-      {signature: 'GimbalAxis(motor::Motor &drive, const control::PositionMotor::Config &position_config, const GimbalAxisConfig &config)', description: '引用一台 Motor，构造位置环与轴拓扑；构造不启用、不访问 CAN。', parameters: [{name: 'drive', meaning: '已知硬件类型的底层 Motor，生命周期长于 axis'}, {name: 'position_config', meaning: '位置/速度环、effort 单位、PositionReference 与安全阈值'}, {name: 'config', meaning: 'Continuous/Limited、限位、最大角速度、参考初始化策略'}], returns: '单线程控制对象；禁止复制/移动。', context: '所有控制方法由一个执行线程调用。', errors: '配置由 validate/begin 报告；底层 Motor/CanBus 由调用者管理。'},
-      {signature: 'int GimbalAxis::validate() const; int GimbalAxis::begin()', description: 'validate 检查轴拓扑与参考模式；begin 在 CanBus::start 后配置 PositionMotor，不使能 drive。', parameters: [], returns: '0：配置可用；负 errno：失败。', context: '初始化由轴的 owner 线程调用。', errors: '-EINVAL：非法范围/限速/枚举/参考初始化；-ENOTSUP：Continuous 未用 AbsoluteNearest 或 Limited 未用 DriverContinuous；-EALREADY：重复 begin；其他值来自 PositionMotor.configure。'},
-      {signature: 'GimbalAxis::Status GimbalAxis::poll(std::uint64_t now_ms)', description: '检查反馈和参考并给出 ready_for_enable/feedback_healthy；Limited+CalibratedFeedback 可在 disabled 准备期重建驱动连续参考。', parameters: [{name: 'now_ms', meaning: '当前单调 ms，用于记录 readiness 的 false→true 时刻'}], returns: 'Status 含 ready_for_enable、feedback_healthy、ready_since_ms、error；ready_since 在未 ready 时仍保留。', context: '单执行线程；Active 时 ready_for_enable=false 属正常状态，要另看 feedback_healthy 与 MotorState。', errors: '-EACCES：未 begin；-EAGAIN：无新鲜反馈；-ENODATA：缺少对应角度或参考；-EINVAL：角度非有限；-ERANGE：Limited 角度越界；也可能返回 reseedPosition 错误。'},
-      {signature: 'int GimbalAxis::reset()', description: '在新鲜反馈基础上重置控制历史与目标，不改变驱动坐标原点；恢复前显式调用。', parameters: [], returns: '0：从当前反馈建立控制起点。', context: '执行线程，drive 处于 Disabled/可准备状态；要在 enable 前调用。', errors: '-EACCES：未 begin；-EBUSY：Motor Active/Enabling；反馈与 PositionMotor.reset 错误透传。'},
-      {signature: 'int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt_s); int GimbalAxis::updateRate(float rate_rad_s, float dt_s)', description: '已授权 Active 路径中更新位置目标。Rate 对角速度限幅再积分；AbsoluteAngle 限速移动到目标；Hold 保持当前参考。updateRate 等价于 Rate+Active。', parameters: [{name: 'command', meaning: 'GimbalMode、target_rad、rate_rad_s；所有角度 rad'}, {name: 'action', meaning: '应用已经授权的 Active/Hold；Disable 不执行驱动停机'}, {name: 'dt_s', meaning: '真实周期，有限且 0<dt≤0.02 s'}], returns: '0：位置环目标更新成功；仍需本周期对应 CanBus.commit。', context: '单 owner，drive 必须 Active 且 output_permitted；命令 stamp 与裁判许可由应用先检查。', errors: '-EACCES：未配置、Disabled action/mode 或 drive 未授权；-EINVAL：非法模式、数值或 dt；反馈/位置环错误透传。错误后调用者停机，不转发上次输出。'},
-      {signature: 'double GimbalAxis::targetAngleRad() const; control::PositionMotor::Telemetry GimbalAxis::telemetry() const', description: '读取内部目标和位置环诊断，便于解释“输入、目标、反馈、effort”关系。', parameters: [], returns: '当前目标 rad 与位置控制 telemetry 值。', context: '同一执行线程取值，再发布副本供观测线程读取。', errors: '轴本体无跨线程快照锁；不要让 telemetry 线程并发直接访问 update/poll。'}
-    ],
-    examples: [{title: '真实单轴调用顺序：准备、显式使能、更新、提交', language: 'cpp', code: '#include <drivers/motor/can_bus.hpp>\n#include <robotics/gimbal/gimbal_axis.hpp>\n#include "board_config.hpp"\nusing namespace skywalker;\n\n// 对应 gimbal_control 样例的配置接口；每个实例长期存活。\nstatic motor::Motor drive(board_config::yawHardware());\nstatic motor::CanBus bus(board_config::yaw_can);\nstatic robotics::GimbalAxis axis(drive, board_config::yawMotorConfig(), board_config::yaw);\n\nint prepareAxis() {\n    int ret = axis.validate();\n    if (ret == 0) ret = bus.attach(drive);\n    if (ret == 0) ret = bus.start();\n    if (ret == 0) ret = axis.begin();\n    return ret;\n}\nint enablePreparedAxis(std::uint64_t now_ms) {\n    if (!axis.poll(now_ms).ready_for_enable) return -EAGAIN;\n    int ret = axis.reset();\n    if (ret == 0) ret = drive.enable();\n    return ret;\n}\nint activeStep(float authorized_rate_rad_s, float dt_s) {\n    int ret = axis.updateRate(authorized_rate_rad_s, dt_s);\n    if (ret == 0) ret = bus.commit().error;\n    if (ret < 0) drive.disable();\n    return ret;\n}', notes: 'enablePreparedAxis 只在新的有效授权到来后调用；drive 完成 enable handshake 并进入 Active 后才能 activeStep。真实周期还要 poll、检查命令年龄/反馈/急停，见样例与 GimbalExecutor。'}],
-    lifecycle: ['先确认电机单位、零位、拓扑和 PositionReference；validate → bus.attach → bus.start → axis.begin。', '持续 poll 获取新鲜反馈与可信参考；Limited 轴限位必须在已标定坐标中定义。', '新授权且 ready_for_enable 后 axis.reset，再 Motor/Group.enable，等待 Active。', '每个 Active 周期检查本地反馈和命令有效期，axis.update/updateRate 成功后只提交对应物理总线一次。', '故障/过期时应用 disable；恢复必须重新建立可信参考并等待新的授权，通信恢复本身不会启动电机。'],
-    pitfalls: ['Continuous 必须使用固定零点单圈反馈 + AbsoluteNearest；Limited 必须使用已校准 DriverContinuous 坐标。', '把 ready_for_enable 当成 Active 健康标志会错误停机；Active 周期看反馈健康与 Motor state。', 'SafetyAction::Disable 让 update 返回 -EACCES，不替代 Motor/Group.disable。', '软件 disable 不代表机械立即停止；急停输入和功率切断由实际应用接入。', '通用 Gimbal 两轴组合类尚不是当前公共 API，不能把开发指南拟议接口写成现行实现。'],
-    config: [{name: 'CONFIG_SKYWALKER_ROBOTICS_GIMBAL', description: '依赖 LIB_ROBOTICS 与 LIB_MOTOR_CONTROL；后者选择 PID 等控制算法。'}, {name: 'GimbalAxisConfig', description: '默认 Continuous、范围 [-π,π]、max_rate=3 rad/s、hold_on_zero_rate=true、reference_init=Preserve。'}, {name: 'PositionMotor::Config', description: '明确 effort 单位、Reference、位置/速度环、力矩/电流上限及反馈安全阈值；示例参数不能直接照搬整车。'}, {name: '应用 board_config', description: 'sentry_gimbal connections_configured=false；当前只组装 yaw。实际两轴与视觉参考转换需在应用层完成。'}]
-  },
+  "id": "gimbal",
+  "title": "云台单轴与本地执行",
+  "category": "机器人与仲裁",
+  "summary": "机械单轴保存目标；公开双轴 GimbalExecutor 独立计算两轴并由应用统一提交总线。",
+  "responsibility": "GimbalAxis 管机械范围与目标，PositionMotor 管本轴反馈计算；GimbalExecutor 管新鲜输入/许可和双轴调用，不持有 CAN。",
+  "status": "ready",
+  "statusNote": "正式云台已装配双轴与惯性适配框架，真实接线与安装确认默认关闭。",
+  "source": [
+    {
+      "label": "gimbal_axis.hpp",
+      "path": "include/robotics/gimbal/gimbal_axis.hpp"
+    },
+    {
+      "label": "gimbal_executor.hpp",
+      "path": "include/robotics/gimbal/gimbal_executor.hpp"
+    },
+    {
+      "label": "gimbal_axis.cpp",
+      "path": "lib/robotics/gimbal_axis.cpp"
+    },
+    {
+      "label": "gimbal_executor.cpp",
+      "path": "lib/robotics/gimbal_executor.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "executors.md",
+      "path": "docs/modules/robotics/executors.md"
+    },
+    {
+      "label": "README.md",
+      "path": "samples/robotics/gimbal_control/README.md"
+    }
+  ],
+  "depends": [
+    "motor-control",
+    "command"
+  ],
+  "interfaces": [
+    {
+      "signature": "int GimbalAxis::validate() const; int GimbalAxis::begin(); Status GimbalAxis::poll(uint64_t now_ms)",
+      "description": "begin 配置；poll 观测反馈/配置允许的参考，Status 仅 feedback_healthy/error，无 ready_for_enable。",
+      "parameters": [],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "int GimbalAxis::reset(); int GimbalAxis::update(const AxisCommand &, SafetyAction, float dt_s); int updateRate(float rate_rad_s, float dt_s)",
+      "description": "明确 Hold/reset 获取本轴目标；Rate 时间轴不因驱动离线重置，机械限位保留。",
+      "parameters": [
+        {
+          "name": "dt_s",
+          "meaning": "实际 s"
+        },
+        {
+          "name": "action",
+          "meaning": "业务授权动作；不能代替 Motor disable"
+        }
+      ],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "GimbalExecutor(Motor &yaw, Motor &pitch, Group &, const PositionMotor::Config &, const GimbalAxisConfig &, const PositionMotor::Config &, const GimbalAxisConfig &, const Config &); int begin()",
+      "description": "注入长期存活两轴与配置；应用先 attach/start。",
+      "parameters": [],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "RunStatus GimbalExecutor::update(const GimbalExecutionInputs &, core::TimeUs now_us); RunStatus suspend(core::TimeUs, WaitReason, int error = 0, bool blocked = false)",
+      "description": "source_stamp/permission 与命令分别过期；yaw_output_valid/pitch_output_valid 分别声明数学输入是否足够。update 不 commit CAN。",
+      "parameters": [
+        {
+          "name": "now_us",
+          "meaning": "单调本地 µs"
+        },
+        {
+          "name": "inputs",
+          "meaning": "command/source_stamp/permission、transport_ready、两轴输出有效性与急停"
+        }
+      ],
+      "returns": "RunStatus 值副本，生产 stamp、requested 与各轴统计。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "两轴持续更新，共享总线统一发布",
+      "language": "cpp",
+      "code": "const auto status = executor.update(inputs, now_us);\nconst auto published = bus.commit();\n// 若两轴跨物理 CAN，另一总线仍独立 commit；状态用于诊断。",
+      "notes": "应用周期片段，构造与实物配置以链接源码为准。"
+    }
+  ],
+  "lifecycle": [
+    "确定 Continuous/Limited 和可信机械参考。",
+    "应用 attach/start，axis/executor.begin 配置。",
+    "每周期从真实新鲜输入持续更新目标。",
+    "本轴缺反馈只作废本轴 computed effort，其他轴继续。",
+    "每物理 CAN 周期末一次 commit；真实停止由 suspend/disable 处理。"
+  ],
+  "pitfalls": [
+    "世界姿态须先经惯性适配，不能直接送编码器角。",
+    "reset 是业务目标/历史操作，不是电机恢复时重采原点。",
+    "软件停止报告不能替代机械停止测量。"
+  ],
+  "config": [
+    {
+      "name": "GimbalAxisConfig",
+      "description": "Continuous/Limited、机械范围、max_rate、hold_on_zero_rate、Preserve/CalibratedFeedback。"
+    },
+    {
+      "name": "GimbalExecutor::Config",
+      "description": "来源/命令 100 ms、许可 300 ms、周期 20 ms；所有 stamp 保留原时刻。"
+    }
+  ]
+},
   {
-    id: 'chassis', title: '舵轮底盘与功率缩放', category: '机器人与仲裁',
-    summary: '把 vx/vy/wz 分成四轮方向与速度，再计算转向/驱动 effort；八电机绑定和总线提交由硬件适配器负责。',
-    responsibility: 'SwerveKinematics 求运动学，SwerveModule 处理最短转向与反转优化，SwerveChassis 组合四轮控制。ChassisPowerLimiter 输出启发式 effort_scale；ChassisExecutor 负责板间会话、本地反馈与恢复。',
-    status: 'ready', statusNote: '四模块算法、单轮台架和八电机底盘应用已实现；sentry_chassis connections_configured=false，power_model_calibrated=false，整车功率和硬件仍需配置/标定。',
-    source: [{label: '四轮组合 API', path: 'include/robotics/swerve/swerve_chassis.hpp'}, {label: '运动学 API', path: 'include/robotics/swerve/swerve_kinematics.hpp'}, {label: '单轮 API', path: 'include/robotics/swerve/swerve_module.hpp'}, {label: '轮顺序与值类型', path: 'include/robotics/swerve/swerve_types.hpp'}, {label: '功率限制接口', path: 'include/robotics/chassis/chassis_power_limiter.hpp'}, {label: '应用执行器', path: 'applications/sentry_chassis/src/chassis_executor.cpp'}],
-    docs: [{label: '单舵轮样例', path: 'samples/robotics/swerve/README.md'}, {label: '机器人算法', path: 'docs/modules/robotics/robotics.md'}, {label: '双板控制链', path: 'docs/applications/dual-controller.md'}],
-    depends: ['pid', 'motor-dji', 'interboard'],
-    interfaces: [
-      {signature: 'explicit SwerveChassis(const Config &config); int SwerveChassis::validate() const; int SwerveChassis::reset(const ChassisFeedback &feedback)', description: '构造四轮纯算法；validate 检查几何和控制参数；reset 用当前四轮反馈初始化方向与控制历史。', parameters: [{name: 'config', meaning: '四轮 locations、最大轮速及每轮半径/位置速度环'}, {name: 'feedback', meaning: 'FL、FR、RL、RR 四轮的 absolute/continuous 转向角及转向/驱动角速度'}], returns: '0：配置/初始化完成；负 errno：无效配置或反馈。reset 失败时不提交部分状态。', context: '单个执行线程拥有有状态算法；它不访问设备，不校验 stamp，应用必须先保证反馈新鲜。', errors: '-EINVAL：非法数值/轮半径/控制参数；-ERANGE：各环 dt 合法区间不相交；底层控制校验错误透传。'},
-      {signature: 'int SwerveChassis::step(const ChassisCommand &command, const ChassisFeedback &feedback, float dt_s, ChassisOutput &out)', description: '先求四轮目标，再计算四轮 steer_effort/drive_effort；任一轮失败不提交算法状态和 out，避免半组输出。', parameters: [{name: 'command', meaning: 'BodyVelocity/Spin/Disabled；vx/vy=m/s，wz=rad/s'}, {name: 'feedback', meaning: '当前四轮值，由应用先判断新鲜度、参考与限值'}, {name: 'dt_s', meaning: '真实控制周期，满足所有环的配置区间'}, {name: 'out', meaning: '四轮 target 与 optimized angle/speed/continuous target/effort'}], returns: '0：完整输出；负 errno：整次拒绝。', context: '单执行线程；成功后由硬件适配器把 effort 映射到八台电机并 commit。', errors: '-EACCES：未 reset；-EINVAL：非法命令/反馈/dt；-ERANGE：计算超出数值或 dt 范围；其他底层算法错误。Disabled 命令仅给零轮速，不替代硬件 disable。'},
-      {signature: 'explicit SwerveKinematics(const Config &config); int SwerveKinematics::validate() const; int SwerveKinematics::reset(const ModuleTargets &current); int SwerveKinematics::solve(const ChassisCommand &command, ModuleTargets &out)', description: '只算目标：每轮 vx_i=vx-wz*y_i、vy_i=vy+wz*x_i；超最大轮速时整组等比例缩放，静止时保持此前转向角。', parameters: [{name: 'config.locations', meaning: 'FL/FR/RL/RR 相对底盘原点位置 x_m/y_m'}, {name: 'current', meaning: 'reset 时各轮当前转向角，rad'}, {name: 'command / out', meaning: '底盘目标与四轮 angle_rad/wheel_velocity_m_s'}], returns: '0：解成功；负 errno：拒绝。', context: '单 owner，因为静止保角依赖历史。坐标 +x 前、+y 左、+wz 逆时针。', errors: '-EINVAL：max speed≤0、非法几何或命令；-EACCES：未 reset；-ERANGE：运动学结果非有限。'},
-      {signature: 'explicit SwerveModule(const Config &config); int SwerveModule::reset(const ModuleFeedback &feedback); int SwerveModule::step(const ModuleTarget &target, const ModuleFeedback &feedback, float dt_s, ModuleOutput &out)', description: '单轮控制：转向误差超过 π/2 时目标角加 π 并反转轮速；用连续角目标驱动位置/速度双环。', parameters: [{name: 'config', meaning: 'wheel_radius_m、steer 位置双环和 drive 速度环'}, {name: 'target', meaning: '目标单圈角 rad 与轮线速度 m/s'}, {name: 'feedback', meaning: '固定零点单圈角、可信连续角以及各角速度'}, {name: 'dt_s / out', meaning: '真实周期与本轮完整计算结果'}], returns: '0；负 errno 失败时不提交本轮状态/out。drive_target_rad_s=optimized_wheel_velocity_m_s/wheel_radius_m。', context: '单 owner 算法；硬件方向与 effort 单位由应用适配。', errors: '-EACCES：未 reset；-EINVAL：非有限输入或配置；PID/angle 函数错误透传。'},
-      {signature: 'int ChassisPowerLimiter::reset(); int ChassisPowerLimiter::step(const ChassisPowerInput &input, float dt_s, ChassisPowerDecision &out)', description: 'reset 将 effort scale 清为 0；step 依据实测功率/上限/缓冲能量下降目标并缓慢恢复，输出 [0,1] effort_scale。', parameters: [{name: 'input', meaning: 'measured_power_w、power_limit_w、buffer_energy_j，均非负有限值'}, {name: 'dt_s', meaning: '有限且 0<dt≤0.1 s'}, {name: 'out', meaning: 'effort_scale，供已标定应用缩放 effort'}], returns: '0：计算完成；-EINVAL：参数/配置非法。', context: '同一底盘执行线程；预算年龄与测量来源由应用先检查。', errors: '这是台架启发式，不能凭它宣称竞赛功率合规；未标定或预算过期时不应伪造输入启用 limiter。'}
-    ],
-    examples: [{title: '纯算法组合：先 reset，再整组 step', language: 'cpp', code: '#include <robotics/swerve/swerve_chassis.hpp>\nusing namespace skywalker::robotics;\n\n// feedback 来自应用已经检查新鲜度/零位的四轮快照。\nint prepareChassis(SwerveChassis &chassis, const ChassisFeedback &feedback) {\n    int ret = chassis.validate();\n    if (ret == 0) ret = chassis.reset(feedback);\n    return ret;\n}\nint controlCycle(SwerveChassis &chassis, const ChassisCommand &authorized,\n                 const ChassisFeedback &feedback, float dt_s, ChassisOutput &out) {\n    return chassis.step(authorized, feedback, dt_s, out);\n}\n// ret==0 后硬件适配器将 out.module[i].steer_effort/drive_effort\n// 按 FL/FR/RL/RR 与电机方向映射，并统一提交对应 CanBus。\n// ret<0 时停整组，不能只采用已算出的部分轮输出。', notes: 'Config 和八电机输出映射见 applications/sentry_chassis/src/board_config.hpp、chassis_hardware.cpp 与 chassis_executor.cpp；单轮真实使能/commit 示例见 samples/robotics/swerve/src/main.cpp。'}, {title: '标定后使用功率缩放', language: 'cpp', code: '#include <robotics/chassis/chassis_power_limiter.hpp>\nusing namespace skywalker::robotics;\n\nint computePowerScale(ChassisPowerLimiter &limiter,\n                      const ChassisPowerInput &fresh_budget, float dt_s, float &scale) {\n    ChassisPowerDecision decision{};\n    const int ret = limiter.step(fresh_budget, dt_s, decision);\n    if (ret == 0) scale = decision.effort_scale;\n    return ret;\n}\n// 只有应用已标定功率模型且预算新鲜时调用；重新准备时 limiter.reset()。', notes: 'limiter 不读取裁判、没有预算 stamp，也不拥有八电机；当前应用默认关闭功率模型标定开关。'}],
-    lifecycle: ['确定四轮几何、FL/FR/RL/RR 顺序、半径、电机正负方向与单圈零位。', '硬件适配器 attach/start 八台电机，等待稳定反馈并建立连续位置参考。', '检查板间 command/constraint 新鲜度、boot/generation 与许可，再 reset 算法并显式使能整组。', 'Active 时采集完整四轮反馈 → SwerveChassis.step → 已标定的功率缩放 → 八电机 effort → CanBus.commit。', '任一反馈、输出、预算或会话故障导致应用 suspend；增加恢复代次，等待新命令后重新准备。'],
-    pitfalls: ['算法 ChassisFeedback 没有时间戳字段，不代表它允许陈旧反馈；应用必须在组装前检查每台电机。', 'steer_absolute_rad 与 steer_continuous_rad 不能混用；最短转向依赖同一个固定零点。', '轮线速度 m/s 除以半径才得到输出轴 rad/s，减速比由硬件驱动配置处理。', '底盘 mode=Disabled 仍可能算保持转向与制动 effort，不能当作八电机硬件停机。', '当前应用基于 DJI 八电机；支持其他品牌需要新的硬件绑定，不能把纯算法支持误读为已接好所有驱动。'],
-    config: [{name: 'CONFIG_SKYWALKER_ROBOTICS_SWERVE', description: '启用四轮算法和台架 limiter；由 LIB_ROBOTICS 选择控制算法。'}, {name: 'SwerveKinematics::Config', description: '四个 ModuleLocation、max_wheel_velocity_m_s>0；stationary_epsilon_m_s 默认 0.01。'}, {name: 'SwerveModule::Config', description: 'wheel_radius_m>0；steer/drive PID、输出上限、参考 slew 与有效 dt 区间必须一起配置。'}, {name: 'ChassisPowerLimiter::Config', description: '默认 recovery_per_s=0.5、buffer_reserve_j=10；初始 scale=0，恢复逐步提高。'}, {name: 'sentry_chassis board_config', description: 'connections_configured=false、power_model_calibrated=false；核对八电机 ID、零位、模式、功率模型和预算需求后再接入。'}]
-  },
+  "id": "chassis",
+  "title": "舵轮底盘与功率缩放",
+  "category": "机器人与仲裁",
+  "summary": "四轮运动学与八轴独立有效性；公开 SwerveHardware/ChassisExecutor 持续暂存，应用统一 commit。",
+  "responsibility": "SwerveKinematics 分目标，SwerveModule 独立转向/轮驱计算与翻转迟滞，SwerveHardware 映射八电机；功率执行使用可信预算与测量。",
+  "status": "ready",
+  "statusNote": "单舵轮最新提交记录基本功能调通；四轮/整车软件入口已有，真实几何与功率仍待标定。",
+  "source": [
+    {
+      "label": "swerve_types.hpp",
+      "path": "include/robotics/swerve/swerve_types.hpp"
+    },
+    {
+      "label": "swerve_module.hpp",
+      "path": "include/robotics/swerve/swerve_module.hpp"
+    },
+    {
+      "label": "swerve_chassis.hpp",
+      "path": "include/robotics/swerve/swerve_chassis.hpp"
+    },
+    {
+      "label": "swerve_hardware.hpp",
+      "path": "include/robotics/chassis/swerve_hardware.hpp"
+    },
+    {
+      "label": "chassis_executor.hpp",
+      "path": "include/robotics/chassis/chassis_executor.hpp"
+    },
+    {
+      "label": "chassis_executor.cpp",
+      "path": "lib/robotics/chassis_executor.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "executors.md",
+      "path": "docs/modules/robotics/executors.md"
+    },
+    {
+      "label": "README.md",
+      "path": "samples/robotics/swerve/README.md"
+    },
+    {
+      "label": "README.md",
+      "path": "samples/robotics/four_swerve/README.md"
+    }
+  ],
+  "depends": [
+    "pid",
+    "motor-dji",
+    "interboard"
+  ],
+  "interfaces": [
+    {
+      "signature": "int SwerveChassis::validate() const; int reset(const ChassisFeedback &); int step(const ChassisCommand &, const ChassisFeedback &, float dt_s, ChassisOutput &out)",
+      "description": "持续解算，不等待全轮反馈；ModuleFeedback.steer_valid/drive_valid 与各轴 generation 独立决定 effort 有效性。",
+      "parameters": [
+        {
+          "name": "command",
+          "meaning": "vx/vy m/s、wz rad/s；+x 前、+y 左、+wz 逆时针"
+        },
+        {
+          "name": "feedback",
+          "meaning": "四模块 FL/FR/RL/RR；舵绝对角/速度，轮驱速度"
+        }
+      ],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "非法输入/配置返回负 errno；本轴缺反馈以本轴 output_valid=false 表达。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "int SwerveModule::step(const ModuleTarget &, const ModuleFeedback &, float dt_s, ModuleOutput &out)",
+      "description": "最短转向、翻转迟滞、转向斜坡、Hold/Coast；无对齐门控或 cos 缩速，舵向和轮驱分别恢复。",
+      "parameters": [],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "int SwerveHardware::begin(); int read(ChassisFeedback &); int stage(const ChassisOutput &, float steer_scale, float drive_scale); void suspend()",
+      "description": "应用注入八台 Motor 和批量 Group；stage 独立携带计算 enable generation，不 commit 总线。",
+      "parameters": [],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "ChassisExecutor(SwerveHardware &, const SwerveChassis::Config &, const Config &); int begin(); RunStatus update(const ChassisExecutionInputs &, core::TimeUs now_us)",
+      "description": "注入硬件，不绑定 Endpoint；消费原输入、权限、预算和真实功率。",
+      "parameters": [
+        {
+          "name": "inputs",
+          "meaning": "command/source_stamp/permission/power_budget/measured_power 与运行/急停条件"
+        }
+      ],
+      "returns": "RunStatus 与输出/测量观察入口，电机等待不撤销其他轴目标。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "int ChassisPowerLimiter::reset(); int step(const ChassisPowerInput &, float dt_s, ChassisPowerDecision &out)",
+      "description": "标定后以 measured_power_w、预算 W、缓冲 J 计算 [0,1] 缩放；预算不可冒充测量。",
+      "parameters": [],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "数值/周期非法 -EINVAL；模型未标定或测量过期由执行器阻断对应功率模式。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "四轮与大 Yaw 分别推进",
+      "language": "cpp",
+      "code": "const auto wheels = chassis.update(chassis_inputs, now_us);\nconst auto yaw = big_yaw.update(yaw_inputs, now_us);\nconst auto steer_tx = steer_bus.commit();\nconst auto wheel_tx = wheel_bus.commit();\nconst auto yaw_tx = yaw_bus.commit();\n// 每条物理 CAN 一个 owner；一个失败不漏提交另外两条。",
+      "notes": "应用周期片段，构造与实物配置以链接源码为准。"
+    }
+  ],
+  "lifecycle": [
+    "核对 FL/FR/RL/RR、方向、单圈零位、半径、减速比。",
+    "应用 attach/start 各总线，hardware/executor.begin 校验。",
+    "持续解算各轴目标；只用有效测量计算对应 effort。",
+    "功率模式保留预算与测量时效；未标定台架使用独立电流上限。",
+    "统一提交每物理 CAN；输入停止才明确批量撤销。"
+  ],
+  "pitfalls": [
+    "ModuleFeedback 没有旧 steer_continuous_rad，舵向绝对角局部展开。",
+    "单轮经验速度比例/等效半径不是整车实测几何。",
+    "mode=Disabled 的运动学目标不替代 Motor.disable。",
+    "电机独立恢复，Group 不形成故障传播。"
+  ],
+  "config": [
+    {
+      "name": "SwerveModule::Config",
+      "description": "wheel_radius_m、两套控制环、steer_target_rate、翻转进入/退出阈值、IdleBehavior。"
+    },
+    {
+      "name": "ChassisExecutor::Config",
+      "description": "真实功率/预算年龄、模型确认、estimated 回退、舵/驱独立台架缩放与电流上限。"
+    }
+  ]
+},
   {
-    id: 'telemetry', title: 'VOFA、日志与一致快照', category: '调试与观测',
-    summary: '从同一帧快照解释来源、目标、许可、反馈和错误；JustFloat 有界排队，主机离线不阻塞控制。',
-    responsibility: 'VOFA 库提供独占 IRQ UART/CDC 的 JustFloat 与 key=value 接收；Latest<T> 用非阻塞短锁交换值副本。应用 telemetry 只消费 CommandSnapshot/执行快照，不参与运动决策。',
-    status: 'ready', statusNote: 'VOFA 与多个样例 telemetry 已实现；CommandManager 台架记录三机构最终命令、来源年龄和原因位。应用需自行选择通道和独占调试 UART。',
-    source: [{label: 'VOFA C API 与回调契约', path: 'include/lib/vofa/vofa.h'}, {label: '非消费 Latest<T>', path: 'include/latest.hpp'}, {label: '命令台架 telemetry', path: 'samples/robotics/command_manager/src/telemetry.cpp'}, {label: '台架 telemetry 接口', path: 'samples/robotics/command_manager/src/telemetry.hpp'}],
-    docs: [{label: '调试指南', path: 'docs/guides/debugging.md'}, {label: '命令观测通道', path: 'samples/robotics/command_manager/README.md'}, {label: '视觉 VOFA 示例', path: 'samples/communication/vision/README.md'}],
-    depends: [],
-    interfaces: [
-      {signature: 'int vofa_init(Vofa *vofa, const struct device *uart)', description: '一次性绑定支持 IRQ/FIFO API 的独占 USART 或 USB CDC ACM；不等待主机连接。', parameters: [{name: 'vofa', meaning: '零初始化、静态或等同生命周期的 Vofa 实例'}, {name: 'uart', meaning: '就绪设备，不能与 console/shell/AsyncUart 分享回调'}], returns: '0：初始化成功；负 errno：失败，失败后不能 send。', context: '线程中调用一次；初始化后不能复制、移动或重新初始化；USB 栈由应用/Zephyr 启动。', errors: '-EINVAL：参数非法；-ENODEV：设备未就绪；或 UART 回调注册错误。'},
-      {signature: 'int vofa_send(Vofa *vofa, const float *data, uint8_t num)', description: '非阻塞复制完整 JustFloat 帧进入深度 4 的队列；成功后可立即复用 data，多生产者可共享实例。', parameters: [{name: 'vofa', meaning: '成功初始化的实例'}, {name: 'data', meaning: 'num 个 float 的数组'}, {name: 'num', meaning: '1～16 个通道，VOFA_MAX_FLOATS=16'}], returns: '0：完整帧已入队，不表示主机接收；负 errno：整帧拒绝。', context: '可在线程或普通 ISR 中调用；无等待 USB/DTR。', errors: '-ENOBUFS：队列满，丢本次完整帧；-EINVAL：参数非法；-ENODEV/驱动错误：设备发送不可用。'},
-      {signature: 'int vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size, vofa_cmd_handler on_cmd)', description: '设置一次接收行缓冲与 key=value handler，自动启用 IRQ 接收，支持 LF/CRLF。', parameters: [{name: 'rx_buf / rx_buf_size', meaning: '持续存活的接收缓冲，至少 2 字节'}, {name: 'on_cmd', meaning: 'void (*)(const char *key, float val)，key 只在回调期间有效'}], returns: '0：handler 已设置；负 errno：失败。', context: '线程配置一次；handler 在 UART 驱动回调运行，可能 ISR/工作队列，不能阻塞。要执行控制变更时先入队给应用线程。', errors: '-EINVAL/-ENODEV/-EALREADY；超长或含 NUL 的行丢弃至下一换行，不并发配置或热替换 handler。'},
-      {signature: 'int Latest<T>::put(const T &value); int Latest<T>::get(T &value)', description: '用 K_NO_WAIT mutex 拷贝完整最新值，没有 I/O 和回调；get 非消费且不保证新的序号。', parameters: [{name: 'value', meaning: 'put 的输入或 get 的读者输出；跨线程传值，不保存内部引用'}], returns: '0：完整复制；-EAGAIN：锁忙。初始内部值为 T{}。', context: '线程之间交换适当大小的快照；mutex 不用于 ISR。', errors: 'Latest 本身没有 have_value/时间有效性标志；读者必须检查值里的 stamp.valid/sequence，-EAGAIN 时保留旧值仍要过期。'},
-      {signature: 'int bench::Telemetry::start(const device *vofa_uart); void bench::Telemetry::emit(const skywalker::robotics::CommandSnapshot &frame)', description: '命令 sample 私有封装：日志约每 100 ms 输出同帧的模式/来源/年龄/原因，VOFA 可选每 20 ms 输出最终命令与拆分原因位。', parameters: [{name: 'vofa_uart', meaning: '观测专属设备'}, {name: 'frame', meaning: 'manager.snapshot 得到的同一次发布，主通道使用 decision.command'}], returns: 'start 返回 VOFA 初始化结果（未编译 VOFA 时为 0）；emit 不返回，记录拒绝帧计数。', context: 'sample 观测线程调用；不是 lib 的通用机器人 telemetry 服务。', errors: 'VOFA 背压不会阻塞 manager；telemetry 不应反复重发旧运动命令或在控制线程打印高频长日志。'}
-    ],
-    examples: [{title: '将同一次发布的最终命令送到 VOFA', language: 'cpp', code: '#include <lib/vofa/vofa.h>\n#include <robotics/command/command_manager.hpp>\nusing namespace skywalker;\n\nint telemetryLoop(const device *telemetry_uart,\n                  const robotics::CommandManager &manager) {\n    static Vofa vofa{};\n    const int init = vofa_init(&vofa, telemetry_uart);\n    if (init < 0) return init;\n    robotics::CommandSnapshot frame{};\n    for (;;) {\n        if (manager.snapshot(frame) == 0) {\n            const auto &c = frame.decision.command;\n            const float values[] = {c.chassis.vx_m_s, c.chassis.vy_m_s,\n                                    c.chassis.wz_rad_s, c.gimbal.yaw_rate_rad_s,\n                                    float(frame.decision.error)};\n            const int ret = vofa_send(&vofa, values, 5);\n            // ret==-ENOBUFS 时记录丢观测帧，继续下一周期。\n            (void)ret;\n        }\n        k_sleep(K_MSEC(20));\n    }\n}', notes: '本函数仅调用一次，telemetry_uart 与遥控/裁判/视觉/板间设备独立。通道单位和顺序在主机侧对应配置。'}],
-    lifecycle: ['选独占观测 UART/CDC，静态构造 Vofa 并 vofa_init 一次。', '采集一份完整 CommandSnapshot/执行快照；只在观测线程组装通道和低频日志。', 'vofa_send 复制整帧，有背压则丢本次观测，下一周期用新值。', '接收调参行时回调只复制请求，应用线程决定何时应用参数，保留控制所有权。'],
-    pitfalls: ['浮点通道不要直接存完整 32 位 bitmask/大序号；需要精确原因位可像台架一样拆为低/高 16 位。', 'data 入队成功不等于主机已显示；串口断开也不能卡住控制循环。', 'Latest.get 的 0 不证明已经 publish；值类型要包含有效标志。', '对比仲裁观测和最终输出时用同一个 CommandSnapshot，避免分别读导致跨帧误判。'],
-    config: [{name: 'CONFIG_SKYWALKER_LIB_VOFA', description: '依赖 SERIAL 与 SERIAL_SUPPORT_INTERRUPT，选择 UART_INTERRUPT_DRIVEN。'}, {name: 'VOFA_MAX_FLOATS / VOFA_TX_QUEUE_DEPTH', description: '16 个 float 通道、4 帧有界队列；不是无限数据缓存。'}, {name: 'CONFIG_COMMAND_MANAGER_VOFA', description: '三源 sample 的可选观测开关；串口选择和通道顺序见该 sample 配置。'}, {name: '日志与观测周期', description: '控制/仲裁线程持续运行，观测采用更低频率；当前命令台架 log=100 ms、VOFA=20 ms。'}]
-  }
+  "id": "telemetry",
+  "title": "VOFA、日志与一致快照",
+  "category": "调试与观测",
+  "summary": "从同一帧快照解释来源、目标、许可、反馈和错误；JustFloat 有界排队，主机离线不阻塞控制。",
+  "responsibility": "VOFA 有界 JustFloat/调参行；Latest 与 SnapshotCache 交换值副本，应用观察线程不参与目标授权。",
+  "status": "ready",
+  "statusNote": "单舵轮 16 通道，M2006 速度环 USB CDC 12 通道与反馈/CAN 前后快照诊断；详细通道见各样例 README。",
+  "source": [
+    {
+      "label": "vofa.h",
+      "path": "include/lib/vofa/vofa.h"
+    },
+    {
+      "label": "latest.hpp",
+      "path": "include/latest.hpp"
+    },
+    {
+      "label": "snapshot_cache.hpp",
+      "path": "include/robotics/execution/snapshot_cache.hpp"
+    },
+    {
+      "label": "telemetry.cpp",
+      "path": "samples/robotics/command_manager/src/telemetry.cpp"
+    },
+    {
+      "label": "main.cpp",
+      "path": "samples/motor/m2006_speed_control/src/main.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "调试指南",
+      "path": "docs/guides/debugging.md"
+    },
+    {
+      "label": "命令观测通道",
+      "path": "samples/robotics/command_manager/README.md"
+    },
+    {
+      "label": "视觉 VOFA 示例",
+      "path": "samples/communication/vision/README.md"
+    },
+    {
+      "label": "README.md",
+      "path": "samples/motor/m2006_speed_control/README.md"
+    },
+    {
+      "label": "README.md",
+      "path": "samples/robotics/swerve/README.md"
+    }
+  ],
+  "depends": [],
+  "interfaces": [
+    {
+      "signature": "int vofa_init(Vofa *vofa, const struct device *uart)",
+      "description": "一次性绑定支持 IRQ/FIFO API 的独占 USART 或 USB CDC ACM；不等待主机连接。",
+      "parameters": [
+        {
+          "name": "vofa",
+          "meaning": "零初始化、静态或等同生命周期的 Vofa 实例"
+        },
+        {
+          "name": "uart",
+          "meaning": "就绪设备，不能与 console/shell/AsyncUart 分享回调"
+        }
+      ],
+      "returns": "0：初始化成功；负 errno：失败，失败后不能 send。",
+      "context": "线程中调用一次；初始化后不能复制、移动或重新初始化；USB 栈由应用/Zephyr 启动。",
+      "errors": "-EINVAL：参数非法；-ENODEV：设备未就绪；或 UART 回调注册错误。"
+    },
+    {
+      "signature": "int vofa_send(Vofa *vofa, const float *data, uint8_t num)",
+      "description": "非阻塞复制完整 JustFloat 帧进入深度 4 的队列；成功后可立即复用 data，多生产者可共享实例。",
+      "parameters": [
+        {
+          "name": "vofa",
+          "meaning": "成功初始化的实例"
+        },
+        {
+          "name": "data",
+          "meaning": "num 个 float 的数组"
+        },
+        {
+          "name": "num",
+          "meaning": "1～16 个通道，VOFA_MAX_FLOATS=16"
+        }
+      ],
+      "returns": "0：完整帧已入队，不表示主机接收；负 errno：整帧拒绝。",
+      "context": "可在线程或普通 ISR 中调用；无等待 USB/DTR。",
+      "errors": "-ENOBUFS：队列满，丢本次完整帧；-EINVAL：参数非法；-ENODEV/驱动错误：设备发送不可用。"
+    },
+    {
+      "signature": "int vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size, vofa_cmd_handler on_cmd)",
+      "description": "设置一次接收行缓冲与 key=value handler，自动启用 IRQ 接收，支持 LF/CRLF。",
+      "parameters": [
+        {
+          "name": "rx_buf / rx_buf_size",
+          "meaning": "持续存活的接收缓冲，至少 2 字节"
+        },
+        {
+          "name": "on_cmd",
+          "meaning": "void (*)(const char *key, float val)，key 只在回调期间有效"
+        }
+      ],
+      "returns": "0：handler 已设置；负 errno：失败。",
+      "context": "线程配置一次；handler 在 UART 驱动回调运行，可能 ISR/工作队列，不能阻塞。要执行控制变更时先入队给应用线程。",
+      "errors": "-EINVAL/-ENODEV/-EALREADY；超长或含 NUL 的行丢弃至下一换行，不并发配置或热替换 handler。"
+    },
+    {
+      "signature": "int Latest<T>::put(const T &value); int Latest<T>::get(T &value)",
+      "description": "用 K_NO_WAIT mutex 拷贝完整最新值，没有 I/O 和回调；get 非消费且不保证新的序号。",
+      "parameters": [
+        {
+          "name": "value",
+          "meaning": "put 的输入或 get 的读者输出；跨线程传值，不保存内部引用"
+        }
+      ],
+      "returns": "0：完整复制；-EAGAIN：锁忙。初始内部值为 T{}。",
+      "context": "线程之间交换适当大小的快照；mutex 不用于 ISR。",
+      "errors": "Latest 本身没有 have_value/时间有效性标志；读者必须检查值里的 stamp.valid/sequence，-EAGAIN 时保留旧值仍要过期。"
+    },
+    {
+      "signature": "int bench::Telemetry::start(const device *vofa_uart); void bench::Telemetry::emit(const skywalker::robotics::CommandSnapshot &frame)",
+      "description": "命令 sample 私有封装：日志约每 100 ms 输出同帧的模式/来源/年龄/原因，VOFA 可选每 20 ms 输出最终命令与拆分原因位。",
+      "parameters": [
+        {
+          "name": "vofa_uart",
+          "meaning": "观测专属设备"
+        },
+        {
+          "name": "frame",
+          "meaning": "manager.snapshot 得到的同一次发布，主通道使用 decision.command"
+        }
+      ],
+      "returns": "start 返回 VOFA 初始化结果（未编译 VOFA 时为 0）；emit 不返回，记录拒绝帧计数。",
+      "context": "sample 观测线程调用；不是 lib 的通用机器人 telemetry 服务。",
+      "errors": "VOFA 背压不会阻塞 manager；telemetry 不应反复重发旧运动命令或在控制线程打印高频长日志。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "将同一次发布的最终命令送到 VOFA",
+      "language": "cpp",
+      "code": "#include <lib/vofa/vofa.h>\n#include <robotics/command/command_manager.hpp>\nusing namespace skywalker;\n\nint telemetryLoop(const device *telemetry_uart,\n                  const robotics::CommandManager &manager) {\n    static Vofa vofa{};\n    const int init = vofa_init(&vofa, telemetry_uart);\n    if (init < 0) return init;\n    robotics::CommandSnapshot frame{};\n    for (;;) {\n        if (manager.snapshot(frame) == 0) {\n            const auto &c = frame.decision.command;\n            const float values[] = {c.chassis.vx_m_s, c.chassis.vy_m_s,\n                                    c.chassis.wz_rad_s, c.gimbal.yaw_rate_rad_s,\n                                    float(frame.decision.error)};\n            const int ret = vofa_send(&vofa, values, 5);\n            // ret==-ENOBUFS 时记录丢观测帧，继续下一周期。\n            (void)ret;\n        }\n        k_sleep(K_MSEC(20));\n    }\n}",
+      "notes": "本函数仅调用一次，telemetry_uart 与遥控/裁判/视觉/板间设备独立。通道单位和顺序在主机侧对应配置。"
+    }
+  ],
+  "lifecycle": [
+    "选独占观测 UART/CDC，静态构造 Vofa 并 vofa_init 一次。",
+    "采集一份完整 CommandSnapshot/执行快照；只在观测线程组装通道和低频日志。",
+    "vofa_send 复制整帧，有背压则丢本次观测，下一周期用新值。",
+    "接收调参行时回调只复制请求，应用线程决定何时应用参数，保留控制所有权。"
+  ],
+  "pitfalls": [
+    "浮点通道不要直接存完整 32 位 bitmask/大序号；需要精确原因位可像台架一样拆为低/高 16 位。",
+    "data 入队成功不等于主机已显示；串口断开也不能卡住控制循环。",
+    "Latest.get 的 0 不证明已经 publish；值类型要包含有效标志。",
+    "对比仲裁观测和最终输出时用同一个 CommandSnapshot，避免分别读导致跨帧误判。"
+  ],
+  "config": [
+    {
+      "name": "CONFIG_SKYWALKER_LIB_VOFA",
+      "description": "依赖 SERIAL 与 SERIAL_SUPPORT_INTERRUPT，选择 UART_INTERRUPT_DRIVEN。"
+    },
+    {
+      "name": "VOFA_MAX_FLOATS / VOFA_TX_QUEUE_DEPTH",
+      "description": "16 个 float 通道、4 帧有界队列；不是无限数据缓存。"
+    },
+    {
+      "name": "CONFIG_COMMAND_MANAGER_VOFA",
+      "description": "三源 sample 的可选观测开关；串口选择和通道顺序见该 sample 配置。"
+    },
+    {
+      "name": "日志与观测周期",
+      "description": "控制/仲裁线程持续运行，观测采用更低频率；当前命令台架 log=100 ms、VOFA=20 ms。"
+    }
+  ]
+},
+{
+  "id": "inertial",
+  "title": "头部惯性云台适配",
+  "category": "机器人与仲裁",
+  "status": "partial",
+  "summary": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
+  "responsibility": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
+  "statusNote": "软件接口与整车装配已有；中央硬件/安装/测量确认未完成，不代表实机验收。",
+  "depends": [
+    "imu",
+    "gimbal",
+    "command"
+  ],
+  "source": [
+    {
+      "label": "inertial_gimbal.hpp",
+      "path": "include/robotics/gimbal/inertial_gimbal.hpp"
+    },
+    {
+      "label": "inertial_gimbal.cpp",
+      "path": "lib/robotics/inertial_gimbal.cpp"
+    },
+    {
+      "label": "main.cpp",
+      "path": "samples/robotics/inertial_gimbal/src/main.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "executors.md",
+      "path": "docs/modules/robotics/executors.md"
+    },
+    {
+      "label": "dual-controller.md",
+      "path": "docs/applications/dual-controller.md"
+    }
+  ],
+  "interfaces": [
+    {
+      "signature": "InertialGimbalAdapter(const Config &); InertialGimbalOutput update(const InertialGimbalInputs &, core::TimeUs now_us)",
+      "description": "输入头部 Snapshot、两轴 MotorSnapshot、command/source_stamp/prerequisites_ready，输出关节 command、原 stamp、两轴 output_valid、stabilization_valid 与误差。",
+      "parameters": [],
+      "returns": "值副本；不写电机、不持有总线。",
+      "errors": "IMU/参考/质量不足时相应数学输出无效；视觉参考须匹配头部 frame_id/epoch。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "头部惯性云台适配 周期",
+      "language": "cpp",
+      "code": "const auto adapted = adapter.update(inputs, now_us);\nmechanical_inputs.command = adapted.command;\nmechanical_inputs.source_stamp = adapted.source_stamp;\nmechanical_inputs.yaw_output_valid = adapted.yaw_output_valid;\nmechanical_inputs.pitch_output_valid = adapted.pitch_output_valid;\nconst auto status = gimbal.update(mechanical_inputs, now_us);",
+      "notes": "应用周期片段，构造与实物配置以链接源码为准。"
+    }
+  ],
+  "lifecycle": [
+    "静态构造与校验实物配置。",
+    "保留原输入/测量时间及坐标身份。",
+    "唯一执行 owner 持续 update；应用统一物理 CAN commit。",
+    "真实输入停止才撤销；电机等待仅影响本轴计算。"
+  ],
+  "pitfalls": [
+    "API 已存在不等于实物标定和闭环通过。",
+    "状态生产时间不能被读者/通信刷新。"
+  ],
+  "config": [
+    {
+      "name": "InertialGimbalAdapter::Config",
+      "description": "头部超时20ms、机械50ms、输入100ms；pitch_locked=true，方向/安装/姿态质量必须确认。"
+    }
+  ]
+},
+{
+  "id": "big-yaw",
+  "title": "大 Yaw 回中与独立速度环",
+  "category": "机器人与仲裁",
+  "status": "partial",
+  "summary": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
+  "responsibility": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
+  "statusNote": "软件接口与整车装配已有；中央硬件/安装/测量确认未完成，不代表实机验收。",
+  "depends": [
+    "gimbal",
+    "motor-control",
+    "interboard"
+  ],
+  "source": [
+    {
+      "label": "yaw_centering.hpp",
+      "path": "include/robotics/gimbal/yaw_centering.hpp"
+    },
+    {
+      "label": "big_yaw_executor.hpp",
+      "path": "include/robotics/execution/big_yaw_executor.hpp"
+    },
+    {
+      "label": "yaw_centering.cpp",
+      "path": "lib/robotics/yaw_centering.cpp"
+    },
+    {
+      "label": "big_yaw_executor.cpp",
+      "path": "lib/robotics/big_yaw_executor.cpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "executors.md",
+      "path": "docs/modules/robotics/executors.md"
+    },
+    {
+      "label": "dual-controller.md",
+      "path": "docs/applications/dual-controller.md"
+    }
+  ],
+  "interfaces": [
+    {
+      "signature": "YawCenteringOutput YawCenteringController::update(const YawCenteringInputs &, core::TimeUs now_us); void reset()",
+      "description": "使用独立标定中心、关节采样时刻、头部稳定与新鲜许可，产生带死区/迟滞/限速/斜坡的角速度。",
+      "parameters": [],
+      "returns": "enabled、velocity_rad_s、center_error_rad、stamp 与 reason。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "BigYawExecutor(Motor &, const VelocityMotor::Config &, const Config &); int begin(); RunStatus update(const BigYawExecutionInputs &, core::TimeUs now_us); BigYawFeedback feedback() const",
+      "description": "消费 v4 request、实际 local_boot_id、peer_online、transport_ready 和输入撤销条件；只暂存，不 commit。",
+      "parameters": [],
+      "returns": "RunStatus / BigYawFeedback 值副本；actual_rate_rad_s 仅 valid 时使用。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "大 Yaw 回中与独立速度环 周期",
+      "language": "cpp",
+      "code": "const auto follow = centering.update(center_inputs, now_us);\nrequest.mode = follow.enabled ? BigYawMode::FollowCenter : BigYawMode::Disabled;\nrequest.target_rate_rad_s = follow.velocity_rad_s;\nrequest.stamp = follow.stamp;\n// 同时保留 source_sequence、来源/命令/权限原年龄。\nendpoint.submitBigYaw(request);",
+      "notes": "应用周期片段，构造与实物配置以链接源码为准。"
+    }
+  ],
+  "lifecycle": [
+    "静态构造与校验实物配置。",
+    "保留原输入/测量时间及坐标身份。",
+    "唯一执行 owner 持续 update；应用统一物理 CAN commit。",
+    "真实输入停止才撤销；电机等待仅影响本轴计算。"
+  ],
+  "pitfalls": [
+    "API 已存在不等于实物标定和闭环通过。",
+    "状态生产时间不能被读者/通信刷新。"
+  ],
+  "config": [
+    {
+      "name": "center_rad",
+      "description": "独立实测小 Yaw 机械中心，不能用编码器零点替代。"
+    },
+    {
+      "name": "v4",
+      "description": "目标保留 boot/producer/age，无 resume_generation，发送不等待电机 ready。"
+    }
+  ]
+},
+{
+  "id": "shooter",
+  "title": "摩擦轮与拨盘发射执行",
+  "category": "机器人与仲裁",
+  "status": "partial",
+  "summary": "摩擦轮与拨盘独立持续目标；供弹业务检查热量/可信原点/摩擦稳定/头部状态；离散旧事件消费丢弃不重放。",
+  "responsibility": "摩擦轮与拨盘独立持续目标；供弹业务检查热量/可信原点/摩擦稳定/头部状态；离散旧事件消费丢弃不重放。",
+  "statusNote": "软件接口与整车装配已有；中央硬件/安装/测量确认未完成，不代表实机验收。",
+  "depends": [
+    "command",
+    "gimbal",
+    "motor-control",
+    "referee"
+  ],
+  "source": [
+    {
+      "label": "shooter_executor.hpp",
+      "path": "include/robotics/shooter/shooter_executor.hpp"
+    },
+    {
+      "label": "shooter_executor.cpp",
+      "path": "lib/robotics/shooter_executor.cpp"
+    },
+    {
+      "label": "shooter_bench.hpp",
+      "path": "samples/robotics/common/shooter_bench.hpp"
+    }
+  ],
+  "docs": [
+    {
+      "label": "executors.md",
+      "path": "docs/modules/robotics/executors.md"
+    },
+    {
+      "label": "dual-controller.md",
+      "path": "docs/applications/dual-controller.md"
+    }
+  ],
+  "interfaces": [
+    {
+      "signature": "ShooterExecutor(Motor &left, Motor &right, Motor &dial, Group &friction, Group &feed, const VelocityMotor::Config &, const PositionMotor::Config &, const Config &); int begin()",
+      "description": "注入三电机、两批量组与环参数；应用先 attach/start，不在执行器内 commit。",
+      "parameters": [],
+      "returns": "0 为接受/配置成功；实际状态单独观测。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    },
+    {
+      "signature": "ShooterStatus update(const ShooterExecutionInputs &, core::TimeUs now_us); ShooterStatus suspend(core::TimeUs, WaitReason, int error = 0)",
+      "description": "输入原始命令/事件、source_stamp、热量/许可、拨盘参考、云台状态、allow_feed 与急停；单发去重，忙碌/过期/恢复中旧事件丢弃。",
+      "parameters": [],
+      "returns": "friction/feed RunStatus、摩擦就绪、拨盘 busy/jammed、last_event_id、软件 shots 与 reserved_heat。",
+      "errors": "非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。",
+      "context": "单一执行线程拥有状态；对象与引用须覆盖 worker 生命周期。"
+    }
+  ],
+  "examples": [
+    {
+      "title": "摩擦轮与拨盘发射执行 周期",
+      "language": "cpp",
+      "code": "const auto status = shooter.update(inputs, now_us);\n// 小云台/摩擦/拨盘共享 DJI CAN1，所有机构 stage 后统一 commit。\nconst auto published = dji_bus.commit();",
+      "notes": "应用周期片段，构造与实物配置以链接源码为准。"
+    }
+  ],
+  "lifecycle": [
+    "静态构造与校验实物配置。",
+    "保留原输入/测量时间及坐标身份。",
+    "唯一执行 owner 持续 update；应用统一物理 CAN commit。",
+    "真实输入停止才撤销；电机等待仅影响本轴计算。"
+  ],
+  "pitfalls": [
+    "API 已存在不等于实物标定和闭环通过。",
+    "状态生产时间不能被读者/通信刷新。"
+  ],
+  "config": [
+    {
+      "name": "真实供弹来源",
+      "description": "IShooterHeatSource、IDialHomeSource 默认 Pending 无效；不能将当前点伪造有载原点。"
+    },
+    {
+      "name": "软件 shots",
+      "description": "软件执行统计不是可信裁判弹数，不直接用作 AB 实测反馈。"
+    }
+  ]
+}
 ]);

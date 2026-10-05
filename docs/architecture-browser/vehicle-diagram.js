@@ -1,75 +1,1134 @@
 'use strict';
-
-// Physical ownership and parallel data paths. Coordinates use viewBox 0 0 1100 560.
-// Explicit routes keep arrows outside node rectangles. Detached current sensing
-// nodes are intentional: sentry_gimbal has not assembled IMU or vision receivers.
+// Physical ownership: main@99a97c9, current and remaining integration targets.
 window.SKYWALKER_VEHICLE_MAP = {
-  current: {
-    nodes: [
-      { id: 'current-remote', title: 'DR16 / 键鼠', detail: '已接命令来源 · 原始时间戳', moduleId: 'remote', x: 35, y: 24, w: 175, h: 62, status: 'ready', zone: 'input' },
-      { id: 'current-referee', title: '裁判系统', detail: '权限 / 功率 · 配置待完成', moduleId: 'referee', x: 230, y: 24, w: 175, h: 62, status: 'partial', zone: 'input' },
-      { id: 'current-imu', title: 'IMU（待装配）', detail: '模块已有 · 正式应用未接', moduleId: 'imu', x: 470, y: 24, w: 185, h: 62, status: 'partial', zone: 'input' },
-      { id: 'current-host', title: '视觉主机（待装配）', detail: 'AB 模块已有 · 未参与仲裁', moduleId: 'vision', x: 765, y: 24, w: 250, h: 62, status: 'partial', zone: 'host' },
-      { id: 'current-command', title: '命令来源 → CommandManager', detail: 'Remote + Permission · 后台仲裁', moduleId: 'command', x: 55, y: 175, w: 275, h: 76, status: 'ready', zone: 'gimbal' },
-      { id: 'current-gimbal-link', title: '云台 InterBoardEndpoint', detail: 'UART 默认 · 可选 RS485 / CAN', moduleId: 'interboard', x: 380, y: 175, w: 245, h: 76, status: 'ready', zone: 'gimbal' },
-      { id: 'current-chassis-link', title: '底盘 InterBoardEndpoint', detail: '接收命令 / 约束 · 回传状态', moduleId: 'interboard', x: 770, y: 175, w: 245, h: 76, status: 'ready', zone: 'chassis' },
-      { id: 'current-gimbal-executor', title: 'GimbalExecutor → 单 Yaw', detail: '本地恢复 / GimbalAxis / 控制环', moduleId: 'gimbal', x: 55, y: 320, w: 275, h: 76, status: 'partial', zone: 'gimbal' },
-      { id: 'current-yaw-motor', title: 'GM6020 Yaw / CAN1', detail: '模式 / 零点 / 连接门禁待配置', moduleId: 'motor-dji', x: 55, y: 485, w: 275, h: 60, status: 'partial', zone: 'gimbal' },
-      { id: 'current-chassis-executor', title: 'ChassisExecutor', detail: 'boot / generation / 年龄 / 功率门控', moduleId: 'application', x: 770, y: 290, w: 245, h: 70, status: 'partial', zone: 'chassis' },
-      { id: 'current-swerve', title: 'Swerve + 功率限制', detail: '四轮目标分配 · 模型尚未标定', moduleId: 'chassis', x: 770, y: 405, w: 245, h: 70, status: 'partial', zone: 'chassis' },
-      { id: 'current-chassis-motors', title: '4 舵向 + 4 驱动电机', detail: 'Group / 1～2 条 CanBus', moduleId: 'motor-dji', x: 770, y: 495, w: 245, h: 50, status: 'partial', zone: 'chassis' }
+  "current": {
+    "height": 770,
+    "nodes": [
+      {
+        "id": "remote",
+        "title": "DR16 / 键鼠",
+        "detail": "Remote · 原始输入",
+        "moduleId": "remote",
+        "x": 35,
+        "y": 24,
+        "w": 175,
+        "h": 70,
+        "status": "ready",
+        "zone": "input"
+      },
+      {
+        "id": "referee",
+        "title": "裁判 / 真实测量",
+        "detail": "可选权限 · 功率 / 热量",
+        "moduleId": "referee",
+        "x": 230,
+        "y": 24,
+        "w": 175,
+        "h": 70,
+        "status": "partial",
+        "zone": "input"
+      },
+      {
+        "id": "imu",
+        "title": "头部 IMU",
+        "detail": "已装配 · 安装待确认",
+        "moduleId": "imu",
+        "x": 470,
+        "y": 24,
+        "w": 185,
+        "h": 70,
+        "status": "partial",
+        "zone": "input"
+      },
+      {
+        "id": "host",
+        "title": "视觉 AB 主机",
+        "detail": "可选观察 / 执行 · 上行待补",
+        "moduleId": "vision",
+        "x": 765,
+        "y": 24,
+        "w": 250,
+        "h": 70,
+        "status": "partial",
+        "zone": "host"
+      },
+      {
+        "id": "command",
+        "title": "CommandManager",
+        "detail": "Remote / 可选 Aim / Permission",
+        "moduleId": "command",
+        "x": 55,
+        "y": 175,
+        "w": 275,
+        "h": 88,
+        "status": "ready",
+        "zone": "gimbal"
+      },
+      {
+        "id": "glink",
+        "title": "云台 Endpoint v4",
+        "detail": "目标 / 原年龄 · 1ms poll",
+        "moduleId": "interboard",
+        "x": 380,
+        "y": 175,
+        "w": 245,
+        "h": 88,
+        "status": "ready",
+        "zone": "gimbal"
+      },
+      {
+        "id": "clink",
+        "title": "底盘 Endpoint v4",
+        "detail": "真实 boot · 状态生产年龄",
+        "moduleId": "interboard",
+        "x": 770,
+        "y": 175,
+        "w": 245,
+        "h": 88,
+        "status": "ready",
+        "zone": "chassis"
+      },
+      {
+        "id": "inertial",
+        "title": "头部惯性适配",
+        "detail": "测量 / 参考 → 双轴 Rate",
+        "moduleId": "inertial",
+        "x": 55,
+        "y": 320,
+        "w": 275,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "gimbal",
+        "title": "小 Yaw / Pitch 执行",
+        "detail": "两轴计算有效性 · 持续目标",
+        "moduleId": "gimbal",
+        "x": 55,
+        "y": 465,
+        "w": 275,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "shooter",
+        "title": "摩擦轮 / 拨盘执行",
+        "detail": "热量 / 原点 Pending 无效",
+        "moduleId": "shooter",
+        "x": 380,
+        "y": 465,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "gmotor",
+        "title": "小云台与发射 / CAN",
+        "detail": "DJI CAN1 · Pitch DM CAN2",
+        "moduleId": "motor-dji",
+        "x": 55,
+        "y": 650,
+        "w": 275,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "centering",
+        "title": "小 Yaw 中心外环",
+        "detail": "头部稳定 · 角速度 / 原年龄",
+        "moduleId": "big-yaw",
+        "x": 380,
+        "y": 320,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "chassis",
+        "title": "ChassisExecutor",
+        "detail": "八轴有效性 · 功率模式待测量",
+        "moduleId": "chassis",
+        "x": 770,
+        "y": 320,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "chassis"
+      },
+      {
+        "id": "wheel",
+        "title": "四舵向 + 四轮驱",
+        "detail": "CAN1 / CAN3 · 2ms 绝对节拍",
+        "moduleId": "motor-dji",
+        "x": 770,
+        "y": 465,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "chassis"
+      },
+      {
+        "id": "bigyaw",
+        "title": "大 Yaw 独立速度环",
+        "detail": "BigYawExecutor · DM CAN2",
+        "moduleId": "big-yaw",
+        "x": 770,
+        "y": 650,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "chassis"
+      }
     ],
-    edges: [
-      { from: 'current-remote', to: 'current-command', label: '操作者输入', kind: 'command', points: [{ x: 122, y: 86 }, { x: 122, y: 175 }] },
-      { from: 'current-referee', to: 'current-command', label: '输出许可', kind: 'permission', points: [{ x: 317, y: 86 }, { x: 317, y: 128 }, { x: 272, y: 128 }, { x: 272, y: 175 }] },
-      { from: 'current-command', to: 'current-gimbal-executor', label: '本地云台命令', kind: 'command', points: [{ x: 192, y: 251 }, { x: 192, y: 320 }] },
-      { from: 'current-gimbal-executor', to: 'current-yaw-motor', label: '控制输出 / commit', kind: 'command', points: [{ x: 192, y: 396 }, { x: 192, y: 485 }] },
-      { from: 'current-yaw-motor', to: 'current-gimbal-executor', label: '角度 / 速度反馈', kind: 'feedback', points: [{ x: 55, y: 515 }, { x: 26, y: 515 }, { x: 26, y: 357 }, { x: 55, y: 357 }] },
-      { from: 'current-command', to: 'current-gimbal-link', label: '底盘命令', kind: 'command', points: [{ x: 330, y: 198 }, { x: 380, y: 198 }] },
-      { from: 'current-command', to: 'current-gimbal-link', label: '裁判约束', kind: 'permission', points: [{ x: 330, y: 234 }, { x: 380, y: 234 }] },
-      { from: 'current-gimbal-link', to: 'current-chassis-link', label: '命令 + 权限 / 功率', kind: 'command', points: [{ x: 625, y: 195 }, { x: 770, y: 195 }] },
-      { from: 'current-chassis-link', to: 'current-gimbal-link', label: '心跳 / ready / 代次', kind: 'feedback', points: [{ x: 770, y: 235 }, { x: 625, y: 235 }] },
-      { from: 'current-chassis-link', to: 'current-chassis-executor', label: '端点快照', kind: 'command', points: [{ x: 892, y: 251 }, { x: 892, y: 290 }] },
-      { from: 'current-chassis-executor', to: 'current-chassis-link', label: '执行状态摘要', kind: 'feedback', points: [{ x: 770, y: 321 }, { x: 746, y: 321 }, { x: 746, y: 238 }, { x: 770, y: 238 }] },
-      { from: 'current-chassis-executor', to: 'current-swerve', label: '机体速度目标', kind: 'command', points: [{ x: 892, y: 360 }, { x: 892, y: 405 }] },
-      { from: 'current-swerve', to: 'current-chassis-motors', label: '电流目标', kind: 'command', points: [{ x: 892, y: 475 }, { x: 892, y: 495 }] },
-      { from: 'current-chassis-motors', to: 'current-chassis-executor', label: '8 电机真实反馈', kind: 'feedback', points: [{ x: 1015, y: 522 }, { x: 1056, y: 522 }, { x: 1056, y: 325 }, { x: 1015, y: 325 }] }
+    "edges": [
+      {
+        "to": "command",
+        "label": "原输入",
+        "kind": "command",
+        "from": "remote"
+      },
+      {
+        "to": "command",
+        "label": "可选许可",
+        "kind": "permission",
+        "from": "referee",
+        "points": [
+          {
+            "x": 317,
+            "y": 94
+          },
+          {
+            "x": 317,
+            "y": 132
+          },
+          {
+            "x": 280,
+            "y": 132
+          },
+          {
+            "x": 280,
+            "y": 175
+          }
+        ],
+        "labelPosition": {
+          "x": 300,
+          "y": 123
+        }
+      },
+      {
+        "to": "command",
+        "label": "可选 Aim",
+        "kind": "command",
+        "from": "host",
+        "points": [
+          {
+            "x": 890,
+            "y": 94
+          },
+          {
+            "x": 890,
+            "y": 112
+          },
+          {
+            "x": 350,
+            "y": 112
+          },
+          {
+            "x": 350,
+            "y": 197
+          },
+          {
+            "x": 330,
+            "y": 197
+          }
+        ],
+        "labelPosition": {
+          "x": 700,
+          "y": 103
+        }
+      },
+      {
+        "to": "inertial",
+        "label": "姿态 / 参考",
+        "kind": "feedback",
+        "from": "imu",
+        "points": [
+          {
+            "x": 562,
+            "y": 94
+          },
+          {
+            "x": 562,
+            "y": 140
+          },
+          {
+            "x": 350,
+            "y": 140
+          },
+          {
+            "x": 350,
+            "y": 345
+          },
+          {
+            "x": 330,
+            "y": 345
+          }
+        ],
+        "labelPosition": {
+          "x": 420,
+          "y": 131
+        }
+      },
+      {
+        "to": "inertial",
+        "label": "云台命令",
+        "kind": "command",
+        "from": "command"
+      },
+      {
+        "to": "gimbal",
+        "label": "机械 Rate",
+        "kind": "command",
+        "from": "inertial"
+      },
+      {
+        "to": "gmotor",
+        "label": "stage / 一次 commit",
+        "kind": "command",
+        "from": "gimbal"
+      },
+      {
+        "to": "gmotor",
+        "label": "共享 DJI stage",
+        "kind": "command",
+        "from": "shooter",
+        "points": [
+          {
+            "x": 502,
+            "y": 553
+          },
+          {
+            "x": 502,
+            "y": 600
+          },
+          {
+            "x": 290,
+            "y": 600
+          },
+          {
+            "x": 290,
+            "y": 650
+          }
+        ],
+        "labelPosition": {
+          "x": 440,
+          "y": 591
+        }
+      },
+      {
+        "to": "shooter",
+        "label": "发射请求",
+        "kind": "command",
+        "from": "command",
+        "points": [
+          {
+            "x": 300,
+            "y": 263
+          },
+          {
+            "x": 300,
+            "y": 290
+          },
+          {
+            "x": 665,
+            "y": 290
+          },
+          {
+            "x": 665,
+            "y": 510
+          },
+          {
+            "x": 625,
+            "y": 510
+          }
+        ],
+        "labelPosition": {
+          "x": 650,
+          "y": 406
+        }
+      },
+      {
+        "to": "glink",
+        "label": "轮控 / 操作",
+        "kind": "command",
+        "from": "command",
+        "points": [
+          {
+            "x": 330,
+            "y": 218
+          },
+          {
+            "x": 380,
+            "y": 218
+          }
+        ]
+      },
+      {
+        "to": "clink",
+        "label": "v4 / 原年龄",
+        "kind": "command",
+        "from": "glink",
+        "points": [
+          {
+            "x": 625,
+            "y": 207
+          },
+          {
+            "x": 770,
+            "y": 207
+          }
+        ]
+      },
+      {
+        "to": "glink",
+        "label": "心跳 / 状态",
+        "kind": "feedback",
+        "from": "clink",
+        "points": [
+          {
+            "x": 770,
+            "y": 244
+          },
+          {
+            "x": 625,
+            "y": 244
+          }
+        ]
+      },
+      {
+        "to": "chassis",
+        "label": "输入快照",
+        "kind": "command",
+        "from": "clink"
+      },
+      {
+        "to": "wheel",
+        "label": "四轮目标 / stage",
+        "kind": "command",
+        "from": "chassis"
+      },
+      {
+        "to": "centering",
+        "label": "头部稳定",
+        "kind": "feedback",
+        "from": "inertial"
+      },
+      {
+        "to": "glink",
+        "label": "回中请求",
+        "kind": "command",
+        "from": "centering",
+        "points": [
+          {
+            "x": 502,
+            "y": 320
+          },
+          {
+            "x": 502,
+            "y": 263
+          }
+        ]
+      },
+      {
+        "to": "bigyaw",
+        "label": "大 Yaw 请求",
+        "kind": "command",
+        "from": "clink",
+        "points": [
+          {
+            "x": 1015,
+            "y": 235
+          },
+          {
+            "x": 1058,
+            "y": 235
+          },
+          {
+            "x": 1058,
+            "y": 694
+          },
+          {
+            "x": 1015,
+            "y": 694
+          }
+        ],
+        "labelPosition": {
+          "x": 1045,
+          "y": 575
+        }
+      },
+      {
+        "to": "chassis",
+        "label": "八轴反馈",
+        "kind": "feedback",
+        "from": "wheel",
+        "points": [
+          {
+            "x": 1015,
+            "y": 507
+          },
+          {
+            "x": 1038,
+            "y": 507
+          },
+          {
+            "x": 1038,
+            "y": 365
+          },
+          {
+            "x": 1015,
+            "y": 365
+          }
+        ]
+      },
+      {
+        "to": "gimbal",
+        "label": "机械反馈",
+        "kind": "feedback",
+        "from": "gmotor",
+        "points": [
+          {
+            "x": 55,
+            "y": 694
+          },
+          {
+            "x": 25,
+            "y": 694
+          },
+          {
+            "x": 25,
+            "y": 510
+          },
+          {
+            "x": 55,
+            "y": 510
+          }
+        ]
+      },
+      {
+        "to": "clink",
+        "label": "真实速度 / 状态年龄",
+        "kind": "feedback",
+        "from": "bigyaw",
+        "points": [
+          {
+            "x": 1015,
+            "y": 715
+          },
+          {
+            "x": 1080,
+            "y": 715
+          },
+          {
+            "x": 1080,
+            "y": 249
+          },
+          {
+            "x": 1015,
+            "y": 249
+          }
+        ],
+        "labelPosition": {
+          "x": 1070,
+          "y": 410
+        }
+      }
     ]
   },
-  target: {
-    nodes: [
-      { id: 'target-remote', title: 'DR16 / 键鼠', detail: 'Manual / Auto / Safe / 接管', moduleId: 'remote', x: 35, y: 24, w: 165, h: 62, status: 'ready', zone: 'input' },
-      { id: 'target-referee', title: '裁判系统', detail: '独立权限、功率与热量来源', moduleId: 'referee', x: 225, y: 24, w: 180, h: 62, status: 'partial', zone: 'input' },
-      { id: 'target-imu', title: 'IMU / 姿态', detail: '采集 / EKF / 安装参考 / 时效', moduleId: 'imu', x: 455, y: 24, w: 180, h: 62, status: 'partial', zone: 'input' },
-      { id: 'target-host', title: '视觉计算机 ↔ AB 收发', detail: '目标下行 · 姿态 / 弹速 / 计数上行', moduleId: 'vision', x: 765, y: 24, w: 250, h: 62, status: 'partial', zone: 'host' },
-      { id: 'target-command', title: '来源 + 仲裁 + 行为目标', detail: 'CommandManager · 跟踪 / 搜索装配', moduleId: 'command', x: 55, y: 175, w: 275, h: 76, status: 'partial', zone: 'gimbal' },
-      { id: 'target-gimbal-link', title: '云台 InterBoardEndpoint', detail: '命令 / 权限 / 功率与双向上下文', moduleId: 'interboard', x: 380, y: 175, w: 245, h: 76, status: 'ready', zone: 'gimbal' },
-      { id: 'target-chassis-link', title: '底盘 InterBoardEndpoint', detail: '心跳 / 状态年龄 / 可信机体反馈', moduleId: 'interboard', x: 770, y: 175, w: 245, h: 76, status: 'partial', zone: 'chassis' },
-      { id: 'target-gimbal-executor', title: '姿态适配 + 双轴执行', detail: 'Yaw / Pitch · 按机构加大小 Yaw', moduleId: 'gimbal', x: 55, y: 330, w: 275, h: 76, status: 'planned', zone: 'gimbal' },
-      { id: 'target-gimbal-motors', title: '云台 DJI / DM 电机', detail: 'GimbalAxis / 控制环 / Group / CAN', moduleId: 'motor-dji', x: 55, y: 485, w: 275, h: 60, status: 'partial', zone: 'gimbal' },
-      { id: 'target-shooter', title: '发射执行器（按任务装配）', detail: '摩擦轮 / 拨弹 / 热量 / 卡弹恢复', moduleId: 'application', x: 380, y: 330, w: 245, h: 76, status: 'planned', zone: 'extras' },
-      { id: 'target-chassis-control', title: '底盘执行 / Swerve / 功率', detail: '本地恢复 + 标定 + 可信速度估计', moduleId: 'chassis', x: 770, y: 330, w: 245, h: 76, status: 'partial', zone: 'chassis' },
-      { id: 'target-chassis-motors', title: '4 舵向 + 4 驱动电机', detail: 'Group / 独占 CanBus / 测量闭环', moduleId: 'motor-dji', x: 770, y: 485, w: 245, h: 60, status: 'partial', zone: 'chassis' }
+  "target": {
+    "height": 770,
+    "nodes": [
+      {
+        "id": "remote",
+        "title": "DR16 / 键鼠",
+        "detail": "Remote · 原始输入",
+        "moduleId": "remote",
+        "x": 35,
+        "y": 24,
+        "w": 175,
+        "h": 70,
+        "status": "ready",
+        "zone": "input"
+      },
+      {
+        "id": "referee",
+        "title": "裁判 / 真实测量",
+        "detail": "可选权限 · 功率 / 热量",
+        "moduleId": "referee",
+        "x": 230,
+        "y": 24,
+        "w": 175,
+        "h": 70,
+        "status": "partial",
+        "zone": "input"
+      },
+      {
+        "id": "imu",
+        "title": "头部 IMU",
+        "detail": "确认安装 / 质量 / 参考会话",
+        "moduleId": "imu",
+        "x": 470,
+        "y": 24,
+        "w": 185,
+        "h": 70,
+        "status": "partial",
+        "zone": "input"
+      },
+      {
+        "id": "host",
+        "title": "视觉 AB 主机",
+        "detail": "真实姿态 / 弹速 / 弹数闭环",
+        "moduleId": "vision",
+        "x": 765,
+        "y": 24,
+        "w": 250,
+        "h": 70,
+        "status": "partial",
+        "zone": "host"
+      },
+      {
+        "id": "command",
+        "title": "CommandManager",
+        "detail": "可扩展搜索 / 导航目标 · 待实现",
+        "moduleId": "command",
+        "x": 55,
+        "y": 175,
+        "w": 275,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "glink",
+        "title": "云台 Endpoint v4",
+        "detail": "目标 / 原年龄 · 1ms poll",
+        "moduleId": "interboard",
+        "x": 380,
+        "y": 175,
+        "w": 245,
+        "h": 88,
+        "status": "ready",
+        "zone": "gimbal"
+      },
+      {
+        "id": "clink",
+        "title": "底盘 Endpoint v4",
+        "detail": "真实 boot · 状态生产年龄",
+        "moduleId": "interboard",
+        "x": 770,
+        "y": 175,
+        "w": 245,
+        "h": 88,
+        "status": "ready",
+        "zone": "chassis"
+      },
+      {
+        "id": "inertial",
+        "title": "头部惯性适配",
+        "detail": "测量 / 参考 → 双轴 Rate",
+        "moduleId": "inertial",
+        "x": 55,
+        "y": 320,
+        "w": 275,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "gimbal",
+        "title": "小 Yaw / Pitch 执行",
+        "detail": "两轴计算有效性 · 持续目标",
+        "moduleId": "gimbal",
+        "x": 55,
+        "y": 465,
+        "w": 275,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "shooter",
+        "title": "摩擦轮 / 拨盘执行",
+        "detail": "接真实热量 / 原点 · 受约束供弹",
+        "moduleId": "shooter",
+        "x": 380,
+        "y": 465,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "gmotor",
+        "title": "小云台与发射 / CAN",
+        "detail": "DJI CAN1 · Pitch DM CAN2",
+        "moduleId": "motor-dji",
+        "x": 55,
+        "y": 650,
+        "w": 275,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "centering",
+        "title": "小 Yaw 中心外环",
+        "detail": "头部稳定 · 角速度 / 原年龄",
+        "moduleId": "big-yaw",
+        "x": 380,
+        "y": 320,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "gimbal"
+      },
+      {
+        "id": "chassis",
+        "title": "ChassisExecutor",
+        "detail": "标定功率 · 补车体速度 / 里程计",
+        "moduleId": "chassis",
+        "x": 770,
+        "y": 320,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "chassis"
+      },
+      {
+        "id": "wheel",
+        "title": "四舵向 + 四轮驱",
+        "detail": "CAN1 / CAN3 · 2ms 绝对节拍",
+        "moduleId": "motor-dji",
+        "x": 770,
+        "y": 465,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "chassis"
+      },
+      {
+        "id": "bigyaw",
+        "title": "大 Yaw 独立速度环",
+        "detail": "BigYawExecutor · DM CAN2",
+        "moduleId": "big-yaw",
+        "x": 770,
+        "y": 650,
+        "w": 245,
+        "h": 88,
+        "status": "partial",
+        "zone": "chassis"
+      }
     ],
-    edges: [
-      { from: 'target-remote', to: 'target-command', label: '操作者输入', kind: 'command', points: [{ x: 117, y: 86 }, { x: 117, y: 175 }] },
-      { from: 'target-referee', to: 'target-command', label: '输出许可', kind: 'permission', points: [{ x: 315, y: 86 }, { x: 315, y: 142 }, { x: 260, y: 142 }, { x: 260, y: 175 }] },
-      { from: 'target-host', to: 'target-command', label: '视觉目标 → Aim 来源', kind: 'planned', points: [{ x: 890, y: 86 }, { x: 890, y: 111 }, { x: 352, y: 111 }, { x: 352, y: 187 }, { x: 330, y: 187 }] },
-      { from: 'target-imu', to: 'target-host', label: '真实姿态 / 角速度反馈', kind: 'planned', points: [{ x: 635, y: 55 }, { x: 765, y: 55 }] },
-      { from: 'target-imu', to: 'target-gimbal-executor', label: '姿态 / 参考适配', kind: 'planned', points: [{ x: 545, y: 86 }, { x: 545, y: 138 }, { x: 363, y: 138 }, { x: 363, y: 361 }, { x: 330, y: 361 }] },
-      { from: 'target-command', to: 'target-gimbal-executor', label: '授权后的云台目标', kind: 'planned', points: [{ x: 170, y: 251 }, { x: 170, y: 330 }] },
-      { from: 'target-gimbal-executor', to: 'target-gimbal-motors', label: '机械轴目标 / 控制输出', kind: 'planned', points: [{ x: 192, y: 406 }, { x: 192, y: 485 }] },
-      { from: 'target-gimbal-motors', to: 'target-gimbal-executor', label: '编码器 / 速度反馈', kind: 'feedback', points: [{ x: 55, y: 515 }, { x: 26, y: 515 }, { x: 26, y: 368 }, { x: 55, y: 368 }] },
-      { from: 'target-command', to: 'target-shooter', label: '射击请求 + 许可', kind: 'planned', points: [{ x: 287, y: 251 }, { x: 287, y: 287 }, { x: 502, y: 287 }, { x: 502, y: 330 }] },
-      { from: 'target-shooter', to: 'target-host', label: '真实弹速 / 计数', kind: 'planned', points: [{ x: 625, y: 367 }, { x: 660, y: 367 }, { x: 660, y: 96 }, { x: 824, y: 96 }, { x: 824, y: 86 }] },
-      { from: 'target-command', to: 'target-gimbal-link', label: '底盘命令', kind: 'command', points: [{ x: 330, y: 205 }, { x: 380, y: 205 }] },
-      { from: 'target-command', to: 'target-gimbal-link', label: '裁判约束', kind: 'permission', points: [{ x: 330, y: 235 }, { x: 380, y: 235 }] },
-      { from: 'target-gimbal-link', to: 'target-chassis-link', label: '命令 + 权限 / 功率', kind: 'command', points: [{ x: 625, y: 195 }, { x: 770, y: 195 }] },
-      { from: 'target-chassis-link', to: 'target-gimbal-link', label: '状态 / 代次 / 机体反馈', kind: 'feedback', points: [{ x: 770, y: 235 }, { x: 625, y: 235 }] },
-      { from: 'target-chassis-link', to: 'target-chassis-control', label: '有时效的命令 / 约束', kind: 'command', points: [{ x: 892, y: 251 }, { x: 892, y: 330 }] },
-      { from: 'target-chassis-control', to: 'target-chassis-link', label: '状态年龄 / 实测反馈', kind: 'planned', points: [{ x: 770, y: 367 }, { x: 746, y: 367 }, { x: 746, y: 238 }, { x: 770, y: 238 }] },
-      { from: 'target-chassis-control', to: 'target-chassis-motors', label: '限功率的轮端输出', kind: 'command', points: [{ x: 892, y: 406 }, { x: 892, y: 485 }] },
-      { from: 'target-chassis-motors', to: 'target-chassis-control', label: '8 电机真实反馈', kind: 'feedback', points: [{ x: 1015, y: 515 }, { x: 1056, y: 515 }, { x: 1056, y: 368 }, { x: 1015, y: 368 }] }
+    "edges": [
+      {
+        "to": "command",
+        "label": "原输入",
+        "kind": "command",
+        "from": "remote"
+      },
+      {
+        "to": "command",
+        "label": "可选许可",
+        "kind": "permission",
+        "from": "referee",
+        "points": [
+          {
+            "x": 317,
+            "y": 94
+          },
+          {
+            "x": 317,
+            "y": 132
+          },
+          {
+            "x": 280,
+            "y": 132
+          },
+          {
+            "x": 280,
+            "y": 175
+          }
+        ],
+        "labelPosition": {
+          "x": 300,
+          "y": 123
+        }
+      },
+      {
+        "to": "command",
+        "label": "可选 Aim",
+        "kind": "command",
+        "from": "host",
+        "points": [
+          {
+            "x": 890,
+            "y": 94
+          },
+          {
+            "x": 890,
+            "y": 112
+          },
+          {
+            "x": 350,
+            "y": 112
+          },
+          {
+            "x": 350,
+            "y": 197
+          },
+          {
+            "x": 330,
+            "y": 197
+          }
+        ],
+        "labelPosition": {
+          "x": 700,
+          "y": 103
+        }
+      },
+      {
+        "to": "inertial",
+        "label": "姿态 / 参考",
+        "kind": "feedback",
+        "from": "imu",
+        "points": [
+          {
+            "x": 562,
+            "y": 94
+          },
+          {
+            "x": 562,
+            "y": 140
+          },
+          {
+            "x": 350,
+            "y": 140
+          },
+          {
+            "x": 350,
+            "y": 345
+          },
+          {
+            "x": 330,
+            "y": 345
+          }
+        ],
+        "labelPosition": {
+          "x": 420,
+          "y": 131
+        }
+      },
+      {
+        "to": "inertial",
+        "label": "云台命令",
+        "kind": "command",
+        "from": "command"
+      },
+      {
+        "to": "gimbal",
+        "label": "机械 Rate",
+        "kind": "command",
+        "from": "inertial"
+      },
+      {
+        "to": "gmotor",
+        "label": "stage / 一次 commit",
+        "kind": "command",
+        "from": "gimbal"
+      },
+      {
+        "to": "gmotor",
+        "label": "共享 DJI stage",
+        "kind": "command",
+        "from": "shooter",
+        "points": [
+          {
+            "x": 502,
+            "y": 553
+          },
+          {
+            "x": 502,
+            "y": 600
+          },
+          {
+            "x": 290,
+            "y": 600
+          },
+          {
+            "x": 290,
+            "y": 650
+          }
+        ],
+        "labelPosition": {
+          "x": 440,
+          "y": 591
+        }
+      },
+      {
+        "to": "shooter",
+        "label": "发射请求",
+        "kind": "command",
+        "from": "command",
+        "points": [
+          {
+            "x": 300,
+            "y": 263
+          },
+          {
+            "x": 300,
+            "y": 290
+          },
+          {
+            "x": 665,
+            "y": 290
+          },
+          {
+            "x": 665,
+            "y": 510
+          },
+          {
+            "x": 625,
+            "y": 510
+          }
+        ],
+        "labelPosition": {
+          "x": 650,
+          "y": 406
+        }
+      },
+      {
+        "to": "glink",
+        "label": "轮控 / 操作",
+        "kind": "command",
+        "from": "command",
+        "points": [
+          {
+            "x": 330,
+            "y": 218
+          },
+          {
+            "x": 380,
+            "y": 218
+          }
+        ]
+      },
+      {
+        "to": "clink",
+        "label": "v4 / 原年龄",
+        "kind": "command",
+        "from": "glink",
+        "points": [
+          {
+            "x": 625,
+            "y": 207
+          },
+          {
+            "x": 770,
+            "y": 207
+          }
+        ]
+      },
+      {
+        "to": "glink",
+        "label": "心跳 / 状态",
+        "kind": "feedback",
+        "from": "clink",
+        "points": [
+          {
+            "x": 770,
+            "y": 244
+          },
+          {
+            "x": 625,
+            "y": 244
+          }
+        ]
+      },
+      {
+        "to": "chassis",
+        "label": "输入快照",
+        "kind": "command",
+        "from": "clink"
+      },
+      {
+        "to": "wheel",
+        "label": "四轮目标 / stage",
+        "kind": "command",
+        "from": "chassis"
+      },
+      {
+        "to": "centering",
+        "label": "头部稳定",
+        "kind": "feedback",
+        "from": "inertial"
+      },
+      {
+        "to": "glink",
+        "label": "回中请求",
+        "kind": "command",
+        "from": "centering",
+        "points": [
+          {
+            "x": 502,
+            "y": 320
+          },
+          {
+            "x": 502,
+            "y": 263
+          }
+        ]
+      },
+      {
+        "to": "bigyaw",
+        "label": "大 Yaw 请求",
+        "kind": "command",
+        "from": "clink",
+        "points": [
+          {
+            "x": 1015,
+            "y": 235
+          },
+          {
+            "x": 1058,
+            "y": 235
+          },
+          {
+            "x": 1058,
+            "y": 694
+          },
+          {
+            "x": 1015,
+            "y": 694
+          }
+        ],
+        "labelPosition": {
+          "x": 1045,
+          "y": 575
+        }
+      },
+      {
+        "to": "chassis",
+        "label": "八轴反馈",
+        "kind": "feedback",
+        "from": "wheel",
+        "points": [
+          {
+            "x": 1015,
+            "y": 507
+          },
+          {
+            "x": 1038,
+            "y": 507
+          },
+          {
+            "x": 1038,
+            "y": 365
+          },
+          {
+            "x": 1015,
+            "y": 365
+          }
+        ]
+      },
+      {
+        "to": "gimbal",
+        "label": "机械反馈",
+        "kind": "feedback",
+        "from": "gmotor",
+        "points": [
+          {
+            "x": 55,
+            "y": 694
+          },
+          {
+            "x": 25,
+            "y": 694
+          },
+          {
+            "x": 25,
+            "y": 510
+          },
+          {
+            "x": 55,
+            "y": 510
+          }
+        ]
+      },
+      {
+        "to": "clink",
+        "label": "真实速度 / 状态年龄",
+        "kind": "feedback",
+        "from": "bigyaw",
+        "points": [
+          {
+            "x": 1015,
+            "y": 715
+          },
+          {
+            "x": 1080,
+            "y": 715
+          },
+          {
+            "x": 1080,
+            "y": 249
+          },
+          {
+            "x": 1015,
+            "y": 249
+          }
+        ],
+        "labelPosition": {
+          "x": 1070,
+          "y": 410
+        }
+      },
+      {
+        "to": "host",
+        "label": "实测弹速 / 弹数",
+        "kind": "planned",
+        "from": "gmotor",
+        "points": [
+          {
+            "x": 330,
+            "y": 694
+          },
+          {
+            "x": 690,
+            "y": 694
+          },
+          {
+            "x": 690,
+            "y": 125
+          },
+          {
+            "x": 920,
+            "y": 125
+          },
+          {
+            "x": 920,
+            "y": 94
+          }
+        ],
+        "labelPosition": {
+          "x": 690,
+          "y": 618
+        }
+      }
     ]
   }
 };

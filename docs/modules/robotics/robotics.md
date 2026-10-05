@@ -22,6 +22,8 @@ CommandArbiter 是同步策略核心，接收 CommandInputs 并返回 CommandDec
 
 完整注册、错误语义、静态生命周期和同步仲裁入口见[命令来源与后台服务](command-service.md)。三源运行入口见 samples/robotics/command_manager/src/main.cpp。
 
+公开 GimbalExecutor、ChassisExecutor、BigYawExecutor、ShooterExecutor 以及惯性/回中适配接口见[机构执行器](executors.md)。
+
 ## GimbalAxis
 
 持续保存机械目标，位置控制独立等待本轴反馈。Rate 时间轴不因驱动离线停止；实际反馈恢复后 PositionMotor 自动重置本轴 PID。Limited 轴保留必要机械范围和可信参考；没有全组 ready 或手动恢复准入。

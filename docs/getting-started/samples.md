@@ -47,7 +47,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/interboard-chassis \
 | `samples/motor/dji_unified` | GM6020 `Motor`/`CanBus` 低电流台架 |
 | `samples/motor/dji_speed_control` | DJI `VelocityMotor` 速度闭环 |
 | `samples/motor/dji_position_control` | DJI `PositionMotor` 位置-速度串级，推荐参考 |
-| `samples/motor/m2006_speed_control` | M2006 + C610，含 36:1 减速比示例 |
+| `samples/motor/m2006_speed_control` | M2006 + C610，36:1 输出轴速度环、USB CDC 12 通道与 CAN/反馈诊断 |
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx -d build/can-smoke samples/motor/can_smoke
@@ -67,7 +67,7 @@ west build -p -b rm_typec -d build/dji-position samples/motor/dji_position_contr
 | `samples/motor/dm_mit_velocity_control` | MIT + SkyWalker 软件速度环 |
 | `samples/motor/dm_mit_position_control` | MIT + SkyWalker 软件位置-速度环 |
 | `samples/motor/recovery` | DJI 或 DM MIT 掉电/总线恢复台架 |
-| `samples/motor/mixed_topology` | DJI 同帧独立组、DM 共用 Master ID、跨 CAN 联动组与独立组故障隔离 |
+| `samples/motor/mixed_topology` | DJI 同帧独立组、DM 共用 Master ID、跨 CAN 批量启停与成员独立恢复 |
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx -d build/dm-mit \
@@ -76,7 +76,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/dm-position \
   samples/motor/dm_mit_position_control
 ```
 
-DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致。掉电恢复样例只切电机动力，不切 MCU 电源；反馈恢复后还需再次按 `e` 显式使能。
+DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致。掉电恢复样例只切电机动力，不切 MCU 电源；运行意图仍有效时反馈恢复后自动跟踪最新目标；主动停止后的启动须由用户重新请求。
 
 ## 5. 机器人算法台架
 

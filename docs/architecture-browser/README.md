@@ -25,7 +25,7 @@ bash docs/architecture-browser/run.sh
 | 整车架构 → 当前实际接入 | 现在源码真正连通了什么？两板如何分工？哪些配置仍阻断输出？                            |
 | 整车架构 → 最终上车蓝图 | 视觉、IMU、双轴、底盘、发射和观测最终应如何装配？哪些部分仍待实现？                   |
 | 模块关系                 | 谁依赖谁？点击节点高亮直接上游和消费者，并进入详细接口。                              |
-| 接口与示例               | 18 个逻辑模块的职责、主要 API、参数、返回、错误、线程边界、调用顺序、配置和真实用法。 |
+| 接口与示例               | 21 个逻辑模块的职责、主要 API、参数、返回、错误、线程边界、调用顺序、配置和真实用法。 |
 | 端到端调用链             | 遥控、视觉、板间底盘、IMU 和异常恢复，每一步由谁推进？                                |
 | Markdown 文档            | 保留已有目录结构，内嵌阅读模块正文、指南、开发记录及样例 README。                     |
 | 变更来历                 | Git 中何时加入增量覆盖层，注明的目的是什么？                                          |
@@ -42,13 +42,19 @@ bash docs/architecture-browser/run.sh
 
 总览的箭头表示运行时数据方向；模块关系图的箭头表示“被依赖模块 → 使用者”，两种关系有各自说明。总览中未连通的感知支路保持独立，蓝图中的未完成连接以虚线标注。
 
-## 当前正式应用的实际边界
+## 当前源码与发布基线
 
-`sentry_gimbal` 已组装 RemoteSource 和 RefereePermissionSource，经 CommandManager worker/CommandArbiter 生成非消费式快照。gimbalTask 交给本地 GimbalExecutor 控制单 Yaw；linkTask 交给 InterBoardEndpoint 发送底盘命令和裁判约束。`sentry_chassis` 在独立控制线程执行本地授权、四舵轮解算、功率约束及八电机提交。
+本轮对齐 `main@99a97c91e7e8ed684b9758e0edf6b12bf73b0d79`（2026-10-05）。顶部和总览显示基线；Markdown 与源码读取仍指向同份部署快照。GitHub Pages 在 main 合并后由 `.github/workflows/deploy-architecture-pages.yml` 自动部署；PR 分支先用于评审，不代表 Pages 已更新。
 
-正式云台没有组装 IMU、VisionReceiver 或 VisionSource，`allow_auto=false`，执行器不消费 Pitch。两端 `connections_configured=false`；裁判 profile 为 Unspecified，底盘功率模型没有标定。底盘返回的是状态摘要，当前没有有效实测车体速度/功率字段。搜索、导航、射击执行及状态生产年龄的补齐均在目标蓝图中标明。
+现有私有站点：[SkyWalker 双主控架构浏览器](https://skywalker-architecture-browser.docile-raven-1977.chatgpt.site/)。本轮将同一套静态内容同步到该站点，保留现有访问范围。
 
-详细依据可从主图节点、接入缺口、模块接口和[双主控正文](../applications/dual-controller.md)进入。
+两个 sentry 入口共用 `samples/robotics/common/vehicle_bench.hpp`。云台装配头部 IMU、惯性双轴、可选视觉/裁判、发射框架和回中外环；底盘装配四舵轮与独立大 Yaw。机构公开 API 位于 `include/robotics`，旧应用私有 Executor 和两份 board_config 已删除。
+
+电机使用持续目标、逐轴反馈计算和独立自动恢复。MotorSession、公共 ready/clearFault、Group 故障传播和恢复授权 generation 已移除；板间只接受 v4。RunStatus 已有执行生产 stamp，通信不能续期陈旧状态。当前源码已存在与实机完成必须分别理解。
+
+中央连接/IMU/功率/发射确认默认关闭；真实功率、热量、拨盘原点与视觉弹速/弹数上行来源仍待接。车体实测速度/功率摘要尚未填充，搜索和导航仍未实现。最新提交记录单舵轮基本功能调通，不能扩大到整车验收。
+
+详情见[双主控正文](../applications/dual-controller.md)、[公开执行器](../modules/robotics/executors.md)、[电机工作流](../guides/motor-workflow.md)和[板间 v4](../modules/communication/interboard-transports.md)。
 
 ## 为什么重建
 

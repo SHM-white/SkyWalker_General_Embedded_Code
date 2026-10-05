@@ -2,11 +2,13 @@
 
 本目录保存设计方案、实施记录和指定时间点的分析。查当前接口、启动顺序和返回值时以源码及[模块文档](../README.md)为准。
 
+当前接口以 `main@99a97c9` 为基线；旧方案中的 MotorSession、ready/clearFault、Group 故障传播和恢复授权 generation 已被持续目标与逐轴自动恢复替代，历史正文仅保留演进背景。
+
 ## 已落地的实现记录
 
 | 记录 | 当前代码入口 | 说明 |
 |---|---|---|
-| [samples 遥控与统一板间协议](samples遥控控制统一改造指南.md) | samples/robotics/common/、lib/communication/interboard_* | 机构样例使用物理遥控与独立诊断构建；板间通信只接受当前标识 3，实板接线与标定待确认 |
+| [samples 遥控与统一板间协议](samples遥控控制统一改造指南.md) | samples/robotics/common/、lib/communication/interboard_* | 机构样例使用物理遥控与独立诊断构建；记录中的标识 3 已被 v4 替代；当前契约见板间模块文档，实板接线与标定待确认 |
 | [双主控逐级整车验证实施](项目优化与逐级整车验证样例实施指南.md) | samples/robotics/ 的逐级样例、include/robotics/vehicle/ | 首包与后续惯性控制、大 Yaw、共享 CAN、四舵轮、发射和整车框架已直接实现；实板与标定 TODO 待落实 |
 | [命令来源注册与后台仲裁服务](命令来源注册与后台仲裁服务实施指南.md) | include/robotics/command/command_manager.hpp、receiver_sources.hpp | 已实现的来源注册、后台 worker、CommandSnapshot 与同步 CommandArbiter 分层 |
 | [三源命令管理台架原施工方案](三源命令管理sample手工实施指南.md) | samples/robotics/command_manager/ | 方案已落地；当前接线、配置和操作以 sample README 为准 |

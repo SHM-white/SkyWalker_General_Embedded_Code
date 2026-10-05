@@ -115,7 +115,7 @@ while (uart.read(chunk) == 0)
 - 反馈 timestamp 超时。
 - PID dt 超过 `dt_max_s`。
 - command cache 超时。
-- runtime 自动 suspend/fault。
+- 当前轴计算输出暂不可用，Motor/CAN 独立恢复；输入停更仍按输入有效期撤销。
 
 首次调试建议用日志/VOFA 而不是断点；要停机检查时先通过键盘/遥控发送 disable，或者直接切断动力电源。MC02 的部分样例打开 `CONFIG_STM32_ENABLE_DEBUG_SLEEP_STOP=y` 只是帮助睡眠时保持调试连接，不会修复控制时序。
 
@@ -123,12 +123,14 @@ while (uart.read(chunk) == 0)
 
 | 现象 | 优先观测 |
 |---|---|
-| 电机无动作 | `device state`、BusState、反馈 timestamp、arm/flush 返回值 |
+| 电机无动作 | `device state`、BusState、反馈 timestamp、enabled_requested、update/commit 返回值 |
 | 位置方向错误 | raw encoder、`absolute_position_rad`、减速比、motor direction |
 | 控制发抖 | dt、filtered velocity、PID error、effort、限幅状态 |
-| 反复恢复 | `MotorStatus.error`、`last_recovery_error`、recovery_attempts、CAN state |
-| 双主控不在线 | AsyncUart dropped chunks、parser CRC/sequence、peer boot_id/generation |
+| 反复恢复 | `MotorSnapshot.last_fault/retry_count`、`BusStatus.last_recovery`、CAN state |
+| 双主控不在线 | AsyncUart dropped chunks、parser CRC/sequence、peer boot_id、原始 source age/sequence、状态生产年龄 |
 | 安全一直 Disable | active reason、权限 timestamp、远端 heartbeat/feedback age |
+
+最新 M2006 台架通道、诊断触发与旧日志标签的区别见 [M2006 速度样例](../../samples/motor/m2006_speed_control/README.md)。单舵轮的 16 通道与两轴有效性见 [舵轮台架](../../samples/robotics/swerve/README.md)。
 
 ## 6. 现场记录
 
