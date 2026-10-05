@@ -45,8 +45,12 @@ void RemoteReceiver::run() {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         if (now >= retry_ms) {
             int ret = uart_.service(now);
-            if (ret == -EACCES) ret = uart_.init();
-            if (ret == 0) { current.state = State::Running; current.uart_error = 0; }
+            if (ret == -EACCES)
+                ret = uart_.init();
+            if (ret == 0) {
+                current.state = State::Running;
+                current.uart_error = 0;
+            }
             else if (ret != -EAGAIN) {
                 current.state = State::InitFailed;
                 current.uart_error = ret;
@@ -55,9 +59,17 @@ void RemoteReceiver::run() {
             AsyncUart::RxChunk chunk{};
             for (unsigned budget = 0; budget < 8 && ret == 0; ++budget) {
                 const int rr = uart_.read(chunk);
-                if (rr == -EOVERFLOW) { service_.discardPartial(); ++current.resets; continue; }
-                if (rr == -EAGAIN) break;
-                if (rr < 0) { current.uart_error = rr; break; }
+                if (rr == -EOVERFLOW) {
+                    service_.discardPartial();
+                    ++current.resets;
+                    continue;
+                }
+                if (rr == -EAGAIN)
+                    break;
+                if (rr < 0) {
+                    current.uart_error = rr;
+                    break;
+                }
                 ++current.rx_chunks;
                 service_.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
             }

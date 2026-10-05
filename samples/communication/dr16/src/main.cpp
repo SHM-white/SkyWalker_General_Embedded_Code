@@ -79,9 +79,9 @@ void vofaTask(void *, void *, void *) {
         }
         if (now >= next_status_ms) {
             next_status_ms = now + 1000;
-            LOG_INF("Telemetry queued=%u send=%d; DR16 state=%u online=%u seq=%u rx_chunks=%u",
-                    queued_frames, send_ret, static_cast<unsigned>(snapshot.state),
-                    static_cast<unsigned>(fresh), snapshot.remote.stamp.sequence, snapshot.rx_chunks);
+            LOG_INF("Telemetry queued=%u send=%d; DR16 state=%u online=%u seq=%u rx_chunks=%u", queued_frames, send_ret,
+                    static_cast<unsigned>(snapshot.state), static_cast<unsigned>(fresh), snapshot.remote.stamp.sequence,
+                    snapshot.rx_chunks);
             if constexpr (DT_NODE_HAS_COMPAT(DT_ALIAS(telemetry_uart), zephyr_cdc_acm_uart)) {
                 std::uint32_t dtr = 0;
                 const int ret = uart_line_ctrl_get(bench::telemetry_uart, UART_LINE_CTRL_DTR, &dtr);

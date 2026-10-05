@@ -29,6 +29,7 @@ public:
     // 1..240 bytes; 1..1000 ms total batch lifetime; -EAGAIN: backpressure.
     virtual int send(const std::uint8_t *, std::size_t, std::uint32_t timeout_ms = 60) = 0;
     virtual bool txBusy() const = 0;
+
 protected:
     InterBoardTransport() = default;
 };

@@ -88,23 +88,28 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can2));
-    if (!device_is_ready(can)) return -ENODEV;
+    if (!device_is_ready(can))
+        return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::m3508({
         .id = 3,
         .current_limit_a = 3.0f,
         // .encoder_zero_ticks = 0,
         // .current_mode_confirmed = true,
         .gear_ratio = 19.0f,
-        .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
+        .timing =
+            {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::VelocityMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
     const int vofa_error = vofa_init(&vofa, uart);
     int ret = bus.attach(drive);
-    if (ret == 0) ret = bus.start();
-    if (ret == 0) ret = axis.configure();
-    if (ret < 0) return ret;
+    if (ret == 0)
+        ret = bus.start();
+    if (ret == 0)
+        ret = axis.configure();
+    if (ret < 0)
+        return ret;
     const auto started_ms = k_uptime_get();
     auto previous_ms = started_ms;
     std::int64_t next_log_ms = 0;
@@ -116,28 +121,40 @@ int main() {
         previous_ms = now;
         const bool requested = true;
         const int request_error = requested ? drive.enable() : drive.disable();
-        if (request_error < 0) last_call_error = request_error;
+        if (request_error < 0)
+            last_call_error = request_error;
         const float target = requestedVelocityForTime((now - started_ms) % kRunDurationMs);
-        if (requested) { const int error = axis.update(target, dt); if (error < 0) last_call_error = error; }
+        if (requested) {
+            const int error = axis.update(target, dt);
+            if (error < 0)
+                last_call_error = error;
+        }
         const int commit_error = bus.commit().error;
-        if (commit_error < 0) last_call_error = commit_error;
+        if (commit_error < 0)
+            last_call_error = commit_error;
         const auto data = axis.telemetry();
         const auto &f = data.motor.feedback;
         const auto &o = data.output;
         if (vofa_error == 0) {
-            const float channels[12] = {target, o.velocity_reference_rad_s, f.velocity_rad_s,
-                o.filtered_velocity_rad_s, o.velocity_error_rad_s, o.regulator.feedback.p,
-                o.regulator.feedback.i, o.regulator.feedback.d, o.regulator.feedforward,
-                requested && data.output_valid ? o.effort_command : 0,
-                float(data.output_valid && requested), float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0)};
+            const float channels[12] = {target,
+                                        o.velocity_reference_rad_s,
+                                        f.velocity_rad_s,
+                                        o.filtered_velocity_rad_s,
+                                        o.velocity_error_rad_s,
+                                        o.regulator.feedback.p,
+                                        o.regulator.feedback.i,
+                                        o.regulator.feedback.d,
+                                        o.regulator.feedforward,
+                                        requested && data.output_valid ? o.effort_command : 0,
+                                        float(data.output_valid && requested),
+                                        float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0)};
             (void)vofa_send(&vofa, channels, 12);
         }
         if (now >= next_log_ms) {
             next_log_ms = now + 1000;
-            LOG_INF("run=%d state=%u target=%.3f seq=%llu output=%d wait=%u call=%d",
-                requested, unsigned(data.motor.state), double(target),
-                static_cast<unsigned long long>(data.target_sequence), data.output_valid && requested,
-                unsigned(data.issue), last_call_error);
+            LOG_INF("run=%d state=%u target=%.3f seq=%llu output=%d wait=%u call=%d", requested,
+                    unsigned(data.motor.state), double(target), static_cast<unsigned long long>(data.target_sequence),
+                    data.output_valid && requested, unsigned(data.issue), last_call_error);
         }
     }
 }

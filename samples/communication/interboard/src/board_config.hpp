@@ -21,7 +21,8 @@ inline const skywalker::communication::ConfiguredInterBoardTransport::Config tra
     c.uart = uart;
     c.rs485.uart = DEVICE_DT_GET(DT_ALIAS(interboard_rs485));
     const bool coordinator = role == skywalker::robotics::BoardRole::GimbalController;
-    c.rs485.role = coordinator ? Rs485InterBoardTransport::Role::Coordinator : Rs485InterBoardTransport::Role::Responder;
+    c.rs485.role = coordinator ? Rs485InterBoardTransport::Role::Coordinator
+                               : Rs485InterBoardTransport::Role::Responder;
     c.can.can = DEVICE_DT_GET(DT_ALIAS(interboard_can));
     c.can.tx_id = coordinator ? 0x600 : 0x601;
     c.can.rx_id = coordinator ? 0x601 : 0x600;

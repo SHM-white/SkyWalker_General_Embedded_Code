@@ -14,36 +14,36 @@ using namespace skywalker::robotics;
 // select an error; -EAGAIN afterwards exercises the manager's real cache.
 class Source final : public ICommandSource {
 public:
-    explicit Source(SourceRole role = SourceRole::Operator, int startup = 0)
-        : role_(role), startup_(startup) {}
+    explicit Source(SourceRole role = SourceRole::Operator, int startup = 0) : role_(role), startup_(startup) {
+    }
 
-    SourceRole role() const override { return role_; }
-    int start() override
-    {
+    SourceRole role() const override {
+        return role_;
+    }
+    int start() override {
         ++starts;
         return startup_;
     }
 
-    int sample(SourceSample &out) override
-    {
+    int sample(SourceSample &out) override {
         const auto key = k_spin_lock(&lock_);
         const int result = result_;
-        if (result != -EAGAIN) out = pending_;
-        if (result == 0) result_ = -EAGAIN;
+        if (result != -EAGAIN)
+            out = pending_;
+        if (result == 0)
+            result_ = -EAGAIN;
         k_spin_unlock(&lock_, key);
         return result;
     }
 
-    void publish(const SourceValue &value)
-    {
+    void publish(const SourceValue &value) {
         const auto key = k_spin_lock(&lock_);
         pending_ = {value, {}};
         result_ = 0;
         k_spin_unlock(&lock_, key);
     }
 
-    void fail(int error)
-    {
+    void fail(int error) {
         const auto key = k_spin_lock(&lock_);
         pending_ = {};
         pending_.diagnostics.state = 73;
@@ -65,28 +65,27 @@ private:
 
 class Permission final : public IPermissionSource {
 public:
-    explicit Permission(int startup = 0) : startup_(startup) {}
-    int start() override
-    {
+    explicit Permission(int startup = 0) : startup_(startup) {
+    }
+    int start() override {
         ++starts;
         return startup_;
     }
 
-    int sample(std::uint64_t, RefereeState &out, SourceDiagnostics &diagnostics) override
-    {
+    int sample(std::uint64_t, RefereeState &out, SourceDiagnostics &diagnostics) override {
         const auto key = k_spin_lock(&lock_);
         const int result = result_;
         if (result != -EAGAIN) {
             out = pending_;
             diagnostics = diagnostics_;
         }
-        if (result == 0) result_ = -EAGAIN;
+        if (result == 0)
+            result_ = -EAGAIN;
         k_spin_unlock(&lock_, key);
         return result;
     }
 
-    void publish(std::uint32_t sequence)
-    {
+    void publish(std::uint32_t sequence) {
         const auto now_ms = core::monotonicTimeUs() / 1000;
         const auto key = k_spin_lock(&lock_);
         pending_ = {};
@@ -101,8 +100,7 @@ public:
         k_spin_unlock(&lock_, key);
     }
 
-    void fail(int error)
-    {
+    void fail(int error) {
         const auto key = k_spin_lock(&lock_);
         pending_ = {};
         diagnostics_ = {};
@@ -121,30 +119,26 @@ private:
     int result_ = -EAGAIN;
 };
 
-CommandManager::Config noPermission()
-{
+CommandManager::Config noPermission() {
     CommandManager::Config config{};
     config.require_referee_for_motion = false;
     return config;
 }
 
-CommandManager::Config invalidConfig()
-{
+CommandManager::Config invalidConfig() {
     auto config = noPermission();
     config.max_gimbal_yaw_rate_rad_s = std::numeric_limits<float>::quiet_NaN();
     return config;
 }
 
-CommandManager::Config serviceConfig()
-{
+CommandManager::Config serviceConfig() {
     CommandManager::Config config{};
     config.input_timeout_ms = 150;
     config.permission_timeout_ms = 100;
     return config;
 }
 
-RemoteState remote(std::uint32_t sequence)
-{
+RemoteState remote(std::uint32_t sequence) {
     RemoteState value{};
     value.online = true;
     value.left_switch = value.right_switch = RcSwitch::Middle;
@@ -154,20 +148,18 @@ RemoteState remote(std::uint32_t sequence)
     return value;
 }
 
-void disabled(const RobotCommand &command)
-{
+void disabled(const RobotCommand &command) {
     zassert_equal(command.chassis.mode, ChassisMode::Disabled);
     zassert_equal(command.gimbal.mode, GimbalMode::Disabled);
     zassert_equal(command.shooter.mode, ShooterMode::Disabled);
 }
 
-template <typename Predicate>
-CommandSnapshot awaitSnapshot(CommandManager &manager, Predicate condition)
-{
+template <typename Predicate> CommandSnapshot awaitSnapshot(CommandManager &manager, Predicate condition) {
     CommandSnapshot snapshot{};
     const auto deadline = k_uptime_get() + 1000;
     do {
-        if (manager.snapshot(snapshot) == 0 && condition(snapshot)) return snapshot;
+        if (manager.snapshot(snapshot) == 0 && condition(snapshot))
+            return snapshot;
         k_sleep(K_MSEC(1));
     } while (k_uptime_get() < deadline);
     zassert_true(false, "service did not publish the expected state within 1 s");
@@ -187,8 +179,7 @@ K_THREAD_STACK_DEFINE(reader_stack_a, 4096);
 K_THREAD_STACK_DEFINE(reader_stack_b, 4096);
 k_thread reader_thread_a{}, reader_thread_b{};
 
-void readerEntry(void *pointer, void *, void *)
-{
+void readerEntry(void *pointer, void *, void *) {
     auto &reader = *static_cast<Reader *>(pointer);
     for (std::size_t i = 0; i < reader.commands.size(); ++i) {
         if (reader.use_snapshot) {
@@ -196,7 +187,8 @@ void readerEntry(void *pointer, void *, void *)
             reader.results[i] = reader.manager->snapshot(value);
             reader.commands[i] = value.decision.command;
             reader.source_sequences[i] = value.observed.remote.stamp.sequence;
-        } else {
+        }
+        else {
             reader.results[i] = reader.manager->current(reader.commands[i]);
         }
         // Interleave the two consumers without advancing simulated time. At
@@ -207,17 +199,16 @@ void readerEntry(void *pointer, void *, void *)
     k_sem_give(&reader.done);
 }
 
-void independentReaders(CommandManager &manager, std::uint32_t source_sequence)
-{
+void independentReaders(CommandManager &manager, std::uint32_t source_sequence) {
     Reader current_reader{}, snapshot_reader{};
     current_reader.manager = snapshot_reader.manager = &manager;
     snapshot_reader.use_snapshot = true;
     k_sem_init(&current_reader.done, 0, 1);
     k_sem_init(&snapshot_reader.done, 0, 1);
-    k_thread_create(&reader_thread_a, reader_stack_a, K_THREAD_STACK_SIZEOF(reader_stack_a),
-                    readerEntry, &current_reader, nullptr, nullptr, 6, 0, K_NO_WAIT);
-    k_thread_create(&reader_thread_b, reader_stack_b, K_THREAD_STACK_SIZEOF(reader_stack_b),
-                    readerEntry, &snapshot_reader, nullptr, nullptr, 6, 0, K_NO_WAIT);
+    k_thread_create(&reader_thread_a, reader_stack_a, K_THREAD_STACK_SIZEOF(reader_stack_a), readerEntry,
+                    &current_reader, nullptr, nullptr, 6, 0, K_NO_WAIT);
+    k_thread_create(&reader_thread_b, reader_stack_b, K_THREAD_STACK_SIZEOF(reader_stack_b), readerEntry,
+                    &snapshot_reader, nullptr, nullptr, 6, 0, K_NO_WAIT);
     zassert_ok(k_sem_take(&current_reader.done, K_SECONDS(1)));
     zassert_ok(k_sem_take(&snapshot_reader.done, K_SECONDS(1)));
     zassert_ok(k_thread_join(&reader_thread_a, K_SECONDS(1)));
@@ -234,15 +225,16 @@ void independentReaders(CommandManager &manager, std::uint32_t source_sequence)
             zassert_within(value.chassis.vx_m_s, 3.0f, 1.0e-6f);
             zassert_equal(value.gimbal.stamp.sequence, value.stamp.sequence);
             zassert_equal(value.chassis.stamp.timestamp_ms, value.stamp.timestamp_ms);
-            if (i > 0) zassert_true(value.stamp.sequence >= reader->commands[i - 1].stamp.sequence);
-            if (reader->use_snapshot) zassert_equal(reader->source_sequences[i], source_sequence);
+            if (i > 0)
+                zassert_true(value.stamp.sequence >= reader->commands[i - 1].stamp.sequence);
+            if (reader->use_snapshot)
+                zassert_equal(reader->source_sequences[i], source_sequence);
         }
     }
 }
 } // namespace
 
-ZTEST(command_service, test_registration_startup_and_failed_lifetime)
-{
+ZTEST(command_service, test_registration_startup_and_failed_lifetime) {
     static CommandManager unstarted{noPermission()};
     RobotCommand untouched{};
     untouched.stamp.sequence = 777;
@@ -321,8 +313,7 @@ ZTEST(command_service, test_registration_startup_and_failed_lifetime)
     zassert_true(failed.decision.reasons() & PermissionMissing);
 }
 
-ZTEST(command_service, test_background_cache_consumers_expiry_and_recovery)
-{
+ZTEST(command_service, test_background_cache_consumers_expiry_and_recovery) {
     static Source operator_source;
     static Permission permission_source;
     static CommandManager manager{serviceConfig()};

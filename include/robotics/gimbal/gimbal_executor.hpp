@@ -43,9 +43,15 @@ public:
     RunStatus update(const GimbalExecutionInputs &inputs, core::TimeUs now_us);
     // Explicit input withdrawal (stop, emergency, expired input).
     RunStatus suspend(core::TimeUs now_us, WaitReason reason, int error = 0, bool blocked = false);
-    double yawTargetRad() const { return yaw_.targetAngleRad(); }
-    double pitchTargetRad() const { return pitch_.targetAngleRad(); }
-    const RunStatus &status() const { return status_; } // Execution-thread only.
+    double yawTargetRad() const {
+        return yaw_.targetAngleRad();
+    }
+    double pitchTargetRad() const {
+        return pitch_.targetAngleRad();
+    }
+    const RunStatus &status() const {
+        return status_;
+    } // Execution-thread only.
 
 private:
     RunStatus publish(core::TimeUs now_us, RunState state, WaitReason reason, int error = 0);

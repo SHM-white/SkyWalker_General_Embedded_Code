@@ -16,15 +16,26 @@ public:
         bool extended_id = false;
         std::uint32_t reassembly_timeout_ms = 60, recovery_retry_ms = 100;
     };
-    explicit CanInterBoardTransport(const Config &config) : config_(config) {}
-    InterBoardTransportKind kind() const override { return InterBoardTransportKind::Can; }
+    explicit CanInterBoardTransport(const Config &config) : config_(config) {
+    }
+    InterBoardTransportKind kind() const override {
+        return InterBoardTransportKind::Can;
+    }
     int service(std::uint64_t now_ms) override;
-    int read(RxChunk &out) override { return rx_.read(out); }
+    int read(RxChunk &out) override {
+        return rx_.read(out);
+    }
     int send(const std::uint8_t *, std::size_t, std::uint32_t timeout_ms = 60) override;
-    bool txBusy() const override { return tx_size_ != 0 || in_flight_; }
+    bool txBusy() const override {
+        return tx_size_ != 0 || in_flight_;
+    }
+
 private:
     static constexpr std::size_t kPacketCapacity = kTxCapacity + 5, kRawDepth = 64;
-    struct RxEvent { can_frame frame{}; std::uint64_t timestamp_ms = 0; };
+    struct RxEvent {
+        can_frame frame{};
+        std::uint64_t timestamp_ms = 0;
+    };
     static void onRx(const device *, can_frame *, void *);
     static void onTx(const device *, int, void *);
     int initialize();

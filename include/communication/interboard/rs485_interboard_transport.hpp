@@ -16,12 +16,20 @@ public:
         std::uint16_t turnaround_ms = 1;
     };
     Rs485InterBoardTransport(const Config &config, AsyncUart::DmaBuffers &dma)
-        : config_(config), uart_(config.uart, dma) {}
-    InterBoardTransportKind kind() const override { return InterBoardTransportKind::Rs485; }
+        : config_(config), uart_(config.uart, dma) {
+    }
+    InterBoardTransportKind kind() const override {
+        return InterBoardTransportKind::Rs485;
+    }
     int service(std::uint64_t now_ms) override;
-    int read(RxChunk &out) override { return rx_.read(out); }
+    int read(RxChunk &out) override {
+        return rx_.read(out);
+    }
     int send(const std::uint8_t *, std::size_t, std::uint32_t timeout_ms = 60) override;
-    bool txBusy() const override { return pending_size_ != 0 || uart_.txBusy(); }
+    bool txBusy() const override {
+        return pending_size_ != 0 || uart_.txBusy();
+    }
+
 private:
     static constexpr std::size_t kHeaderSize = 12, kOverhead = 14;
     enum class Phase : std::uint8_t { Idle, Sending, AwaitReply, ReplyGranted };

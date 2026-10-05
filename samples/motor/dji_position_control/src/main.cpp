@@ -125,22 +125,27 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(can)) return -ENODEV;
+    if (!device_is_ready(can))
+        return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::gm6020({
         .id = 4,
         .current_limit_a = 1.5f,
         .encoder_zero_ticks = 0,
         .current_mode_confirmed = true,
-        .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
+        .timing =
+            {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
     const int vofa_error = vofa_init(&vofa, uart);
     int ret = bus.attach(drive);
-    if (ret == 0) ret = bus.start();
-    if (ret == 0) ret = axis.configure();
-    if (ret < 0) return ret;
+    if (ret == 0)
+        ret = bus.start();
+    if (ret == 0)
+        ret = axis.configure();
+    if (ret < 0)
+        return ret;
     const auto started_ms = k_uptime_get();
     auto previous_ms = started_ms;
     std::int64_t next_log_ms = 0;
@@ -152,30 +157,42 @@ int main() {
         previous_ms = now;
         const auto elapsed_ms = now - started_ms;
         const float target = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
-            ? requestedAbsolutePositionRad(elapsed_ms)
-            : static_cast<float>((elapsed_ms % 10000) / 2500) * kTargetOffsetRad;
+                                 ? requestedAbsolutePositionRad(elapsed_ms)
+                                 : static_cast<float>((elapsed_ms % 10000) / 2500) * kTargetOffsetRad;
         const int enable_error = drive.enable();
         const int update_error = axis.update(target, dt);
         const int commit_error = bus.commit().error;
-        if (enable_error < 0) last_call_error = enable_error;
-        if (update_error < 0) last_call_error = update_error;
-        if (commit_error < 0) last_call_error = commit_error;
+        if (enable_error < 0)
+            last_call_error = enable_error;
+        if (update_error < 0)
+            last_call_error = update_error;
+        if (commit_error < 0)
+            last_call_error = commit_error;
         const auto data = axis.telemetry();
         const auto &f = data.motor.feedback;
         const auto &o = data.output;
         if (vofa_error == 0) {
-            const float channels[14] = {target, float(data.target_position_rad), float(data.position_rad),
-                f.absolute_position_rad, o.position.error, o.position.output, o.velocity.velocity_reference_rad_s,
-                f.velocity_rad_s, o.velocity.velocity_error_rad_s, o.velocity.regulator.feedback.p,
-                o.velocity.regulator.feedback.i, data.output_valid ? o.effort_command : 0,
-                float(data.output_valid), float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0)};
+            const float channels[14] = {target,
+                                        float(data.target_position_rad),
+                                        float(data.position_rad),
+                                        f.absolute_position_rad,
+                                        o.position.error,
+                                        o.position.output,
+                                        o.velocity.velocity_reference_rad_s,
+                                        f.velocity_rad_s,
+                                        o.velocity.velocity_error_rad_s,
+                                        o.velocity.regulator.feedback.p,
+                                        o.velocity.regulator.feedback.i,
+                                        data.output_valid ? o.effort_command : 0,
+                                        float(data.output_valid),
+                                        float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0)};
             (void)vofa_send(&vofa, channels, 14);
         }
         if (now >= next_log_ms) {
             next_log_ms = now + 1000;
             LOG_INF("state=%u target=%.3f seq=%llu output=%d wait=%u call=%d", unsigned(data.motor.state),
-                double(target), static_cast<unsigned long long>(data.target_sequence), data.output_valid,
-                unsigned(data.issue), last_call_error);
+                    double(target), static_cast<unsigned long long>(data.target_sequence), data.output_valid,
+                    unsigned(data.issue), last_call_error);
         }
     }
 }

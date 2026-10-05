@@ -67,7 +67,8 @@ int GimbalAxis::prepareReference(const motor::MotorSnapshot &snapshot) {
 
 GimbalAxis::Status GimbalAxis::poll(std::uint64_t) {
     Status next{};
-    if (!configured_) next.error = -EACCES;
+    if (!configured_)
+        next.error = -EACCES;
     else {
         auto view = drive_.snapshot();
         if (config_.topology == AxisTopology::Limited &&
@@ -78,31 +79,38 @@ GimbalAxis::Status GimbalAxis::poll(std::uint64_t) {
         }
         const int ret = feedbackError(view);
         next.feedback_healthy = !ret;
-        if (!next.error) next.error = ret;
+        if (!next.error)
+            next.error = ret;
     }
     status_ = next;
     return next;
 }
 int GimbalAxis::seed(const motor::MotorSnapshot &snapshot) {
     const int ret = feedbackError(snapshot);
-    if (ret < 0) return ret;
-    target_angle_rad_ = (config_.topology == AxisTopology::Continuous ?
-        double(snapshot.feedback.absolute_position_rad) : double(snapshot.feedback.position_rad)) + pending_rate_delta_rad_;
+    if (ret < 0)
+        return ret;
+    target_angle_rad_ = (config_.topology == AxisTopology::Continuous ? double(snapshot.feedback.absolute_position_rad)
+                                                                      : double(snapshot.feedback.position_rad)) +
+                        pending_rate_delta_rad_;
     pending_rate_delta_rad_ = 0;
     initialized_ = true;
     return 0;
 }
 int GimbalAxis::reset() {
-    if (!configured_) return -EACCES;
+    if (!configured_)
+        return -EACCES;
     // Explicit business operation: acquire a Hold target. Driver recovery never calls it.
     return seed(drive_.snapshot());
 }
 int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt) {
-    if (!configured_) return -EACCES;
-    if (action > SafetyAction::Active || command.mode > GimbalMode::AbsoluteAngle ||
-        !std::isfinite(dt) || dt < 0 || !std::isfinite(command.rate_rad_s) || !std::isfinite(command.target_rad)) return -EINVAL;
+    if (!configured_)
+        return -EACCES;
+    if (action > SafetyAction::Active || command.mode > GimbalMode::AbsoluteAngle || !std::isfinite(dt) || dt < 0 ||
+        !std::isfinite(command.rate_rad_s) || !std::isfinite(command.target_rad))
+        return -EINVAL;
     if (action == SafetyAction::Disable || command.mode == GimbalMode::Disabled) {
-        previous_action_ = action; previous_mode_ = command.mode;
+        previous_action_ = action;
+        previous_mode_ = command.mode;
         return position_.update(target_angle_rad_, 0);
     }
     (void)poll(drive_.snapshot().feedback.timestamp_ms);
@@ -115,23 +123,33 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
         if (command.mode == GimbalMode::AbsoluteAngle && !hold) {
             target_angle_rad_ = command.target_rad;
             initialized_ = true;
-        } else if (measured) (void)seed(snapshot);
+        }
+        else if (measured)
+            (void)seed(snapshot);
         else if (command.mode == GimbalMode::Rate && !hold)
-            pending_rate_delta_rad_ += std::clamp(command.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s) * integration_dt;
+            pending_rate_delta_rad_ += std::clamp(command.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s) *
+                                       integration_dt;
     }
-    if (hold && !was_hold && measured) (void)seed(snapshot);
+    if (hold && !was_hold && measured)
+        (void)seed(snapshot);
     if (initialized_ && !hold) {
         double delta = 0;
         if (command.mode == GimbalMode::Rate) {
-            if (command.rate_rad_s == 0 && !config_.hold_on_zero_rate && measured) (void)seed(snapshot);
+            if (command.rate_rad_s == 0 && !config_.hold_on_zero_rate && measured)
+                (void)seed(snapshot);
             delta = std::clamp(command.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s) * integration_dt;
-        } else if (command.mode == GimbalMode::AbsoluteAngle) {
+        }
+        else if (command.mode == GimbalMode::AbsoluteAngle) {
             if (config_.topology == AxisTopology::Continuous) {
                 float error = 0;
                 const int ret = control_shortest_angle_error(command.target_rad, float(target_angle_rad_), &error);
-                if (ret < 0) return ret;
+                if (ret < 0)
+                    return ret;
                 delta = error;
-            } else delta = double(std::clamp(command.target_rad, config_.min_angle_rad, config_.max_angle_rad)) - target_angle_rad_;
+            }
+            else
+                delta = double(std::clamp(command.target_rad, config_.min_angle_rad, config_.max_angle_rad)) -
+                        target_angle_rad_;
             const double step = config_.max_rate_rad_s * integration_dt;
             delta = std::clamp(delta, -step, step);
         }
@@ -139,8 +157,10 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
     }
     if (config_.topology == AxisTopology::Limited)
         target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad), double(config_.max_angle_rad));
-    else target_angle_rad_ = std::remainder(target_angle_rad_, 6.283185307179586);
-    previous_action_ = action; previous_mode_ = command.mode;
+    else
+        target_angle_rad_ = std::remainder(target_angle_rad_, 6.283185307179586);
+    previous_action_ = action;
+    previous_mode_ = command.mode;
     return position_.update(target_angle_rad_, initialized_ ? dt : 0);
 }
 int GimbalAxis::updateRate(float rate_rad_s, float dt_s) {

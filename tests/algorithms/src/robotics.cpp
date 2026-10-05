@@ -44,7 +44,8 @@ SwerveChassis::Config chassisConfig() {
     SwerveChassis::Config config{};
     config.kinematics = square();
     constexpr float radii[] = {0.1f, 0.2f, 0.05f, 0.15f};
-    for (unsigned i = 0; i < 4; ++i) config.modules[i] = moduleConfig(radii[i]);
+    for (unsigned i = 0; i < 4; ++i)
+        config.modules[i] = moduleConfig(radii[i]);
     return config;
 }
 void expect_module_equal(const ModuleOutput &actual, const ModuleOutput &expected) {
@@ -142,8 +143,9 @@ ZTEST(swerve_kinematics, test_invalid_input_does_not_change_output_or_history) {
     ModuleTargets initial{};
     initial[0].angle_rad = 0.3f;
     zassert_ok(solver.reset(initial));
-    zassert_equal(solver.solve({.mode = ChassisMode::BodyVelocity,
-                                .vx_m_s = std::numeric_limits<float>::quiet_NaN()}, out), -EINVAL);
+    zassert_equal(solver.solve({.mode = ChassisMode::BodyVelocity, .vx_m_s = std::numeric_limits<float>::quiet_NaN()},
+                               out),
+                  -EINVAL);
     zassert_equal(out[0].wheel_velocity_m_s, 9);
     zassert_ok(solver.solve({}, out));
     zassert_equal(out[0].angle_rad, 0.3f);
@@ -155,9 +157,8 @@ ZTEST(swerve_kinematics, test_benchmark_solve) {
     const ChassisCommand input{.mode = ChassisMode::BodyVelocity, .vx_m_s = 2, .vy_m_s = 1, .wz_rad_s = 2};
     ModuleTargets out{};
     int failures = 0;
-    skywalker::test::benchmark("swerve.solve.4_modules", 4096, [&](std::uint32_t) {
-        failures += solver.solve(input, out) != 0;
-    });
+    skywalker::test::benchmark("swerve.solve.4_modules", 4096,
+                               [&](std::uint32_t) { failures += solver.solve(input, out) != 0; });
     zassert_equal(failures, 0);
     zassert_within(out[1].wheel_velocity_m_s, 2, 1e-6f);
 }
@@ -189,8 +190,7 @@ ZTEST(swerve_module, test_flipped_wheel_preserves_velocity_vector_and_wraps) {
     zassert_within(output.optimized_wheel_velocity_m_s, -2, 1e-6f);
     zassert_within(output.steer_continuous_target_rad, 4 * pi - pi / 4, 2e-6f);
     zassert_within(output.drive_target_rad_s, -20, 1e-5f);
-    expect_vector({output.optimized_angle_rad, output.optimized_wheel_velocity_m_s},
-                  -std::sqrt(2.0f), std::sqrt(2.0f));
+    expect_vector({output.optimized_angle_rad, output.optimized_wheel_velocity_m_s}, -std::sqrt(2.0f), std::sqrt(2.0f));
 
     feedback = {pi - 0.1f, 7 * pi - 0.1f, 0, 0};
     zassert_ok(module.reset(feedback));
@@ -232,8 +232,8 @@ ZTEST(swerve_chassis, test_four_modules_map_mixed_twist_to_different_radii) {
     zassert_ok(chassis.validate());
     zassert_ok(chassis.reset(feedback));
     ChassisOutput output{};
-    zassert_ok(chassis.step({.mode = ChassisMode::BodyVelocity, .vx_m_s = 2, .vy_m_s = 1, .wz_rad_s = 2},
-                           feedback, 0.005f, output));
+    zassert_ok(chassis.step({.mode = ChassisMode::BodyVelocity, .vx_m_s = 2, .vy_m_s = 1, .wz_rad_s = 2}, feedback,
+                            0.005f, output));
     // FL, FR, RL, RR: rigid-body vectors (1,2), (3,2), (1,0), (3,0).
     constexpr float vx[] = {1, 3, 1, 3}, vy[] = {2, 2, 0, 0};
     for (unsigned i = 0; i < 4; ++i) {
@@ -260,15 +260,14 @@ ZTEST(swerve_chassis, test_rotation_retains_four_vector_directions_after_flippin
     const ChassisFeedback feedback{};
     zassert_ok(chassis.reset(feedback));
     ChassisOutput output{};
-    zassert_ok(chassis.step({.mode = ChassisMode::Spin, .vx_m_s = 100, .vy_m_s = -100, .wz_rad_s = 2},
-                           feedback, 0.005f, output));
+    zassert_ok(chassis.step({.mode = ChassisMode::Spin, .vx_m_s = 100, .vy_m_s = -100, .wz_rad_s = 2}, feedback, 0.005f,
+                            output));
     constexpr float vx[] = {-1, 1, -1, 1}, vy[] = {1, 1, -1, -1};
     constexpr float sign[] = {-1, 1, -1, 1};
     for (unsigned i = 0; i < 4; ++i) {
         const auto &module = output.module[i];
         expect_vector({module.optimized_angle_rad, module.optimized_wheel_velocity_m_s}, vx[i], vy[i]);
-        zassert_within(module.drive_target_rad_s,
-                       sign[i] * std::sqrt(2.0f) / config.modules[i].wheel_radius_m, 1e-5f);
+        zassert_within(module.drive_target_rad_s, sign[i] * std::sqrt(2.0f) / config.modules[i].wheel_radius_m, 1e-5f);
         zassert_true(std::fabs(module.steer_continuous_target_rad) <= pi / 2);
     }
 }
@@ -285,8 +284,7 @@ ZTEST(swerve_chassis, test_last_module_failure_is_transactional_for_entire_chass
     output.module[3].drive_effort = 73;
     const auto before = output;
     // The first three modules accept 1 m/s. RR rejects 1/0.15 rad/s > 2.
-    zassert_equal(chassis.step({.mode = ChassisMode::BodyVelocity, .vx_m_s = 1},
-                               feedback, 0.005f, output), -ERANGE);
+    zassert_equal(chassis.step({.mode = ChassisMode::BodyVelocity, .vx_m_s = 1}, feedback, 0.005f, output), -ERANGE);
     expect_chassis_equal(output, before);
     auto invalid_feedback = feedback;
     invalid_feedback.module[3].steer_absolute_rad = std::numeric_limits<float>::quiet_NaN();
@@ -340,9 +338,8 @@ ZTEST(chassis_power, test_benchmark_step) {
     const ChassisPowerInput input{50, 100, 10};
     ChassisPowerDecision out;
     int failures = 0;
-    skywalker::test::benchmark("chassis_power.step", 4096, [&](std::uint32_t) {
-        failures += limiter.step(input, 0.01f, out) != 0;
-    });
+    skywalker::test::benchmark("chassis_power.step", 4096,
+                               [&](std::uint32_t) { failures += limiter.step(input, 0.01f, out) != 0; });
     zassert_equal(failures, 0);
     zassert_equal(out.effort_scale, 1);
 }

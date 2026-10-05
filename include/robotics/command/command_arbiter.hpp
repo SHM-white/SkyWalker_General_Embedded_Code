@@ -22,7 +22,9 @@ public:
     };
     explicit CommandArbiter(const Config &config);
     // One owner thread; inputs include the arbitration time. Results are owned values.
-    [[nodiscard]] int configError() const { return config_error_; }
+    [[nodiscard]] int configError() const {
+        return config_error_;
+    }
     [[nodiscard]] CommandDecision update(const CommandInputs &);
     void reset();
 

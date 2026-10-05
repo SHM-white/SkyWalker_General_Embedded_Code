@@ -133,13 +133,20 @@ public:
     communication::InterBoardTransportKind kind() const override {
         return communication::InterBoardTransportKind::Uart;
     }
-    int service(std::uint64_t time) override { now = time; return 0; }
-    int read(RxChunk &) override { return -EAGAIN; }
+    int service(std::uint64_t time) override {
+        now = time;
+        return 0;
+    }
+    int read(RxChunk &) override {
+        return -EAGAIN;
+    }
     int send(const std::uint8_t *bytes, std::size_t size, std::uint32_t) override {
         ++sends;
         return observer.processRxBytes(bytes, size, now);
     }
-    bool txBusy() const override { return false; }
+    bool txBusy() const override {
+        return false;
+    }
 };
 }
 

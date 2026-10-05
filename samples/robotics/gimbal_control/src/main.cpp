@@ -75,12 +75,15 @@ void gimbalTask(void *, void *, void *) {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const auto &operator_state = controls.update(operator_cache.remote, now);
         const auto exercise = diagnostics.update(now, operator_state.run_allowed,
-            !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
-        if (!exercise.input_paused) rc = operator_cache;
+                                                 !operator_state.fresh ||
+                                                     operator_state.remote.left_switch == RcSwitch::Down);
+        if (!exercise.input_paused)
+            rc = operator_cache;
         const auto &remote = rc.remote;
         if (exercise.execution_paused && operator_state.run_allowed && !operator_state.clear_estop &&
             !board_config::emergencyStopRequested()) {
-            k_sleep(K_MSEC(5)); continue;
+            k_sleep(K_MSEC(5));
+            continue;
         }
         const float dt = (now - previous_ms) / 1000.0f;
         previous_ms = now;
@@ -103,9 +106,11 @@ void gimbalTask(void *, void *, void *) {
         }
         else {
             enable_error = gimbal.enable();
-            const float yaw_rate = board_config::yaw_direction * samples::control::RcControlAdapter::normalize(remote.analog.right_x) *
+            const float yaw_rate = board_config::yaw_direction *
+                                   samples::control::RcControlAdapter::normalize(remote.analog.right_x) *
                                    board_config::yaw.max_rate_rad_s;
-            const float pitch_rate = board_config::pitch_direction * samples::control::RcControlAdapter::normalize(remote.analog.right_y) *
+            const float pitch_rate = board_config::pitch_direction *
+                                     samples::control::RcControlAdapter::normalize(remote.analog.right_y) *
                                      board_config::pitch.max_rate_rad_s;
             yaw_error = yaw.updateRate(yaw_rate, dt);
             pitch_error = pitch.updateRate(pitch_rate, dt);
@@ -127,7 +132,9 @@ void gimbalTask(void *, void *, void *) {
                 static_cast<float>(status.enabled_count),
                 static_cast<float>(unsigned(ys.state)),
                 static_cast<float>(unsigned(ps.state)),
-                static_cast<float>(enable_error < 0 ? enable_error : yaw_error < 0 ? yaw_error : pitch_error),
+                static_cast<float>(enable_error < 0 ? enable_error
+                                   : yaw_error < 0  ? yaw_error
+                                                    : pitch_error),
                 static_cast<float>(yaw_commit),
                 static_cast<float>(pitch_commit),
             };

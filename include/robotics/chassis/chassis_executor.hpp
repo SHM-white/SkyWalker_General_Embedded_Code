@@ -38,16 +38,30 @@ public:
         ChassisPowerLimiter::Config limiter{};
     };
     ChassisExecutor(SwerveHardware &hardware, const SwerveChassis::Config &chassis, const Config &config)
-        : hardware_(hardware), chassis_(chassis), config_(config), limiter_(config.limiter) {}
+        : hardware_(hardware), chassis_(chassis), config_(config), limiter_(config.limiter) {
+    }
     int begin();
     RunStatus update(const ChassisExecutionInputs &inputs, core::TimeUs now_us);
     RunStatus suspend(core::TimeUs now_us, WaitReason reason, int error = 0, bool blocked = false);
-    const RunStatus &status() const { return status_; }
-    const ChassisOutput &output() const { return output_; }
-    const ChassisFeedback &feedback() const { return feedback_; }
-    float effortScale() const { return effort_scale_; }
-    float steerEffortScale() const { return steer_effort_scale_; }
-    const PowerMeasurement &powerMeasurement() const { return selected_power_; }
+    const RunStatus &status() const {
+        return status_;
+    }
+    const ChassisOutput &output() const {
+        return output_;
+    }
+    const ChassisFeedback &feedback() const {
+        return feedback_;
+    }
+    float effortScale() const {
+        return effort_scale_;
+    }
+    float steerEffortScale() const {
+        return steer_effort_scale_;
+    }
+    const PowerMeasurement &powerMeasurement() const {
+        return selected_power_;
+    }
+
 private:
     void withdraw(WaitReason reason, int error = 0, bool blocked = false);
     RunStatus publish(core::TimeUs now_us, RunState state, WaitReason reason, int error = 0);

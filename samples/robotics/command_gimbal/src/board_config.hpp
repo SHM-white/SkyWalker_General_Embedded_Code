@@ -51,8 +51,10 @@ inline skywalker::motor::dji::Config yawHardware() {
                                           .current_limit_a = calibration::small_yaw.effort_limit,
                                           .encoder_zero_ticks = yaw_encoder_zero_ticks,
                                           .current_mode_confirmed = connections_configured,
-                                          .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20,
-                                                     .enable_timeout_ms = 100, .retry_interval_ms = 100}});
+                                          .timing = {.feedback_timeout_ms = 20,
+                                                     .command_timeout_ms = 20,
+                                                     .enable_timeout_ms = 100,
+                                                     .retry_interval_ms = 100}});
 }
 inline skywalker::motor::dm::Config pitchHardware() {
     return skywalker::motor::dm::j4310Mit({.id = calibration::pitch.id,
@@ -61,8 +63,10 @@ inline skywalker::motor::dm::Config pitchHardware() {
                                            .velocity_max_rad_s = 30.0f,
                                            .torque_max_nm = 10.0f,
                                            .torque_limit_nm = calibration::pitch.effort_limit,
-                                           .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20,
-                                                      .enable_timeout_ms = 3000, .retry_interval_ms = 100}});
+                                           .timing = {.feedback_timeout_ms = 50,
+                                                      .command_timeout_ms = 20,
+                                                      .enable_timeout_ms = 3000,
+                                                      .retry_interval_ms = 100}});
 }
 
 // ManualCommandMapper already maps right_x to negative yaw and right_y to

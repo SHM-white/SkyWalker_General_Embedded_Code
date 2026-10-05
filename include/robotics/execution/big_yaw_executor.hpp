@@ -32,7 +32,10 @@ public:
     RunStatus update(const BigYawExecutionInputs &, core::TimeUs now_us);
     RunStatus suspend(core::TimeUs now_us, WaitReason reason, int error = 0, bool blocked = false);
     BigYawFeedback feedback() const; // Execution-thread owner; publish copies.
-    const RunStatus &status() const { return status_; }
+    const RunStatus &status() const {
+        return status_;
+    }
+
 private:
     RunStatus publish(core::TimeUs, RunState, WaitReason, int error = 0);
     void withdraw(WaitReason, int, bool);

@@ -13,11 +13,13 @@ public:
         float flip_enter_error_rad = 1.6580628f, flip_exit_error_rad = 1.4835299f;
         IdleBehavior idle_behavior = IdleBehavior::Hold;
     };
-    explicit SwerveModule(const Config &config) : config_(config) {}
+    explicit SwerveModule(const Config &config) : config_(config) {
+    }
     int validate() const;
     int reset(const ModuleFeedback &);
     // One writer. Feedback loss invalidates only the affected axis's output.
     int step(const ModuleTarget &, const ModuleFeedback &, float dt_s, ModuleOutput &out);
+
 private:
     int steer(const ModuleFeedback &, float dt_s, ModuleOutput &out);
     int drive(const ModuleFeedback &, float dt_s, ModuleOutput &out);
