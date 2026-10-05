@@ -2,6 +2,8 @@
 
 文档按当前源码边界组织：工程与板级入口、可复用模块、跨模块工作流、整机应用。旧的 docs/01…19 文件名保留为迁移提示；正文以本目录链接指向的新页面为准。设计记录和待实施方案仍放在 dev/，不能当作当前 API 契约。
 
+当前维护基线：`main@99a97c9`（2026-10-05）。在线浏览器读取同一套正文；实机验收、待标定配置与已有软件能力分别说明。
+
 ## 按任务开始
 
 | 目标 | 阅读路线 |
@@ -32,7 +34,7 @@
 | drivers/imu | [IMU](modules/drivers/imu.md) | ImuSource、ImuReceiver |
 | lib/control、lib/matrix | [控制算法](modules/control/algorithms.md)、[电机控制器](modules/control/motor-control.md)、[Kalman 与矩阵](modules/drivers/kalman-matrix.md) | C PID、KalmanFilter、QuaternionEkf、VelocityMotor、PositionMotor |
 | lib/communication | [UART、遥控、裁判、板间](modules/communication/communication.md)、[视觉](modules/communication/vision.md) | AsyncUart、RemoteReceiver、RefereeReceiver、InterBoardEndpoint、VisionReceiver |
-| lib/robotics | [命令来源服务](modules/robotics/command-service.md)、[云台与舵轮](modules/robotics/robotics.md)、[恢复](modules/robotics/command-recovery.md) | CommandManager、CommandArbiter、GimbalAxis、SwerveChassis |
+| lib/robotics | [命令来源服务](modules/robotics/command-service.md)、[云台与舵轮](modules/robotics/robotics.md)、[机构执行器](modules/robotics/executors.md)、[恢复](modules/robotics/command-recovery.md) | CommandManager、CommandArbiter、GimbalExecutor、ChassisExecutor、BigYawExecutor、ShooterExecutor |
 | 所有封装对象 | [调用示例手册](modules/call-examples.md) | 初始化、快照、周期更新与错误路径 |
 
 ### 工作流与应用

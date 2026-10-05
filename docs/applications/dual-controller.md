@@ -13,11 +13,11 @@
     发射请求 + 实际权限/热量/云台状态 → ShooterExecutor
     所有机构暂存输出 → DJI CAN1 / Pitch CAN2 各提交一次
     执行状态与大 Yaw 请求 → 快照缓存
-  通信线程 → InterBoardEndpoint V2 → UART1
+  通信线程 → InterBoardEndpoint v4 → UART1
 
 底盘板
-  通信线程 → InterBoardEndpoint V2 → 接收快照
-  执行线程（5 ms）
+  通信线程 → InterBoardEndpoint v4 → 接收快照
+  执行线程（2 ms 绝对节拍）
     底盘命令 → ChassisExecutor → SwerveChassis → 八电机
     大 Yaw 请求 → BigYawExecutor → DM 速度内环
     CAN1 舵向 / CAN3 轮驱动 / CAN2 大 Yaw 各提交一次
@@ -30,7 +30,7 @@
 
 默认手动阶段使用遥控来源；`VEHICLE_REFEREE` 接入真实裁判权限，`VEHICLE_VISION_OBSERVE` 只观察视觉目标，`VEHICLE_VISION_EXECUTE` 才参与执行。视觉与惯性控制消费头部 IMU 的实际参考会话。小 Yaw 的编码器角仍是机械关节角，惯性目标先经过适配层再进入机械执行器。
 
-回中外环根据独立标定的小 Yaw 中心产生大 Yaw 角速度请求，并检查头部稳定、命令新鲜度与权限。请求携带底盘 boot ID、大 Yaw 独立恢复代次、生产序号和年龄。底盘轮控恢复不会授权大 Yaw；版本或能力不匹配时大 Yaw 保持禁用。
+回中外环根据独立标定的小 Yaw 中心产生大 Yaw 角速度请求，并检查头部稳定、命令新鲜度与权限。v4 请求保留底盘 boot ID、生产序号、命令/来源/权限年龄，不再携带 resume_generation。真实板重启或输入失效撤销请求；电机恢复不创建新授权边界，发送不等待大 Yaw ready/armed。
 
 `VEHICLE_SHOOTING` 接入摩擦轮和拨盘。单发事件具有独立编号和生产时间；恢复、忙碌或条件不满足时的旧事件被丢弃。连发持续检查新鲜请求、摩擦轮就绪、真实热量、权限和云台状态。拨盘归位与热量测量的实际来源仍需接入，TODO 未完成时有载发射不能通过准备条件。
 
@@ -38,11 +38,11 @@
 
 `ChassisExecutor` 注入应用持有的 `SwerveHardware`；四舵向共用 CAN1，四轮驱动共用 CAN3。大 Yaw 使用独立 DM 电机与 CAN2，通过速度控制允许连续旋转，无需固定绝对机械零点。
 
-`VEHICLE_POWER_BUDGET` 接入裁判预算，但预算不是实测功率。现有 V1 约束没有实测功率字段；整车框架预留 `IPowerMeasurementSource`，实际传感器与功率模型完成标定后才能开放完整功率控制。独立 `chassis_power` 样例提供测量与缩放观察入口。
+`VEHICLE_POWER_BUDGET` 接入裁判预算，但预算不是实测功率。现有 v4 约束没有实测功率字段；整车框架预留 `IPowerMeasurementSource`，实际传感器与功率模型完成标定后才能开放完整功率控制。独立 `chassis_power` 样例提供测量与缩放观察入口。
 
 ## 配置与上机顺序
 
-阶段配置、接线与构建命令见 `samples/robotics/vehicle_integration/README.md`。默认配置均保留中央接线门禁；解除前须填写电机 ID、方向、减速比、零点、机械限位、IMU 安装变换和低功率参数。
+阶段配置、接线与构建命令见 [整车样例](../../samples/robotics/vehicle_integration/README.md)，机构公开 API 见[执行器](../modules/robotics/executors.md)。默认配置均保留中央接线门禁；解除前须填写电机 ID、方向、减速比、零点、机械限位、IMU 安装变换和低功率参数。
 
 从 west workspace 根目录构建两应用：
 

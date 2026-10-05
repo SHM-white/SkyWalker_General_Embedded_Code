@@ -1,6 +1,6 @@
 # 双主控整车组合
 
-这个 sample 与 `applications/sentry_gimbal`、`applications/sentry_chassis` 共用 `../common/vehicle_bench.hpp`。默认入口是云台板，`chassis.conf` 切换为底盘板。两板均使用唯一当前协议标识 3。sample 显式开启 VEHICLE_SAMPLE_CONTROLS，使用纯物理遥控；applications 选择原有操作方式，并同步使用当前协议。
+这个 sample 与 `applications/sentry_gimbal`、`applications/sentry_chassis` 共用 `../common/vehicle_bench.hpp`。默认入口是云台板，`chassis.conf` 切换为底盘板。两板均使用唯一当前协议标识 4。sample 显式开启 VEHICLE_SAMPLE_CONTROLS，使用纯物理遥控；applications 选择原有操作方式，并同步使用当前协议。
 
 | 板卡 | 物理资源 | 执行机构 |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 
 应用创建 Motor、Group、CanBus 并完成 attach/start。每块板的电机目标只由一个执行线程写入（底盘 2 ms 绝对节拍，云台仍为 5 ms），周期末每条物理 CAN 提交一次。通信线程只处理协议和快照；sample 遥测线程只处理观察，独立遥控管理发布操作请求。底盘八电机、大 Yaw、云台双轴、摩擦轮对、拨盘分别拥有自己的故障范围和恢复上下文。
 
-云台板运行真实 `CommandManager`，把头部 IMU 的惯性目标经 `InertialGimbalAdapter` 转成机械控制，再由 `GimbalExecutor` 执行。头部稳定后，小 Yaw 独立标定中心偏差经带死区、迟滞、限速和斜坡的外环产生大 Yaw 请求。底盘板大 Yaw 只执行自己的速度内环，拒绝目标 boot 或独立恢复代次不匹配的请求。错误协议格式、会话不匹配、命令过期或状态生产停更时，大 Yaw 保持禁用；轮控按自身条件处理。
+云台板运行真实 `CommandManager`，把头部 IMU 的惯性目标经 `InertialGimbalAdapter` 转成机械控制，再由 `GimbalExecutor` 执行。头部稳定后，小 Yaw 独立标定中心偏差经带死区、迟滞、限速和斜坡的外环产生大 Yaw 请求。底盘板大 Yaw 只执行自己的速度内环，拒绝目标 boot 不匹配或原始输入过期的请求；电机恢复不创建新的输入授权代次。错误协议格式、会话不匹配、命令过期或状态生产停更时，大 Yaw 保持禁用；轮控按自身条件处理。
 
 所有硬件标定使用 `include/robotics/vehicle/calibration.hpp`。默认连接、IMU 安装和发射约束确认标志均为 false。入口仍运行来源接收、协议和遥测，但不会输出电机目标。默认手动版本使用明确的悬空台架操作权限，保留头部惯性保持和大 Yaw 回中链路；实际地面运动之前必须完成前级 sample 验收。
 
@@ -48,7 +48,7 @@ west build -b dm_mc02/stm32h723xx samples/robotics/vehicle_integration -d ../bui
 
 sample 使用 [统一遥控操作](../common/REMOTE_CONTROL.md)，console 只输出观察。仅云台板接遥控器，独立 OperatorControl 传递运行许可、急停及单次清故障事件；底盘在管理输入过期或会话错误时停输出。清故障事件绑定产生时的底盘 boot，重启后不能重放。物理急停仍须按实际接线接入。独立诊断构建支持输入、执行、状态、头部、视觉、权限、功率测量暂停（1～7），仅用于已配置对应来源的变体；稳定 Active 3 秒后暂停 1.5 秒，真实遥控管理继续运行。
 
-按手动整车 → 视觉观察 → 视觉执行 → 受约束发射推进。每级分别操作来源停产、执行停更、状态停更但心跳继续、单板重启、恢复代次变化、头部 IMU 断流/参考变化、单机构断流和物理 CAN 故障。记录原始来源年龄、状态年龄、独立恢复代次、头部稳定/回中误差、请求与实际速度、功率缩放、总线错误、控制耗时/超限次数、执行栈余量。TODO 保留真实停输出延迟和 I/O 队列峰值采集。
+按手动整车 → 视觉观察 → 视觉执行 → 受约束发射推进。每级分别操作来源停产、执行停更、状态停更但心跳继续、单板重启、电机执行代次变化、头部 IMU 断流/参考变化、单机构断流和物理 CAN 故障。记录原始来源年龄、状态年龄、各轴执行代次、头部稳定/回中误差、请求与实际速度、功率缩放、总线错误、控制耗时/超限次数、执行栈余量。TODO 保留真实停输出延迟和 I/O 队列峰值采集。
 
 本次集中进行最终编译，不运行测试或实板动作。中央 TODO 和 Pending 测量源需要实板标定后填写。
 

@@ -90,7 +90,7 @@ CAN callback → CanBus I/O worker → Motor snapshot
   → CanBus.commit() → asynchronous CAN TX
 ~~~
 
-同一物理 CAN 只创建一个 CanBus。Group 表达共同使能和停机的机械故障域，可以跨 CAN；共享 CAN 的多个业务写入方必须在应用层协调 setter/update 与 commit。
+同一物理 CAN 只创建一个 CanBus。Group 提供显式批量 enable/disable 和成员统计，可以跨 CAN，不持有恢复状态或传播成员故障；共享 CAN 的多个业务写入方必须在应用层协调 setter/update 与 commit。
 
 ### 命令链路
 
@@ -106,7 +106,7 @@ RemoteReceiver / VisionReceiver / RefereeReceiver
 
 ### 应用线程
 
-sentry_gimbal 的 CommandManager 有自己的仲裁 worker；RemoteReceiver 也有接收 worker。应用的 linkTask 消费命令快照并推进 InterBoardEndpoint，gimbalTask 调用 GimbalExecutor。sentry_chassis 将板间 poll 与 ChassisExecutor 分开运行。各静态对象及 DMA buffer 必须覆盖 worker 和 callback 的整个生命周期。
+sentry_gimbal 的 CommandManager 有自己的仲裁 worker；RemoteReceiver 也有接收 worker。两应用入口均调用公共 `samples/robotics/common/vehicle_bench.hpp`；linkTask 推进 InterBoardEndpoint，执行线程推进各机构并统一提交物理 CAN。底盘采用 2 ms 绝对节拍，云台约 5 ms。各静态对象及 DMA buffer 必须覆盖 worker 和 callback 的整个生命周期。
 
 ## 6. 单位和状态
 

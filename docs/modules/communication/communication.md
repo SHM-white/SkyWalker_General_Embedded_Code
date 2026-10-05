@@ -31,8 +31,8 @@
 `Dr16Decoder` 解码固定 18 字节帧：四个摇杆通道、拨杆、鼠标、鼠标键和键盘 bitmask。默认按仓库 DT7/DR16 手册将最后两字节视为保留字段，不参与通道范围校验。配置默认值：
 
 - channel center=1024，合法范围 364–1684。
-- center deadband=10。
-- decode_wheel=false；只有确认接收机把最后两字节用作滚轮通道时才显式设为 true，关闭时 `analog.wheel=0`。
+- center deadband=0。
+- decode_wheel=true；当前默认解析最后两字节的拨轮扩展，仍需确认接收机支持；仅保留字节的接收机应显式关闭，关闭时 `analog.wheel=0`。
 - frame assembly gap=10 ms。
 - offline timeout=100 ms。
 
@@ -40,7 +40,7 @@
 
 MC02 使用 UART5，C 板使用 USART3，均由板级 `remote-uart` 提供 100000 baud、8E1 和 RX DMA；实际遥控器链路还要确认电平反相和接线。
 
-[DR16 示例](../../../samples/communication/dr16/README.md) 使用 `RemoteReceiver` 接收，独立 VOFA 线程每 100 ms 输出 16 通道，包括在线标志、摇杆、拨杆、鼠标、键盘、帧序号和接收块数；console 显示初始化与错误变化。该示例关闭解码死区，其余接入方保留默认死区 10。
+[DR16 示例](../../../samples/communication/dr16/README.md) 使用 `RemoteReceiver` 接收，独立 VOFA 线程每 100 ms 输出 16 通道，包括在线标志、摇杆、拨杆、鼠标、键盘、帧序号和接收块数；console 显示初始化与错误变化。当前 decoder 默认死区为 0，各应用需要死区时显式配置。
 
 ### `RemoteReceiver`：可复用接收线程
 
@@ -113,7 +113,7 @@ int main() {
 
 ```text
 0..1    0xA5 0x5A
-2       protocol version = 1
+2       protocol version = 4
 3       sender role: GimbalController=1 / ChassisController=2
 4..5    MessageId little-endian
 6..7    payload length little-endian
@@ -122,7 +122,7 @@ int main() {
 end     CRC16-CCITT little-endian
 ```
 
-当前消息 ID：
+当前 v4 消息 ID（均有编解码与缓存）：
 
 | ID | 发送角色 | 内容 |
 |---:|---|---|
@@ -130,11 +130,11 @@ end     CRC16-CCITT little-endian
 | `0x0101` | Gimbal | ChassisControl |
 | `0x0102` | Gimbal | ChassisConstraint |
 | `0x0103` | Chassis | ChassisFeedback |
-| `0x0104` | Chassis | ChassisFault，已预留 |
-| `0x0201` | Chassis | GimbalFeedback，已预留 |
-| `0x0301` | 任一 | SystemEvent，已预留 |
+| `0x0301` | Gimbal | OperatorControl：原始运行/急停/清除事件 |
+| `0x0402` | Gimbal | BigYawRequest：回中速度与输入年龄 |
+| `0x0403` | Chassis | BigYawFeedback：真实速度/状态与生产年龄 |
 
-当前 `InterBoardLink` 实际解码并缓存 Heartbeat、ChassisControl、ChassisConstraint、ChassisFeedback 四类消息。
+Heartbeat、ChassisControl、BigYawRequest、BigYawFeedback 载荷分别为 20、32、36、24 字节。旧帧版本直接拒绝，两板须同时升级。完整传输与时效说明见[三后端与 v4](interboard-transports.md)。
 
 ## 5. boot / sequence / generation
 
@@ -163,7 +163,10 @@ for (;;) {
 ```
 
 实际应用应把 `latest*()` 的值拷贝到线程安全快照，再由安全/控制线程消费。不要把 parser 内部引用跨线程保存。
-\n\n更多对象生命周期与完整调用顺序见[封装模块调用示例](../../../call-examples.md)。\n
+
+
+更多对象生命周期与完整调用顺序见[封装模块调用示例](../call-examples.md)。
+
 ## 应用级接收器和端点
 
 RefereeReceiver 以 poll(now_ms) 封装 UART 初始化重试、字节读取、半帧丢弃、RefereeService 与 freshness 快照；它没有独立 start()。RemoteReceiver 和 VisionReceiver 则提供后台 worker，需要显式 start()。InterBoardEndpoint 的 poll() 由唯一通信线程调用，其他线程通过 submit、setReferee、setStatus 和 snapshot 交换值副本。各自的 __nocache DMA buffers 和模块对象要覆盖回调生命周期。

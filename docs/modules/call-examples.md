@@ -233,4 +233,4 @@ if (ret == 0) {
 }
 ~~~
 
-reset 失败、feedback 过期或周期异常时应撤销对应输出域。ChassisPowerLimiter 是台架启发式，需真实功率标定，不是比赛限功率合规认证。参考 applications/sentry_chassis/src/chassis_executor.cpp 和 samples/robotics/swerve/src/main.cpp。
+reset 失败、feedback 过期或周期异常时应撤销对应输出域。ChassisPowerLimiter 是台架启发式，需真实功率标定，不是比赛限功率合规认证。参考 lib/robotics/chassis_executor.cpp 和 samples/robotics/swerve/src/main.cpp。

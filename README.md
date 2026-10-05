@@ -28,7 +28,9 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 | 查现场问题                 | [故障排查](docs/guides/troubleshooting.md)                                                                               |
 | 查设计记录和专题分析       | [开发专题索引](docs/dev/README.md)                                                                                   |
 
-交互式架构图的本地打开方法见 [架构浏览器](docs/architecture-browser/README.md)。
+在线阅读：[GitHub Pages 架构与接口手册](https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/)；本地启动和私有站点见 [架构浏览器](docs/architecture-browser/README.md)。
+
+本文与接口手册对齐 `main@99a97c9`（2026-10-05）：共用整车运行时、板间 v4、持续目标与逐轴自动恢复。单舵轮调试进展不代表整车已验收。
 
 ## 当前能力
 
@@ -45,7 +47,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 - DJI：M3508-C620、M2006-C610、GM6020 电流模式；支持反馈解码、输出轴角度、温度和总线分组发送。
 - 达妙：DM-J4310-2EC V1.1；支持 MIT、位置-速度、速度三种原生 CAN 模式，以及 Enable/Disable/ClearError/SaveZero。
-- 统一 CAN 电机驱动：`CanBus` 管物理传输，`Motor` 管端点，`Group` 声明联动停机；`VelocityMotor`、`PositionMotor` 复用纯 C 控制算法并暂存目标。
+- 统一 CAN 电机驱动：`CanBus` 管物理传输，`Motor` 管端点，`Group` 提供显式批量启停，不传播成员故障；`VelocityMotor`、`PositionMotor` 复用纯 C 控制算法并暂存目标。
 - 纯 C 控制库：PID、前馈、复合前馈 PID、斜坡限幅、角度工具、速度环和位置-速度串级。
 - IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM-IMU-L1 通过主动 RS485 帧接入统一快照。
 
@@ -55,7 +57,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - DR16：18 字节帧解码、摇杆死区、拨杆、鼠标/键盘和在线判断。
 - 裁判系统：RM2026 V1.3 profile、CRC8/CRC16、权限和功率快照。
 - 板间协议：统一 v4 帧格式、CRC16、生产者序号、boot_id 和原始输入年龄；电机独立自动恢复。
-- 机器人算法：CommandArbiter 同步仲裁；CommandManager 注册来源并后台发布快照；GimbalAxis、SwerveChassis 和应用私有执行器分别完成子系统计算与本地恢复。
+- 机器人算法：CommandArbiter 同步仲裁；CommandManager 注册来源并后台发布快照；公开 GimbalExecutor、ChassisExecutor、BigYawExecutor 和 ShooterExecutor 消费新鲜输入；惯性适配与舵轮逐轴计算，Motor/CAN 独立恢复。
 
 ## 构建一个样例
 
@@ -117,9 +119,9 @@ skywalker_code/
 2. DJI 的统一 effort 单位是 A；DM 的 MIT effort 单位是 N·m，代码不会自动换算两者。
 3. `motor::Feedback::position_rad` 是首帧归零的连续输出轴角度，可在禁用状态通过 `reseedPosition()` 建立已知坐标；GM6020 的 `absolute_position_rad` 是固定零点单圈角。
 4. 同一物理 CAN 只创建一个 `CanBus`：各 `Motor` 暂存目标后，由总线 `commit()` 提交；只有机械联动的电机才放入同一个 `Group`。
-5. `disable()` 立即撤销软件输出许可，安全帧异步发送；这不等于机械制动，也不切断板上动力电源。反馈恢复后仍需新的显式 `enable()`。
+5. `disable()` 立即撤销软件输出许可，安全帧异步发送；这不等于机械制动，也不切断板上动力电源。运行意图仍有效时，每轴反馈恢复后自动执行最新目标；用户主动停止会取消旧目标。
 6. `samples/` 是已存在的验证入口；`applications/sentry_*` 是需要按真实机器人修改 overlay 和 `src/board_config.hpp` 的应用骨架，不应被描述为开箱即用整机固件。
-7. `tests/motor/regression/` 有电机软件回归测试；控制、通信和安全链路仍需结合样例、日志与硬件台架验证。
+7. `tests/` 提供电机、算法、命令服务、执行与视觉/IMU 软件测试入口；通过情况以 CI 为准，硬件链路另做台架验证。
 
 电机调试前必须让机构悬空或脱离负载，准备物理断电手段，并先从低限幅开始。完整的安全检查见 [12 故障排查](docs/guides/troubleshooting.md)。
 

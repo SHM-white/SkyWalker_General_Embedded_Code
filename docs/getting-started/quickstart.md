@@ -143,7 +143,7 @@ CONFIG_CAN=y
 1. 在 `app.overlay` 中声明电机 compatible、CAN phandle、ID、量程和减速比。
 2. 打开 `CONFIG_SKYWALKER_DRIVER_MOTOR=y` 以及对应的 `SKYWALKER_MOTOR_DJI` 或 `SKYWALKER_MOTOR_DM`。
 3. 用 `DEVICE_DT_GET(DT_ALIAS(motor0))` 获取设备。
-4. 先确认 `device_is_ready()`、反馈时间戳、状态和能力位，再 arm。
+4. 先确认 `device_is_ready()` 与能力/模式配置，按有效运行意图持续 enable/update/commit；反馈新鲜度与各轴输出有效性独立观察。
 5. 修改 overlay 后重新 pristine build。
 
 所有必填属性以 `dts/bindings/` 为准；不要从旧样例复制已经删除的节点名。

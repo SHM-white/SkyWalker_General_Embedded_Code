@@ -1,6 +1,6 @@
 # 板间 UART、RS485 与 CAN
 
-三种方式均已实现。`InterBoardEndpoint` 保留 `submit / setReferee / setStatus / snapshot / poll`；构造时绑定 `InterBoardTransport`，此后不更换后端。现有 V1 业务帧、CRC、序号、boot_id、恢复 generation 和命令有效期继续使用。
+三种方式均已实现。`InterBoardEndpoint` 保留 `submit / setReferee / setStatus / snapshot / poll`；构造时绑定 `InterBoardTransport`，此后不更换后端。当前统一 v4 业务帧保留 CRC、通信/生产者序号、boot_id 和原始输入有效期；恢复授权 generation 已删除。
 
 ## 初始化选择
 
@@ -119,7 +119,7 @@ USART2 DMA 使用 DMAMUX 通道 0(TX request 44)、5(RX request 43)，避开板�
 
 后端独占整个 CAN 控制器，初始化要求控制器未启动；bus-off、发送超时或发送失败后停止控制器、淘汰旧批次、等待中止回调，再按默认 100 ms 重试恢复。正常 CAN 发送使用 `K_NO_WAIT` 和完成回调，不等 ACK；底层控制器 start/stop 仍可能有驱动自身的有限等待，不能把恢复操作当作硬实时无阻塞过程。
 
-原板间通信样例默认采用 CAN3 与电机 CAN1 分离。大 Yaw 已占用底盘 CAN3 的组合使用 UART 板间通信；更换传输方式前须重新分配物理控制器。**同一控制器不能同时交给 motor::CanBus 和本后端**；启动状态检测不是跨模块所有权注册表。若需要共线，需要先统一控制器生命周期、路由、ID 和带宽分配。CAN 链路层 ACK 也不代表远端业务接受批次。
+原板间通信样例默认采用 CAN3 与电机 CAN1 分离。整车组合的 CAN1 舵向、CAN3 轮驱和 CAN2 大 Yaw 已占满底盘三路控制器，因此默认使用 USART1 板间 UART；更换传输方式前须重新分配物理控制器。**同一控制器不能同时交给 motor::CanBus 和本后端**；启动状态检测不是跨模块所有权注册表。若需要共线，需要先统一控制器生命周期、路由、ID 和带宽分配。CAN 链路层 ACK 也不代表远端业务接受批次。
 
 ## 构建配置与上机
 
