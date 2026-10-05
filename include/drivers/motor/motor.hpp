@@ -46,7 +46,6 @@ struct Feedback {
 };
 
 class CanBus;
-class Group;
 class Motor;
 
 enum class MotorState : std::uint8_t { Offline, Disabled, Enabling, Active, Fault };
@@ -96,6 +95,10 @@ struct MotorSnapshot {
     MotorState state = MotorState::Offline;
     bool feedback_fresh = false;
     bool output_permitted = false;
+    bool enabled_requested = false;
+    std::uint64_t command_revision = 0;
+    std::uint64_t command_written_ms = 0;
+    std::uint64_t retry_count = 0;
     bool position_reference_valid = false;
     std::uint64_t enable_generation = 0;
     std::uint64_t reference_generation = 0;
@@ -119,7 +122,9 @@ struct StagedCommand {
     bool valid = false;
     std::uint64_t written_ms = 0;
     std::uint64_t revision = 0;
-    std::uint64_t enable_generation = 0;
+    std::uint64_t cancellation_generation = 0;
+    bool computed_effort = false;
+    std::uint64_t sampled_enable_generation = 0;
 };
 
 class Motor {
@@ -133,14 +138,15 @@ public:
 
     MotorInfo info() const;
     MotorSnapshot snapshot() const;
-    bool ready() const;
     bool active() const;
 
     [[nodiscard]] int enable();
     [[nodiscard]] int disable();
-    [[nodiscard]] int clearFault();
     [[nodiscard]] int setCurrent(float ampere);
+    [[nodiscard]] int setCurrent(float ampere, std::uint64_t sampled_enable_generation);
     [[nodiscard]] int setTorque(float newton_meter);
+    [[nodiscard]] int setTorque(float newton_meter, std::uint64_t sampled_enable_generation);
+    int invalidateComputedEffort();
     [[nodiscard]] int setMit(const dm::MitCommand &command);
     [[nodiscard]] int setVelocity(float rad_s);
     [[nodiscard]] int setPositionVelocity(float rad, float max_rad_s);
@@ -148,29 +154,23 @@ public:
 
 private:
     friend class CanBus;
-    friend class Group;
     friend class skywalker::control::PositionMotor;
     friend class skywalker::control::VelocityMotor;
 
+    enum class AttemptKind : std::uint8_t { None, Enable, ClearFault };
     int validateConfig() const;
-    int stage(const Command &command, const void *producer = nullptr);
-    int bindProducer(const void *producer, float velocity_abs_max_rad_s, float temperature_max_c,
-                     std::uint32_t required_feedback, bool require_position_reference);
-    int checkProducerSafetyLocked() const;
-    bool readyLocked(std::uint64_t now_ms) const;
-    int setCurrentFrom(const void *producer, float ampere);
-    int setTorqueFrom(const void *producer, float newton_meter);
-    void rejectControl(int error);
+    int stage(const Command &command, const void *producer = nullptr, bool computed_effort = false,
+              std::uint64_t sampled_enable_generation = 0);
+    int bindProducer(const void *producer);
+    int setCurrentFrom(const void *producer, float ampere, std::uint64_t sampled_enable_generation);
+    int setTorqueFrom(const void *producer, float newton_meter, std::uint64_t sampled_enable_generation);
+    int invalidateComputedEffortFrom(const void *producer);
     StagedCommand copyStaged() const;
-    int requestEnable(std::uint64_t generation);
-    void requestDisable();
-    int requestClearFault();
-    void grantGroupActive(std::uint64_t generation);
+    int requestDisable();
     void markStarted();
     bool busStarted() const;
-    void markSafePrepared(std::uint64_t expected_stop_generation = 0);
-    void markEnableTxComplete(std::uint64_t generation, std::uint64_t completed_ms, std::uint64_t completed_order);
-    void markClearTxComplete(std::uint64_t generation, std::uint64_t completed_ms, std::uint64_t completed_order);
+    void markAttemptTxComplete(AttemptKind kind, std::uint64_t generation,
+                               std::uint64_t completed_ms, std::uint64_t completed_order);
     void markPrepared(std::uint64_t generation);
     void markStopped(StopProgress progress, int tx_error, std::uint64_t request_generation,
                      std::uint64_t completed_ms = 0, std::uint64_t completed_order = 0);
@@ -197,38 +197,28 @@ private:
     std::variant<dji::Config, dm::Config> config_;
     std::variant<DjiRuntime, DmRuntime> protocol_state_;
     CanBus *bus_ = nullptr;
-    Group *group_ = nullptr;
-    bool group_conflict_ = false;
     mutable struct k_spinlock lock_{};
     MotorSnapshot snapshot_{};
-    FaultInfo latched_fault_{};
     StagedCommand staged_{};
     const void *producer_ = nullptr;
-    struct ProducerSafety {
-        float velocity_abs_max_rad_s = 0.0f;
-        float temperature_max_c = 0.0f;
-        std::uint32_t required_feedback = 0;
-        bool require_position_reference = false;
-    } producer_safety_{};
     bool started_ = false;
-    bool safe_prepared_ = false;
-    bool safe_pending_ = false;
-    bool clear_pending_ = false;
-    bool enable_pending_ = false;
-    bool enable_tx_done_ = false;
-    bool safe_tx_done_ = false;
-    bool clear_tx_done_ = false;
-    std::uint64_t enable_requested_at_ms_ = 0;
-    std::uint64_t activated_ms_ = 0;
-    std::uint64_t enable_tx_completed_ms_ = 0;
-    std::uint64_t enable_tx_completed_order_ = 0;
-    std::uint64_t safe_tx_completed_ms_ = 0;
-    std::uint64_t safe_tx_completed_order_ = 0;
-    std::uint64_t safe_first_tx_completed_ms_ = 0;
-    std::uint64_t clear_tx_completed_ms_ = 0;
-    std::uint64_t clear_tx_completed_order_ = 0;
+    bool output_command_valid_ = false;
+    std::uint64_t cancellation_generation_ = 1;
+    std::uint64_t invalidated_effort_revision_ = 0;
+    std::uint64_t protocol_generation_ = 1;
+    AttemptKind attempt_ = AttemptKind::None;
+    bool attempt_tx_done_ = false;
+    bool probe_sent_ = false;
+    std::uint64_t attempt_started_ms_ = 0;
+    std::uint64_t attempt_tx_completed_ms_ = 0;
+    std::uint64_t attempt_tx_completed_order_ = 0;
+    std::uint64_t next_retry_ms_ = 0;
+    bool stop_pending_ = false;
+    bool stop_tx_done_ = false;
+    std::uint64_t stop_last_tx_ms_ = 0;
+    std::uint64_t stop_first_tx_ms_ = 0;
+    std::uint64_t stop_tx_completed_order_ = 0;
     std::uint64_t feedback_event_order_ = 0;
-    std::uint64_t feedback_stable_since_ms_ = 0;
 };
 
 } // namespace skywalker::motor

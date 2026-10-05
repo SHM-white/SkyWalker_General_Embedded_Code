@@ -47,7 +47,7 @@ private:
     bool was_online_ = false;
 };
 struct PeerOperatorState {
-    bool run_allowed = false, emergency_stop = false, clear_fault = false;
+    bool run_allowed = false, emergency_stop = false, clear_estop = false;
 };
 class OperatorControlConsumer {
 public:
@@ -64,7 +64,7 @@ public:
             (request.sender_boot_id != cleared_boot_ || request.clear_event_id != cleared_id_)) {
             cleared_boot_ = request.sender_boot_id;
             cleared_id_ = request.clear_event_id;
-            state.clear_fault = true;
+            state.clear_estop = true;
         }
         return state;
     }

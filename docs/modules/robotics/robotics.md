@@ -1,6 +1,6 @@
 # 机器人决策与执行模块
 
-机器人算法位于 include/robotics 与 lib/robotics。它把时间戳消息转换为带单位的命令，或把已授权目标转换为运动学和控制输入。板级设备、电机绑定、应用线程及本地恢复由 samples/ 与 applications/ 负责。
+机器人算法位于 include/robotics 与 lib/robotics。它把时间戳消息转换为带单位的命令，或把已授权目标转换为运动学和控制输入。板级设备、电机绑定和应用线程由 samples/ 与 applications/ 负责；协议恢复由 Motor/CAN 独立处理。
 
 ## 当前调用链
 
@@ -14,7 +14,7 @@
   → GimbalAxis / SwerveChassis / Motor / CanBus
 ~~~
 
-CommandArbiter 是同步策略核心，接收 CommandInputs 并返回 CommandDecision。CommandManager 是注册来源和后台调度服务，不直接接收 CommandInputs，也没有 update()。旧的 GlobalSafetyManager、GimbalLocalSafety、ChassisLocalSafety 与专用输入/决策类型已移除；应用执行器自己检查本地反馈、时间戳、恢复代次和硬件配置。
+CommandArbiter 是同步策略核心，接收 CommandInputs 并返回 CommandDecision。CommandManager 是注册来源和后台调度服务，不直接接收 CommandInputs，也没有 update()。旧的 GlobalSafetyManager、GimbalLocalSafety、ChassisLocalSafety 与专用输入/决策类型已移除；应用执行器检查原始输入年龄和硬件配置，持续提交目标；实际反馈只决定对应轴是否能够计算输出。
 
 ## 命令来源服务
 
@@ -24,19 +24,12 @@ CommandArbiter 是同步策略核心，接收 CommandInputs 并返回 CommandDec
 
 ## GimbalAxis
 
-GimbalAxis 封装单轴位置参考处理和 PositionMotor 调用，但不拥有底层 Motor / CanBus，不负责 enable、disable 或 CAN commit。应用完成 attach/start 和 begin 后，持续 poll 反馈；在输入新鲜、轴就绪并有新的运行授权时 reset，再显式使能。Active 周期调用 update 或 updateRate，成功后提交对应物理 CAN。
-
-- Continuous 拓扑要求固定零点单圈反馈，并使用 PositionReference::AbsoluteNearest。
-- Limited 拓扑要求已校准 DriverContinuous 坐标和机械角限位。
-- ready_for_enable 在电机 Active 时为 false 是正常现象；Active 与 feedback_healthy 应分别判断。
-- 错误时由调用者停对应 Motor 或 Group，并按新的有效输入和可信位置参考恢复。
-
-详细周期代码见[封装模块调用示例](../call-examples.md#9-gimbalaxis)与 samples/robotics/gimbal_control/src/main.cpp。
+持续保存机械目标，位置控制独立等待本轴反馈。Rate 时间轴不因驱动离线停止；实际反馈恢复后 PositionMotor 自动重置本轴 PID。Limited 轴保留必要机械范围和可信参考；没有全组 ready 或手动恢复准入。
 
 ## SwerveChassis 与功率限制
 
-SwerveChassis 是不访问设备的算法封装。它按 FL、FR、RL、RR 顺序接收四轮反馈和底盘命令，完成运动学与各模块控制计算；它不会绑定八台电机或提交 CAN。applications/sentry_chassis 中的 ChassisExecutor 与 DjiChassisHardware 完成这些工作。
+运动学持续解算，舵向与轮驱分别有效、分别初始化、分别计算。没有全模块对齐互锁、drive_ready 或 cos 缩速。轮驱速度控制不需要位置参考；舵向使用绝对角的本地短程展开，未知角度不参与翻转判断。
 
-ChassisPowerLimiter 根据测量功率、功率限额和缓冲能量计算 effort_scale，是台架启发式，不等于竞赛功率合规认证。当前 sentry_chassis 只有在 power_model_calibrated 且预算新鲜时才使用 limiter；默认标定开关关闭。
+功率限制保留真实预算和测量有效期，删除与电机恢复时刻比较的授权边界。各轴输出携带计算时执行版本，统一物理 CAN 发布者提交。
 
-完整调用示例见[封装模块调用示例](../call-examples.md#10-swervechassis-与-chassispowerlimiter)及 applications/sentry_chassis/src/chassis_executor.cpp。
+更多接口、协议与实板验收见[实施指南](../../dev/电机持续指令与独立自动恢复重构实施指南.md)。

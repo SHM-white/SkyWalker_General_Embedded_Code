@@ -51,7 +51,8 @@ inline skywalker::motor::dji::Config yawHardware() {
                                           .current_limit_a = calibration::small_yaw.effort_limit,
                                           .encoder_zero_ticks = yaw_encoder_zero_ticks,
                                           .current_mode_confirmed = connections_configured,
-                                          .timing = {20, 20, 30, 100}});
+                                          .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20,
+                                                     .enable_timeout_ms = 100, .retry_interval_ms = 100}});
 }
 inline skywalker::motor::dm::Config pitchHardware() {
     return skywalker::motor::dm::j4310Mit({.id = calibration::pitch.id,
@@ -60,7 +61,8 @@ inline skywalker::motor::dm::Config pitchHardware() {
                                            .velocity_max_rad_s = 30.0f,
                                            .torque_max_nm = 10.0f,
                                            .torque_limit_nm = calibration::pitch.effort_limit,
-                                           .timing = {50, 20, 50, 3000}});
+                                           .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20,
+                                                      .enable_timeout_ms = 3000, .retry_interval_ms = 100}});
 }
 
 // ManualCommandMapper already maps right_x to negative yaw and right_y to
@@ -88,7 +90,6 @@ inline constexpr skywalker::robotics::GimbalAxisConfig
 inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::Ampere;
-    c.safety = {calibration::small_yaw.velocity_limit_rad_s, 70.0f};
     c.reference = skywalker::control::PositionReference::DriverContinuous;
     c.loop.position = {.kp = 20.0f,
                        .ki = 0.5f,
@@ -124,7 +125,6 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
-    c.safety = {calibration::pitch.velocity_limit_rad_s, 60.0f};
     c.reference = skywalker::control::PositionReference::DriverContinuous;
     c.loop.position = {.kp = 0.8f,
                        .ki = 0.1f,
@@ -172,10 +172,10 @@ inline const skywalker::robotics::CommandManager::Config command_policy = [] {
     return c;
 }();
 inline const skywalker::robotics::GimbalExecutor::Config execution_policy{
-    .recovery = {command_timeout_ms, command_timeout_ms * 1000ULL},
+    .command_timeout_ms = command_timeout_ms,
+    .source_timeout_us = command_timeout_ms * 1000ULL,
     .permission_timeout_ms = 300,
     .max_cycle_us = 20000,
-    .fault_retry_ms = 100,
 };
 
 #ifdef CONFIG_COMMAND_GIMBAL_VISION_EXECUTE

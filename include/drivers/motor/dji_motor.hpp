@@ -22,7 +22,7 @@ struct Gm6020Options {
     std::uint16_t encoder_zero_ticks = 0;
     // 已确认电机固件工作在电流控制模式时设为 true。
     bool current_mode_confirmed = false;
-    // 该电机的反馈、命令、恢复和使能超时设置。
+    // 该电机的反馈、命令、协议超时和重试间隔。
     Timing timing{};
 };
 
@@ -33,7 +33,7 @@ struct M3508Options {
     float current_limit_a = 0.0f;
     // 电机轴转数与输出轴转数之比，必须为正。
     float gear_ratio = 19.0f;
-    // 该电机的反馈、命令、恢复和使能超时设置。
+    // 该电机的反馈、命令、协议超时和重试间隔。
     Timing timing{};
 };
 
@@ -44,7 +44,7 @@ struct M2006Options {
     float current_limit_a = 0.0f;
     // 电机轴转数与输出轴转数之比，必须为正。
     float gear_ratio = 36.0f;
-    // 该电机的反馈、命令、恢复和使能超时设置。
+    // 该电机的反馈、命令、协议超时和重试间隔。
     Timing timing{};
 };
 
@@ -61,7 +61,7 @@ struct Config {
     std::uint16_t encoder_zero_ticks = 0;
     // GM6020 固件的电流控制模式确认标志。
     bool current_mode_confirmed = false;
-    // 该电机的反馈、命令、恢复和使能超时设置。
+    // 该电机的反馈、命令、协议超时和重试间隔。
     Timing timing{};
 };
 

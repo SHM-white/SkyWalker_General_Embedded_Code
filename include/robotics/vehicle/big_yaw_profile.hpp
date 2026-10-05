@@ -6,12 +6,11 @@ inline motor::dm::Config bigYawHardware() {
     // TODO(hardware): confirm MIT mode and PMAX/VMAX/TMAX stored in the drive.
     return motor::dm::j4310Mit({.id = big_yaw.id, .master_id = big_yaw.master_id,
         .position_max_rad = 12.5f, .velocity_max_rad_s = 30, .torque_max_nm = 10,
-        .torque_limit_nm = big_yaw.effort_limit, .timing = {50, 20, 50, 3000}});
+        .torque_limit_nm = big_yaw.effort_limit, .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100}});
 }
 inline control::VelocityMotor::Config bigYawMotorConfig() {
     control::VelocityMotor::Config c{};
     c.effort_unit = control::EffortUnit::NewtonMeter;
-    c.safety = {10, 60};
     // TODO(tuning): identify the loaded big-Yaw inertia and tune the velocity loop.
     c.loop.regulator.feedback = {.kp = 0.02f, .ki = 0.15f, .kd = 0,
         .derivative_tau_s = 0, .integral_min = -0.3f, .integral_max = 0.3f,

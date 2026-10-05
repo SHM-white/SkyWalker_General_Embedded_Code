@@ -42,6 +42,7 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
     case MessageId::ChassisControl: {
         RemoteChassisControl c{};
         ret = InterBoardCodec::decodeChassisControl(m, p, n, c);
+        // Repeated transport frames must not renew the producer's command age.
         if (ret == 0 &&
             (!control_.stamp.valid || sequenceAfter(c.command.stamp.sequence, control_.command.stamp.sequence)))
             control_ = c;
@@ -63,6 +64,7 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
     case MessageId::BigYawRequest: {
         BigYawRequest r{};
         ret = InterBoardCodec::decodeBigYawRequest(m, p, n, r);
+        // Use the request producer sequence, not the transport frame sequence.
         if (ret == 0 && (!big_yaw_request_.stamp.valid ||
             sequenceAfter(r.stamp.sequence, big_yaw_request_.stamp.sequence))) big_yaw_request_ = r;
         break;

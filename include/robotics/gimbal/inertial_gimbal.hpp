@@ -23,12 +23,13 @@ struct InertialGimbalOutput {
     float head_yaw_rad = 0, head_pitch_rad = 0;
     float yaw_error_rad = 0, pitch_error_rad = 0;
     bool stabilization_valid = false;
+    bool yaw_output_valid = false, pitch_output_valid = false;
 };
 
 // One execution-thread owner. Adapts a head inertial goal into joint commands;
 // mechanical GimbalAxis remains responsible for motor loops and hard limits.
-// A changed IMU/motor reference creates a new session and rejects pre-session
-// inputs. This object never enables a motor or submits a physical CAN bus.
+// Goals survive motor recovery. IMU reference and joint measurements are
+// mathematical inputs, not authorization. No motor or CAN ownership.
 class InertialGimbalAdapter {
 public:
     struct Config {
@@ -47,7 +48,6 @@ public:
     explicit InertialGimbalAdapter(const Config &config) : config_(config) {}
     InertialGimbalOutput update(const InertialGimbalInputs &, core::TimeUs now_us);
     InertialGimbalOutput suspend(core::TimeUs now_us, WaitReason reason, int error = 0);
-    std::uint32_t generation() const { return generation_; }
 
 private:
     InertialGimbalOutput publish(core::TimeUs, WaitReason, int, bool active = false);
@@ -55,9 +55,8 @@ private:
     Config config_;
     InertialGimbalOutput output_{};
     core::OrientationReference reference_{};
-    std::uint64_t yaw_reference_ = 0, pitch_reference_ = 0;
-    core::TimeUs boundary_us_ = 0, previous_us_ = 0;
-    std::uint32_t generation_ = 0, sequence_ = 0;
+    core::TimeUs previous_us_ = 0;
+    std::uint32_t sequence_ = 0;
     float yaw_goal_rad_ = 0, pitch_goal_rad_ = 0;
     ControlSource goal_source_ = ControlSource::None;
     GimbalMode goal_mode_ = GimbalMode::Disabled;

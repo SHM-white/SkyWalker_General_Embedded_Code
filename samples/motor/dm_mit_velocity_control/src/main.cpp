@@ -37,8 +37,7 @@ float targetVelocityRadS() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(uart) || !device_is_ready(can))
-        return -ENODEV;
+    if (!device_is_ready(can)) return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dm::j4310Mit({
         .id = 1,
         .master_id = 0x11,
@@ -46,7 +45,7 @@ int main() {
         .velocity_max_rad_s = 30.0f,
         .torque_max_nm = 10.0f,
         .torque_limit_nm = 1.0f,
-        .timing = {50, 20, 50, 3000},
+        .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::VelocityMotor
@@ -88,71 +87,49 @@ int main() {
                      return config;
                  }();
                  config.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
-                 config.safety = {kVelocityCutoffRadS, kTemperatureCutoffC};
+
                  return config;
              }()};
     static Vofa vofa{};
-    vofa_init(&vofa, uart);
+    const int vofa_error = vofa_init(&vofa, uart);
     int ret = bus.attach(drive);
-    if (ret == 0)
-        ret = bus.start();
-    if (ret == 0)
-        ret = skywalker::samples::dm::enableMotorPower();
-    if (ret == 0)
-        k_sleep(K_MSEC(1500));
-    if (ret == 0)
-        ret = axis.configure();
-    if (ret < 0) {
-        LOG_ERR("configuration blocked: %d", ret);
-        return ret;
-    }
-    const auto ready_deadline = k_uptime_get() + 3000;
-    while (!drive.ready() && k_uptime_get() < ready_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.ready())
-        return -ETIMEDOUT;
-    ret = axis.reset(); // Check speed, temperature and reference before enabling.
-    if (ret == 0)
-        ret = drive.enable();
-    if (ret < 0)
-        return ret;
-    const auto active_deadline = k_uptime_get() + 5000;
-    while (!drive.active() && k_uptime_get() < active_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.active()) {
-        (void)drive.disable();
-        return -ETIMEDOUT;
-    }
-    auto previous_ms = k_uptime_get();
+    if (ret == 0) ret = bus.start();
+    if (ret == 0) ret = skywalker::samples::dm::enableMotorPower();
+    if (ret == 0) ret = axis.configure();
+    if (ret < 0) return ret;
+    const auto started_ms = k_uptime_get();
+    auto previous_ms = started_ms;
+    std::int64_t next_log_ms = 0;
+    int last_call_error = 0;
     for (;;) {
         k_sleep(K_MSEC(kControlPeriodMs));
         const auto now = k_uptime_get();
-        const float dt_s = float(now - previous_ms) / 1000.0f;
+        const float dt = float(now - previous_ms) / 1000;
         previous_ms = now;
-        if (!drive.active())
-            return -EHOSTDOWN;
+        const bool requested = true;
+        const int request_error = requested ? drive.enable() : drive.disable();
+        if (request_error < 0) last_call_error = request_error;
         const float target = targetVelocityRadS();
-        ret = axis.update(target, dt_s);
-        if (ret == 0)
-            ret = bus.commit().error;
-        if (ret < 0) {
-            (void)drive.disable();
-            LOG_ERR("cycle stopped: %d", ret);
-            return ret;
-        }
+        if (requested) { const int error = axis.update(target, dt); if (error < 0) last_call_error = error; }
+        const int commit_error = bus.commit().error;
+        if (commit_error < 0) last_call_error = commit_error;
         const auto data = axis.telemetry();
-        const auto &feedback = data.motor.feedback;
-        const auto &output = data.output;
-        const float channels[8] = {
-            target,
-            output.velocity_reference_rad_s,
-            feedback.velocity_rad_s,
-            output.velocity_error_rad_s,
-            output.effort_command,
-            feedback.torque_nm,
-            data.motor.native_mos_temperature_c,
-            feedback.temperature_c,
-        };
-        vofa_send(&vofa, channels, 8);
+        const auto &f = data.motor.feedback;
+        const auto &o = data.output;
+        if (vofa_error == 0) {
+            const float channels[12] = {target, o.velocity_reference_rad_s, f.velocity_rad_s,
+                o.filtered_velocity_rad_s, o.velocity_error_rad_s, o.regulator.feedback.p,
+                o.regulator.feedback.i, o.regulator.feedback.d, o.regulator.feedforward,
+                requested && data.output_valid ? o.effort_command : 0,
+                float(data.output_valid && requested), float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0)};
+            (void)vofa_send(&vofa, channels, 12);
+        }
+        if (now >= next_log_ms) {
+            next_log_ms = now + 1000;
+            LOG_INF("run=%d state=%u target=%.3f seq=%llu output=%d wait=%u call=%d",
+                requested, unsigned(data.motor.state), double(target),
+                static_cast<unsigned long long>(data.target_sequence), data.output_valid && requested,
+                unsigned(data.issue), last_call_error);
+        }
     }
 }

@@ -1,70 +1,88 @@
-# 04 DJI CAN 电机驱动
+# DJI CAN 电机驱动
 
-实现位置：`drivers/motor/{motor,can_bus,group}.cpp`、`drivers/motor/dji/dji_protocol.cpp`，公开接口位于 `include/drivers/motor/{dji_motor,motor,can_bus,group}.hpp`。电机型号、ID、限幅和时序由 C++ 配置；设备树只提供物理 CAN 等板级设备。
+实现位于 `drivers/motor/{motor,can_bus,group}.cpp` 和 `drivers/motor/dji/dji_protocol.cpp`；接口位于 `include/drivers/motor/`。型号、ID、限幅和时序由 C++ 配置，设备树提供物理 CAN 设备。
 
-**调用路线：** `dji::Config` → `Motor` → 所属物理 `CanBus` → `attach/start` → `ready/enable` → `setCurrent` 或闭环控制器 `update` → 每周期 `commit`。Group 只用于需要联动停机的成员。完整异步时序见 [电机工作链路](../../guides/motor-workflow.md)，与遥控/机器人层的联动见 [模块联动](../../applications/module-integration.md)。
+调用顺序为配置 → Motor → CanBus attach/start → 持续 enable 与 setter/update → commit。电机不存在或短暂离线时仍接收目标；恢复后自动执行最新有效目标。Group 是批量启停工具，每台电机独立执行和恢复。完整并发说明见[电机工作链路](../../guides/motor-workflow.md)。
 
-## 1. 型号与 CAN ID
+## 型号、ID 和电流换算
 
-| 型号 | 反馈 ID | 命令 ID（ID 1–4 / 高 ID） | 电机 ID | 协议满幅电流 | 温度反馈 |
+| 型号 | 反馈 ID | 命令 ID：ID 1–4 / 高 ID | 电机 ID | 协议满幅电流 | 温度反馈 |
 | --- | ---: | ---: | ---: | ---: | --- |
 | M3508-C620 | `0x200 + id` | `0x200` / `0x1FF` | 1–8 | 20 A | 有效 |
 | M2006-C610 | `0x200 + id` | `0x200` / `0x1FF` | 1–8 | 10 A | 无效 |
 | GM6020 current | `0x204 + id` | `0x1FE` / `0x2FE` | 1–7 | 3 A | 有效 |
 
-ID 1–4 使用低命令帧的 slot 0–3，ID 5 起使用高命令帧的 slot 0–3。每个 8 字节命令帧包含 4 个 big-endian `int16`。`dji::describe(config, descriptor)` 可查询反馈 ID、命令 ID、slot、协议满幅、配置限幅和减速比；CAN 设备由 `CanBus` 持有，应用不必拼帧或手动分配 slot。
+ID 1–4 映射到低命令帧的 slot 0–3，ID 5 起映射到高命令帧的 slot 0–3。一个 8 字节命令帧包含四个 big-endian `int16`。`dji::describe()` 提供反馈 ID、命令 ID、slot、协议满幅和减速比。
 
-## 2. C++ 配置与共享总线
+量化公式为 `round(目标安培 × 原始满幅 / 协议满幅安培)`。M2006 原始满幅为 10000，其他型号为 16384。3508 的 1 A 约为 819，字节为 `03 33`；−1 A 为 −819，16 位补码为 `FC CD`。ID3 使用 slot 2，即字节 4–5。一个电机离线时只有对应槽位为零，其他槽位正常控制。
 
-通过 `dji::m3508(options)`、`dji::m2006(options)` 或 `dji::gm6020(options)` 生成 `dji::Config`，再构造 `motor::Motor`。同一物理 CAN 上的电机交给同一个 `motor::CanBus`，包括 DJI 与 DM 混接。下面的两个型号使用同一条 CAN 和 `0x200` 命令帧：
+## 配置与周期调用
 
 ```cpp
 using namespace skywalker;
-
-static motor::Motor m3508{motor::dji::m3508({
-    .id = 1, .current_limit_a = 0.3f,
-    .gear_ratio = 3591.0f / 187.0f, .timing = {20, 20, 30, 100},
+static motor::Motor drive{motor::dji::m3508({
+    .id = 3,
+    .current_limit_a = 0.3f,
+    .gear_ratio = 3591.0f / 187.0f,
+    .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20,
+               .enable_timeout_ms = 100, .retry_interval_ms = 100},
 })};
-static motor::Motor m2006{motor::dji::m2006({
-    .id = 2, .current_limit_a = 0.3f,
-    .gear_ratio = 36.0f, .timing = {20, 20, 30, 100},
-})};
-static motor::CanBus can1{DEVICE_DT_GET(DT_NODELABEL(can1))};
+static motor::CanBus bus{DEVICE_DT_GET(DT_NODELABEL(can1))};
 
-int ret = can1.attach(m3508, m2006);
-if (ret == 0)
-    ret = can1.start();
+int initialize() {
+    const int error = bus.attach(drive);
+    return error < 0 ? error : bus.start();
+}
+
+// run_requested 由用户操作和输入有效期决定，电机状态不改变它。
+void tick(bool run_requested, float current_a) {
+    if (run_requested) {
+        recordCallError(drive.enable());
+        recordCallError(drive.setCurrent(current_a));
+    } else {
+        recordCallError(drive.disable());
+    }
+    recordCallError(bus.commit().error);
+}
 ```
 
-`gear_ratio` 是电机轴转数与输出轴转数之比，应按实物减速机构填写。`current_limit_a` 必须为正且不超过对应协议满幅。GM6020 配置还需填写 `encoder_zero_ticks`（0–8191）并在确认固件处于电流环后设置 `current_mode_confirmed = true`。样例记录的电流环固件版本为 `>= 1.0.11.2`；现场仍应核对实际固件手册和电机设置。
+`recordCallError()` 表示应用自己的错误记录入口。同一物理 CAN 上所有 DJI/DM 电机使用一个 CanBus，由统一发布者协调 setter/update 与每周期一次 commit。
 
-`CanBus::start()` 建立接收路由并启动异步 I/O 线程，先准备安全输出。等待 `Motor::ready()` 表示安全准备已完成且反馈新鲜、稳定；使能前仍需由应用检查机械状态、速度和温度。独立电机调用 `Motor::enable()`；若需联动，应在总线启动前创建 `motor::Group group{m3508, m2006}`，所有成员挂接完毕后再调用 `start()`，随后通过 `group.enable()` 使能。进入组后，必须通过组进行使能、停机和清故障。`enable()` 返回 0 只表示请求被接受，运动命令须等 `active()` 为真后写入。
+`enable()` 保存持续运行意图，重复调用成功。setter 返回 0 表示目标已保存，不表示设备已经运动。`commit()` 返回 0 表示整条总线最新命令已发布，Recovering 期间也接受发布。命令过期不被重复 commit 续期。
 
-`setCurrent(ampere)` 将目标写入电机命令缓存；`CanBus::commit()` 发布这一周期的命令，实际发帧由 I/O 线程完成。返回的 `CommitResult.sequence` 是提交序号，`error == 0` 不代表 CAN 已发送成功。查看 `CanBus::status().last_tx` 和 `Motor::snapshot()` 追踪发送、反馈与停机进度。多个独立 Group 可以共享一个 `CanBus`，即使其成员使用同一命令帧，也会按 slot 合成完整帧。
+非有限值、超出配置限幅或命令类型不匹配分别返回调用错误，不锁存电机故障。`current_limit_a` 必须为正且不超过协议满幅；`gear_ratio` 是电机轴转数除以输出轴转数。
 
-## 3. 反馈、参考点与故障
+GM6020 使用实际固定零点 `encoder_zero_ticks`，范围 0–8191，并在确认电流控制模式后填写 `current_mode_confirmed=true`。设备持久模式必须与代码匹配。
 
-`Motor::snapshot()` 中的 `feedback.valid` 和 `timestamp_ms` 标明哪些字段可用及最后接收时间；`feedback_fresh` 会按配置的反馈超时实时计算。`position_rad` 是按减速比换算的连续输出轴位置，初次有效反馈以 0 为参考。`velocity_rad_s` 是输出轴速度；`current_a` 是解码后的实际电流。M2006 不声明 `FeedbackTemperature`。GM6020 的 1:1 固定零点配置还提供 `FeedbackAbsolutePosition`，`absolute_position_rad` 位于 `[-π, π)`。原始编码器、转速及电流字段可从 `native_dji_feedback` 读取，但先确认 `native_dji_feedback_valid`。
+## 反馈与位置参考
 
-反馈中断会令连续坐标参考失效；在重新定位后，可于未使能且反馈新鲜时调用 `reseedPosition(known_position_rad)`。位置控制应检查 `position_reference_valid` 与 `reference_generation`，不能沿用失效前的坐标。
+快照包含 `enabled_requested`、实际 `state`、`feedback_fresh`、最近命令序号／写入时间和历史错误。`active()` 是观测实际执行的辅助查询，上层不得用它阻止目标提交。
 
-反馈过期、命令超时、控制器故障或命令无效时，驱动撤销输出许可并请求安全帧；共享物理 CAN 故障会影响该总线所有电机，单电机故障则牵连其所在 Group。`disable()` 也是异步安全请求，`snapshot().stop.progress` 可区分 Pending 与已完成发送。对处于 `MotorState::Fault` 的独立电机显式调用 `clearFault()`，组内电机调用 `group.clearFault()`；等待重新 `ready()` 后才可再次使能。清故障不会自动使能。暂时离线的电机需等待反馈和安全准备恢复，再检查是否可使能。
+`position_rad` 是连续输出轴位置，首帧建立初始坐标；`velocity_rad_s` 为输出轴速度，`current_a` 为实际电流。GM6020 的 1:1 固定零点配置提供 `absolute_position_rad`，范围 `[-π, π)`。检查 `feedback.valid` 后使用字段，检查 `native_dji_feedback_valid` 后使用原始反馈。
 
-## 4. 帧格式
+连续位置在反馈中断后可能失去可信参考。速度环继续恢复；连续位置轴等待可信坐标，可显式调用 `reseedPosition(known_position_rad)`。GM6020 的绝对角控制可从新的单圈反馈恢复，无需重新定义多圈零点。
 
-反馈帧要求标准 CAN、DLC=8：
+反馈帧：
 
 ```text
-data[0..1]  encoder      big-endian uint16
-data[2..3]  speed_rpm    big-endian int16
-data[4..5]  current_raw  big-endian int16
-data[6]     temperature  uint8
-data[7]     保留
+data[0..1] encoder      big-endian uint16
+data[2..3] speed_rpm    big-endian int16
+data[4..5] current_raw  big-endian int16
+data[6]    temperature uint8
+data[7]    reserved
 ```
 
-命令帧由 4 个 big-endian `int16` 组成。驱动按型号协议满幅将安培值量化；非有限值、超出软件限幅或型号协议限幅的命令会被拒绝。`dji_protocol.hpp` 中的 `decodeFeedback()` 和 `buildCommandFrame()` 是底层帧函数，通常由共享总线使用。
+## 停止与自动恢复
 
-## 5. 配置与上机
+`disable()` 在运行意图真→假时取消此前命令和协议操作；持续重复已停止的 disable 不推进版本，也不擦掉停止后新写入的目标。新目标仍须后续 enable 才执行。
+
+反馈掉线影响本轴实际输出，意图和最新目标保持。新反馈到达后本轴自动恢复；软件 PID 重新建立本轴历史，使用恢复后的反馈计算输出。两参数 `setCurrent(a, sampled_enable_generation)` 用于反馈计算得到的电流，防止掉线前的计算结果直接跨恢复发送；直接电流命令用单参数接口。
+
+CanBus 自行处理传输故障。真实总线故障会影响该物理总线上的输出，其他总线和上层目标生产继续。`BusStatus.last_recovery` 保存重启前错误；当前 Running 状态与历史错误分别理解。
+
+`StopProgress` 表示软件停止帧的发送进度。软件返回成功、CAN TX 完成和机械停止是三个不同事实；失能后机构仍可能自由运动。
+
+## 编译配置
 
 ```conf
 CONFIG_CAN=y
@@ -72,19 +90,6 @@ CONFIG_SKYWALKER_DRIVER_MOTOR=y
 CONFIG_SKYWALKER_MOTOR_DJI=y
 ```
 
-`Timing{feedback_timeout_ms, command_timeout_ms, recovery_stable_ms, enable_timeout_ms}` 随每台电机配置；DJI 默认值分别为 20、10、20、100 ms。共享总线容量、接收队列和 I/O 线程参数由 `CONFIG_SKYWALKER_MOTOR_MAX_MOTORS_PER_BUS`、`CONFIG_SKYWALKER_MOTOR_MAX_BUSES`、`CONFIG_SKYWALKER_MOTOR_RX_QUEUE_DEPTH`、`CONFIG_SKYWALKER_MOTOR_IO_STACK_SIZE` 等通用 Kconfig 项控制。控制周期应明显小于命令超时；调试断点会让反馈和命令过期。
+Timing 字段依次为反馈超时、命令超时、协议超时、重试间隔。默认 20、10、100、100 ms；配置使用具名字段。控制周期应短于命令超时，断点暂停后上层恢复更新即可继续。
 
-首次上机：
-
-1. 先运行 [can_smoke](../../../samples/motor/can_smoke/) 确认 CAN 收帧、终端电阻和波特率。
-2. 核对型号、CAN 口、电机 ID、减速比、机械方向与 `describe()` 给出的 slot。
-3. GM6020 填入实际固定零点，并确认电流环；先设低电流限幅。
-4. 等待安全准备和新鲜反馈，检查静止及温度后再使能。
-5. 先发零输出与极小正负电流；停机后查看安全帧的异步完成状态。
-
-相关样例：[dji_unified](../../../samples/motor/dji_unified/)、[dji_speed_control](../../../samples/motor/dji_speed_control/)、[dji_position_control](../../../samples/motor/dji_position_control/)、[m2006_speed_control](../../../samples/motor/m2006_speed_control/) 和 [mixed_topology](../../../samples/motor/mixed_topology/)。
-
-## 完整工作链路与并发约定
-
-见 [17 电机工作链路](../../guides/motor-workflow.md) 的模块调用图、完整调用示例和故障时序，或在 [浏览器](../../architecture-browser/index.html#motor-workflow) 中逐步查看。业务线程数量不固定；每个控制器保持单写入方，共享 CAN 的命令发布需协调。发送候选把帧、批次与操作代次绑定，反馈间断先撤销旧许可，快速恢复重新建立稳定窗口，锁存 Fault 不因后续通信恢复而自动清除。公开 setter/update/commit 调用方式保持不变。
-\n\n更多对象生命周期与完整调用顺序见[封装模块调用示例](../../../call-examples.md)。\n
+样例：[recovery](../../../samples/motor/recovery/)、[dji_speed_control](../../../samples/motor/dji_speed_control/)、[dji_position_control](../../../samples/motor/dji_position_control/)、[mixed_topology](../../../samples/motor/mixed_topology/)。

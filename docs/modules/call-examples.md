@@ -4,83 +4,40 @@
 
 ## 1. Motor、Group、CanBus
 
-一条物理 CAN 只创建一个 CanBus。先构造电机与机械故障域 Group，再 attach 所有端点并 start 总线。控制器或 setter 暂存目标；每个物理 CAN 的发布者在完成本周期全部写入后调用一次 commit。
+初始化构造合法 Motor 配置，attach 全部成员，再 start 物理总线。Group 仅批量启停，成员不需要共同在线。
 
 ~~~cpp
-#include <drivers/motor/can_bus.hpp>
-#include <drivers/motor/group.hpp>
-
-using namespace skywalker;
-
-static motor::Motor yaw{motor::dji::m3508({
-    .id = 1, .current_limit_a = 0.3f, .gear_ratio = 19.2032f,
-    .timing = {20, 20, 30, 100},
-})};
-static motor::Motor pitch{motor::dji::m2006({
-    .id = 2, .current_limit_a = 0.3f, .gear_ratio = 36.0f,
-    .timing = {20, 20, 30, 100},
-})};
-static motor::Group axes{yaw, pitch};
-static motor::CanBus bus{DEVICE_DT_GET(DT_NODELABEL(can1))};
-
-int initialize() {
-    int ret = bus.attach(yaw, pitch);
-    if (ret == 0) ret = bus.start();
-    return ret;
+if (run_requested) {
+    const int enabled = axes.enable();
+    const int first = left.setCurrent(left_current_a);
+    const int second = right.setCurrent(right_current_a);
+    // 分别记录调用错误，继续处理其他成员。
+} else {
+    axes.disable();
 }
-
-int updateAuthorizedTargets(float yaw_a, float pitch_a) {
-    if (!axes.active())
-        return -EAGAIN;
-    int ret = yaw.setCurrent(yaw_a);
-    if (ret == 0) ret = pitch.setCurrent(pitch_a);
-    if (ret == 0) ret = bus.commit().error;
-    if (ret < 0) axes.disable();
-    return ret;
-}
-
-// 仅在新的、明确的使能请求中调用；不在每个控制周期重复请求。
-int requestEnable() {
-    return axes.ready() ? axes.enable() : -EAGAIN;
-}
+const auto publication = bus.commit();
+const auto counts = axes.status();
 ~~~
 
-Group 成员不能通过 Motor 单独 enable/disable/clearFault。disable 会先关闭软件输出许可，安全帧由 CAN I/O 线程异步发送。详见 [DJI](drivers/motor/motor-dji.md)、[达妙](drivers/motor/motor-dm.md) 与[完整电机链路](../guides/motor-workflow.md)。
+enable 返回 0 表示意图保存，setter 返回 0 表示合法目标接受，不表示机械已运动。离线/故障/恢复不拒绝目标，底层独立重试。明确停止取消旧命令；总线恢复不撤销输入意图。
 
 ## 2. VelocityMotor 与 PositionMotor
 
-控制器绑定唯一 Motor 命令生产者。调用顺序为 attach/start、configure、等待 drive.ready、reset、显式 enable、等待 active；每周期先 update，再 commit。update 不会替应用提交 CAN。
+attach/start 后 configure，然后持续 update，不使用 ready/preflight 或 active 门控。
 
 ~~~cpp
-static motor::Motor drive{motor::dji::gm6020({
-    .id = 4, .current_limit_a = 3.0f, .encoder_zero_ticks = 0,
-    .current_mode_confirmed = true, .timing = {20, 20, 20, 100},
-})};
-static motor::CanBus bus{DEVICE_DT_GET(DT_NODELABEL(can1))};
-
-// makeVelocityConfig 包含经台架整定的 control_motor_velocity_config、
-// Ampere effort 单位，以及速度/温度安全限值；参照链接样例定义。
-static control::VelocityMotor axis{drive, makeVelocityConfig()};
-
-int configureAxis() {
-    int ret = bus.attach(drive);
-    if (ret == 0) ret = bus.start();
-    if (ret == 0) ret = axis.configure();
-    return ret;
+if (run_requested) {
+    (void)drive.enable();
+    const int accepted = axis.update(target_rad_s, dt_s);
+} else {
+    (void)drive.disable();
 }
-
-int velocityTick(float target_rad_s, float measured_dt_s) {
-    if (!drive.active())
-        return -EAGAIN;
-    int ret = axis.update(target_rad_s, measured_dt_s);
-    if (ret == 0) ret = bus.commit().error;
-    if (ret < 0) (void)drive.disable();
-    const auto telemetry = axis.telemetry(); // 保留 valid/error 与 effort_unit
-    return ret;
-}
+const auto sent = bus.commit();
+const auto telemetry = axis.telemetry();
+// telemetry.target_sequence / output_valid / issue 分别观察目标与实际计算。
 ~~~
 
-对位置控制器，将 Config 改为 PositionMotor::Config，设定 PositionReference，并调用 axis.update(target_position_rad, dt_s)。reset 必须在失能、反馈新鲜且参考有效时完成。loop 配置不可用默认空值代替，effort_abs_max 不得超过电机硬件限幅。配置和参考模式见[电机控制器文档](control/motor-control.md)，运行样例见 samples/motor/dji_speed_control 与 dji_position_control。
+普通离线等待返回 0。恢复首周期自动从反馈初始化并提交带执行版本的零输出。有限异常周期跳过积分，不撤销用户意图。位置参考模式见[控制器文档](control/motor-control.md)。
 
 ## 3. ImuReceiver
 
@@ -196,7 +153,7 @@ communication::InterBoardEndpoint::Snapshot readPeer() {
 }
 ~~~
 
-底盘端把角色改为 ChassisController。端点按配置的命令与心跳超时发布 online/error；应用仍需检查 command、constraint、feedback 各自的时间戳和接收方 boot/generation。对象和 DMA 在所有线程期间保持存活。双主控使用细节见[模块联动](../applications/module-integration.md)。
+底盘端把角色改为 ChassisController。端点按配置的命令与心跳超时发布 online/error；应用仍需检查 command、constraint、feedback 各自的时间戳和接收方 boot 与原始输入年龄。对象和 DMA 在所有线程期间保持存活。双主控使用细节见[模块联动](../applications/module-integration.md)。
 
 ## 7. VisionReceiver
 
@@ -234,41 +191,31 @@ void visionTick() {
 
 ## 9. GimbalAxis
 
-GimbalAxis 封装单轴位置参考与运动转换，但由调用方管理 Motor 和 CanBus 生命周期。初始化后持续 poll；业务许可满足、反馈健康、ready_for_enable 为真且收到新命令后，reset 并显式 enable；active 时 update，再 commit。
+GimbalAxis 负责单轴机械目标与范围；调用方管理运行意图和 CAN 发布。本轴没有反馈不阻断其他轴。
 
 ~~~cpp
-robotics::GimbalAxis axis(
-    drive, position_motor_config, gimbal_axis_config);
-
-int ret = bus.attach(drive);
-if (ret == 0) ret = bus.start();
-if (ret == 0) ret = axis.begin();
-
-const auto readiness = axis.poll(now_ms);
-if (authorized && readiness.feedback_healthy &&
-    readiness.ready_for_enable && drive.ready()) {
-    ret = axis.reset();
-    if (ret == 0) ret = drive.enable();
+if (run_requested) {
+    (void)group.enable();
+    const int yaw_result = yaw.updateRate(yaw_rate_rad_s, dt_s);
+    const int pitch_result = pitch.updateRate(pitch_rate_rad_s, dt_s);
+} else {
+    group.disable();
 }
-if (drive.active()) {
-    ret = axis.update(
-        {robotics::GimbalMode::Rate, 0.0f, requested_rate_rad_s},
-        robotics::SafetyAction::Active, dt_s);
-    if (ret == 0) ret = bus.commit().error;
-    if (ret < 0) (void)drive.disable();
+const auto yaw_publish = yaw_bus.commit();
+if (split_buses) {
+    const auto pitch_publish = pitch_bus.commit();
 }
 ~~~
 
-同 Group 的电机需改用 Group 的 enable/disable/clearFault 管理生命周期。GimbalAxis 不会自动停机、清故障或提交另一条 CAN。位置 reference、限位和完整双轴样例见[机器人模块文档](robotics/robotics.md)和 samples/robotics/gimbal_control。
+poll 只观测/准备配置允许的可信参考，不产生启动许可。业务 Hold 可显式 reset 获取本轴位置；协议恢复不调用该操作重新定义目标。
 
 ## 10. SwerveChassis 与 ChassisPowerLimiter
 
-SwerveChassis 是纯计算侧封装，反馈由硬件适配器组装。调用者先 validate/reset，再按周期传入命令、反馈和测得 dt_s。
+SwerveChassis 是纯计算侧封装，反馈由硬件适配器组装。调用者先 validate，再持续传入命令、逐轴有效反馈和测得 dt_s，不等待全部设备上线。
 
 ~~~cpp
 robotics::SwerveChassis chassis(chassis_config);
 int ret = chassis.validate();
-if (ret == 0) ret = chassis.reset(feedback);
 
 robotics::ChassisOutput output{};
 if (ret == 0)

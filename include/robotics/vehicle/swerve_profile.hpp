@@ -11,7 +11,6 @@ inline SwerveChassis::Config swerveConfig() {
     c.kinematics.max_wheel_velocity_m_s = 3.0f;
     c.kinematics.stationary_epsilon_m_s = 0.01f;
     c.kinematics.resume_velocity_m_s = 0.02f;
-    c.require_all_modules_aligned = true;
     for (std::size_t i = 0; i < 4; ++i) {
         auto &m = c.modules[i];
         m.wheel_radius_m = wheel_radius_m;

@@ -1,67 +1,73 @@
-# 05 达妙 DM CAN 电机驱动
+# 达妙 DM CAN 电机驱动
 
-实现位置：`drivers/motor/{motor,can_bus,group}.cpp`、`drivers/motor/dm/dm_protocol.cpp`；公开接口位于 `include/drivers/motor/{dm_motor,dm_protocol,motor,can_bus,group}.hpp`。当前支持 J4310-2EC-V1.1，电机配置在 C++ 中构造，设备树只提供物理 CAN、电源控制等板级设备。
+实现位于 `drivers/motor/{motor,can_bus,group}.cpp` 和 `drivers/motor/dm/dm_protocol.cpp`；接口位于 `include/drivers/motor/`。当前支持 J4310-2EC-V1.1。配置在 C++ 中构造，设备树提供物理设备。
 
-**调用路线：** `dm::Config` → `Motor` → 所属物理 `CanBus` → `attach/start` → 等待反馈、显式 `enable` → 原生 setter 或 MIT 软件闭环 `update` → 每周期 `commit`。需要共同停机的成员先建 Group。完整异步时序见 [电机工作链路](../../guides/motor-workflow.md)，跨模块例子见 [模块联动](../../applications/module-integration.md)。
+调用顺序为配置 → Motor → CanBus attach/start → 持续 enable 与 setter/update → commit。目标提交不等待电机反馈。掉线、握手和真实驱动故障期间，上层继续提交；底层逐电机自动重试、清错和使能。详细并发约定见[电机工作链路](../../guides/motor-workflow.md)。
 
-## 1. 控制模式与 C++ 配置
+## 模式和配置
 
-达妙电机有 MIT、位置-速度、速度三种持久化控制模式。固件中的模式必须与电机调试助手中的实际设置一致，分别用 `dm::j4310Mit()`、`dm::j4310PositionVelocity()`、`dm::j4310Velocity()` 创建 `dm::Config`：
+持久模式须与电机调试助手一致，分别用 `dm::j4310Mit()`、`j4310PositionVelocity()`、`j4310Velocity()` 创建配置。
 
 ```cpp
 using namespace skywalker;
-
 static motor::Motor drive{motor::dm::j4310Mit({
     .id = 1, .master_id = 0x11,
     .position_max_rad = 12.5f,
     .velocity_max_rad_s = 30.0f,
     .torque_max_nm = 10.0f,
     .torque_limit_nm = 1.0f,
-    .timing = {50, 20, 50, 3000},
+    .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20,
+               .enable_timeout_ms = 3000, .retry_interval_ms = 100},
 })};
-static motor::CanBus can1{DEVICE_DT_GET(DT_NODELABEL(can1))};
-
-int ret = can1.attach(drive);
-if (ret == 0)
-    ret = can1.start();
+static motor::CanBus bus{DEVICE_DT_GET(DT_NODELABEL(can1))};
 ```
 
-`id` 范围为 1–15，`master_id` 是标准 CAN 反馈 ID。`position_max_rad`、`velocity_max_rad_s`、`torque_max_nm` 必须取自电机实际 PMAX/VMAX/TMAX 设置：它们既参与 MIT 量化，也决定反馈解码。`torque_limit_nm` 是正的应用软件限幅，不能超过 TMAX。`dm::describe(config, descriptor)` 可查询模式、命令 ID、反馈 ID、ID 和限幅；物理 CAN 设备由 `CanBus` 持有。
+ID 范围为 1–15，Master ID 是标准 CAN 反馈 ID。PMAX、VMAX、TMAX 使用设备实际值，既决定命令量化，也参与反馈解码。软件力矩上限为正且不超过 TMAX。
 
-在需要板级电源控制的板卡上，先 `attach()` / `start()` 安装 CAN 接收路由，再打开电机电源并等待反馈。`Motor::ready()` 只说明安全准备与反馈稳定，可按实物再次检查速度、MOS 和转子温度后调用 `enable()`。该调用只受理异步使能请求；驱动等待真实 `Enabled` 反馈并发送中性命令，`active()` 为真后才能写运动目标。
+初始化时 attach 全部电机，再 start 物理总线。控制循环持续调用 enable、模式对应 setter、commit；无需先取得设备反馈。Group 可以批量启停跨 CAN 成员，但不等待或联动成员实际状态。
 
-## 2. 命令帧与模式对应 API
+## 模式与字节布局
 
-| 模式 | 标准 CAN ID | DLC | 数据 | `Motor` 命令 |
+| 模式 | 标准 CAN ID | DLC | 数据 | 命令 |
 | --- | ---: | ---: | --- | --- |
-| MIT | `motor-id` | 8 | 位置 16 bit，速度/KP/KD/前馈力矩各 12 bit 打包 | `setTorque(N·m)` 或 `setMit(MitCommand)` |
-| 位置-速度 | `0x100 + motor-id` | 8 | little-endian float 位置与速度上限 | `setPositionVelocity(rad, max_rad_s)` |
-| 速度 | `0x200 + motor-id` | 4 | little-endian float 速度 | `setVelocity(rad_s)` |
+| MIT | motor ID | 8 | 位置 16 bit，速度/KP/KD/力矩各 12 bit | `setTorque()`、`setMit()` |
+| 位置速度 | `0x100 + ID` | 8 | little-endian float 位置与速度上限 | `setPositionVelocity()` |
+| 速度 | `0x200 + ID` | 4 | little-endian float 速度 | `setVelocity()` |
 
-`setTorque()` 只用于 MIT 模式，其余 MIT 字段置零；完整 MIT 位置、速度和增益命令用 `setMit()`。命令被写入缓存后，每个控制周期调用同一物理 CAN 的 `CanBus::commit()`。其 `CommitResult.error == 0` 表示命令已发布给异步 I/O 线程，`sequence` 是提交序号，不是总线发送确认。查看 `CanBus::status().last_tx`、`Motor::snapshot()` 与 CAN 抓包确认后续状态。
+MIT 有符号工程量通过线性偏移量化到无符号字段：`(value - min) × ((1 << bits) - 1) / (max - min)`。KP 范围为 0–500，KD 为 0–5。量化和字节打包由已有协议函数完成，应用只传工程单位。
 
-底层协议函数包括 `buildMitFrame()`、`buildPositionVelocityFrame()`、`buildVelocityFrame()`、`buildSpecialFrame()`、`decodeFeedback()`。它们在量化前校验有限数与协议边界。
+`setTorque()` 生成零 KP/KD、零位置速度、仅前馈力矩的 MIT 命令。软件位置／速度 PID 输出 N·m 时，使用携带实际反馈执行代次的两参数力矩提交。原生模式直接目标使用单参数 setter。
 
-| 特殊命令 | 值 | 用途 |
+| 特殊命令 | 末字节 | 用途 |
 | --- | ---: | --- |
-| ClearError | `0xFB` | 清理驱动故障 |
-| Enable | `0xFC` | 请求使能 |
-| Disable | `0xFD` | 请求失能 |
-| SaveZero | `0xFE` | 保存位置零点；仅底层协议提供，须由应用单独评估持久化影响 |
+| ClearError | `0xFB` | 清驱动故障 |
+| Enable | `0xFC` | 使能 |
+| Disable | `0xFD` | 失能 |
+| SaveZero | `0xFE` | 持久化零点，仅底层协议提供 |
 
-## 3. 反馈路由与状态
+特殊帧前七字节为 `FF`。自动恢复只使用协议清错、使能、停止及必要探测，不自动 SaveZero。
 
-反馈标准 CAN ID 等于 `master_id`，`data[0]` 的高 4 bit 是驱动状态、低 4 bit 是电机 ID。一个 `CanBus` 可以接入多个 DM 和 DJI 电机；共享同一 `master_id` 的 DM 电机按帧内电机 ID 分发。重复的 `(master_id, motor_id)`、冲突的命令 ID 或命令/反馈 ID 会在 `start()` 时被拒绝。不同 CAN 控制器各有独立的 `CanBus`，也可通过一个 `Group` 联动；跨 CAN 的全部组成员应先挂接，再启动任一总线。
+## 反馈和逐轴恢复
 
-`Motor::snapshot()` 提供工程单位反馈、`feedback.valid`、接收时间、`feedback_fresh` 和状态。`feedback.position_rad` 是连续坐标；`native_position_rad` 是本次解码的原生位置。通用 `feedback.temperature_c` 是转子温度，`native_mos_temperature_c`、`native_rotor_temperature_c` 提供两个原生温度，使用前检查 `native_temperatures_valid`。`native_drive_status` 要先检查 `native_drive_status_valid`。驱动识别 Disabled、Enabled、OverVoltage、UnderVoltage、OverCurrent、MOS/电机过温、CommunicationLost 和 Overload 等状态。
+反馈 ID 为 Master ID，`data[0]` 高四位为设备状态，低四位为 motor ID。共享 Master ID 的设备按帧内 ID 分发；重复 ID、命令冲突及 TX/RX 冲突在 start 时报告配置错误。
 
-## 4. 安全停机与恢复
+快照的 `enabled_requested` 表示上层意图；`state` 和 `output_permitted` 描述实际执行。`feedback.valid`、`feedback_fresh` 描述测量有效性。原生 MOS／转子温度和设备状态仅在对应 valid 标记为真时使用。
 
-`disable()` 撤销软件输出许可并请求 Disable，实际 CAN 发送与电机应答异步进行。`snapshot().stop.progress` 区分 `Pending`、`TxComplete`、`DriveConfirmed` 和 `Unreachable`。DM 需收到 Disable 发送完成后的真实 Disabled 反馈，才能确认驱动失能并重新准备安全状态。反馈或命令超时、非法命令、驱动报告故障时，相关电机/Group 撤销输出；CAN 控制器故障则影响该物理总线上的所有电机。
+设备报告过压、欠压、过流、过温、通信丢失或过载时，本轴 Fault；底层限频 ClearError，得到对应操作之后的真实 Disabled 反馈，再自动 Enable。故障持续则继续本轴重试，其他电机正常运行。
 
-对 `MotorState::Fault` 的独立电机调用 `clearFault()`；组内通过 `Group::clearFault()`。清故障请求可能经由 ClearError 和安全输出的异步流程，必须等待电机重新 `ready()`，确认驱动 Disabled 和反馈稳定后显式 `enable()` 或 `Group::enable()`。清故障不会自动发送运动目标。`CanBus` 自行尝试恢复 CAN 控制器，但恢复总线不等于重新使能电机。
+Enable 与反馈顺序用 callback 顺序号确认，不用毫秒相等推断先后。缺少反馈也允许发起协议尝试，设备稍后接入可自动运行。必要的探测发送零力矩／速度，位置速度模式只在知道原生位置时使用当前位置；不伪造零位置。
 
-## 5. 配置与上机
+`feedback.position_rad` 是连续参考，`native_position_rad` 是本次解码的原生位置。多圈参考中断后不能自动猜回原坐标；速度控制恢复，依赖多圈参考的轴只等待自己的可信参考。显式 reseed 后继续最新目标。
+
+## 命令接收、停止和诊断
+
+合法 setter 在设备离线和 Fault 时返回 0。负返回值表示参数、模式、范围或写入者错误，不能用于撤销其他轴。commit 返回发布结果，Recovering 期间持续覆盖最新命令。重复 commit 不刷新原命令年龄。
+
+停止取消此前命令与旧协议操作；持续已停 disable 幂等。停止后写入的新目标保存在缓存，之后 enable 才运行。`StopProgress` 的 Pending、TxComplete、DriveConfirmed、Unreachable 分别表示等待发送、发送完成、真实 Disabled 确认、暂未确认，不能当成机械停止测量。
+
+正常掉电恢复无需控制台重新复位。观察最近命令序号、运行意图、反馈年龄、实际状态、retry_count、BusStatus.last_tx 和 last_recovery。实际 CAN 整体不可用时，该总线无法执行；其他总线持续工作。
+
+## 资源和使用
 
 ```conf
 CONFIG_CAN=y
@@ -69,13 +75,8 @@ CONFIG_SKYWALKER_DRIVER_MOTOR=y
 CONFIG_SKYWALKER_MOTOR_DM=y
 ```
 
-每台电机的 `Timing{feedback_timeout_ms, command_timeout_ms, recovery_stable_ms, enable_timeout_ms}` 由工厂选项配置；DM J4310 默认分别为 50、20、50、3000 ms。共享总线容量及 I/O 资源使用通用 `CONFIG_SKYWALKER_MOTOR_*` Kconfig 项。
+J4310 默认反馈 50 ms、命令 20 ms、协议等待 3000 ms、重试间隔 100 ms，使用具名 Timing。每条 CAN 一个工作线程，协议任务限频轮转并与正常目标交替，缺失设备不会占满发送机会。
 
-首次上机须核对物理 CAN 口、终端电阻、电机 ID、Master ID、持久化控制模式和调试助手中的 PMAX/VMAX/TMAX。编码范围或模式不一致会造成拒收、解码错误、位置跳变或立即故障。先设小力矩/速度限幅，确认机构安全、温度和正方向，再逐步增大命令。失能后机构仍可能自由转动。
+首次使用核对 CAN、ID、Master ID、持久模式和 PMAX/VMAX/TMAX。恢复后继续运动是默认行为，现场应在能够正常运动的条件下接入电机电源。
 
-原生模式样例：[dm_mit_control](../../../samples/motor/dm_mit_control/)、[dm_velocity_control](../../../samples/motor/dm_velocity_control/)、[dm_position_control](../../../samples/motor/dm_position_control/)。MIT 软件闭环样例：[dm_mit_velocity_control](../../../samples/motor/dm_mit_velocity_control/)、[dm_mit_position_control](../../../samples/motor/dm_mit_position_control/)。共享反馈路由与跨 CAN 组见 [mixed_topology](../../../samples/motor/mixed_topology/)。
-
-## 完整工作链路与并发约定
-
-见 [17 电机工作链路](../../guides/motor-workflow.md) 的模块调用图、完整调用示例和故障时序，或在 [浏览器](../../architecture-browser/index.html#motor-workflow) 中逐步查看。业务线程数量不固定；每个控制器保持单写入方，共享 CAN 的命令发布需协调。发送候选把帧、批次与操作代次绑定，反馈间断先撤销旧许可，快速恢复重新建立稳定窗口，锁存 Fault 不因后续通信恢复而自动清除。公开 setter/update/commit 调用方式保持不变。
-\n\n更多对象生命周期与完整调用顺序见[封装模块调用示例](../../../call-examples.md)。\n
+样例：[dm_mit_control](../../../samples/motor/dm_mit_control/)、[dm_velocity_control](../../../samples/motor/dm_velocity_control/)、[dm_position_control](../../../samples/motor/dm_position_control/)、[dm_mit_velocity_control](../../../samples/motor/dm_mit_velocity_control/)、[dm_mit_position_control](../../../samples/motor/dm_mit_position_control/)。

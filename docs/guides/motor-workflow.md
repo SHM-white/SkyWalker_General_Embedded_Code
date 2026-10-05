@@ -1,305 +1,158 @@
-# 17 电机驱动工作链路、并发与调用示例
+# 电机持续控制、逐轴恢复与并发调用
 
-本文对应当前工作区的统一电机驱动，包含发送候选、反馈超时、故障锁存和期限调度修复。公开 API 保持 `Motor / Group / CanBus / PositionMotor / VelocityMotor`。图表示调用关系和异步事件，不表示电机已在真实硬件上完成验收。
+上层持续表达运行意图和最新目标，每台电机独立处理实际执行和恢复。设备不存在、掉线或报告故障不会要求上层重新启动，也不会由 Group 传播停机。主动停止、急停和真实输入过期由输入入口处理。
 
-交互入口：[架构浏览器的电机工作链路](../architecture-browser/index.html#motor-workflow)。先读对象关系，再按启动、命令、反馈、停机和恢复顺序阅读。型号与字节编码分别见 [DJI](../modules/drivers/motor-dji.md)、[DM](../modules/drivers/motor-dm.md)，控制器参数见 [09 控制封装](../modules/control/motor-control.md)。
+型号与字节编码见 [DJI](../modules/drivers/motor-dji.md)、[DM](../modules/drivers/motor-dm.md)，PID 封装见[电机控制](../modules/control/motor-control.md)。
 
-## 1. 谁负责什么
+## 对象职责
 
-| 模块 | 输入 → 输出 | 执行上下文 | 源码 |
-| --- | --- | --- | --- |
-| 应用 / robotics | 遥控、策略、状态 → 目标、启停请求 | 应用配置的控制线程 | `samples/robotics/gimbal_control/src/main.cpp`、`lib/robotics/` |
-| PositionMotor / VelocityMotor | 目标、真实 dt、Motor 快照 → A 或 N·m | 调用 update 的业务线程 | `lib/control/motor_control.cpp` |
-| Motor | 配置、反馈、命令 → 暂存区、状态与停机报告 | 业务 API 与所属 CAN I/O；短锁保护数据 | `drivers/motor/motor.cpp` |
-| Group | 使能请求、成员准备/故障 → 全组许可与代次 | 请求线程或任一成员 I/O | `drivers/motor/group.cpp` |
-| CanBus | 所有端点暂存命令 → 发布快照、CAN 帧 | commit 在调用方，发送/恢复在 I/O | `drivers/motor/can_bus.cpp` |
-| DJI / DM 编解码 | 工程单位 / 字节 → CAN 帧 / 反馈 | I/O 线程调用普通函数 | `drivers/motor/{dji,dm}/` |
-| Zephyr CAN | 帧、发送请求 → RX/TX 回调 | 底层驱动；RX 按 ISR 约束，TX 也可能在取消调用中 | 锁定版本的 `zephyr/include/zephyr/drivers/can.h` |
+| 对象 | 负责内容 | 执行位置 |
+| --- | --- | --- |
+| 输入入口 | 用户启停、急停、命令来源年龄 | 输入／业务线程 |
+| 机构算法 | 运动学、机械坐标与目标 | 业务控制线程 |
+| PositionMotor／VelocityMotor | 保存目标，按本轴有效反馈计算 A／N·m | 调用 update 的线程 |
+| Motor | 运行意图、最新命令、真实反馈、实际状态 | API 与所属 CAN 工作线程 |
+| Group | 对固定成员批量 enable／disable，统计成员 | 调用线程，无独立生命周期 |
+| CanBus | 完整发布快照、收发、各端点协议恢复 | 每物理 CAN 一个工作线程 |
+| DJI／DM codec | 既有厂商协议编解码 | CAN 工作线程 |
 
 ```mermaid
 flowchart TD
-    App[应用控制任务] --> Robot[GimbalAxis / Swerve 等业务算法]
-    Robot --> Ctrl[PositionMotor / VelocityMotor 或直接 effort]
-    Ctrl -->|update 内部暂存 或 setter| Motor[Motor：每台电机一个端点]
-    App -->|enable / disable / clearFault| Group[Group：共享许可与故障域]
-    Group --> Motor
-    App -->|commit| Pub[CanBus：复制整条 CAN 暂存区]
-    Motor --> Pub
-    Pub --> IO[每 CAN 一个 I/O：收发、期限、生命周期]
-    IO --> Codec[DJI / DM 编解码]
-    Codec --> CAN[Zephyr CAN]
-    CAN -->|RX / TX 完成| Events[固定 RX 队列 / 独立 TX 完成槽]
-    Events --> IO
-    IO -->|反馈与状态| Motor
-    Motor -->|snapshot| Ctrl
-    Motor -->|raiseFault → trip| Group
+    Input[输入意图和来源有效期] --> Target[持续更新目标]
+    Target --> Control[机构算法 / 控制封装]
+    Control --> Motor[各 Motor 独立命令槽]
+    Motor --> Publish[CanBus commit 发布整条总线]
+    Publish --> Worker[每物理 CAN 一个 I/O 线程]
+    Worker --> Device[电机]
+    Device --> Feedback[真实反馈和实际状态]
+    Feedback --> Control
+    Feedback --> Diagnostics[诊断]
+    Group[Group 显式批量操作] --> Motor
 ```
 
-每个物理 CAN 只有一个 CanBus owner；同一 CAN 可以同时挂 DJI 与 DM，多个 Group 可以共享帧。Group 不拥有 CAN、PID 或线程，跨 CAN 的 Group 也不保证各成员同时收到命令。
+Motor、Group 和控制器不创建线程。一个物理 CAN 只有一个 CanBus owner，DJI 与 DM 可以共享，多个 Group 可以引用端点进行明确批量操作。
 
-## 2. 启动与使能
+## 从初始化到持续运行
 
-```mermaid
-sequenceDiagram
-    participant App as 初始化/控制任务
-    participant Bus as CanBus
-    participant IO as CAN I/O
-    participant M as Motor / Group
-    participant HW as CAN / 电机
-    App->>Bus: attach 全部成员（跨 CAN 也先全部 attach）
-    App->>Bus: start()
-    Bus->>Bus: 配置/ID冲突检查，唯一 owner，安装过滤器
-    Bus->>IO: 创建 I/O 线程，主动唤醒
-    Bus-->>App: 0（未授权运动）
-    IO->>HW: DJI 零槽 / DM Disable
-    HW-->>IO: TX 完成、真实反馈
-    IO->>M: 安全准备、反馈稳定窗口
-    App->>M: ready()；控制器 reset / 必要的 reseedPosition
-    App->>M: 显式 enable()
-    M-->>App: 0（请求受理）
-    IO->>HW: DJI 安全准备 / DM Enable + 中性命令
-    HW-->>IO: DM Enabled 反馈（在 Enable TX 之后）
-    IO->>M: memberPrepared；全组同代次才开放许可
-    App->>M: active() 为真后才写运动目标
+1. 静态构造电机、总线和控制器。
+2. 给对应物理 CanBus attach 全部端点，然后 start。
+3. 配置控制器。能力／参数错误属于初始化错误。
+4. 用户启动后持续 enable 和 setter/update，设备尚未有反馈也接受。
+5. 每个物理 CAN 每周期 commit 一次。
+6. 底层独立建立实际执行条件；反馈恢复后控制器自行重置本轴历史。
+
+```cpp
+// 所有错误都记录，但本轴等待不得跳过其他轴。
+void tick(bool requested, float first_target, float second_target, float dt) {
+    if (requested) {
+        recordCallError(first_motor.enable());
+        recordCallError(second_motor.enable());
+        recordCallError(first_axis.update(first_target, dt));
+        recordCallError(second_axis.update(second_target, dt));
+    } else {
+        recordCallError(first_motor.disable());
+        recordCallError(second_motor.disable());
+    }
+    recordCallError(bus.commit().error);
+}
 ```
 
-`start()` 成功时 I/O 已可能运行；初始化后不能再修改绑定关系。对象应静态存活到应用结束。控制器 `configure()` 在 start 之后调用，但不必等首次反馈；reset、使能和目标更新各有自己的反馈条件。
+`requested` 只由输入意图和有效期改变，不由 MotorState 改变。`recordCallError()` 是应用自己的错误记录接口。两个轴位于不同物理 CAN 时，两条总线分别 commit，不能因为第一个结果失败漏掉第二条。
 
-DM 的中性命令按持久模式选择：MIT 零增益/零前馈、速度零、位置速度模式当前原生位置加零速度上限。其机械行为仍需对应固件和机构验证。
+本地固定目标由周期任务持续生产；没有新的控制台按键不等于命令源失联。遥控、板间或其他外部命令则保留原始生产时间，不能重复读取旧输入并重新盖上当前时间。
 
-## 3. 一个控制周期怎样发出去
+## 三个成功结果
 
-```mermaid
-sequenceDiagram
-    participant App as 业务线程
-    participant M as Motor
-    participant B as CanBus 发布区
-    participant IO as I/O 线程
-    participant CAN as CAN 驱动
-    App->>M: setter / 控制器 update
-    M->>M: 检查生产者、许可、限幅，记录 written_ms / enable_generation
-    App->>B: commit()
-    B->>M: copyStaged（所有挂接端点）
-    B->>B: publication_lock 下发布完整数组和 sequence
-    B-->>App: CommitResult（不等待发帧）
-    IO->>B: 一次短锁复制候选命令 + sequence
-    IO->>M: 捕获端点/停机代次与状态
-    IO->>IO: 锁外编码 DJI 四槽 / DM 单帧
-    IO->>IO: Group → Motor → TX 锁下共同授权，预留唯一在途槽
-    IO->>CAN: 锁外 can_send(K_NO_WAIT, callback)
-    CAN-->>IO: TX 回调仅记录完成并唤醒
-    IO->>IO: processTx：匹配原代次，更新状态，推进下一帧
-```
+| 调用 | 返回成功的含义 |
+| --- | --- |
+| setter／update | 目标已接受；暂不可执行也属于成功接收 |
+| commit | 已发布最新总线命令快照；Recovering 期间也接受 |
+| CAN TX 完成 | 这帧实际完成发送 |
 
-诊断兼容性：普通目标的 `TxResult.sequence` 对应 commit 序号；独立安全、Enable、Probe 和 ClearFault 的公开序号仍为 0，结合 `purpose` 和端点停机代次判断动作。内部候选仍保留编码时使用的发布序号，安全 DJI 帧中的健康槽也不会逐槽混批。
+这些结果均不代表机械已经到位或停止。
 
-三个不同含义不能混淆：setter 成功是“暂存成功”；commit 成功是“发布成功”；TX 成功是“这帧完成发送”。它们都不等于电机已经到位或停止。
+setter 只拒绝本次非法调用，如非有限值、超过明确数值范围、协议不支持或写入者不匹配。设备状态不作为上层命令写入的准入条件。
 
-### 候选与授权为什么分开
+## 命令、取消版本与计算依据
 
-`TxCandidate` 保存在 CanBus 内部，包含帧、sequence、bus generation，以及实际涉及端点的命令、状态、enable generation 和 stop generation。一次编码只读这份候选，不逐槽重读不断变化的发布区。
+每个端点保存最新值，后写覆盖前写，不积压掉线期间的历史目标。命令 `written_ms` 来源于 setter，commit、恢复和重复发布都不续期。
 
-发送前按固定顺序获取涉及的 Group 锁，再取端点锁，最后取 TX 锁。在同一临界区验证候选仍属于当前代次、运动许可和时间有效，并预留唯一发送槽。Group 采用统一地址顺序，跨 CAN 的 worker 也遵循同一顺序。锁外调用 CAN API，不持锁等待硬件。
-
-若候选已失效，内部返回 `-EAGAIN` 并重新安排处理。普通目标恢复待处理机会，安全请求则始终保存在端点上；不会通过给旧帧补上新代次来“修正”它。这个内部重试不改变公开 commit 的含义。
-
-### DJI 同帧、不同 Group
-
-四个 slot 取自同一发布快照，再按各端点许可过滤：需要停机的 slot 为零，健康独立组的 slot 可以继续非零。安全完成只结算帧中确实承载安全动作的端点。故障组不能用邻居的非零 slot 来确认自己已经停机。
-
-## 4. 反馈链与时间
-
-```mermaid
-flowchart LR
-    RX[CAN RX callback] --> Q[复制 frame / 接收毫秒 / bus代次 / callback顺序]
-    Q --> W[唤醒 I/O]
-    W --> Route[processRx：格式/代次检查和路由]
-    Route --> Decode[DJI/DM decode]
-    Decode --> Gap[覆盖时间戳之前检查反馈间断]
-    Gap -->|旧 Active/Enabling 已过期| Trip[关闭旧许可 → Group.trip]
-    Gap --> Accept[acceptFeedback：更新原始值/工程单位]
-    Trip --> Accept
-    Accept --> Stable[无稳定起点则重新起算]
-    Accept --> Snapshot[Motor.snapshot 返回值副本]
-```
-
-时间戳保留回调接收时刻，不以线程处理时刻刷新；积压的旧帧不应冒充新鲜反馈。超时阈值采用严格 `间隔 > timeout_ms`，不是相等即到期。DM 用回调顺序号区分同一毫秒内 RX 与 TX 的先后。
-
-反馈恢复只能开始恢复观察，不能抹掉已经发生的超时。通信稳定计时与连续位置参考独立：即使快速 CAN stop/start 后反馈间隔未超过时限，清空的稳定起点也会重新起算；位置参考不会因此自动变可信。
-
-## 5. 停机、故障和恢复
-
-```mermaid
-stateDiagram-v2
-    [*] --> Offline: start 后安全准备
-    Offline --> Disabled: 安全准备完成 / 新鲜反馈
-    Disabled --> Enabling: ready 且显式 enable
-    Enabling --> Active: 本代次全部成员准备完成
-    Active --> Disabled: disable / 命令过期
-    Active --> Offline: 反馈超时 / CAN 通信故障
-    Enabling --> Offline: 反馈超时 / CAN 通信故障
-    Active --> Fault: 无效命令 / 驱动或控制故障
-    Enabling --> Fault: 使能超时
-    Fault --> Fault: 后续通信故障不清锁存
-    Fault --> Disabled: 显式清故障完成且反馈新鲜
-    Fault --> Offline: 显式清故障完成但反馈不新鲜
-```
-
-图简化了所有状态都可接收的停机请求。`Disabled` 不等于 ready，ready 还要求安全准备、反馈新鲜和稳定窗口等条件。位置控制另外要求可信参考。
-
-| 事件 | 驱动动作 | 恢复责任 |
+| 版本 | 变化时机 | 用途 |
 | --- | --- | --- |
-| 单端点反馈过期 | 撤销该端点/Group，安排安全输出 | 稳定反馈、可信参考、业务显式 enable |
-| 命令写入或 commit 停止 | 已发布命令按原 written_ms 过期；反复 commit 不续命 | 新业务意图和新使能 |
-| CAN TX 错误 / RX 溢出 / bus-off | 整 CAN 撤销，传播跨 CAN Group，清发布区，stop/取消后 start | I/O 恢复通信；应用决定重新运动 |
-| InvalidCommand / DriveFault / ControlRejected 等 | 锁存 Fault，保存首次需清除的根因 | clearFault → 安全准备/稳定 → 显式 enable |
-| Fault 后再通信故障 | 保留 Fault 与根因，继续撤销输出 | 通信恢复不能代替 clearFault |
+| cancellation generation | 用户运行→停止 | 拒绝停止之前的旧命令 |
+| protocol generation | 协议尝试取消／重试 | 拒绝旧使能／清错回调 |
+| enable generation | 本轴重新实际激活 | 作废以前反馈计算出的输出 |
+| reference generation | 可信坐标改变／失效 | 重置依赖该坐标的控制历史 |
 
-CAN stop 失败或取消回调未终结时，不复用旧在途槽。新提交与旧回调以 bus generation 分隔。默认 `BusOptions` 的 TX 时限为 2 ms，恢复失败重试间隔为 100 ms，具体容差应结合 tick、调度和负载测试。
+直接电流／力矩或原生模式目标只受命令取消版本和年龄约束。由反馈计算的电流／力矩携带计算快照的 enable generation：
 
-### 停机报告
+```cpp
+const auto sampled = motor.snapshot();
+// calculate() 必须以 sampled 中的实际反馈为依据。
+const float current_a = calculate(sampled.feedback);
+recordCallError(motor.setCurrent(current_a, sampled.enable_generation));
+```
 
-| `StopProgress` | 含义 |
+不能在计算完后重新取当前版本给旧结果贴标签。PID 封装内部使用同样的带版本 producer 接口；反馈暂不可用时 `invalidateComputedEffort()` 作废计算输出，不撤销运行意图。
+
+## 停止与恢复
+
+`disable()` 在运行意图真→假时取消此前目标和协议尝试，并异步请求停止。已停止时重复调用返回成功，不推进取消版本，也不擦掉停止之后新提交的目标。重新 enable 只能使用停止之后的有效目标。
+
+| 事件 | 本轴执行 | 上层及其他轴 |
+| --- | --- | --- |
+| 首次没有设备 | 限频探测／协议尝试 | 持续接收目标 |
+| 反馈过期 | 本轴等待，新反馈后自动恢复 | 意图与目标生产继续 |
+| 命令过期 | 采用停止输出，新目标可继续 | 不锁存硬件故障 |
+| DM 驱动故障 | 自动限频清错与使能 | 其他轴照常运行 |
+| Enable 超时 | 等下一次本轴重试 | 不要求用户复位 |
+| 单 CAN 故障 | 恢复控制器，保留最新发布 | 其他 CAN 正常执行 |
+| 多圈参考丢失 | 依赖该参考的轴等待 | 速度控制及其他轴继续 |
+| 用户停止／急停 | 取消旧输出和恢复操作 | 输入意图具有最终决定权 |
+
+DM 协议确认用 callback 顺序号区分同一毫秒内 RX／TX。协议任务与正常目标交替调度，协议端点轮转；缺失端点按 retry_interval_ms 等待，不忙等。
+
+连续位置丢失后不能凭第一帧重新定义旧零点。可信绝对角可自动恢复；连续／相对参考等待显式提供正确坐标。`reseedPosition()` 仅更新本轴参考，不停其他轴。
+
+### 停止报告
+
+| StopProgress | 含义 |
 | --- | --- |
-| None | 当前没有需要报告的停机动作 |
-| Pending | 安全请求已保存，等待对应帧 |
-| TxComplete | 对应代次的安全帧已发送完成 |
-| DriveConfirmed | DM 在安全 TX 之后反馈 Disabled |
-| Unreachable | 已完成安全 TX，但在等待窗口内未获得需要的确认 |
+| None | 当前无需要报告的停止请求 |
+| Pending | 等待本次停止帧发送 |
+| TxComplete | 对应停止帧发送完成 |
+| DriveConfirmed | DM 在对应 TX 之后反馈 Disabled |
+| Unreachable | 暂未获得所需设备确认 |
 
-`disable()` 返回时许可已关闭，但关闭前已经取得授权的一帧可能仍发送。之后仍必须完成真正的安全动作；不能把残留旧帧当作新停机完成。TX/驱动确认也不表示机械刹停，失能机构可能自由运动。
+已交给硬件的一帧可能存在在途残留。迟到 Enable／Clear 回调必须匹配本轴协议版本才能改变实际状态。停止报告不等于机械刹停测量。
 
-## 6. 线程数量与提交协调
+## 发送候选与共享 DJI 帧
 
-应用线程总数不固定。可为底盘、云台、通信、规划分别建线程；每台电机/控制器的普通目标仍须由明确的写入方负责。驱动默认每条已 start 的 CAN 一个 I/O 线程，Motor、Group 和控制器本身不创建线程。
+commit 在短锁内发布完整命令数组和 sequence。I/O 从一次发布复制候选，捕获参与端点的状态和版本，再编码；不能逐槽重读不同批次。
 
-- 不同控制线程管理不同 CAN：可以各自 update/setter/commit。
-- 多个线程共享 CAN：推荐指定一个发布者，或用共同应用互斥锁串行化相关 setter/update 和 commit；不能只看到内部有 spinlock 就假定整批业务操作具备事务性。
-- `commit()` 收集整条 CAN，而非“本线程的电机”。不协调就可能发布新 yaw 加旧 pitch，多个 commit 还可能出现收集旧值的线程最后发布。
-- 同一个 PID 控制器的 configure/reset/update 必须串行。telemetry 的短锁只保护读取快照，不使 PID 内部历史支持多写入方。
-- 对需要同周期配对的轴，应用需设置批次屏障；允许各轴最新值的独立控制不必强制配对。
-- 共享目标消息保留来源时间，发布者先检查年龄，不能每轮把已过期输入重新写成“新命令”。
+提交前只锁涉及的 Motor 和 TX 上下文，确认年龄、取消版本、执行依据和协议操作仍有效。Group 不参与授权或锁排序。锁外调用 `can_send(K_NO_WAIT)`，不持锁等待硬件。
 
-I/O 每轮有界处理 RX、TX 完成、期限和发送。仍有队列数据或可推进工作时继续处理；无工作才按最近软件期限等待。控制器状态暂未使用回调，仍以最多请求等待 2 ms 的探测周期检查；这是混合调度，实际响应还受 tick 和调度影响。恢复重试等待不会因旧 TX 已过期而空转。
+DJI 四槽分别判断可执行性，一个离线成员只将自己的槽位变为零。为某个停止端点发送的共享帧仍保留其他正常端点的非零目标。停止确认只记入实际携带停止动作的端点。
 
-I/O 优先级必须是系统范围内的可抢占优先级。RAM 够用后还要检查栈高水位、控制周期抖动、RX 队列峰值、最坏 I/O 延迟和 CAN 带宽。静态 CanBus 即使未 start，其内嵌栈和队列仍占用存储。
+总线恢复保存 `published_` 与目标原时间；恢复后重新安排最新批次，过期目标不会复活。旧 TX 上下文必须在 `can_stop()` 终止／完成回调后才能复用。RX 队列保留接收时间、总线版本和 callback 顺序，积压反馈不能冒充新鲜测量。
 
-## 7. 调用示例
+## 并发约定与期限
 
-### 7.1 两台 DJI 共享 CAN、共同启停
+- 同一个控制器的 configure/reset/update 串行执行。telemetry 锁只保护快照读取。
+- 同一电机由一个普通目标写入者负责，producer 绑定只处理身份，不附带温度／超速授权。
+- 不同线程使用不同物理 CAN 可以独立 update／commit。
+- 多线程共享 CAN 时指定统一发布者，或串行化整组 setter/update 和 commit。内部短锁不提供整个业务周期的事务性。
+- commit 收集整条总线，未协调会把不同周期的轴目标混在一起。
+- 对必须同周期配对的轴由应用协调；独立轴不增加全员就绪屏障。
 
-以下是可复用的初始化/周期函数片段，放在已有应用中；控制周期、板级电源、操作输入与错误显示由调用方安排。`new_enable_request` 和 `clear_request` 必须是明确的新请求，不应每轮自动置真。
+Timing 采用具名字段：feedback_timeout_ms、command_timeout_ms、enable_timeout_ms、retry_interval_ms。DJI 默认为 20、10、100、100 ms；J4310 默认为 50、20、3000、100 ms。
 
-```cpp
-#include <cerrno>
-#include <zephyr/device.h>
-#include <drivers/motor/can_bus.hpp>
-#include <drivers/motor/group.hpp>
-using namespace skywalker;
+BusOptions 默认 TX 等待 2 ms、控制器恢复间隔 100 ms。每轮 RX 处理有界，协议工作有界，下一次等待考虑当前尝试与重试期限。控制器状态仍采用短周期探测；忙碌时有界让出 CPU。实际调度和延迟依赖板卡 tick、优先级与 CAN 负载。
 
-static motor::Motor yaw{motor::dji::m3508({
-    .id = 1, .current_limit_a = 0.3f, .gear_ratio = 19.2032f,
-    .timing = {20, 20, 30, 100},
-})};
-static motor::Motor pitch{motor::dji::m2006({
-    .id = 2, .current_limit_a = 0.3f, .gear_ratio = 36.0f,
-    .timing = {20, 20, 30, 100},
-})};
-static motor::Group axes{yaw, pitch};
-static motor::CanBus bus{DEVICE_DT_GET(DT_NODELABEL(can1))};
+## 诊断入口
 
-int initMotors() {
-    int error = bus.attach(yaw, pitch);
-    return error < 0 ? error : bus.start();
-}
+先看 `enabled_requested` 和最近命令序号，确认输入入口是否持续生产；再看反馈年龄、实际 state、output_permitted、retry_count 和位置参考。最后看 BusStatus.state、last_tx 和 last_recovery。
 
-int tickMotors(bool allow, bool new_enable_request, bool clear_request,
-               float yaw_a, float pitch_a) {
-    if (!allow) {
-        const auto status = axes.status();
-        if (status.active || status.enable_pending)
-            axes.disable();
-        return 0;
-    }
-    if (clear_request) {
-        axes.disable();
-        return axes.clearFault(); // 受理后继续等待 ready，不自动 enable。
-    }
-    if (new_enable_request)
-        return axes.ready() ? axes.enable() : -EAGAIN;
-    if (!axes.active())
-        return -EAGAIN;
-    int error = yaw.setCurrent(yaw_a);
-    if (error == 0) error = pitch.setCurrent(pitch_a);
-    if (error == 0) error = bus.commit().error;
-    if (error < 0) axes.disable();
-    return error;
-}
-```
+历史错误和当前状态分别理解：总线已经 Running 时，last_recovery 保留上次故障并不表示目前仍然故障。一个成员掉线连带其他总线停止时，检查应用输入撤权或主动 disable 路径；Group 自身没有故障传播。
 
-这些型号和数值仅示范 API。调用 allow 前仍需检查机构、反馈速度/温度和业务输入年龄。示例避免每轮重复 disable；重复停机请求会产生新 stop generation，应在真正的新停机事件或仍 Active/Enabling 时调用。
-
-### 7.2 现有双轴云台：同 CAN / 跨 CAN
-
-```cpp
-// yaw_drive、pitch_drive、gimbal Group 和两条 CanBus 已静态构造。
-const bool split_buses = board_config::yaw_can != board_config::pitch_can;
-int ret = split_buses ? yaw_bus.attach(yaw_drive)
-                      : yaw_bus.attach(yaw_drive, pitch_drive);
-if (ret == 0 && split_buses) ret = pitch_bus.attach(pitch_drive);
-if (ret == 0) ret = yaw_bus.start();
-if (ret == 0 && split_buses) ret = pitch_bus.start();
-// 检查 ret 后配置控制器、等待反馈、准备参考并显式 gimbal.enable()。
-// 在 active 控制周期中：
-ret = yaw.updateRate(yaw_rate, dt);
-if (ret == 0) ret = pitch.updateRate(pitch_rate, dt);
-if (ret == 0) ret = yaw_bus.commit().error;
-if (ret == 0 && split_buses) ret = pitch_bus.commit().error;
-if (ret < 0) gimbal.disable();
-```
-
-这是两个独立阶段的片段，第二阶段只能在初始化成功且 active 后运行。完整输入门控见 [gimbal_control/main.cpp](../../samples/robotics/gimbal_control/src/main.cpp)。同 CAN 时不要 start `pitch_bus`；它不是“pitch 电机专属 CAN owner”。
-
-### 7.3 DM 原生命令与软件 PID
-
-```cpp
-// 三者按实际模式三选一；drive 已 active，随后检查 commit 返回值。
-int error = drive.setTorque(torque_nm);             // MIT：前馈力矩，其余字段为零
-// int error = drive.setVelocity(velocity_rad_s);     // 原生速度模式
-// int error = drive.setPositionVelocity(rad, vmax); // 原生位置速度模式
-if (error == 0) error = bus.commit().error;
-if (error < 0) (void)drive.disable(); // 组内改用 group.disable()
-```
-
-使用 `PositionMotor`/`VelocityMotor` 时，改为 `axis.update(target, dt)` 后 commit，不再直接 setter。配置参考 [09](../modules/control/motor-control.md) 及具体样例，不要将 DM 原生闭环与电流/力矩控制器随意嵌套。
-
-## 8. 诊断和验证
-
-| 现象 | 先看什么 |
-| --- | --- |
-| commit 成功但未输出 | Group/Motor active、命令原始年龄、BusStatus.last_tx、CAN 抓包 |
-| 恢复后 ready 为 false | Fault 是否锁存、安全输出/Disabled 确认、稳定时间、反馈新鲜度 |
-| ready 但位置控制无法使能 | position_reference_valid、所需绝对反馈、速度温度、reset/reseed 返回值 |
-| 一台掉线连带另一 CAN 停机 | 是否属于同一 Group；查询 GroupStatus.last_fault.source_motor |
-| 健康邻居也停机 | 是否同组、是否整 CAN 控制器故障、应用是否主动撤销整个输出域 |
-| 线程多时偶发超时 | 栈、优先级、周期抖动、提交协调、RX 溢出和 CAN 负载 |
-
-确定性回归测试位于 [tests/motor/regression](../../tests/motor/regression/)，使用实际驱动实现与可控 CAN 发送替身，直接插入交错点；它验证软件状态和帧，不能替代电气/机械测试。
-
-```bash
-west build -b native_sim/native/64 tests/motor/regression -d /tmp/skywalker-motor-regression
-/tmp/skywalker-motor-regression/zephyr/zephyr.exe
-west build -b dm_mc02/stm32h723xx samples/motor/mixed_topology -d /tmp/skywalker-motor-mixed
-west build -b dm_mc02/stm32h723xx samples/robotics/gimbal_control -d /tmp/skywalker-gimbal
-```
-
-上机先检查型号、接线、波特率、终端、电源与单位；动力关闭时核对安全帧，机构可靠支撑且低限幅时验证主动停机，再注入反馈断流、CAN 故障和恢复。记录帧、许可、代次、StopProgress 与时延，不仅看日志中的 ready。
-
-## 9. 当前实现边界
-
-- 调用方仍按 `attach/start`、控制器 `configure/reset`、显式 `enable`、周期 `update`/`commit`、故障时 `disable/clearFault` 的顺序工作；不需要管理驱动内部 I/O 线程。
-- 整帧发布快照与发送授权包含批次和生命周期代次；反馈间断撤销旧许可，Fault 的清除需要显式请求。上述是软件设计行为，实际停机时延仍需在目标硬件测量。
-- 品牌无关的任意电机底盘装配、多生产者自动仲裁和全部诊断字段尚未作为公开能力提供。应用需要自己协调共享 CAN 的命令发布。
-- 总线取消/回调时序、线程栈余量、最坏调度延迟和机械停机行为仍需按板卡和机构验证。
-
-从上层消息到 `CanBus` 的一整条链路见 [模块联动](../applications/module-integration.md)；历史审查与修正记录见 [开发专题索引](../dev/README.md)。
+此文描述软件契约。实际 CAN 电气故障、模式配置、连续坐标可信来源和机械执行需要对应硬件确认；自动恢复不能修正错误接线、协议量化范围或机构坐标。

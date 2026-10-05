@@ -1,29 +1,30 @@
 ---
 name: ancient-programming
-description: Repository-wide manual coding mode for every task in the SkyWalker repository. Use unconditionally whenever Codex works in this repository, unless the user explicitly asks to disable 古法编程模式. Inspect source code read-only, never implement changes directly, and write hand-holding implementation instructions only to a Markdown guide under docs/dev.
+description: Guided implementation mode for SkyWalker repository tasks when the user has not authorized direct workspace edits. Do not invoke for planning-only requests or when the user explicitly permits modifying workspace code.
 ---
 
 # 古法编程模式
 
-把源码当成只读教材。分析项目并教用户亲手实现，不替用户修改代码。
+在用户未授权直接修改工作区代码时，把源码当成只读教材，分析项目并教用户亲手实现；用户明确授权后可按其范围直接修改。
 
 ## 强制边界
 
-1. 只读检查源码、配置、测试、脚本、设备树和构建文件。
-2. 不直接新增、修改、删除、移动或格式化任何业务文件。
-3. 不运行会生成或覆盖工作区文件的构建、测试、格式化、代码生成或自动修复命令；把建议命令写入指南供用户执行。
-4. 唯一常规写入目标是项目 `docs/dev/` 目录下与当前任务对应的 Markdown 实施指南。
-5. 只有用户明确要求禁用“古法编程模式”时，才可按用户指定的范围停止应用本 Skill。不要从“帮我实现”“直接修好”等模糊措辞推断为禁用。
-6. 用户未说明禁用范围时，只对当前任务禁用；下一任务自动恢复。
-7. 修改本 Skill、`AGENTS.md` 或其他项目元数据，也必须由用户明确要求。
+1. 仅在任务包含代写实现、修复或重构，且用户没有明确授权直接修改工作区时触发本 Skill。
+2. 纯计划、方案设计、任务拆解或实现指南请求不触发本 Skill；此时可以只读分析并直接在聊天中给出计划。
+3. 用户明确说允许修改工作区代码、直接实现、直接修复、按要求编辑文件，或表达同等明确授权时，视为本任务已授权直接修改，不要求用户使用“禁用古法编程模式”这一固定措辞。
+4. 未获授权时，只读检查源码、配置、测试、脚本、设备树和构建文件，不直接新增、修改、删除、移动或格式化业务文件。
+5. 未获授权时，不运行会生成或覆盖工作区文件的构建、测试、格式化、代码生成或自动修复命令；把建议命令写入指南供用户执行。
+6. 未获授权时，唯一常规写入目标是项目 `docs/dev/` 目录下与当前任务对应的 Markdown 实施指南。
+7. 用户授权的范围仅对当前任务生效；下一任务重新判断，不默认沿用。
+8. 修改本 Skill、`AGENTS.md` 或其他项目元数据，必须由用户明确要求。
 
 ## 工作流程
 
-1. 只读查找适用的 `AGENTS.md`、现有实现、调用方、构建入口、配置、测试和样例。
+1. 未获授权时，先只读查找适用的 `AGENTS.md`、现有实现、调用方、构建入口、配置、测试和样例。
 2. 说明关键假设；对型号、协议、版本等不确定事实使用权威资料核实。
 3. 找出真正的数据流和复用边界，不机械复制现有文件。
-4. 在项目 `docs/dev/` 目录创建或更新一个任务专用 Markdown 指南（目录不存在时先创建）。除非用户指定文件名，使用能准确表达任务的中文文件名。
-5. 不在聊天中假装已经实现业务代码。明确区分“已写入教程”和“仍需用户亲手修改”。
+4. 未获授权且任务需要落地实现时，在项目 `docs/dev/` 目录创建或更新一个任务专用 Markdown 指南（目录不存在时先创建）。除非用户指定文件名，使用能准确表达任务的中文文件名。
+5. 未获授权时，不在聊天中假装已经实现业务代码；明确区分“已写入教程”和“仍需用户亲手修改”。获得授权后，按实际修改结果如实汇报。
 
 ## 指南最低内容
 

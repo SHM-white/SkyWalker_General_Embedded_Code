@@ -26,18 +26,16 @@ inline motor::dji::Config steerConfig(std::size_t index) {
     const auto &c = calibration::steer[index];
     return motor::dji::gm6020({.id = c.id, .current_limit_a = c.effort_limit,
         .encoder_zero_ticks = c.encoder_zero_ticks, .current_mode_confirmed = calibration::connections_confirmed,
-        .timing = {20, 20, 30, 100}});
+        .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100}});
 }
 inline motor::dji::Config driveConfig(std::size_t index) {
     const auto &c = calibration::wheel[index];
     return motor::dji::m3508({.id = c.id, .current_limit_a = c.effort_limit,
-        .gear_ratio = c.gear_ratio, .timing = {20, 20, 30, 100}});
+        .gear_ratio = c.gear_ratio, .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100}});
 }
 inline robotics::SwerveHardware::Config hardwareConfig() {
     robotics::SwerveHardware::Config c{};
     c.hardware_confirmed = calibration::connections_confirmed;
-    // TODO(calibration): tune overspeed limits on the real suspended chassis.
-    c.velocity_safety_rad_s = 80;
     for (std::size_t i = 0; i < 4; ++i) {
         c.directions[i] = calibration::steer[i].direction;
         c.directions[i + 4] = calibration::wheel[i].direction;
@@ -100,12 +98,10 @@ public:
         return 0;
     }
     bool running() const {
-        return steer_started_ && drive_started_ && steer_bus.status().state == motor::BusState::Running &&
-               drive_bus.status().state == motor::BusState::Running;
+        return steer_started_ && drive_started_;
     }
     int commit() {
-        // Always submit both buses in the same application cycle. Group
-        // withdrawal provides joint stop even if just one bus commit fails.
+        // Publish each physical bus independently, including while recovering.
         const int steer_error = steer_started_ ? steer_bus.commit().error : -EACCES;
         const int drive_error = drive_started_ ? drive_bus.commit().error : -EACCES;
         return steer_error < 0 ? steer_error : drive_error;
@@ -138,7 +134,6 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
     communication::RemoteReceiver::Snapshot remote_snapshot{};
     input::RcControlAdapter rc_adapter;
     input::SampleDiagnostics diagnostics;
-    bool authority_started = false;
     core::TimeUs next_log = 0;
     PeriodicDeadline deadline;
     ChassisExecutionInputs inputs{};
@@ -156,7 +151,7 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
         const auto now_ms = now_us / 1000;
         (void)remote.snapshot(remote_snapshot);
         const auto &rc = rc_adapter.update(remote_snapshot.remote, now_ms);
-        const auto diagnostic = diagnostics.update(now_ms, hardware.group.active(),
+        const auto diagnostic = diagnostics.update(now_ms, rc.run_allowed,
             !rc.fresh || rc.remote.left_switch == RcSwitch::Down);
         if (!diagnostic.input_paused && rc.fresh && (!inputs.command.stamp.valid ||
             sequenceAfter(rc.remote.stamp.sequence, inputs.command.stamp.sequence))) {
@@ -172,8 +167,8 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             inputs.command.mode = ChassisMode::Disabled;
             inputs.command.vx_m_s = inputs.command.vy_m_s = inputs.command.wz_rad_s = 0;
         }
-        inputs.clear_fault = rc.clear_fault;
-        inputs.transport_ready = topology_error == 0 && hardware.running();
+        inputs.clear_estop = rc.clear_estop;
+        inputs.transport_ready = topology_error == 0;
         inputs.require_permission = with_power;
 #if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
         if (with_power && referee_uart && device_is_ready(referee_uart)) referee = receiver.poll(now_ms);
@@ -197,26 +192,22 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             }
         }
         inputs.measured_power = measurement;
-        if (!diagnostic.execution_paused || rc.clear_fault || !rc.run_allowed) {
+        if (!diagnostic.execution_paused || rc.clear_estop || !rc.run_allowed) {
             auto execution_status = executor.update(inputs, now_us);
             if (topology_error == 0) {
                 const int commit = hardware.commit();
-                if (commit < 0) execution_status = executor.suspend(now_us, WaitReason::Transport, commit);
+                if (commit < 0) execution_status.error = commit;
             }
             if (!diagnostic.status_paused) status = execution_status;
-            const auto group_state = hardware.group.status();
-            const bool authority_now = group_state.active || group_state.enable_pending;
-            if (rc.run_allowed && ((authority_started && !authority_now) || execution_status.state == RunState::Blocked))
-                rc_adapter.withdraw();
-            authority_started = rc.run_allowed && authority_now;
+
         }
         if (now_us >= next_log) {
             next_log = now_us + 500000;
             const bool status_fresh = isFresh(status.stamp, now_ms, 100);
-            LOG_INF("src=%u age_ms=%llu exec=%u fresh=%d ready=%d reason=%u err=%d gen=%u power_valid=%d scale_milli=%d power_mW=%d budget_mW=%d bus=%u/%u",
+            LOG_INF("src=%u age_ms=%llu exec=%u fresh=%d ready=%d reason=%u err=%d active=%u power_valid=%d scale_milli=%d power_mW=%d budget_mW=%d bus=%u/%u",
                 inputs.command.stamp.sequence, static_cast<unsigned long long>(now_ms >= inputs.command.stamp.timestamp_ms ?
                 now_ms - inputs.command.stamp.timestamp_ms : 0), unsigned(status.state), status_fresh,
-                status_fresh && status.ready, unsigned(status.reason), status.error, status.generation,
+                status_fresh && status.ready, unsigned(status.reason), status.error, unsigned(status.active_count),
                 measurement.valid && core::fresh(measurement.stamp, now_us, 300000),
                 int(executor.effortScale() * 1000), int(measurement.power_w * 1000),
                 int(referee.power.chassis_power_limit_w * 1000), unsigned(hardware.steer_bus.status().state),
@@ -224,10 +215,10 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             const auto &feedback = executor.feedback();
             const auto &output = executor.output();
             for (std::size_t i = 0; i < 4; ++i)
-                LOG_INF("wheel=%u steer_mrad=%d final_mrad=%d ramp_mrad=%d error_mrad=%d ready=%d drive_on=%d flip=%d coast=%d drive_mrad_s=%d target_mrad_s=%d current_mA=%d/%d scale_milli=%d/%d", unsigned(i),
+                LOG_INF("wheel=%u steer_mrad=%d final_mrad=%d ramp_mrad=%d error_mrad=%d steer_out=%d drive_out=%d flip=%d coast=%d drive_mrad_s=%d target_mrad_s=%d current_mA=%d/%d scale_milli=%d/%d", unsigned(i),
                     int(feedback.module[i].steer_absolute_rad * 1000), int(output.module[i].optimized_angle_rad * 1000),
                     int(output.module[i].steer_reference_rad * 1000), int(output.module[i].alignment_error_rad * 1000),
-                    output.module[i].drive_ready, output.module[i].drive_enabled, output.module[i].flipped,
+                    output.module[i].steer_output_valid, output.module[i].drive_output_valid, output.module[i].flipped,
                     output.module[i].coasting, int(feedback.module[i].drive_velocity_rad_s * 1000),
                     int(output.module[i].drive_target_rad_s * 1000),
                     int(output.module[i].steer_effort * executor.steerEffortScale() * 1000),

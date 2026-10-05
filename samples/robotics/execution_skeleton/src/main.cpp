@@ -1,7 +1,8 @@
 #include <cerrno>
 #include <core/clock.hpp>
 #include <robotics/command/command_manager.hpp>
-#include <robotics/execution/recovery_gate.hpp>
+#include <robotics/command/command_source.hpp>
+#include <robotics/execution/run_status.hpp>
 #include <robotics/execution/snapshot_cache.hpp>
 #include <zephyr/logging/log.h>
 
@@ -14,7 +15,6 @@ using namespace skywalker::robotics;
 constexpr std::uint32_t execution_period_ms = 5;
 constexpr std::uint32_t maximum_cycle_ms = 25;
 constexpr std::uint32_t status_timeout_ms = 100;
-constexpr std::uint32_t enable_handshake_ms = 20;
 
 enum class Fault : std::uint8_t { None, InputPaused, GimbalStopped, ChassisCycle, GimbalReference };
 
@@ -78,11 +78,10 @@ struct Observation {
     float target_a = 0, target_b = 0, target_c = 0;
 };
 
-// Each consumer owns its target, lifecycle, recovery generation and status.
-// The only shared input is the manager's non-consuming command snapshot.
+// Consumers retain the latest target independently of current execution ability.
 class SimulatedExecutor {
 public:
-    explicit SimulatedExecutor(bool is_gimbal) : is_gimbal_(is_gimbal), gate_({100, 100000}) {}
+    explicit SimulatedExecutor(bool is_gimbal) : is_gimbal_(is_gimbal) {}
 
     bool paused(Fault fault) const {
         return is_gimbal_ ? fault == Fault::GimbalStopped : fault == Fault::ChassisCycle;
@@ -95,90 +94,51 @@ public:
             (now_ms >= previous_cycle_ms_ && now_ms - previous_cycle_ms_ <= maximum_cycle_ms);
         previous_cycle_ms_ = now_ms;
         have_cycle_ = true;
-        if (!cycle_valid) {
-            ++observation_.cycle_overruns;
-            revoke(WaitReason::Cycle, -ETIMEDOUT);
-            publish(now_ms);
-            return;
-        }
+        if (!cycle_valid) ++observation_.cycle_overruns;
 
         CommandSnapshot frame{};
         const int ret = manager.snapshot(frame);
-        if (ret < 0 || frame.decision.error < 0) {
-            revoke(WaitReason::Command, ret < 0 ? ret : frame.decision.error);
-            publish(now_ms);
-            return;
+        if (ret == 0) {
+            const auto &command = frame.decision.command;
+            mode_requested_ = frame.decision.error == 0 &&
+                (is_gimbal_ ? command.gimbal.mode == GimbalMode::Rate
+                            : command.chassis.mode == ChassisMode::BodyVelocity);
+            observation_.command = is_gimbal_ ? command.gimbal.stamp : command.chassis.stamp;
+            observation_.source = sourceStamp(frame, is_gimbal_ ? command.gimbal.source : command.chassis.source);
+            observation_.target_a = is_gimbal_ ? command.gimbal.yaw_rate_rad_s : command.chassis.vx_m_s;
+            observation_.target_b = is_gimbal_ ? command.gimbal.pitch_rate_rad_s : command.chassis.vy_m_s;
+            observation_.target_c = is_gimbal_ ? 0 : command.chassis.wz_rad_s;
         }
-
-        const auto &command = frame.decision.command;
-        const bool requested = is_gimbal_ ? command.gimbal.mode == GimbalMode::Rate
-                                          : command.chassis.mode == ChassisMode::BodyVelocity;
-        observation_.command = is_gimbal_ ? command.gimbal.stamp : command.chassis.stamp;
-        observation_.source = sourceStamp(frame, is_gimbal_ ? command.gimbal.source : command.chassis.source);
-        if (!requested) {
-            revoke(WaitReason::Command, 0);
-        } else if (is_gimbal_ && faultAt(now_ms) == Fault::GimbalReference) {
-            revoke(WaitReason::Reference, -ESTALE);
-        } else {
-            if (gate_.stage() == RecoveryGate::Stage::WaitingPrerequisites) {
-                // No-output substitute for reference preparation/history reset.
-                clearTarget();
-                gate_.prepared(now_ms);
-            }
-            if (!gate_.accept(observation_.command, observation_.source, now_ms)) {
-                clearTarget();
-                enabling_ = false;
-            } else {
-                if (gate_.stage() == RecoveryGate::Stage::Enabling) {
-                    if (!enabling_) {
-                        enable_started_ms_ = now_ms;
-                        enabling_ = true;
-                    }
-                    if (now_ms - enable_started_ms_ >= enable_handshake_ms) gate_.enabled();
-                }
-                if (gate_.stage() == RecoveryGate::Stage::Active) {
-                    observation_.target_a = is_gimbal_ ? command.gimbal.yaw_rate_rad_s : command.chassis.vx_m_s;
-                    observation_.target_b = is_gimbal_ ? command.gimbal.pitch_rate_rad_s : command.chassis.vy_m_s;
-                    observation_.target_c = is_gimbal_ ? 0 : command.chassis.wz_rad_s;
-                }
-            }
-        }
-        publish(now_ms);
+        auto &status = observation_.status;
+        status.requested = mode_requested_ && isFresh(observation_.command, now_ms, 100) &&
+            core::fresh(observation_.source, now_ms * 1000, 100000);
+        status.member_count = is_gimbal_ ? 2 : 3;
+        const bool reference_valid = !is_gimbal_ || faultAt(now_ms) != Fault::GimbalReference;
+        status.active_count = status.requested && cycle_valid && reference_valid ? status.member_count : 0;
+        status.waiting_count = status.requested ? status.member_count - status.active_count : 0;
+        status.ready = status.active_count == status.member_count;
+        status.state = !status.requested ? RunState::Disabled
+                     : status.active_count ? RunState::Active : RunState::Recovering;
+        status.reason = !status.requested ? WaitReason::Command
+                      : !reference_valid ? WaitReason::Reference
+                      : !cycle_valid ? WaitReason::Cycle : WaitReason::None;
+        status.error = !status.requested ? 0 : !reference_valid ? -ESTALE : !cycle_valid ? -ETIMEDOUT : 0;
+        if (!status.requested)
+            observation_.target_a = observation_.target_b = observation_.target_c = 0;
+        status.last_command_sequence = observation_.command.sequence;
+        status.stamp = {now_ms, ++status_sequence_, true};
+        (void)cache_.publish(observation_);
     }
 
     int snapshot(Observation &out) const { return cache_.snapshot(out); }
 
 private:
-    void clearTarget() {
-        observation_.target_a = observation_.target_b = observation_.target_c = 0;
-    }
-    void revoke(WaitReason reason, int error) {
-        clearTarget();
-        enabling_ = false;
-        gate_.withdraw(reason, error);
-    }
-    void publish(std::uint64_t now_ms) {
-        auto &status = observation_.status;
-        const auto stage = gate_.stage();
-        status.state = stage == RecoveryGate::Stage::Active ? RunState::Active
-                     : stage == RecoveryGate::Stage::Blocked ? RunState::Blocked
-                     : stage == RecoveryGate::Stage::WaitingPrerequisites ? RunState::Disabled
-                     : RunState::Recovering;
-        status.ready = stage == RecoveryGate::Stage::WaitingCommand || stage == RecoveryGate::Stage::Active;
-        status.reason = gate_.reason();
-        status.error = gate_.error();
-        status.generation = gate_.generation();
-        status.last_command_sequence = observation_.command.sequence;
-        status.stamp = {now_ms, ++status_sequence_, true};
-        (void)cache_.publish(observation_);
-    }
     const bool is_gimbal_;
-    RecoveryGate gate_;
     SnapshotCache<Observation> cache_;
     Observation observation_{};
     std::uint32_t status_sequence_ = 0;
-    std::uint64_t previous_cycle_ms_ = 0, enable_started_ms_ = 0;
-    bool have_cycle_ = false, enabling_ = false;
+    std::uint64_t previous_cycle_ms_ = 0;
+    bool have_cycle_ = false, mode_requested_ = false;
 };
 
 SimulatedExecutor chassis(false), gimbal(true);
@@ -204,11 +164,11 @@ void emit(const char *name, const SimulatedExecutor &executor, std::uint64_t now
     if (executor.snapshot(observation) < 0) return;
     const auto &status = observation.status;
     const bool status_fresh = isFresh(status.stamp, now_ms, status_timeout_ms);
-    LOG_INF("%s state=%u ready=%u reason=%u err=%d generation=%u status_seq=%u status_age=%llu valid=%u "
+    LOG_INF("%s requested=%d state=%u active=%zu waiting=%zu reason=%u err=%d status_seq=%u status_age=%llu valid=%u "
             "command_seq=%u command_age=%llu source_seq=%llu source_age=%llu target=(%.3f,%.3f,%.3f) "
             "cycle=%u overruns=%u cycles=%u",
-            name, unsigned(status.state), unsigned(status.ready && status_fresh), unsigned(status.reason),
-            status.error, status.generation, status.stamp.sequence,
+            name, status.requested, unsigned(status.state), status.active_count, status.waiting_count, unsigned(status.reason),
+            status.error, status.stamp.sequence,
             static_cast<unsigned long long>(age(status.stamp.timestamp_ms, status.stamp.valid, now_ms)),
             unsigned(status_fresh), observation.command.sequence,
             static_cast<unsigned long long>(age(observation.command.timestamp_ms, observation.command.valid, now_ms)),

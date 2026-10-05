@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -30,7 +31,6 @@ constexpr float kVelocityAbsMaxRadS = 30.0f;
 // Retain the position sample's 0.8 A loop limit for initial tuning.
 constexpr float kSoftwareCurrentAbsMaxA = 0.80f;
 constexpr float kPositionDeadbandRad = 0.012f;
-constexpr float kMeasuredVelocitySafetyMaxRadS = 1.5f * kVelocityAbsMaxRadS;
 constexpr float kPi = 3.14159265358979323846f;
 
 // 拨弹盘参数：单位为减速器输出轴 rad；若还有外部传动，计入 kRadPerRound。
@@ -45,67 +45,22 @@ constexpr float kJamSpeedRadS = 0.10f;
 constexpr float kJamCurrentA = 0.60f;
 constexpr std::int64_t kJamConfirmMs = 300;
 constexpr std::int64_t kStartupGraceMs = 500;
-constexpr double kMaxLeadRad = kRadPerRound;
 
 constexpr double kReverseRad = 0.5 * kRadPerRound;
 constexpr double kReverseSpeedRadS = 0.5;
 constexpr double kReverseToleranceRad = 0.03;
 constexpr std::int64_t kReverseSettleMs = 100;
 constexpr std::int64_t kReverseTimeoutMs = 2500;
-constexpr std::int64_t kTransitionTimeoutMs = 1000;
-constexpr unsigned kMaxRecoveryAttempts = 3; // 整次运行累计；成功恢复不清零
 
 static_assert(kRadPerRound > 0.0 && kRoundsPerSecond > 0.0);
 static_assert(kFeedDirection == 1.0 || kFeedDirection == -1.0);
 static_assert(kFeedSpeedRadS > kJamSpeedRadS && kFeedSpeedRadS <= kVelocityAbsMaxRadS);
 static_assert(kJamSpeedRadS > 0.0f && kJamCurrentA > 0.0f && kJamCurrentA < kSoftwareCurrentAbsMaxA);
-static_assert(kJamErrorRad > 0.0 && kMaxLeadRad > kJamErrorRad);
+static_assert(kJamErrorRad > 0.0);
 static_assert(kReverseSpeedRadS > kJamSpeedRadS && kReverseSpeedRadS <= kVelocityAbsMaxRadS);
 static_assert(kReverseToleranceRad > 0.0 && kReverseRad > kReverseToleranceRad);
 static_assert(kReverseTimeoutMs > 1000.0 * kReverseRad / kReverseSpeedRadS + kReverseSettleMs);
 static_assert(kJamConfirmMs > 0 && kStartupGraceMs > 0 && kReverseSettleMs > 0);
-static_assert(kTransitionTimeoutMs > 0 && kMaxRecoveryAttempts > 0);
-
-enum class FeedState : std::uint8_t {
-    Forward = 0,
-    Stopping = 1,
-    Enabling = 2,
-    Reverse = 3,
-    FaultLatched = 4,
-};
-
-struct FeedRuntime {
-    FeedState state = FeedState::Forward;
-    FeedState resume = FeedState::Forward;
-    double target_rad = 0.0;
-    unsigned recovery_attempts = 0;
-    std::int64_t state_since_ms = 0;
-    std::int64_t jam_since_ms = -1;
-    std::int64_t settled_since_ms = -1;
-    std::uint64_t last_feedback_ms = 0;
-    std::uint64_t reference_generation = 0;
-};
-
-int validateFeedback(const skywalker::motor::MotorSnapshot &snapshot,
-                     std::uint64_t reference_generation) {
-    using namespace skywalker::motor;
-    const auto &feedback = snapshot.feedback;
-    constexpr auto required = FeedbackPosition | FeedbackVelocity | FeedbackCurrent;
-    if (snapshot.state == MotorState::Fault)
-        return snapshot.last_fault.error < 0 ? snapshot.last_fault.error : -EIO;
-    if (!snapshot.feedback_fresh)
-        return -ESTALE;
-    if (!snapshot.position_reference_valid || (feedback.valid & required) != required)
-        return -ENODATA;
-    if (snapshot.reference_generation != reference_generation)
-        return -ESTALE;
-    if (!std::isfinite(feedback.position_rad) || !std::isfinite(feedback.velocity_rad_s) ||
-        !std::isfinite(feedback.current_a))
-        return -EINVAL;
-    if (std::fabs(feedback.velocity_rad_s) > kMeasuredVelocitySafetyMaxRadS)
-        return -ERANGE;
-    return 0;
-}
 
 control_motor_position_config makePositionLoopConfig() {
     control_motor_position_config config{};
@@ -163,7 +118,7 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
     skywalker::control::PositionMotor::Config config{};
     config.loop = makePositionLoopConfig();
     config.effort_unit = skywalker::control::EffortUnit::Ampere;
-    config.safety = {kMeasuredVelocitySafetyMaxRadS, 0.0f};
+
     config.reference = skywalker::control::PositionReference::StartupRelative;
     return config;
 }
@@ -173,262 +128,97 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(uart) || !device_is_ready(can))
-        return -ENODEV;
+    if (!device_is_ready(can)) return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::m2006({
         .id = 1,
         .current_limit_a = 10.0f,
         .gear_ratio = 36.0f,
-        .timing = {20, 20, 20, 100},
+        .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
-    int ret = vofa_init(&vofa, uart);
-    if (ret < 0)
-        return ret;
-    ret = bus.attach(drive);
-    if (ret == 0)
-        ret = bus.start();
-    if (ret == 0)
-        ret = axis.configure();
-    if (ret < 0) {
-        LOG_ERR("configuration blocked: %d", ret);
-        return ret;
-    }
-    const auto ready_deadline = k_uptime_get() + 3000;
-    while (!drive.ready() && k_uptime_get() < ready_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.ready())
-        return -ETIMEDOUT;
-    // M2006 has no absolute output-shaft reference; reset anchors the startup zero.
-    ret = axis.reset(); // Check speed, temperature and reference before enabling.
-    if (ret == 0)
-        ret = drive.enable();
-    if (ret < 0) {
-        (void)drive.disable();
-        return ret;
-    }
-    const auto active_deadline = k_uptime_get() + 3000;
-    while (!drive.active() && k_uptime_get() < active_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.active()) {
-        (void)drive.disable();
-        return -ETIMEDOUT;
-    }
-    FeedRuntime runtime{};
-    runtime.state_since_ms = k_uptime_get();
-    runtime.reference_generation = drive.snapshot().reference_generation;
-    auto previous_ms = runtime.state_since_ms;
-    std::uint32_t telemetry_divider = 0;
-    std::int64_t next_vofa_warning_ms = 0;
-
-    const auto latch_fault = [&](int cause) {
-        if (runtime.state == FeedState::FaultLatched)
-            return;
-        runtime.state = FeedState::FaultLatched;
-        const int stop_error = drive.disable();
-        LOG_ERR("Feed fault latched: %d, recovery attempts=%u; restart after clearing the obstruction",
-                cause, runtime.recovery_attempts);
-        if (stop_error < 0)
-            LOG_ERR("Stop request failed: %d", stop_error);
-    };
-    const auto request_reanchor = [&](FeedState resume, std::int64_t now) {
-        const int error = drive.disable();
-        if (error < 0)
-            return error;
-        runtime.state = FeedState::Stopping;
-        runtime.resume = resume;
-        runtime.state_since_ms = now;
-        runtime.jam_since_ms = -1;
-        runtime.settled_since_ms = -1;
-        LOG_INF("Stopping before %s", resume == FeedState::Reverse ? "reverse" : "forward");
-        return 0;
-    };
-    const auto request_recovery = [&](std::int64_t now, bool confirmed_jam) {
-        if (runtime.recovery_attempts >= kMaxRecoveryAttempts)
-            return -EIO;
-        ++runtime.recovery_attempts;
-        LOG_WRN("%s; recovery %u/%u", confirmed_jam ? "Jam detected" : "Position lag limit reached",
-                runtime.recovery_attempts, kMaxRecoveryAttempts);
-        return request_reanchor(FeedState::Reverse, now);
-    };
-
-    LOG_INF("Continuous position feed started; VOFA: 16 channels, state 0=forward 1=stop 2=enable 3=reverse 4=fault");
+    const int vofa_error = vofa_init(&vofa, uart);
+    int ret = bus.attach(drive);
+    if (ret == 0) ret = bus.start();
+    if (ret == 0) ret = axis.configure();
+    if (ret < 0) return ret;
+    const auto started_ms = k_uptime_get();
+    auto previous_ms = started_ms;
+    double target = 0, reverse_target = 0;
+    bool reversing = false;
+    unsigned recovery_attempts = 0;
+    std::int64_t reverse_started_ms = 0, jam_since_ms = -1, settled_since_ms = -1, next_log_ms = 0;
+    std::uint64_t observed_feedback_ms = 0;
+    int last_call_error = 0;
     for (;;) {
         k_sleep(K_MSEC(kControlPeriodMs));
         const auto now = k_uptime_get();
-        const float dt_s = float(now - previous_ms) / 1000.0f;
+        const float dt = float(now - previous_ms) / 1000;
         previous_ms = now;
-        const auto snapshot = drive.snapshot();
-        skywalker::control::PositionMotor::Telemetry data{};
-        bool controlled = false;
-
-        // Faults remain latched, while telemetry and the CAN worker keep running.
-        if (runtime.state != FeedState::FaultLatched) {
-            ret = validateFeedback(snapshot, runtime.reference_generation);
-            if (ret < 0)
-                latch_fault(ret);
+        if (std::isfinite(dt) && dt > 0 && dt <= 0.02f) {
+            if (reversing) {
+                const double step = kReverseSpeedRadS * dt;
+                const double left = reverse_target - target;
+                target += std::copysign(std::min(std::fabs(left), step), left);
+            } else target += kFeedDirection * kFeedSpeedRadS * dt;
         }
-
-        switch (runtime.state) {
-        case FeedState::Stopping:
-            if (now - runtime.state_since_ms >= kTransitionTimeoutMs) {
-                latch_fault(-ETIMEDOUT);
-                break;
-            }
-            if (snapshot.state == skywalker::motor::MotorState::Disabled && drive.ready() &&
-                std::fabs(snapshot.feedback.velocity_rad_s) <= kJamSpeedRadS) {
-                // reset() is only legal while disabled. It clears both PID histories
-                // and establishes a new relative zero, discarding all old target debt.
-                ret = axis.reset();
-                if (ret == 0) {
-                    runtime.target_rad = 0.0;
-                    runtime.last_feedback_ms = snapshot.feedback.timestamp_ms;
-                    ret = drive.enable();
-                }
-                if (ret < 0) {
-                    latch_fault(ret);
-                    break;
-                }
-                runtime.state = FeedState::Enabling;
-                runtime.state_since_ms = now;
-            }
-            break;
-
-        case FeedState::Enabling:
-            if (now - runtime.state_since_ms >= kTransitionTimeoutMs) {
-                latch_fault(-ETIMEDOUT);
-                break;
-            }
-            if (drive.active()) {
-                runtime.state = runtime.resume;
-                runtime.state_since_ms = now;
-                runtime.last_feedback_ms = snapshot.feedback.timestamp_ms;
-                LOG_INF("%s active", runtime.state == FeedState::Reverse ? "Reverse" : "Forward");
-            }
-            break;
-
-        case FeedState::Forward:
-        case FeedState::Reverse: {
-            if (!drive.active()) {
-                latch_fault(-EHOSTDOWN);
-                break;
-            }
-            if (!std::isfinite(dt_s) || dt_s < 0.001f || dt_s > 0.020f) {
-                latch_fault(-ERANGE);
-                break;
-            }
-            const bool reversing = runtime.state == FeedState::Reverse;
-            constexpr double reverse_end = -kFeedDirection * kReverseRad;
+        const int enable_error = drive.enable();
+        const int update_error = axis.update(target, dt);
+        const int commit_error = bus.commit().error;
+        if (enable_error < 0) last_call_error = enable_error;
+        if (update_error < 0) last_call_error = update_error;
+        if (commit_error < 0) last_call_error = commit_error;
+        const auto data = axis.telemetry();
+        const auto &f = data.motor.feedback;
+        if (!data.output_valid) {
+            jam_since_ms = settled_since_ms = -1;
+        } else if (f.timestamp_ms > observed_feedback_ms) {
+            observed_feedback_ms = f.timestamp_ms;
+            const auto feedback_ms = static_cast<std::int64_t>(f.timestamp_ms);
             if (reversing) {
-                if (now - runtime.state_since_ms >= kReverseTimeoutMs) {
-                    latch_fault(-ETIMEDOUT);
-                    break;
-                }
-                const double step = kReverseSpeedRadS * double(dt_s);
-                const double left = std::fabs(reverse_end - runtime.target_rad);
-                runtime.target_rad = left <= step ? reverse_end
-                                                 : runtime.target_rad - kFeedDirection * step;
-            } else {
-                // No modulo and no periodic reset: a constant-slope position ramp.
-                runtime.target_rad += kFeedDirection * kFeedSpeedRadS * double(dt_s);
-            }
-            ret = axis.update(runtime.target_rad, dt_s);
-            if (ret == 0) {
-                data = axis.telemetry();
-                ret = data.valid ? validateFeedback(data.motor, runtime.reference_generation) : -ENODATA;
-            }
-            if (ret == 0)
-                ret = bus.commit().error;
-            if (ret < 0) {
-                latch_fault(ret);
-                break;
-            }
-            controlled = true;
-            const auto &fb = data.motor.feedback;
-            const double lead = kFeedDirection * (runtime.target_rad - data.position_rad);
-            if (!reversing && lead <= -kMaxLeadRad) {
-                latch_fault(-ERANGE);
-                break;
-            }
-            if (!reversing && lead >= kMaxLeadRad) {
-                ret = request_recovery(now, false);
-                if (ret < 0)
-                    latch_fault(ret);
-                break;
-            }
-            // Re-reading a cached CAN frame does not count as another jam/settle observation.
-            if (fb.timestamp_ms <= runtime.last_feedback_ms)
-                break;
-            runtime.last_feedback_ms = fb.timestamp_ms;
-            const auto feedback_ms = static_cast<std::int64_t>(fb.timestamp_ms);
-            if (reversing) {
-                const bool settled = runtime.target_rad == reverse_end &&
-                    std::fabs(data.position_rad - reverse_end) <= kReverseToleranceRad &&
-                    std::fabs(fb.velocity_rad_s) <= kJamSpeedRadS;
-                if (!settled) {
-                    runtime.settled_since_ms = -1;
-                } else if (runtime.settled_since_ms < 0) {
-                    runtime.settled_since_ms = feedback_ms;
-                } else if (feedback_ms - runtime.settled_since_ms >= kReverseSettleMs) {
-                    ret = request_reanchor(FeedState::Forward, now);
-                    if (ret < 0)
-                        latch_fault(ret);
+                const bool settled = std::fabs(target - reverse_target) < 1e-6 &&
+                    std::fabs(data.position_rad - reverse_target) <= kReverseToleranceRad &&
+                    std::fabs(f.velocity_rad_s) <= kJamSpeedRadS;
+                if (!settled) settled_since_ms = -1;
+                else if (settled_since_ms < 0) settled_since_ms = feedback_ms;
+                if ((settled_since_ms >= 0 && feedback_ms - settled_since_ms >= kReverseSettleMs) ||
+                    now - reverse_started_ms >= kReverseTimeoutMs) {
+                    reversing = false;
+                    target = data.position_rad;
+                    jam_since_ms = settled_since_ms = -1;
                 }
             } else {
-                const bool jam = now - runtime.state_since_ms >= kStartupGraceMs &&
-                    lead >= kJamErrorRad && std::fabs(fb.velocity_rad_s) <= kJamSpeedRadS &&
-                    std::fabs(fb.current_a) >= kJamCurrentA;
-                if (!jam) {
-                    runtime.jam_since_ms = -1;
-                } else if (runtime.jam_since_ms < 0) {
-                    runtime.jam_since_ms = feedback_ms;
-                } else if (feedback_ms - runtime.jam_since_ms >= kJamConfirmMs) {
-                    ret = request_recovery(now, true);
-                    if (ret < 0)
-                        latch_fault(ret);
+                const double lead = kFeedDirection * (target - data.position_rad);
+                const bool jam = now - started_ms >= kStartupGraceMs && lead >= kJamErrorRad &&
+                    (f.valid & skywalker::motor::FeedbackCurrent) && std::fabs(f.velocity_rad_s) <= kJamSpeedRadS &&
+                    std::fabs(f.current_a) >= kJamCurrentA;
+                if (!jam) jam_since_ms = -1;
+                else if (jam_since_ms < 0) jam_since_ms = feedback_ms;
+                if (jam_since_ms >= 0 && feedback_ms - jam_since_ms >= kJamConfirmMs) {
+                    reversing = true;
+                    ++recovery_attempts;
+                    target = data.position_rad;
+                    reverse_target = target - kFeedDirection * kReverseRad;
+                    reverse_started_ms = now;
+                    jam_since_ms = settled_since_ms = -1;
                 }
             }
-            break;
         }
-        case FeedState::FaultLatched:
-            break;
+        if (vofa_error == 0) {
+            const auto &o = data.output;
+            const float channels[16] = {float(target), float(data.target_position_rad), float(data.position_rad),
+                f.current_a, o.position.error, o.position.output, o.velocity.velocity_reference_rad_s,
+                f.velocity_rad_s, o.velocity.velocity_error_rad_s, o.velocity.regulator.feedback.p,
+                o.velocity.regulator.feedback.i, data.output_valid ? o.effort_command : 0, dt * 1000,
+                float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0), float(reversing), float(recovery_attempts)};
+            (void)vofa_send(&vofa, channels, 16);
         }
-
-        if (++telemetry_divider >= kTelemetryPeriodCycles) {
-            telemetry_divider = 0;
-            const auto current = drive.snapshot();
-            const auto &feedback = controlled ? data.motor.feedback : current.feedback;
-            const auto &output = data.output;
-            const auto telemetry_ms = k_uptime_get();
-            const float feedback_age_ms = telemetry_ms >= static_cast<std::int64_t>(feedback.timestamp_ms)
-                ? static_cast<float>(telemetry_ms - feedback.timestamp_ms) : 0.0f;
-            // Channels 0..13 retain the position sample layout, except reserved
-            // channel 3 now carries measured current. Channels 14/15 are state/retries.
-            const float channels[16] = {
-                static_cast<float>(runtime.target_rad),
-                controlled ? static_cast<float>(data.target_position_rad) : NAN,
-                controlled ? static_cast<float>(data.position_rad) : NAN,
-                feedback.current_a,
-                output.position.error,
-                output.position.output,
-                output.velocity.velocity_reference_rad_s,
-                feedback.velocity_rad_s,
-                output.velocity.velocity_error_rad_s,
-                output.velocity.regulator.feedback.p,
-                output.velocity.regulator.feedback.i,
-                output.effort_command,
-                dt_s * 1000.0f,
-                feedback_age_ms,
-                static_cast<float>(runtime.state),
-                static_cast<float>(runtime.recovery_attempts),
-            };
-            const int telemetry_error = vofa_send(&vofa, channels, 16);
-            if (telemetry_error < 0 && now >= next_vofa_warning_ms) {
-                LOG_WRN("vofa_send failed: %d", telemetry_error);
-                next_vofa_warning_ms = now + 1000;
-            }
+        if (now >= next_log_ms) {
+            next_log_ms = now + 1000;
+            LOG_INF("target=%.3f seq=%llu output=%d wait=%u reverse=%d attempts=%u call=%d", target,
+                static_cast<unsigned long long>(data.target_sequence), data.output_valid, unsigned(data.issue),
+                reversing, recovery_attempts, last_call_error);
         }
     }
 }

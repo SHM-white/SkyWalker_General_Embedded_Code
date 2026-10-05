@@ -14,8 +14,6 @@ struct BoardHeartbeat {
     std::uint32_t sender_uptime_ms = 0;
     // 标识发送方当前这次启动的编号。
     std::uint64_t sender_boot_id = 0;
-    // 发送方恢复运行上下文的代次。
-    std::uint32_t resume_generation = 0;
     // 发送方是否已准备就绪。
     bool ready = false;
     // 发送方是否请求同步运行状态。
@@ -32,8 +30,6 @@ struct RemoteChassisControl {
     std::uint32_t active_reasons = 0;
     // 目标接收板本次启动的编号，用于拒绝旧命令。
     std::uint64_t receiver_boot_id = 0;
-    // 目标接收板当前恢复运行上下文的代次。
-    std::uint32_t resume_generation = 0;
     // 板间底盘控制消息的时间戳与序号。
     MessageStamp stamp{};
 };
@@ -76,8 +72,6 @@ struct BigYawRequest {
     std::uint32_t source_age_ms = 0;
     std::uint32_t command_age_ms = 0;
     std::uint64_t receiver_boot_id = 0;
-    // Independent big-Yaw recovery context, unrelated to wheel heartbeat context.
-    std::uint32_t resume_generation = 0;
     OutputPermission permission{};
     std::uint32_t permission_age_ms = 0;
     MessageStamp stamp{};
@@ -89,7 +83,6 @@ struct BigYawFeedback {
     bool valid = false;
     float actual_rate_rad_s = 0;
     std::uint32_t active_reasons = 0;
-    std::uint32_t resume_generation = 0;
     std::uint32_t last_command_sequence = 0;
     std::uint32_t source_sequence = 0;
     std::uint32_t production_age_ms = 0;
