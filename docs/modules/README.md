@@ -2,6 +2,8 @@
 
 公共头文件按 drivers、control、communication、robotics 和 core 的职责组织。应用先通过 Kconfig/设备树启用所需实现，再构造长期存活的模块对象；多数对象只处理数据，不自动创建线程或完成整个机器人的恢复逻辑。
 
+接口签名、参数、时序与完整调用片段见[独立 Markdown API 参考](../api/README.md)，可直接阅读，无需启动浏览器服务。电机从[公共模型](drivers/motor.md)开始，再选型号、控制环和[迁移指引](../guides/motor-migration.md)。更新时按[维护清单](../maintenance.md)逐项同步。
+
 ## 架构边界
 
 ~~~text

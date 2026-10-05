@@ -30,4 +30,4 @@ reset 只处理本轴 PID 历史，不是输出准入，不能重定义 StartupR
 
 共享 CAN 的所有轴先 update，再由统一发布者每周期 commit 一次。每个控制器一个执行写入线程，Motor/CanBus 对象必须覆盖异步工作线程生命周期。
 
-完整接口、并发版本、逐轴恢复和人工验收见[实施指南](../../dev/电机持续指令与独立自动恢复重构实施指南.md)。样例见 [recovery](../../../samples/motor/recovery/README.md)、[单舵轮](../../../samples/robotics/swerve/README.md)。
+常用接口、参数、时序、边界与示例见[独立接口参考](../../api/motor-control.md)，并发代次见[公共电机模型](../drivers/motor.md)，初始化与周期调用见[工作流](../../guides/motor-workflow.md)。旧设计背景保留在[开发记录](../../dev/电机持续指令与独立自动恢复重构实施指南.md)，现行契约以模块主题页和源码为准。样例见 [recovery](../../../samples/motor/recovery/README.md)、[单舵轮](../../../samples/robotics/swerve/README.md)。

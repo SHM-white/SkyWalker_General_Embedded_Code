@@ -35,6 +35,8 @@ jobs:
           # Keep the repository layout so architecture-browser/app.js can
           # continue resolving ../../ paths to Markdown and source files.
           git archive --format=tar HEAD | tar -xf - -C _site
+          python3 docs/architecture-browser/workspace_docs.py \
+            --root _site --output _site/docs/architecture-browser/docs-index.json
           touch _site/.nojekyll
 
           # Make the Pages root a convenient entry point without changing

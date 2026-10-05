@@ -4,7 +4,10 @@
   const modules = window.SKYWALKER_MODULES || [];
   const byId = new Map(modules.map(module => [module.id, module]));
   const architecture = window.SKYWALKER_ARCHITECTURE;
-  const documents = window.SKYWALKER_DOCS || [];
+  let documents = [];
+  let documentMode;
+  let documentError = '';
+  let documentRequest;
   const categories = window.SKYWALKER_CATEGORIES || [];
   const rootUrl = new URL('../../', window.location.href);
   const content = document.getElementById('content');
@@ -33,6 +36,30 @@
     if (!url.href.startsWith(rootUrl.href)) throw new Error('文件不在本仓库');
     return url;
   };
+
+  async function loadDocuments() {
+    if (documentRequest) return documentRequest;
+    documentRequest = (async () => {
+      try {
+        const response = await fetch(new URL('docs-index.json', window.location.href), {cache: 'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const index = await response.json();
+        if (!['workspace', 'snapshot'].includes(index.mode) || !Array.isArray(index.documents)) throw new Error('目录格式不正确');
+        for (const doc of index.documents) {
+          if (!doc || typeof doc.title !== 'string' || typeof doc.path !== 'string' || typeof doc.group !== 'string' || !/\.md$/i.test(doc.path)) throw new Error('文档条目格式不正确');
+          repositoryFile(doc.path);
+        }
+        documents = index.documents;
+        documentMode = index.mode;
+        documentError = '';
+      } catch (error) {
+        documentError = `无法加载文档目录：${error.message}。请重试；本地阅读可使用仓库启动脚本。${documentMode ? '当前保留上次成功加载的目录。' : ''}`;
+      }
+    })();
+    try { await documentRequest; } finally { documentRequest = null; }
+  }
+
+  const documentWarning = () => documentError ? `<div class="notice warn" role="status">${esc(documentError)} <button class="secondary-button" data-refresh-docs>重试加载</button></div>` : '';
 
   function nav() {
     document.getElementById('module-nav').innerHTML = categories.map(category => {
@@ -109,11 +136,9 @@
   function overview(params) {
     const mode = params.get('mode') === 'target' ? 'target' : 'current';
     const data = architecture[mode];
-    const apiCount = modules.reduce((sum, module) => sum + list(module.interfaces).length, 0);
-    const exampleCount = modules.reduce((sum, module) => sum + list(module.examples).length, 0);
-    const stats = [{number: '02', title: '实时主控分工', note: '云台决策 / 底盘执行'}, {number: String(modules.length).padStart(2, '0'), title: '模块接口手册', note: '源码、契约与调用顺序'}, {number: String(apiCount), title: '接口契约', note: `${exampleCount} 组调用示例`}, {number: String(documents.length), title: 'Markdown 阅读入口', note: '保留现有正文与样例'}];
+    const stats = [{number: '02', title: '实时主控分工', note: '云台决策 / 底盘执行'}, {number: String(modules.length).padStart(2, '0'), title: '模块接口手册', note: '源码、契约与调用顺序'}, {number: String(modules.length), title: '独立接口手册', note: 'Markdown 契约与调用示例'}, {number: documentMode ? String(documents.length) : '—', title: 'Markdown 阅读入口', note: '自动发现正文与样例'}];
     content.innerHTML = heading('01 / System architecture', '从模块到整车，一张图读懂。', `对齐 ${architecture.baseline.branch}@${architecture.baseline.commit.slice(0, 7)} · ${architecture.baseline.date}。先看主控分工，再查公开接口与来源/测量缺口。`, `${pill('partial', '整车装配仍在进行')}<a class="quiet-link" href="#history">查看这次重建的来历 ↗</a>`) +
-      `<div class="intro-stats">${stats.map(stat => `<div class="stat"><div class="stat-number">${stat.number}</div><div class="stat-title">${stat.title}</div><small>${stat.note}</small></div>`).join('')}</div>
+      documentWarning() + `<div class="intro-stats">${stats.map(stat => `<div class="stat"><div class="stat-number">${stat.number}</div><div class="stat-title">${stat.title}</div><small>${stat.note}</small></div>`).join('')}</div>
       <div class="overview-mode"><div class="tabs" aria-label="架构视图"><a class="${mode === 'current' ? 'active' : ''}" ${mode === 'current' ? 'aria-current="page"' : ''} href="#overview?mode=current">当前实际接入</a><a class="${mode === 'target' ? 'active' : ''}" ${mode === 'target' ? 'aria-current="page"' : ''} href="#overview?mode=target">最终上车蓝图</a></div><div class="legend"><span><i class="ready"></i>已有代码</span><span><i class="partial"></i>接入 / 配置未完成</span><span><i class="planned"></i>目标 / 待实现</span></div></div>
       <div class="panel"><div class="panel-header"><div><h2>${mode === 'current' ? '目前代码真正连通的路线' : '两块实时主控 + 视觉计算机'}</h2><p>点击图中模块进入接口手册 · 箭头表示数据方向</p></div><a class="quiet-link" href="#relations">展开所有模块关系 ↗</a></div>${vehicleDiagram(mode)}<div class="map-footer"><strong>${mode === 'current' ? '当前状态' : '目标约定'}：</strong>${esc(data.summary)}<div class="feedback-lines"><span>→ 命令：带单位的目标与原始时间</span><span>← 反馈：状态 / 参考 / 有效测量</span><span>许可：裁判 + 本地执行条件</span></div></div></div>
       <div class="notice ${mode === 'current' ? 'warn' : ''}">${mode === 'current' ? '<strong>已有代码不等于实车验收。</strong> 两应用共用整车运行时，中央连接与 IMU 安装确认关闭；视觉反馈、功率、热量与拨盘原点仍需真实来源。' : '<strong>此图是工程目标。</strong> 惯性双轴、大 Yaw 与发射框架已有；实物标定和来源闭环待补，搜索/导航仍待实现；绿色仅表示软件存在。'}</div>
@@ -123,9 +148,8 @@
       ${sectionHeading('建议的阅读顺序')}<div class="reading-path"><a href="#relations"><small>01 / 看关系</small><strong>谁调用谁</strong><p>选择模块，高亮上下游依赖。</p></a><a href="#modules"><small>02 / 查接口</small><strong>如何正确调用</strong><p>参数、返回、时序、线程和示例。</p></a><a href="#workflows"><small>03 / 串主线</small><strong>从输入走到电机</strong><p>逐步阅读遥控、自瞄与恢复链路。</p></a><a href="#docs"><small>04 / 看正文</small><strong>现有 Markdown</strong><p>配置、长篇说明和完整样例。</p></a></div>`;
   }
 
-  function card(module, query = '') {
-    const matched = query ? list(module.interfaces).filter(api => text(api.signature).toLowerCase().includes(query)).slice(0, 2) : [];
-    return `<article class="module-card"><div class="module-category">${esc(module.category)}</div><h3><a href="#module/${esc(module.id)}">${esc(module.title)}</a></h3><p>${esc(module.summary)}</p><small>${esc(module.statusNote)}</small>${matched.map(api => `<div class="search-match">${esc(api.signature)}</div>`).join('')}<div class="module-card-footer">${pill(module.status)}<a href="#module/${esc(module.id)}">${list(module.interfaces).length} 个接口 · ${list(module.examples).length} 个示例 →</a></div></article>`;
+  function card(module) {
+    return `<article class="module-card"><div class="module-category">${esc(module.category)}</div><h3><a href="#module/${esc(module.id)}">${esc(module.title)}</a></h3><p>${esc(module.summary)}</p><small>${esc(module.statusNote)}</small><div class="module-card-footer">${pill(module.status)}<a href="#module/${esc(module.id)}">Markdown 接口与示例 →</a></div></article>`;
   }
 
   function moduleCatalog(params) {
@@ -135,22 +159,10 @@
       `<div class="toolbar"><div class="filter-buttons" aria-label="模块分类">${['全部', ...categories].map(item => `<button data-category="${esc(item)}" class="${item === category ? 'active' : ''}" aria-pressed="${item === category}">${esc(item)}</button>`).join('')}</div><span class="count-note">${selection.length} 个模块</span></div><div class="module-grid">${selection.map(module => card(module)).join('')}</div>`;
   }
 
-  function moduleDetail(id, params) {
+  async function moduleDetail(id, params, version) {
     const module = byId.get(id);
     if (!module) { content.innerHTML = empty('未找到模块。请从“接口与示例”选择现有模块。'); return; }
-    document.title = `${module.title} · SkyWalker`;
-    breadcrumb.textContent = `${module.category} / ${module.title}`;
-    const toc = [['purpose', '职责与关联'], ['api', '接口契约'], ['examples', '调用示例'], ['lifecycle', '调用顺序'], ['config', '配置与边界'], ['sources', '正文与源码']];
-    const consumerLinks = downstream(id).map(item => moduleLink(item.id)).join('');
-    content.innerHTML = heading('03 / Module reference', module.title, module.summary, `${pill(module.status)}<a class="quiet-link" href="#relations?selected=${esc(id)}">在关系图中定位 ↗</a>`) +
-      `<div class="notice ${module.status === 'partial' ? 'warn' : ''}"><strong>上车接入状态：</strong>${esc(module.statusNote)}</div><div class="module-page"><article class="article">
-      <section class="article-section" id="purpose"><h2>职责与关联</h2><div class="panel module-intro"><p>${esc(module.responsibility)}</p><div class="relation-label">依赖 / 输入来自</div><div class="relation-chips">${list(module.depends).map(parent => moduleLink(parent)).join('') || '<span class="count-note">直接依赖板级设备或底层算法，见接口说明。</span>'}</div><div class="relation-label">被哪些模块使用</div><div class="relation-chips">${consumerLinks || '<span class="count-note">由应用或样例直接装配。</span>'}</div></div></section>
-      <section class="article-section" id="api"><h2>接口契约 <span class="count-note">${list(module.interfaces).length} 项</span></h2>${list(module.interfaces).map(api => `<article class="contract"><code class="signature">${esc(api.signature)}</code><div class="contract-body"><p>${esc(api.description)}</p>${list(api.parameters).length ? `<div class="table-scroll"><table><thead><tr><th>参数</th><th>含义与边界</th></tr></thead><tbody>${api.parameters.map(parameter => `<tr><td><code>${esc(parameter.name)}</code></td><td>${esc(parameter.meaning)}</td></tr>`).join('')}</tbody></table></div>` : ''}<dl class="contract-meta"><dt>返回 / 输出</dt><dd>${esc(text(api.returns))}</dd><dt>线程 / 时序</dt><dd>${esc(text(api.context))}</dd><dt>错误 / 边界</dt><dd>${esc(text(api.errors))}</dd></dl></div></article>`).join('')}</section>
-      <section class="article-section" id="examples"><h2>调用示例</h2>${list(module.examples).map((example, index) => `<div class="code-example"><div class="code-heading"><strong>${esc(example.title)} · ${esc(example.language || 'cpp')}</strong><button data-copy-module="${esc(id)}" data-example="${index}">复制代码</button></div><pre><code>${esc(example.code)}</code></pre>${example.notes ? `<p class="code-note">${esc(text(example.notes))}</p>` : ''}</div>`).join('')}</section>
-      <section class="article-section" id="lifecycle"><h2>调用顺序</h2><div class="panel panel-body"><ol class="steps-list">${list(module.lifecycle).map(step => `<li>${esc(text(step))}</li>`).join('')}</ol></div></section>
-      <section class="article-section" id="config"><h2>配置与使用边界</h2>${list(module.config).length ? `<div class="table-scroll"><table><thead><tr><th>配置项</th><th>作用与前提</th></tr></thead><tbody>${module.config.map(config => `<tr><td><code>${esc(config.name)}</code></td><td>${esc(config.description)}</td></tr>`).join('')}</tbody></table></div>` : ''}<div class="notice">${plainList(module.pitfalls)}</div></section>
-      <section class="article-section" id="sources"><h2>正文与当前工作区源码</h2><div class="panel panel-body"><h3>Markdown 正文</h3>${sourceLinks(module.docs, false)}<h3 style="margin-top:24px">接口 / 实现 / 样例</h3>${sourceLinks(module.source)}</div></section>
-      </article><nav class="section-toc" aria-label="本模块目录"><div class="toc-title">本页目录</div>${toc.map(([anchor, label]) => `<a href="#module/${esc(id)}?anchor=${anchor}">${label}</a>`).join('')}<a href="#modules">← 全部模块</a></nav></div>`;
+    await readFile(module.reference, false, params, version, module);
   }
 
   function relations(params) {
@@ -203,14 +215,15 @@
 
   function docsPage() {
     const groups = [...new Set(documents.map(doc => doc.group))];
-    content.innerHTML = heading('05 / Markdown library', '原来的 Markdown，仍是正文。', '浏览器提供导航、图解和接口速查，现有目录继续保留。点击任一文档可在这里阅读，正文链接会继续带你进入相关文档或源码。', `<span class="pill neutral">${documents.length} 篇文档 / 样例</span>`) +
-      `<div class="notice"><strong>阅读边界：</strong>模块正文说明现行接口；docs/dev 是设计记录与待实施方案。开发记录中的拟议 API 需要结合当前源码判断。</div><div class="docs-layout">${groups.map(group => `<section class="panel doc-group"><h2>${esc(group)}</h2>${documents.filter(doc => doc.group === group).map(doc => `<a class="doc-entry" href="${routeFile(doc.path)}"><span>${esc(doc.title)}<small>${esc(doc.path)}</small></span><span class="doc-arrow">↗</span></a>`).join('')}</section>`).join('')}</div>`;
+    content.innerHTML = heading('05 / Markdown library', '工作区文档，自动汇入目录。', '自动提取 Markdown 标题、路径和目录分组，点击即可在这里阅读。新增、删除或改名文档无需维护索引。', `<span class="pill neutral">${documentMode ? documents.length : '—'} 篇文档 / 样例</span><button class="secondary-button" data-refresh-docs>刷新目录</button>`) +
+      documentWarning() + (documentMode ? `<div class="notice">${documentMode === 'workspace' ? '当前目录来自工作区实时扫描，包含尚未提交的 Markdown。进入本页或点击“刷新目录”会重新扫描。' : '当前目录由部署时自动扫描生成，新增文档将在下一次部署后出现；刷新可加载最新部署目录。'}</div>` : '') +
+      `<div class="notice"><strong>阅读边界：</strong>模块正文说明现行接口；docs/dev 是设计记录与待实施方案。开发记录中的拟议 API 需要结合当前源码判断。</div>${!documents.length && documentMode ? empty('当前工作区没有可索引的 Markdown 文档。') : ''}<div class="docs-layout">${groups.map(group => `<section class="panel doc-group"><h2>${esc(group)}</h2>${documents.filter(doc => doc.group === group).map(doc => `<a class="doc-entry" href="${routeFile(doc.path)}"><span>${esc(doc.title)}<small>${esc(doc.path)}</small></span><span class="doc-arrow">↗</span></a>`).join('')}</section>`).join('')}</div>`;
   }
 
   function historyPage() {
     content.innerHTML = heading('06 / Git history', '什么时候变成了覆盖层？', '以下时间来自仓库 Git 记录，均为北京时间。提交记录能说明实际修改与注明的目的，未注明的动机不作猜测。') +
       `<div class="notice warn"><strong>关键启用点：2026-09-30 03:30:47，d860163。</strong> 前一提交添加刷新脚本，该提交把它插入页面。最初为补视觉 / IMU，后续继续叠加命令服务，导致多代描述依靠运行时覆盖。Markdown 目录始终存在。</div><div class="history-timeline">${architecture.history.map(item => `<article class="history-entry"><time>${esc(item.date)}</time><h3><code class="commit">${esc(item.hash)}</code>${esc(item.title)}</h3><p>${esc(item.detail)}</p></article>`).join('')}</div>
-      ${sectionHeading('这次重建的维护方式')}<div class="panel panel-body"><ol class="steps-list"><li>一个渲染入口 app.js，按模块分组的接口数据；不再通过后载脚本改写旧图与旧接口。</li><li>主图区分“当前实际接入”和“最终上车目标”，模块代码状态与真实装配状态分开显示。</li><li>Markdown 保留为长篇正文并在浏览器内阅读；本地源码入口直接读取工作区，不再固定到过时 GitHub 提交。</li><li>API 修改时同步对应 modules-*.js 与模块正文；应用接入变化时同步 architecture-data.js 和 vehicle-diagram.js。</li></ol><a class="quiet-link" href="#read/docs/architecture-browser/README.md" style="display:block;margin-top:20px">维护与启动说明 →</a></div>`;
+      ${sectionHeading('这次重建的维护方式')}<div class="panel panel-body"><ol class="steps-list"><li>一个渲染入口 app.js；接口详情维护在 docs/api 的独立 Markdown，页面读取同一正文。</li><li>主图区分“当前实际接入”和“最终上车目标”，模块代码状态与真实装配状态分开显示。</li><li>Markdown 保留为长篇正文并在浏览器内阅读；本地源码入口直接读取工作区，不再固定到过时 GitHub 提交。</li><li>API 修改时更新 docs/api 和模块主题页；应用接入变化时更新架构数据与主图；每轮按照文档同步清单逐项完成。</li></ol><a class="quiet-link" href="#read/docs/architecture-browser/README.md" style="display:block;margin-top:20px">维护与启动说明 →</a></div>`;
   }
 
   function searchPage(params) {
@@ -218,10 +231,10 @@
     input.value = query;
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const matches = value => terms.every(term => value.toLowerCase().includes(term));
-    const foundModules = terms.length ? modules.filter(module => matches(JSON.stringify(module))) : [];
+    const foundModules = terms.length ? modules.filter(module => matches(JSON.stringify(module) + ' ' + (documents.find(doc => doc.path === module.reference)?.searchText || ''))) : [];
     const foundDocs = terms.length ? documents.filter(doc => matches(`${doc.title} ${doc.path} ${doc.group}`)) : [];
-    content.innerHTML = heading('Search / 搜索', query ? `“${query}”的搜索结果` : '输入一个模块名或接口名。', '搜索模块说明、接口签名、参数、配置、示例和文档标题 / 路径。可用多个关键词缩小范围。') +
-      `<div class="search-results">${foundModules.length ? `<h2>模块 / 接口 · ${foundModules.length}</h2><div class="module-grid">${foundModules.map(module => card(module, query.toLowerCase())).join('')}</div>` : ''}${foundDocs.length ? `<h2>Markdown / 样例 · ${foundDocs.length}</h2><div class="panel doc-group">${foundDocs.map(doc => `<a class="doc-entry" href="${routeFile(doc.path)}"><span>${esc(doc.title)}<small>${esc(doc.path)}</small></span><span>→</span></a>`).join('')}</div>` : ''}${!foundModules.length && !foundDocs.length ? empty(query ? '没有匹配结果。可尝试 CommandManager、snapshot、CAN、参考或 IMU。' : '顶部搜索框支持 / 快捷键。') : ''}</div>`;
+    content.innerHTML = heading('Search / 搜索', query ? `“${query}”的搜索结果` : '输入一个模块名或接口名。', '搜索模块说明、Markdown 接口签名、参数、配置、示例和文档标题 / 路径。可用多个关键词缩小范围。') +
+      documentWarning() + `<div class="search-results">${foundModules.length ? `<h2>模块 / 接口 · ${foundModules.length}</h2><div class="module-grid">${foundModules.map(module => card(module, query.toLowerCase())).join('')}</div>` : ''}${foundDocs.length ? `<h2>Markdown / 样例 · ${foundDocs.length}</h2><div class="panel doc-group">${foundDocs.map(doc => `<a class="doc-entry" href="${routeFile(doc.path)}"><span>${esc(doc.title)}<small>${esc(doc.path)}</small></span><span>→</span></a>`).join('')}</div>` : ''}${!foundModules.length && !foundDocs.length ? empty(query ? '没有匹配结果。可尝试 CommandManager、snapshot、CAN、参考或 IMU。' : '顶部搜索框支持 / 快捷键。') : ''}</div>`;
   }
 
   function linkForMarkdown(target, path) {
@@ -232,7 +245,7 @@
       if (!url.href.startsWith(rootUrl.href)) return '';
       const relative = decodeURIComponent(url.pathname.slice(rootUrl.pathname.length));
       const fragment = url.hash.slice(1);
-      if (relative.endsWith('.md')) return routeFile(relative) + (fragment ? `?anchor=${encodeURIComponent(decodeURIComponent(fragment))}` : '');
+      if (/\.md$/i.test(relative)) return routeFile(relative) + (fragment ? `?anchor=${encodeURIComponent(decodeURIComponent(fragment))}` : '');
       if (/\.(cpp|hpp|h|c|conf|overlay|yaml|yml|sh|py|txt|json|dts|dtsi|cmake)$/i.test(relative) || /(^|\/)(Kconfig|CMakeLists\.txt)$/.test(relative)) return routeFile(relative, true);
       return url.href;
     } catch { return ''; }
@@ -277,7 +290,7 @@
         index++;
         while (index < lines.length && !new RegExp(`^\\s*${fence[1][0]}{${fence[1].length},}\\s*$`).test(lines[index])) block.push(lines[index++]);
         if (index < lines.length) index++;
-        chunks.push(`${language === 'mermaid' ? '<div class="unrendered-diagram">此正文中的 Mermaid 原始定义如下；交互架构图见“整车架构”和“模块关系”。</div>' : ''}<pre><code class="language-${esc(language)}">${esc(block.join('\n'))}</code></pre>`);
+        chunks.push(`${language === 'mermaid' ? '<div class="unrendered-diagram">此正文中的 Mermaid 原始定义如下；交互架构图见“整车架构”和“模块关系”。</div>' : ''}<div class="code-example"><div class="code-heading"><strong>${esc(language || 'text')}</strong><button data-copy-code>复制代码</button></div><pre><code class="language-${esc(language)}">${esc(block.join('\n'))}</code></pre></div>`);
         continue;
       }
       const title = line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
@@ -325,7 +338,7 @@
     return {html: chunks.join('\n'), headings};
   }
 
-  async function readFile(path, isSource, params, version) {
+  async function readFile(path, isSource, params, version, module = null) {
     breadcrumb.textContent = `${isSource ? '工作区源码' : 'Markdown'} / ${path.split('/').at(-1)}`;
     content.innerHTML = '<div class="loading" role="status">正在读取本地文件…</div>';
     try {
@@ -342,7 +355,7 @@
       } else {
         const rendered = markdown(source, path);
         const toc = rendered.headings.filter(item => item.level <= 3);
-        content.innerHTML = toolbar + `${path.startsWith('docs/dev/') ? '<div class="notice warn">这是开发记录或待实施方案。本文中的设计建议不代表当前接口已经实现。</div>' : ''}<div class="reader-layout"><article class="markdown-body">${rendered.html}</article><nav class="section-toc" aria-label="文档目录"><div class="toc-title">文档目录</div>${toc.map(item => `<a style="padding-left:${item.level > 1 ? 13 : 0}px" href="${routeFile(path)}?anchor=${encodeURIComponent(item.id)}">${esc(item.title)}</a>`).join('')}</nav></div>`;
+        content.innerHTML = (module ? heading('03 / Module reference', module.title, module.summary, `${pill(module.status)}<a class="quiet-link" href="#relations?selected=${esc(module.id)}">在关系图中定位 ↗</a>`) : '') + toolbar + `${path.startsWith('docs/dev/') ? '<div class="notice warn">这是开发记录或待实施方案。本文中的设计建议不代表当前接口已经实现。</div>' : ''}<div class="reader-layout"><article class="markdown-body">${rendered.html}</article><nav class="section-toc" aria-label="文档目录"><div class="toc-title">文档目录</div>${toc.map(item => `<a style="padding-left:${item.level > 1 ? 13 : 0}px" href="${routeFile(path)}?anchor=${encodeURIComponent(item.id)}">${esc(item.title)}</a>`).join('')}</nav></div>`;
         document.title = `${rendered.headings[0]?.title || path.split('/').at(-1)} · SkyWalker`;
       }
       scrollToAnchor(params.get('anchor') || (isSource && params.get('line') ? `line-${params.get('line')}` : ''));
@@ -377,11 +390,16 @@
     const previousScroll = window.scrollY;
     if (!params.has('anchor') && page !== 'relations' && !(page === 'workflows' && params.has('step'))) window.scrollTo({top: 0});
     if (!architecture || !modules.length) { content.innerHTML = empty('架构数据未加载，请确认通过 run.sh 打开，并保留同目录全部脚本。'); return; }
+    if (['overview', 'docs', 'search'].includes(page) || !labels[page] && !['read', 'source'].includes(page)) {
+      if (!documentMode || page === 'docs') content.innerHTML = empty('正在扫描 / 加载 Markdown 文档目录…');
+      await loadDocuments();
+      if (version !== renderVersion) return;
+    }
     switch (page) {
       case 'overview': overview(params); break;
       case 'relations': relations(params); requestAnimationFrame(() => window.scrollTo({top: previousScroll})); break;
       case 'modules': moduleCatalog(params); break;
-      case 'module': moduleDetail(id, params); break;
+      case 'module': await moduleDetail(id, params, version); return;
       case 'workflows': workflows(id, params); if (params.has('step')) requestAnimationFrame(() => window.scrollTo({top: previousScroll})); break;
       case 'docs': docsPage(); break;
       case 'history': historyPage(); break;
@@ -426,12 +444,13 @@
     if (event.key === 'Escape') { document.getElementById('sidebar').classList.remove('open'); document.getElementById('menu-toggle').setAttribute('aria-expanded', 'false'); input.blur(); }
   });
   content.addEventListener('click', event => {
+    if (event.target.closest('[data-refresh-docs]')) { render(); return; }
     const category = event.target.closest('[data-category]');
     if (category) window.location.hash = `modules?category=${encodeURIComponent(category.dataset.category)}`;
-    const copyButton = event.target.closest('[data-copy-module]');
+    const copyButton = event.target.closest('[data-copy-code]');
     if (copyButton) {
-      const example = byId.get(copyButton.dataset.copyModule)?.examples?.[Number(copyButton.dataset.example)];
-      if (example) copy(example.code);
+      const code = copyButton.closest('.code-example')?.querySelector('pre code');
+      if (code) copy(code.textContent);
     }
     const step = event.target.closest('[data-workflow]');
     if (step && !step.disabled) window.location.hash = `workflows/${step.dataset.workflow}?step=${step.dataset.step}`;

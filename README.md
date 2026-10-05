@@ -28,6 +28,8 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 | 查现场问题                 | [故障排查](docs/guides/troubleshooting.md)                                                                               |
 | 查设计记录和专题分析       | [开发专题索引](docs/dev/README.md)                                                                                   |
 
+接口可直接阅读[独立 Markdown 手册](docs/api/README.md)；每轮更新按照[文档同步待办](docs/maintenance.md)。电机旧代码适配见[迁移指引](docs/guides/motor-migration.md)。
+
 在线阅读：[GitHub Pages 架构与接口手册](https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/)；本地启动和私有站点见 [架构浏览器](docs/architecture-browser/README.md)。
 
 本文与接口手册对齐 `main@99a97c9`（2026-10-05）：共用整车运行时、板间 v4、持续目标与逐轴自动恢复。单舵轮调试进展不代表整车已验收。
