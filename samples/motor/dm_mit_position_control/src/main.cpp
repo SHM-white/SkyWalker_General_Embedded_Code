@@ -98,7 +98,7 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
     skywalker::control::PositionMotor::Config config{};
     config.loop = makePositionLoopConfig();
     config.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
-    config.safety = {kVelocityCutoffRadS, kTemperatureCutoffC};
+
     config.reference = skywalker::control::PositionReference::DriverContinuous;
     return config;
 }
@@ -108,8 +108,7 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(uart) || !device_is_ready(can))
-        return -ENODEV;
+    if (!device_is_ready(can)) return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dm::j4310Mit({
         .id = 1,
         .master_id = 0x11,
@@ -117,96 +116,59 @@ int main() {
         .velocity_max_rad_s = 30.0f,
         .torque_max_nm = 10.0f,
         .torque_limit_nm = 1.0f,
-        .timing = {50, 20, 50, 3000},
+        .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
-    vofa_init(&vofa, uart);
+    const int vofa_error = vofa_init(&vofa, uart);
     int ret = bus.attach(drive);
-    if (ret == 0)
-        ret = bus.start();
-    if (ret == 0)
-        ret = skywalker::samples::dm::enableMotorPower();
-    if (ret == 0)
-        k_sleep(K_MSEC(1500));
-    if (ret == 0)
-        ret = axis.configure();
-    if (ret < 0) {
-        LOG_ERR("configuration blocked: %d", ret);
-        return ret;
-    }
-    const auto ready_deadline = k_uptime_get() + 3000;
-    while (!drive.ready() && k_uptime_get() < ready_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.ready())
-        return -ETIMEDOUT;
-    const auto before_reseed = drive.snapshot();
-    if (!before_reseed.native_position_valid)
-        return -ENODATA;
-    // The old MIT position bench used the drive's native startup angle as its
-    // continuous coordinate. Preserve that origin for the 0/90/180/270 path.
-    ret = drive.reseedPosition(before_reseed.native_position_rad);
-    if (ret < 0)
-        return ret;
-    const double initial = drive.snapshot().feedback.position_rad;
-    const double phase = singleTurnRad(static_cast<float>(initial));
-    const double zero_target = initial - phase +
-                               (phase <= static_cast<double>(kZeroToleranceRad) ? 0.0 : static_cast<double>(kTwoPi));
-    ret = axis.reset(); // Check speed, temperature and reference before enabling.
-    if (ret == 0)
-        ret = drive.enable();
-    if (ret < 0)
-        return ret;
-    const auto active_deadline = k_uptime_get() + 5000;
-    while (!drive.active() && k_uptime_get() < active_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.active()) {
-        (void)drive.disable();
-        return -ETIMEDOUT;
-    }
+    if (ret == 0) ret = bus.start();
+    if (ret == 0) ret = skywalker::samples::dm::enableMotorPower();
+    if (ret == 0) ret = axis.configure();
+    if (ret < 0) return ret;
     const auto started_ms = k_uptime_get();
     auto previous_ms = started_ms;
-    std::int64_t previous_step = 0;
+    bool initial_target_valid = false;
+    double zero_target = 0;
+    std::int64_t next_log_ms = 0;
+    int last_call_error = 0;
     for (;;) {
         k_sleep(K_MSEC(kControlPeriodMs));
         const auto now = k_uptime_get();
-        const float dt_s = float(now - previous_ms) / 1000.0f;
+        const float dt = float(now - previous_ms) / 1000;
         previous_ms = now;
-        if (!drive.active())
-            return -EHOSTDOWN;
+        const auto view = drive.snapshot();
+        if (!initial_target_valid && view.feedback_fresh && view.position_reference_valid &&
+            (view.feedback.valid & skywalker::motor::FeedbackPosition) && std::isfinite(view.feedback.position_rad)) {
+            const double initial = view.feedback.position_rad;
+            const double phase = singleTurnRad(static_cast<float>(initial));
+            zero_target = initial - phase + (phase <= kZeroToleranceRad ? 0.0 : double(kTwoPi));
+            initial_target_valid = true;
+        }
         const auto elapsed_ms = now - started_ms;
         const auto step = elapsed_ms / kPositionStepPeriodMs;
-        const float single_turn_target = targetPositionRad(elapsed_ms);
-        const double target = zero_target + static_cast<double>(step / 4) * static_cast<double>(kTwoPi) +
-                              static_cast<double>(single_turn_target);
-        ret = axis.update(target, dt_s);
-        if (ret == 0)
-            ret = bus.commit().error;
-        if (ret < 0) {
-            (void)drive.disable();
-            LOG_ERR("cycle stopped: %d", ret);
-            return ret;
-        }
-        if (step != previous_step) {
-            LOG_INF("time=%lld ms target=%u deg", elapsed_ms, static_cast<unsigned int>(step % 4) * 90U);
-            previous_step = step;
-        }
+        const double target = zero_target + double(step / 4) * kTwoPi + targetPositionRad(elapsed_ms);
+        const int enable_error = drive.enable();
+        // update accepts the latest goal even when the continuous reference is unavailable.
+        const int update_error = axis.update(target, dt);
+        const int commit_error = bus.commit().error;
+        if (enable_error < 0) last_call_error = enable_error;
+        if (update_error < 0) last_call_error = update_error;
+        if (commit_error < 0) last_call_error = commit_error;
         const auto data = axis.telemetry();
-        const auto &feedback = data.motor.feedback;
-        const auto &output = data.output;
-        const float channels[10] = {
-            single_turn_target,
-            singleTurnRad(static_cast<float>(std::fmod(data.position_rad, static_cast<double>(kTwoPi)))),
-            output.position.error,
-            output.velocity.velocity_reference_rad_s,
-            feedback.velocity_rad_s,
-            output.velocity.velocity_error_rad_s,
-            output.effort_command,
-            feedback.torque_nm,
-            data.motor.native_mos_temperature_c,
-            feedback.temperature_c,
-        };
-        vofa_send(&vofa, channels, 10);
+        if (vofa_error == 0) {
+            const float channels[10] = {targetPositionRad(elapsed_ms), singleTurnRad(float(data.position_rad)),
+                data.output.position.error, data.output.velocity.velocity_reference_rad_s,
+                data.motor.feedback.velocity_rad_s, data.output.velocity.velocity_error_rad_s,
+                data.output_valid ? data.effort_command : 0, data.motor.feedback.torque_nm,
+                data.motor.native_mos_temperature_c, data.motor.feedback.temperature_c};
+            (void)vofa_send(&vofa, channels, 10);
+        }
+        if (now >= next_log_ms) {
+            next_log_ms = now + 1000;
+            LOG_INF("target=%.3f initial=%d seq=%llu output=%d wait=%u call=%d", target, initial_target_valid,
+                static_cast<unsigned long long>(data.target_sequence), data.output_valid, unsigned(data.issue), last_call_error);
+        }
     }
 }

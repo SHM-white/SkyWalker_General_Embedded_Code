@@ -75,7 +75,7 @@ inline communication::InterBoardEndpoint::Config endpointConfig() {
 inline communication::InterBoardEndpoint endpoint(transport, endpointConfig());
 inline atomic_t input_paused = 0, execution_paused = 0, status_paused = 0, head_paused = 0, measurement_paused = 0;
 inline atomic_t estop = 0, clear_requested = 0, continuous_requested = 0;
-inline atomic_t vision_paused = 0, permission_paused = 0, release_requested = 0;
+inline atomic_t vision_paused = 0, permission_paused = 0;
 inline SnapshotCache<control::RcControlState> operator_states;
 inline atomic_ptr_t execution_thread = nullptr;
 struct ShotEvent { std::uint32_t id = 0; MessageStamp stamp{}; };
@@ -240,7 +240,6 @@ inline void communicationTask(void *, void *, void *) {
         // pausable command publication and outside execution/status workers.
         (void)remote.snapshot(raw);
 #if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
-        if (atomic_set(&release_requested, 0)) controls.withdraw();
         const auto &operator_state = controls.update(raw.remote, now_ms);
         (void)observations.snapshot(observed);
         const auto exercise = diagnostics.update(now_ms, observed.mechanism.state == RunState::Active,
@@ -252,7 +251,7 @@ inline void communicationTask(void *, void *, void *) {
         atomic_set(&measurement_paused, exercise.measurement_paused);
         atomic_set(&vision_paused, exercise.vision_paused);
         atomic_set(&permission_paused, exercise.permission_paused);
-        if (operator_state.clear_fault) atomic_set(&clear_requested, 1);
+        if (operator_state.clear_estop) atomic_set(&clear_requested, 1);
         if (operator_publisher.publish(endpoint, operator_state.run_allowed, atomic_get(&estop),
             raw.remote.stamp, operator_state.clear_event_id, operator_state.clear_stamp, now_ms)) controls.withdraw();
         (void)operator_states.publish(operator_state);
@@ -334,12 +333,12 @@ inline void telemetryTask(void *, void *, void *) {
             const auto owner = static_cast<k_tid_t>(atomic_ptr_get(&execution_thread));
             if (owner) (void)k_thread_stack_space_get(owner, &execution_stack_unused);
 #endif
-            printk("role=%u online=%d operator=%d source=%u sourceAge=%u stateAge=%u run=%u reason=%u error=%d ready=%d gen=%u bigRun=%u bigGen=%u bigRate_mrad_s=%d headStable=%d headAge=%u center_mrad=%d request_mrad_s=%d scale_milli=%d powerValid=%d frictionReady=%d feed=%u event=%u shots=%u us=%llu peakUs=%llu overruns=%u\n",
+            printk("role=%u online=%d operator=%d source=%u sourceAge=%u stateAge=%u run=%u reason=%u error=%d ready=%d active=%u bigRun=%u bigActive=%u bigRate_mrad_s=%d headStable=%d headAge=%u center_mrad=%d request_mrad_s=%d scale_milli=%d powerValid=%d frictionReady=%d feed=%u event=%u shots=%u us=%llu peakUs=%llu overruns=%u\n",
                 unsigned(kRole), rx.online, rx.operator_control_valid, observation.source_stamp.sequence,
                 ageMs(observation.source_stamp, now_ms), ageMs(observation.stamp, now_ms),
                 unsigned(observation.mechanism.state), unsigned(observation.mechanism.reason), observation.mechanism.error,
-                fresh && observation.mechanism.ready, observation.mechanism.generation, unsigned(observation.big_yaw.state),
-                observation.big_yaw.generation, int(observation.big_yaw_feedback.actual_rate_rad_s * 1000),
+                fresh && observation.mechanism.ready, unsigned(observation.mechanism.active_count), unsigned(observation.big_yaw.state),
+                unsigned(observation.big_yaw.active_count), int(observation.big_yaw_feedback.actual_rate_rad_s * 1000),
                 fresh && observation.head_stable, ageMs(observation.head_stamp, now_ms * 1000),
                 int(observation.center_error_rad * 1000), int(observation.centering_rate_rad_s * 1000),
                 int(observation.effort_scale * 1000), observation.measured_power.valid &&
@@ -422,15 +421,13 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
         atomic_set(&execution_paused, exercise.execution_paused);
         atomic_set(&status_paused, exercise.status_paused);
         atomic_set(&measurement_paused, exercise.measurement_paused);
-        if (exercise.wheel_generation) observation.mechanism = chassis.suspend(now_us, WaitReason::Reference, -ESTALE);
-        if (exercise.big_yaw_generation) observation.big_yaw = big_axis.suspend(now_us, WaitReason::Reference, -ESTALE);
 #endif
         if (!atomic_get(&input_paused)) {
             cached_control = rx.control;
             cached_big_request = rx.big_yaw_request;
         }
         const bool emergency = atomic_get(&estop) || peer_operator.emergency_stop;
-        const bool clear = atomic_set(&clear_requested, 0) || peer_operator.clear_fault;
+        const bool clear = atomic_set(&clear_requested, 0) || peer_operator.clear_estop;
         if (!atomic_get(&execution_paused) || emergency || clear || !peer_operator.run_allowed) {
             if (previous_cycle_us && (now_us <= previous_cycle_us || now_us - previous_cycle_us > 20000)) ++observation.overruns;
             previous_cycle_us = now_us;
@@ -445,9 +442,9 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                 (!IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS) && atomic_get(&input_paused)))
                 input.command.mode = ChassisMode::Disabled;
             input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence, input.command.stamp.valid};
-            input.transport_ready = topology_error == 0 && power_error == 0 && hardware.running() && rx.online;
-            input.recovery_context_valid = rx.local_boot_id && cached_control.receiver_boot_id == rx.local_boot_id &&
-                cached_control.resume_generation == chassis.status().generation;
+            input.transport_ready = topology_error == 0 && power_error == 0 && rx.online;
+            if (!rx.local_boot_id || cached_control.receiver_boot_id != rx.local_boot_id)
+                input.command.mode = ChassisMode::Disabled;
             input.require_permission = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
             input.permission = rx.constraint.output;
             input.permission.stamp = forwardedStamp(rx.constraint.stamp, rx.constraint.output_age_ms);
@@ -465,7 +462,7 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                 else if (ret != -EAGAIN) measurement = {};
             }
             input.measured_power = measurement;
-            input.emergency_stop = emergency; input.clear_fault = clear;
+            input.emergency_stop = emergency; input.clear_estop = clear;
             observation.mechanism = chassis.update(input, now_us);
             BigYawExecutionInputs big_input{};
             big_input.request = cached_big_request;
@@ -473,17 +470,16 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                 big_input.request.mode = BigYawMode::Disabled;
             big_input.local_boot_id = rx.local_boot_id;
             big_input.peer_online = rx.online;
-            big_input.transport_ready = big_error == 0 && power_error == 0 && rx.online &&
-                big_bus.status().state == motor::BusState::Running;
-            big_input.emergency_stop = emergency; big_input.clear_fault = clear;
+            big_input.transport_ready = big_error == 0 && power_error == 0 && rx.online;
+            big_input.emergency_stop = emergency; big_input.clear_estop = clear;
             observation.big_yaw = big_error == 0 ? big_axis.update(big_input, now_us)
                 : big_axis.suspend(now_us, WaitReason::Configuration, big_error, true);
             // All three physical controllers publish once, after both
             // independent mechanism owners have staged this cycle's targets.
             const int wheel_commit = topology_error == 0 ? hardware.commit() : 0;
             const int big_commit = big_error == 0 ? big_bus.commit().error : 0;
-            if (wheel_commit < 0) observation.mechanism = chassis.suspend(now_us, WaitReason::Transport, wheel_commit);
-            if (big_commit < 0) observation.big_yaw = big_axis.suspend(now_us, WaitReason::Transport, big_commit);
+            if (wheel_commit < 0) observation.mechanism.error = wheel_commit;
+            if (big_commit < 0) observation.big_yaw.error = big_commit;
             observation.big_yaw_feedback = big_axis.feedback();
             observation.source_stamp = input.command.stamp;
             observation.measured_power = chassis.powerMeasurement();
@@ -553,7 +549,7 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             inertial_input.source_stamp = sourceStamp(frame, inertial_input.command.source);
             inertial_input.yaw = hardware.yaw.snapshot(); inertial_input.pitch = hardware.pitch.snapshot();
             inertial_input.head = head_cache;
-            inertial_input.prerequisites_ready = topology_error == 0 && power_error == 0 && hardware.running() &&
+            inertial_input.prerequisites_ready = topology_error == 0 && power_error == 0 &&
                 calibration::imu_mounting_confirmed && head_error == 0 && command_error == 0 && !emergency && !clear;
             const bool reference_matches = inertial_input.command.source != ControlSource::Vision ||
                 frame.decision.selected_vision.value.reference == head_cache.sample.reference;
@@ -561,16 +557,14 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
                 : adapter.suspend(now_us, WaitReason::Reference, -ESTALE);
             GimbalExecutionInputs gimbal_input{};
             gimbal_input.command = inertial.command; gimbal_input.source_stamp = inertial.source_stamp;
-            gimbal_input.transport_ready = topology_error == 0 && power_error == 0 && hardware.running();
+            gimbal_input.yaw_output_valid = inertial.yaw_output_valid;
+            gimbal_input.pitch_output_valid = inertial.pitch_output_valid;
+            gimbal_input.transport_ready = topology_error == 0 && power_error == 0;
             gimbal_input.require_permission = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
             gimbal_input.permission = frame.observed.referee.robot.gimbal_output;
-            gimbal_input.emergency_stop = emergency; gimbal_input.clear_fault = clear;
-            const auto previous = observation.mechanism;
+            gimbal_input.emergency_stop = emergency; gimbal_input.clear_estop = clear;
             observation.mechanism = topology_error == 0 ? hardware.gimbal.update(gimbal_input, now_us)
                 : hardware.gimbal.suspend(now_us, WaitReason::Configuration, topology_error, true);
-            if (observation.mechanism.generation != previous.generation ||
-                (previous.state == RunState::Active && observation.mechanism.state != RunState::Active))
-                inertial = adapter.suspend(now_us, WaitReason::Reference, -ESTALE);
             const bool head_stable = inertial.stabilization_valid && observation.mechanism.state == RunState::Active;
             OutputPermission movement_permission{};
 #if defined(CONFIG_VEHICLE_REFEREE)
@@ -585,13 +579,12 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
 #endif
             const auto rx = endpoint.snapshot();
             YawCenteringInputs follow{};
-            follow.joint_yaw_rad = inertial_input.yaw.feedback.position_rad;
+            follow.joint_yaw_rad = inertial_input.yaw.feedback.absolute_position_rad;
             follow.joint_stamp = {inertial_input.yaw.feedback.timestamp_ms * 1000,
-                inertial_input.yaw.feedback.timestamp_ms, inertial_input.yaw.feedback_fresh};
+                inertial_input.yaw.feedback.timestamp_ms, inertial_input.yaw.feedback_fresh &&
+                (inertial_input.yaw.feedback.valid & motor::FeedbackAbsolutePosition)};
             follow.source_stamp = inertial_input.source_stamp;
-            follow.enabled = inertial_input.command.mode != GimbalMode::Disabled && rx.online &&
-                rx.big_yaw_feedback.valid && rx.big_yaw_feedback.ready &&
-                forwardedFresh(rx.big_yaw_feedback.stamp, rx.big_yaw_feedback.production_age_ms, now_ms, kStatusTimeoutMs) && !emergency;
+            follow.enabled = inertial_input.command.mode != GimbalMode::Disabled && rx.online && !emergency;
             follow.head_stable = head_stable;
             follow.permission_valid = movement_permission.valid && movement_permission.enabled &&
                 isFresh(movement_permission.stamp, now_ms, 300);
@@ -608,8 +601,8 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             shooter_input.command = frame.decision.command.shooter;
             shooter_input.source_stamp = sourceStamp(frame, shooter_input.command.source);
             shooter_input.permission = frame.observed.referee.robot.shooter_output;
-            shooter_input.transport_ready = topology_error == 0 && power_error == 0 && hardware.running();
-            shooter_input.emergency_stop = emergency; shooter_input.clear_fault = clear;
+            shooter_input.transport_ready = topology_error == 0 && power_error == 0;
+            shooter_input.emergency_stop = emergency; shooter_input.clear_estop = clear;
             shooter_input.require_permission = shooter_input.require_heat = shooter_input.require_gimbal = true;
             shooter_input.allow_feed = IS_ENABLED(CONFIG_VEHICLE_SHOOTING) && calibration::shooter_constraints_confirmed && head_stable;
             shooter_input.gimbal = observation.mechanism;
@@ -643,9 +636,8 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             // physical DJI commit; pitch's physical CAN also commits once.
             const int commit = topology_error == 0 ? hardware.commit() : 0;
             if (commit < 0) {
-                observation.mechanism = hardware.gimbal.suspend(now_us, WaitReason::Transport, commit);
-                observation.shooter = hardware.shooter.suspend(now_us, WaitReason::Transport, commit);
-                inertial = adapter.suspend(now_us, WaitReason::Transport, commit);
+                observation.mechanism.error = commit;
+                observation.shooter.friction.error = observation.shooter.feed.error = commit;
             }
 #if defined(CONFIG_VEHICLE_VISION_OBSERVE) || defined(CONFIG_VEHICLE_VISION_EXECUTE)
             communication::vision::Feedback vision_feedback{};
@@ -656,17 +648,13 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             vision_feedback.gyro_rad_s = head_cache.sample.gyro_rad_s;
             (void)vision.setFeedback(vision_feedback);
 #endif
-#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
-            if (run_allowed && previous.state == RunState::Active &&
-                (observation.mechanism.state != RunState::Active || observation.mechanism.generation != previous.generation))
-                atomic_set(&release_requested, 1);
-#endif
+
             observation.source_stamp = frame.observed.remote.stamp;
             observation.head_stamp = head_cache.sample.orientation.stamp;
             observation.head_stable = inertial.stabilization_valid && observation.mechanism.state == RunState::Active;
             observation.center_error_rad = centered.center_error_rad; observation.centering_rate_rad_s = centered.velocity_rad_s;
             observation.big_yaw_feedback = rx.big_yaw_feedback;
-            observation.big_yaw.generation = rx.big_yaw_feedback.resume_generation;
+            observation.big_yaw.active_count = rx.big_yaw_feedback.armed ? 1 : 0;
             observation.big_yaw.state = rx.big_yaw_feedback.armed ? RunState::Active : RunState::Recovering;
             observation.buses[0] = hardware.dji_bus.status(); observation.buses[1] = hardware.pitch_bus.status();
             observation.duration_us = core::monotonicTimeUs() - now_us;

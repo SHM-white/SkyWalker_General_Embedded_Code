@@ -30,12 +30,7 @@ float targetVelocityRadS() {
 } // namespace
 
 int main() {
-    const struct device *vofa_uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    if (!device_is_ready(vofa_uart)) {
-        LOG_ERR("VOFA UART device not ready");
-        return -ENODEV;
-    }
-
+    const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     static skywalker::samples::dm::Session session{DEVICE_DT_GET(DT_NODELABEL(can1)),
                                                    skywalker::motor::dm::j4310Velocity({.id = 1,
                                                                                         .master_id = 0x11,
@@ -43,50 +38,37 @@ int main() {
                                                                                         .velocity_max_rad_s = 45.0f,
                                                                                         .torque_max_nm = 18.0f,
                                                                                         .torque_limit_nm = 0.05f,
-                                                                                        .timing = {50, 20, 50, 3000}})};
+                                                                                        .timing = {.feedback_timeout_ms = 50, .command_timeout_ms = 20, .enable_timeout_ms = 3000, .retry_interval_ms = 100}})};
     int ret = skywalker::samples::dm::prepare(session);
-    if (ret < 0) {
-        return ret;
-    }
-
-    const float target_velocity_rad_s = targetVelocityRadS();
-    if (!std::isfinite(target_velocity_rad_s) ||
-        std::fabs(target_velocity_rad_s) > session.descriptor.limits.velocity_max_rad_s) {
-        LOG_ERR("invalid velocity target: %d mrad/s", static_cast<int>(target_velocity_rad_s * 1000.0f));
-        return -ERANGE;
-    }
-    const float velocity_cutoff_rad_s = std::fabs(target_velocity_rad_s) + kSpeedSafetyMarginRadS;
-
+    if (ret < 0) return ret;
     static Vofa vofa{};
-    vofa_init(&vofa, vofa_uart);
-    ret = skywalker::samples::dm::arm(session);
-    if (ret < 0) {
-        return ret;
-    }
-
-    LOG_INF("native velocity control started: target=%d mrad/s", static_cast<int>(target_velocity_rad_s * 1000.0f));
+    const int vofa_error = vofa_init(&vofa, uart);
+    const auto started_ms = k_uptime_get();
+    std::int64_t next_log_ms = 0;
+    int last_call_error = 0;
     for (;;) {
-        skywalker::motor::MotorSnapshot view{};
-        ret = skywalker::samples::dm::readSafeFeedback(session, velocity_cutoff_rad_s, kTemperatureCutoffC, view);
-        if (ret < 0) {
-            return skywalker::samples::dm::stopAfterFailure(session, ret);
+        const auto now = k_uptime_get();
+        const bool requested = true;
+        const float target = targetVelocityRadS();
+        const int request_error = requested ? session.motor.enable() : session.motor.disable();
+        if (request_error < 0) last_call_error = request_error;
+        if (requested) {
+            const int error = session.motor.setVelocity(target);
+            if (error < 0) last_call_error = error;
         }
-
-        ret = session.motor.setVelocity(target_velocity_rad_s);
-        if (ret < 0) {
-            return skywalker::samples::dm::stopAfterFailure(session, ret);
+        const int commit_error = session.bus.commit().error;
+        if (commit_error < 0) last_call_error = commit_error;
+        const auto view = session.motor.snapshot();
+        if (vofa_error == 0) {
+            const float channels[6] = {target, view.native_position_rad, view.feedback.velocity_rad_s,
+                view.feedback.torque_nm, view.native_mos_temperature_c, view.native_rotor_temperature_c};
+            (void)vofa_send(&vofa, channels, 6);
         }
-        ret = skywalker::samples::dm::flush(session);
-        if (ret < 0) {
-            return skywalker::samples::dm::stopAfterFailure(session, ret);
+        if (now >= next_log_ms) {
+            next_log_ms = now + 1000;
+            LOG_INF("run=%d requested=%d state=%u target=%.3f fresh=%d call=%d", requested,
+                view.enabled_requested, unsigned(view.state), double(target), view.feedback_fresh, last_call_error);
         }
-
-        const auto &feedback = view.feedback;
-        const float channels[6] = {
-            target_velocity_rad_s, view.native_position_rad,      feedback.velocity_rad_s,
-            feedback.torque_nm,    view.native_mos_temperature_c, view.native_rotor_temperature_c,
-        };
-        vofa_send(&vofa, channels, 6);
         k_sleep(K_MSEC(kControlPeriodMs));
     }
 }

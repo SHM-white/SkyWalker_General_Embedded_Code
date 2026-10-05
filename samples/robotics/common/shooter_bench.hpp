@@ -53,8 +53,7 @@ public:
         return 0;
     }
     bool running() const {
-        return controllers_started_ && dji_bus.status().state == motor::BusState::Running &&
-               (!with_gimbal_ || pitch_bus.status().state == motor::BusState::Running);
+        return controllers_started_;
     }
     int commit() {
         int ret = dji_started_ ? dji_bus.commit().error : -EACCES;
@@ -99,7 +98,7 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
         const auto &operator_state = controls.update(operator_cache.remote, now);
         const auto exercise = diagnostics.update(now, shooter.friction.state == RunState::Active,
             !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
-        const bool clear = operator_state.clear_fault;
+        const bool clear = operator_state.clear_estop;
         const bool estop = board_config::emergencyStopRequested();
         if (!exercise.input_paused) (void)manager.snapshot(frame);
         local_request = firing.update(operator_state, frame, shooter, now);
@@ -108,12 +107,12 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                 GimbalExecutionInputs gi{};
                 gi.command = frame.decision.command.gimbal; gi.source_stamp = sourceStamp(frame, gi.command.source);
                 if (!operator_state.run_allowed) gi.command.mode = GimbalMode::Disabled;
-                gi.transport_ready = hardware.running(); gi.emergency_stop = estop; gi.clear_fault = clear;
+                gi.transport_ready = setup == 0; gi.emergency_stop = estop; gi.clear_estop = clear;
                 gimbal = hardware.gimbal.update(gi, now_us);
             }
             ShooterExecutionInputs si{};
             si.command = local_request; si.source_stamp = sourceStamp(frame, si.command.source);
-            si.transport_ready = hardware.running(); si.emergency_stop = estop; si.clear_fault = clear;
+            si.transport_ready = setup == 0; si.emergency_stop = estop; si.clear_estop = clear;
             si.gimbal = gimbal; si.require_permission = !unloaded_feed;
             si.require_heat = !unloaded_feed; si.require_gimbal = with_gimbal && !unloaded_feed;
             si.allow_feed = unloaded_feed ? vehicle::connections_confirmed : vehicle::shooter_constraints_confirmed;
@@ -123,17 +122,17 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
             if (setup == 0) {
                 const int commit = hardware.commit();
                 if (commit < 0) {
-                    shooter = hardware.shooter.suspend(now_us, WaitReason::Transport, commit);
-                    if (with_gimbal) gimbal = hardware.gimbal.suspend(now_us, WaitReason::Transport, commit);
+                    shooter.friction.error = shooter.feed.error = commit;
+                    if (with_gimbal) gimbal.error = commit;
                 }
             }
         }
         if (!exercise.status_paused && now >= next_log) {
             next_log = now + 200;
-            printk("src=%u cmd=%u gimbal=%u friction=%u ready=%d feed=%u wait=%u gen=%u/%u event=%u shots=%u busy=%d jam=%d bus=%u\n",
+            printk("src=%u cmd=%u gimbal=%u friction=%u ready=%d feed=%u wait=%u active=%u/%u event=%u shots=%u busy=%d jam=%d bus=%u\n",
                 frame.observed.remote.stamp.sequence, local_request.stamp.sequence, unsigned(gimbal.state),
                 unsigned(shooter.friction.state), shooter.friction_ready, unsigned(shooter.feed.state),
-                unsigned(shooter.feed.reason), shooter.friction.generation, shooter.feed.generation,
+                unsigned(shooter.feed.reason), unsigned(shooter.friction.active_count), unsigned(shooter.feed.active_count),
                 shooter.last_event_id, shooter.shots, shooter.dial_busy, shooter.jammed, unsigned(hardware.dji_bus.status().state));
         }
         k_sleep(K_MSEC(5));

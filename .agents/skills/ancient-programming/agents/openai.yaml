@@ -1,7 +1,7 @@
 interface:
   display_name: "古法编程模式"
-  short_description: "只读检查项目源码，只在 docs/dev 输出手把手实施指南，禁止直接改代码"
-  default_prompt: "Use $ancient-programming to inspect this repository read-only and write a step-by-step implementation guide."
+  short_description: "未获直接编辑授权时提供手把手实施指南；纯计划或明确授权编辑时不触发"
+  default_prompt: "Use $ancient-programming only when implementation is requested without explicit permission to edit workspace files; skip planning-only requests and authorized direct edits."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

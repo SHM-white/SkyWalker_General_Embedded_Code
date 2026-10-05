@@ -95,33 +95,33 @@ int main() {
     samples::control::OperatorControlConsumer operator_controls;
     samples::control::SampleDiagnostics diagnostics;
     BigYawRequest cached_request{};
+    int commit_error = 0;
     for (;;) {
         const auto now = core::monotonicTimeUs(); const auto rx = endpoint.snapshot();
         const auto operator_state = operator_controls.update(rx, now / 1000);
         const auto exercise = diagnostics.update(now / 1000, axis.status().state == RunState::Active,
             !operator_state.run_allowed);
         if (!exercise.input_paused) cached_request = rx.big_yaw_request;
-        if (exercise.big_yaw_generation) axis.suspend(now, WaitReason::Reference, -ESTALE);
-        if (!exercise.execution_paused || !operator_state.run_allowed || operator_state.clear_fault) {
+        if (!exercise.execution_paused || !operator_state.run_allowed || operator_state.clear_estop ||
+            operator_state.emergency_stop) {
             BigYawExecutionInputs in{};
             in.request = cached_request; in.local_boot_id = rx.local_boot_id;
             if (!operator_state.run_allowed) in.request.mode = BigYawMode::Disabled;
             in.peer_online = rx.online;
-            in.transport_ready = rx.online && started && bus.status().state == motor::BusState::Running;
-            in.emergency_stop = operator_state.emergency_stop; in.clear_fault = operator_state.clear_fault;
+            in.transport_ready = started;
+            in.emergency_stop = operator_state.emergency_stop; in.clear_estop = operator_state.clear_estop;
             if (started) {
                 axis.update(in, now);
-                const int error = bus.commit().error;
-                if (error < 0) axis.suspend(now, WaitReason::Transport, error);
+                commit_error = bus.commit().error;
             } else axis.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
             if (!exercise.status_paused) endpoint.setBigYawFeedback(axis.feedback());
         }
         if (now / 1000 >= next_log) {
             next_log = now / 1000 + 200;
             const auto s = axis.status(); const auto f = axis.feedback();
-            LOG_INF("operator=%d online=%d source=%u gen=%u run=%u reason=%u rate=%f error=%d",
-                rx.operator_control_valid, rx.online, rx.big_yaw_request.source_sequence, s.generation,
-                unsigned(s.state), unsigned(s.reason), double(f.actual_rate_rad_s), s.error);
+            LOG_INF("operator=%d online=%d source=%u requested=%d run=%u reason=%u rate=%f error=%d commit=%d",
+                rx.operator_control_valid, rx.online, rx.big_yaw_request.source_sequence, s.requested,
+                unsigned(s.state), unsigned(s.reason), double(f.actual_rate_rad_s), s.error, commit_error);
         }
         k_sleep(K_MSEC(5));
     }
@@ -150,6 +150,7 @@ int main() {
     samples::control::OperatorControlPublisher operator_controls;
     communication::RemoteReceiver::Snapshot operator_cache{};
     imu::Snapshot head_cache{};
+    int yaw_commit_error = 0, pitch_commit_error = 0;
     for (;;) {
         const auto now = core::monotonicTimeUs(), ms = now / 1000;
         (void)remote.snapshot(operator_cache);
@@ -160,7 +161,8 @@ int main() {
         if (operator_controls.publish(endpoint, operator_state.run_allowed, board_config::emergencyStopRequested(),
             operator_state.remote.stamp, operator_state.clear_event_id, operator_state.clear_stamp, ms))
             controls.withdraw();
-        if (exercise.execution_paused && operator_state.run_allowed && !operator_state.clear_fault) {
+        if (exercise.execution_paused && operator_state.run_allowed && !operator_state.clear_estop &&
+            !board_config::emergencyStopRequested()) {
             k_sleep(K_MSEC(5)); continue;
         }
         CommandSnapshot frame{}; (void)commands.snapshot(frame);
@@ -169,32 +171,27 @@ int main() {
         input.head = head_cache; input.yaw = yaw.snapshot(); input.pitch = pitch.snapshot();
         input.command = frame.decision.command.gimbal; input.source_stamp = sourceStamp(frame, input.command.source);
         if (!operator_state.run_allowed) input.command.mode = GimbalMode::Disabled;
-        input.prerequisites_ready = started && inertial_bench::mounting_configured &&
-            yaw_bus.status().state == motor::BusState::Running && (!split || pitch_bus.status().state == motor::BusState::Running);
+        input.prerequisites_ready = started && inertial_bench::mounting_configured;
         auto inertial = adapter.update(input, now);
         GimbalExecutionInputs gimbal_input{};
         gimbal_input.command = inertial.command; gimbal_input.source_stamp = inertial.source_stamp;
-        gimbal_input.transport_ready = input.prerequisites_ready;
+        gimbal_input.transport_ready = started;
+        gimbal_input.yaw_output_valid = inertial.yaw_output_valid;
+        gimbal_input.pitch_output_valid = inertial.pitch_output_valid;
         gimbal_input.emergency_stop = board_config::emergencyStopRequested();
-        gimbal_input.clear_fault = operator_state.clear_fault || board_config::takeEmergencyResetRequest();
-        const auto previous = run;
+        gimbal_input.clear_estop = operator_state.clear_estop || board_config::takeEmergencyResetRequest();
         run = started ? gimbal.update(gimbal_input, now) : gimbal.suspend(now, WaitReason::Configuration, ret ? ret : -ENODEV, true);
         if (started) {
-            const int y = yaw_bus.commit().error, p = split ? pitch_bus.commit().error : 0;
-            if (y < 0 || p < 0) run = gimbal.suspend(now, WaitReason::Transport, y < 0 ? y : p);
+            yaw_commit_error = yaw_bus.commit().error;
+            pitch_commit_error = split ? pitch_bus.commit().error : 0;
         }
-        if (run.generation != previous.generation || (previous.state == RunState::Active && run.state != RunState::Active))
-            inertial = adapter.suspend(now, WaitReason::Reference, -ESTALE);
-        if (operator_state.run_allowed && previous.state == RunState::Active &&
-            (run.state != RunState::Active || run.generation != previous.generation)) controls.withdraw();
         const auto rx = endpoint.snapshot();
         YawCenteringInputs follow{};
         follow.joint_yaw_rad = input.yaw.feedback.position_rad;
         follow.joint_stamp = {input.yaw.feedback.timestamp_ms * 1000, input.yaw.feedback.timestamp_ms, input.yaw.feedback_fresh};
         follow.source_stamp = input.source_stamp;
-        follow.enabled = input.command.mode != GimbalMode::Disabled && operator_state.run_allowed && rx.online &&
-            rx.big_yaw_feedback.valid && rx.big_yaw_feedback.ready && forwardedFresh(rx.big_yaw_feedback.stamp, rx.big_yaw_feedback.production_age_ms, ms, 100);
-        follow.head_stable = inertial.stabilization_valid && run.state == RunState::Active;
+        follow.enabled = input.command.mode != GimbalMode::Disabled && operator_state.run_allowed;
+        follow.head_stable = inertial.stabilization_valid;
         // Explicit unloaded bench permission. Vehicle integration uses referee authority.
         follow.permission_valid = vehicle::connections_confirmed && operator_state.run_allowed && !gimbal_input.emergency_stop;
         const auto centered = centering.update(follow, now);
@@ -207,15 +204,15 @@ int main() {
         request.command_age_ms = input.command.stamp.valid && ms >= input.command.stamp.timestamp_ms
             ? static_cast<std::uint32_t>(std::min<std::uint64_t>(ms - input.command.stamp.timestamp_ms, UINT32_MAX)) : UINT32_MAX;
         request.stamp = centered.stamp;
-        request.permission = {true, follow.permission_valid, {ms, centered.stamp.sequence, true}};
+        request.permission = {operator_state.fresh, follow.permission_valid, operator_state.remote.stamp};
         endpoint.submitBigYaw(request);
         if (!exercise.status_paused) endpoint.setStatus(run);
         if (ms >= next_log) {
             next_log = ms + 200;
-            LOG_INF("headStable=%d centerError=%f request=%f peerRate=%f peerGen=%u online=%d ready=%d localRun=%u",
+            LOG_INF("headStable=%d centerError=%f request=%f peerRate=%f online=%d ready=%d localRun=%u commit=%d/%d",
                 follow.head_stable, double(centered.center_error_rad), double(centered.velocity_rad_s),
-                double(rx.big_yaw_feedback.actual_rate_rad_s), rx.big_yaw_feedback.resume_generation,
-                rx.online, rx.big_yaw_feedback.ready, unsigned(run.state));
+                double(rx.big_yaw_feedback.actual_rate_rad_s),
+                rx.online, rx.big_yaw_feedback.ready, unsigned(run.state), yaw_commit_error, pitch_commit_error);
         }
         k_sleep(K_MSEC(5));
     }

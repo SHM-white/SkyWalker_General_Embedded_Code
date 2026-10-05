@@ -17,9 +17,10 @@ bool axisValid(const GimbalAxisConfig &axis) {
 bool jointHealthy(const motor::MotorSnapshot &m, const GimbalAxisConfig &axis,
                   std::uint64_t now_ms, std::uint32_t timeout_ms) {
     const auto &f = m.feedback;
-    const auto required = motor::FeedbackPosition | motor::FeedbackVelocity;
-    return m.feedback_fresh && m.position_reference_valid && (f.valid & required) == required &&
-           std::isfinite(f.position_rad) && std::isfinite(f.velocity_rad_s) &&
+    const bool continuous = axis.topology == AxisTopology::Continuous;
+    const auto required = motor::FeedbackVelocity | (continuous ? motor::FeedbackAbsolutePosition : motor::FeedbackPosition);
+    return m.feedback_fresh && (continuous || m.position_reference_valid) && (f.valid & required) == required &&
+           std::isfinite(continuous ? f.absolute_position_rad : f.position_rad) && std::isfinite(f.velocity_rad_s) &&
            now_ms >= f.timestamp_ms && now_ms - f.timestamp_ms <= timeout_ms &&
            (axis.topology == AxisTopology::Continuous ||
             (f.position_rad >= axis.min_angle_rad && f.position_rad <= axis.max_angle_rad));
@@ -35,12 +36,12 @@ float stopAtLimits(float rate, float position, const GimbalAxisConfig &axis) {
 
 void InertialGimbalAdapter::withdraw() {
     prepared_ = target_valid_ = false;
-    boundary_us_ = 0;
     goal_source_ = ControlSource::None;
     goal_mode_ = GimbalMode::Disabled;
     output_.command = {};
     output_.source_stamp = {};
     output_.stabilization_valid = false;
+    output_.yaw_output_valid = output_.pitch_output_valid = false;
 }
 
 InertialGimbalOutput InertialGimbalAdapter::publish(core::TimeUs now, WaitReason reason, int error,
@@ -49,7 +50,10 @@ InertialGimbalOutput InertialGimbalAdapter::publish(core::TimeUs now, WaitReason
     output_.status.reason = reason;
     output_.status.error = error;
     output_.status.ready = prepared_;
-    output_.status.generation = generation_;
+    output_.status.requested = target_valid_;
+    output_.status.member_count = 2;
+    output_.status.active_count = unsigned(output_.yaw_output_valid) + unsigned(output_.pitch_output_valid);
+    output_.status.waiting_count = 2 - output_.status.active_count;
     output_.status.stamp = {now / 1000, ++sequence_, true};
     return output_;
 }
@@ -73,10 +77,12 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
         c.max_inertial_pitch_rad >= 1.4f || !std::isfinite(c.stable_yaw_error_rad) ||
         !std::isfinite(c.stable_pitch_error_rad) || c.stable_yaw_error_rad < 0 || c.stable_pitch_error_rad < 0)
         return suspend(now, WaitReason::Configuration, -EINVAL);
-    if (!in.prerequisites_ready)
-        return suspend(now, WaitReason::Transport, -EAGAIN);
-    if (!cycle)
-        return suspend(now, WaitReason::Cycle, -ESTALE);
+    output_.yaw_output_valid = output_.pitch_output_valid = false;
+    output_.stabilization_valid = false;
+    output_.command = in.command;
+    output_.command.mode = GimbalMode::Rate;
+    output_.command.yaw_rate_rad_s = output_.command.pitch_rate_rad_s = 0;
+    output_.source_stamp = in.source_stamp;
     if (in.command.mode == GimbalMode::Disabled) {
         auto out = suspend(now, WaitReason::Command);
         out.status.state = output_.status.state = RunState::Disabled;
@@ -84,8 +90,10 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
     }
     if (in.command.mode > GimbalMode::AbsoluteAngle || !std::isfinite(in.command.yaw_target_rad) ||
         !std::isfinite(in.command.pitch_target_rad) || !std::isfinite(in.command.yaw_rate_rad_s) ||
-        !std::isfinite(in.command.pitch_rate_rad_s))
-        return suspend(now, WaitReason::Command, -EINVAL);
+        !std::isfinite(in.command.pitch_rate_rad_s)) return suspend(now, WaitReason::Command, -EINVAL);
+    if (!isFresh(in.command.stamp, now / 1000, c.command_timeout_ms) ||
+        !core::fresh(in.source_stamp, now, c.source_timeout_us)) return suspend(now, WaitReason::Command, -ESTALE);
+    if (!in.prerequisites_ready) return publish(now, WaitReason::Transport, 0);
     const auto &head = in.head.sample;
     const bool quality = head.attitude_quality == imu::AttitudeQuality::Tracking ||
         (c.allow_unknown_quality && head.attitude_quality == imu::AttitudeQuality::Unknown);
@@ -96,48 +104,23 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
         !core::fresh(head.gyro_rad_s.stamp, now, c.imu_timeout_us) ||
         !core::finite(head.gyro_rad_s.value) || !core::normalize(quaternion) ||
         !head.reference.frame_id || !head.reference.epoch)
-        return suspend(now, WaitReason::Reference, -ESTALE);
-    if (!jointHealthy(in.yaw, c.yaw, now / 1000, c.mechanical_timeout_ms) ||
-        !jointHealthy(in.pitch, c.pitch, now / 1000, c.mechanical_timeout_ms))
-        return suspend(now, WaitReason::Feedback, -ESTALE);
+        return publish(now, WaitReason::Reference, 0);
+    const bool yaw_available = jointHealthy(in.yaw, c.yaw, now / 1000, c.mechanical_timeout_ms);
+    const bool pitch_available = jointHealthy(in.pitch, c.pitch, now / 1000, c.mechanical_timeout_ms);
     const auto e = core::euler(quaternion);
     output_.head_yaw_rad = e.yaw;
     output_.head_pitch_rad = e.pitch;
     if (std::fabs(e.pitch) >= c.max_inertial_pitch_rad)
         return suspend(now, WaitReason::Reference, -ERANGE);
-    if (prepared_ && (reference_ != head.reference || yaw_reference_ != in.yaw.reference_generation ||
-                      pitch_reference_ != in.pitch.reference_generation))
-        return suspend(now, WaitReason::Reference, -ESTALE);
-    if (!prepared_) {
-        if (generation_ == std::numeric_limits<std::uint32_t>::max())
-            return suspend(now, WaitReason::Configuration, -EOVERFLOW);
-        ++generation_;
+    if (!prepared_ || reference_ != head.reference) {
         reference_ = head.reference;
-        yaw_reference_ = in.yaw.reference_generation;
-        pitch_reference_ = in.pitch.reference_generation;
-        boundary_us_ = now;
         prepared_ = true;
-        yaw_goal_rad_ = e.yaw;
-        pitch_goal_rad_ = e.pitch;
-        output_.command = {};
-        return publish(now, WaitReason::Command, -EAGAIN);
+        target_valid_ = false;
     }
-    const bool fresh = isFresh(in.command.stamp, now / 1000, c.command_timeout_ms) &&
-        core::fresh(in.source_stamp, now, c.source_timeout_us) &&
-        in.source_stamp.time_us > boundary_us_ && in.command.stamp.timestamp_ms > boundary_us_ / 1000;
-    if (!fresh) {
-        if (target_valid_)
-            return suspend(now, WaitReason::Command, -ESTALE);
-        output_.command = {};
-        return publish(now, WaitReason::Command, -ESTALE);
-    }
-    const float dt = float(now - previous) * 1e-6f;
+    const float dt = cycle ? float(now - previous) * 1e-6f : 0;
     if (!target_valid_ || goal_source_ != in.command.source || goal_mode_ != in.command.mode) {
-        yaw_goal_rad_ = e.yaw;
-        pitch_goal_rad_ = e.pitch;
-        goal_source_ = in.command.source;
-        goal_mode_ = in.command.mode;
-        target_valid_ = true;
+        yaw_goal_rad_ = e.yaw; pitch_goal_rad_ = e.pitch;
+        goal_source_ = in.command.source; goal_mode_ = in.command.mode; target_valid_ = true;
     }
     float desired_yaw_rate = 0, desired_pitch_rate = 0;
     if (in.command.mode == GimbalMode::AbsoluteAngle) {
@@ -161,21 +144,24 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
     // Estimate carrier motion from head rate minus measured joint contribution.
     // TODO(calibration): validate axis projection and tune damping on the mounted
     // head before opening the full Pitch envelope or vehicle-motion tests.
-    const float carrier_yaw_rate = yaw_rate - c.yaw_direction * in.yaw.feedback.velocity_rad_s;
-    const float carrier_pitch_rate = pitch_rate - c.pitch_direction * in.pitch.feedback.velocity_rad_s;
+    const float carrier_yaw_rate = yaw_available ? yaw_rate - c.yaw_direction * in.yaw.feedback.velocity_rad_s : 0;
+    const float carrier_pitch_rate = pitch_available ? pitch_rate - c.pitch_direction * in.pitch.feedback.velocity_rad_s : 0;
     output_.command = in.command;
     output_.command.mode = GimbalMode::Rate;
-    output_.command.yaw_rate_rad_s = stopAtLimits(c.yaw_direction *
+    output_.command.yaw_rate_rad_s = yaw_available && cycle ? stopAtLimits(c.yaw_direction *
         (desired_yaw_rate + c.yaw_kp * output_.yaw_error_rad - carrier_yaw_rate -
-         c.gyro_damping * (yaw_rate - desired_yaw_rate)), in.yaw.feedback.position_rad, c.yaw);
-    output_.command.pitch_rate_rad_s = c.pitch_locked ? 0 : stopAtLimits(c.pitch_direction *
+         c.gyro_damping * (yaw_rate - desired_yaw_rate)), in.yaw.feedback.position_rad, c.yaw) : 0;
+    output_.command.pitch_rate_rad_s = c.pitch_locked || !pitch_available || !cycle ? 0 : stopAtLimits(c.pitch_direction *
         (desired_pitch_rate + c.pitch_kp * output_.pitch_error_rad - carrier_pitch_rate -
          c.gyro_damping * (pitch_rate - desired_pitch_rate)), in.pitch.feedback.position_rad, c.pitch);
     output_.source_stamp = in.source_stamp;
     output_.status.last_command_sequence = in.command.stamp.sequence;
-    output_.stabilization_valid = std::fabs(output_.yaw_error_rad) <= c.stable_yaw_error_rad &&
+    output_.yaw_output_valid = yaw_available && cycle;
+    output_.pitch_output_valid = pitch_available && cycle;
+    output_.stabilization_valid = yaw_available && (c.pitch_locked || pitch_available) && std::fabs(output_.yaw_error_rad) <= c.stable_yaw_error_rad &&
         (c.pitch_locked || std::fabs(output_.pitch_error_rad) <= c.stable_pitch_error_rad);
-    return publish(now, WaitReason::None, 0, true);
+    return publish(now, !cycle ? WaitReason::Cycle : !yaw_available || !pitch_available ? WaitReason::Feedback : WaitReason::None,
+        0, output_.yaw_output_valid || output_.pitch_output_valid);
 }
 
 } // namespace skywalker::robotics

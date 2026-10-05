@@ -7,7 +7,7 @@
 #include <zephyr/logging/log.h>
 
 #include <control/position_motor.hpp>
-#include <control/motor_session.hpp>
+#include <drivers/motor/can_bus.hpp>
 #include <core/clock.hpp>
 #include <lib/vofa/vofa.h>
 
@@ -113,7 +113,7 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
     skywalker::control::PositionMotor::Config config{};
     config.loop = makePositionLoopConfig();
     config.effort_unit = skywalker::control::EffortUnit::Ampere;
-    config.safety = {kMeasuredVelocitySafetyMaxRadS, 0.0f};
+
     config.reference = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
                            ? skywalker::control::PositionReference::AbsoluteNearest
                            : skywalker::control::PositionReference::StartupRelative;
@@ -125,76 +125,57 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(uart) || !device_is_ready(can))
-        return -ENODEV;
+    if (!device_is_ready(can)) return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::gm6020({
         .id = 4,
         .current_limit_a = 1.5f,
         .encoder_zero_ticks = 0,
         .current_mode_confirmed = true,
-        .timing = {20, 20, 20, 100},
+        .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::PositionMotor axis{drive, makeMotorConfig()};
-    static const skywalker::control::MotorSession::Member members[] = {
-        {"drive", &drive, &bus, &axis, kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
-            ? skywalker::control::ReferencePolicy::UseCalibratedAbsolute
-            : skywalker::control::ReferencePolicy::CaptureOnExplicitStart},
-    };
-    static skywalker::control::MotorSession session(members);
     static Vofa vofa{};
-    vofa_init(&vofa, uart);
-    const int ret = session.configure();
-    if (ret < 0) {
-        LOG_ERR("configuration blocked: %d", ret);
-        return ret;
-    }
-    // Preserve the bench's one-shot automatic start. A fault never retries it.
-    std::uint64_t target_sequence = 0;
-    auto previous_us = skywalker::core::monotonicTimeUs();
-    std::uint32_t telemetry_divider = 0;
+    const int vofa_error = vofa_init(&vofa, uart);
+    int ret = bus.attach(drive);
+    if (ret == 0) ret = bus.start();
+    if (ret == 0) ret = axis.configure();
+    if (ret < 0) return ret;
+    const auto started_ms = k_uptime_get();
+    auto previous_ms = started_ms;
+    std::int64_t next_log_ms = 0;
+    int last_call_error = 0;
     for (;;) {
-        const auto wake_us = previous_us + kControlPeriodMs * 1000;
-        if (skywalker::core::monotonicTimeUs() < wake_us) k_sleep(K_TIMEOUT_ABS_US(wake_us));
-        else k_sleep(K_TICKS(1));
-        const auto now_us = skywalker::core::monotonicTimeUs();
-        previous_us = now_us;
-        const auto before = session.status();
-        const auto elapsed_ms = before.state == skywalker::control::SessionState::Running
-            ? (now_us - before.started_us) / 1000 : 0;
+        k_sleep(K_MSEC(kControlPeriodMs));
+        const auto now = k_uptime_get();
+        const float dt = float(now - previous_ms) / 1000;
+        previous_ms = now;
+        const auto elapsed_ms = now - started_ms;
         const float target = kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute
-                                 ? requestedAbsolutePositionRad(elapsed_ms)
-                                 : static_cast<float>((elapsed_ms % 10000) / 2500) * kTargetOffsetRad;
-        const double targets[] = {target};
-        const skywalker::core::Stamp stamp{now_us, ++target_sequence, true};
-        session.step({.enabled = true, .start_sequence = 1, .source = stamp,
-                      .target_stamp = stamp, .targets = targets}, now_us);
-        const auto state = session.status();
-        if (state.state == skywalker::control::SessionState::Blocked)
-            return state.last_stop.error;
-        if (state.state != skywalker::control::SessionState::Running) continue;
-        if (++telemetry_divider >= kTelemetryPeriodCycles) {
-            telemetry_divider = 0;
-            const auto data = axis.telemetry();
-            const auto &feedback = data.motor.feedback;
-            const auto &output = data.output;
-            const float channels[14] = {
-                target,
-                static_cast<float>(data.target_position_rad),
-                static_cast<float>(data.position_rad),
-                kPositionTargetMode == PositionTargetMode::FixedZeroAbsolute ? feedback.absolute_position_rad : 0.0f,
-                output.position.error,
-                output.position.output,
-                output.velocity.velocity_reference_rad_s,
-                feedback.velocity_rad_s,
-                output.velocity.velocity_error_rad_s,
-                output.velocity.regulator.feedback.p,
-                output.velocity.regulator.feedback.i,
-                output.effort_command,
-                data.dt_s * 1000.0f,
-                static_cast<float>(k_uptime_get() - feedback.timestamp_ms),
-            };
-            vofa_send(&vofa, channels, 14);
+            ? requestedAbsolutePositionRad(elapsed_ms)
+            : static_cast<float>((elapsed_ms % 10000) / 2500) * kTargetOffsetRad;
+        const int enable_error = drive.enable();
+        const int update_error = axis.update(target, dt);
+        const int commit_error = bus.commit().error;
+        if (enable_error < 0) last_call_error = enable_error;
+        if (update_error < 0) last_call_error = update_error;
+        if (commit_error < 0) last_call_error = commit_error;
+        const auto data = axis.telemetry();
+        const auto &f = data.motor.feedback;
+        const auto &o = data.output;
+        if (vofa_error == 0) {
+            const float channels[14] = {target, float(data.target_position_rad), float(data.position_rad),
+                f.absolute_position_rad, o.position.error, o.position.output, o.velocity.velocity_reference_rad_s,
+                f.velocity_rad_s, o.velocity.velocity_error_rad_s, o.velocity.regulator.feedback.p,
+                o.velocity.regulator.feedback.i, data.output_valid ? o.effort_command : 0,
+                float(data.output_valid), float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0)};
+            (void)vofa_send(&vofa, channels, 14);
+        }
+        if (now >= next_log_ms) {
+            next_log_ms = now + 1000;
+            LOG_INF("state=%u target=%.3f seq=%llu output=%d wait=%u call=%d", unsigned(data.motor.state),
+                double(target), static_cast<unsigned long long>(data.target_sequence), data.output_valid,
+                unsigned(data.issue), last_call_error);
         }
     }
 }

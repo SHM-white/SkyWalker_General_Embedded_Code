@@ -45,13 +45,13 @@ inline skywalker::motor::dji::Config steerHardware() {
          .current_limit_a = steer_current_limit_a,
          .encoder_zero_ticks = capture_startup_zero ? std::uint16_t{0} : steer_zero_ticks,
          .current_mode_confirmed = steer_current_mode,
-         .timing = {20, 20, 30, 100}});
+         .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100}});
 }
 inline skywalker::motor::dji::Config driveHardware() {
     return skywalker::motor::dji::m3508({.id = 3,
                                          .current_limit_a = drive_current_limit_a,
                                          .gear_ratio = drive_gear_ratio,
-                                         .timing = {20, 20, 30, 100}});
+                                         .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100}});
 }
 inline skywalker::robotics::SwerveModule::Config moduleConfig() {
     // Reuse the existing controller tuning, overriding this bench's mechanics.

@@ -1,29 +1,21 @@
-# 单电机断电恢复
+# 持续速度目标与电机自动恢复
 
-一块 MC02 + 一台电机。默认 CAN1 上的 M2006/C610 ID1，减速比 36:1，反馈 ID 为 0x201，命令 ID 为 0x200。驱动电流上限 0.5 A，速度控制器输出上限 0.3 A，目标为输出轴 2 rad/s。M2006 无温度反馈，因此此配置不启用温度反馈保护。可选 DM J4310 MIT ID1、Master 0x11、力矩上限 0.5 N·m，保留其温度保护。电机需独立供电、CAN 终端正确且与控制板共地。MC02 逻辑供电保持不断，控制台使用 USART10、115200 baud（PE3 TX 接 USB 转串口 RX，PE2 RX 接 USB 转串口 TX，并共地）；板载 USB 不承担此 sample 的按键输入。
+本例固定目标由主循环每 5 ms 生产。按 `e` 后，电机缺席、掉电、CAN 恢复或驱动故障均不会撤销运行意图；底层独立恢复后执行最新目标，无需再次 `e`、手动 reset 或 clearFault。
 
-## 构建与刷写
+| 按键 | 行为 |
+| --- | --- |
+| e | 请求持续运行；电机尚未上线也接受 |
+| 空格 | 停止并取消旧命令 |
+| ! | 停止并锁存用户急停 |
+| r | 解除用户急停，保持停止 |
 
-```sh
-west build -b dm_mc02/stm32h723xx samples/motor/recovery -d build/bench_recovery
-west flash -d build/bench_recovery
+默认 M2006/C610，CAN1 ID1。`-DRECOVERY_DM=ON` 使用 DM J4310 MIT、ID1、Master ID0x11；MC02 DM 变体会打开 power1。PID 参数在 `src/board_config.hpp`。
+
+日志区分 run、Motor.enabled_requested、实际状态、目标序号、输出有效性、等待原因和历史故障。`update()==0` 表示目标已接受，不保证设备已经执行。
+
+```bash
+west build -b dm_mc02/stm32h723xx samples/motor/recovery -d build/recovery_auto
+west build -b dm_mc02/stm32h723xx samples/motor/recovery -d build/recovery_auto_dm -- -DRECOVERY_DM=ON
 ```
 
-DM MIT 配置：
-
-```sh
-
-QE+w
-
-320.e
-st build -b dm_mc02/stm32h723xx samples/motor/recovery -d build/bench_recovery_dm -- -DRECOVERY_DM=ON
-west flash -d build/bench_recovery_dm
-```
-
-`dm.overlay` 现为兼容性空 overlay；型号、CAN ID、限幅和时限在 `src/main.cpp` 中配置，控制器参数在 `src/board_config.hpp` 中配置。DM 的 PMAX/VMAX/TMAX 必须与上位机一致。DM 配置先启动 CAN，再使能 MC02 XT30_1 并等待 1.5 s。
-
-## 操作与预期
-
-启动仅接收反馈，无运动目标。电机 `ready` 后按 `e`，显式使能并以 2 rad/s 运行。空格立即撤销软件输出许可；`!` 还锁住再次使能。按 `r` 清除软件急停和可清故障，但不会启动电机；必须重新按 `e`。仅切断电机供电时，状态应退出 Active、旧目标作废；重新供电且准备就绪后，仍需按 `e` 发起新的使能，不会自动续跑。日志每 250 ms 显示状态、代次、故障、停机进度、速度和 effort。
-
-目前仅做固件编译验证，尚未连接实物或刷写。
+让电机输出轴空载，再在运行中断电、恢复电源；日志目标序号应持续增加，恢复后自动运动。离线期间按空格／急停，再恢复电源应保持停止。电源断开前保持控制目标是本例明确行为。

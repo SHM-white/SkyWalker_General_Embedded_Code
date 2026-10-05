@@ -3,7 +3,8 @@
 #include <robotics/chassis/chassis_power_limiter.hpp>
 #include <robotics/chassis/power_measurement.hpp>
 #include <robotics/chassis/swerve_hardware.hpp>
-#include <robotics/execution/recovery_gate.hpp>
+#include <robotics/execution/run_status.hpp>
+#include <robotics/command/command_source.hpp>
 #include <robotics/messages/referee.hpp>
 #include <robotics/swerve/swerve_chassis.hpp>
 
@@ -16,18 +17,16 @@ struct ChassisExecutionInputs {
     RefereePowerState power_budget{};
     PowerMeasurement measured_power{};
     bool require_permission = false, transport_ready = false;
-    // Local samples use a local source; cross-board applications must compare
-    // the request's target boot and chassis generation before setting this.
-    bool recovery_context_valid = true;
-    bool emergency_stop = false, clear_fault = false;
+    bool emergency_stop = false, clear_estop = false;
 };
 
 class ChassisExecutor {
 public:
     struct Config {
-        RecoveryGate::Config recovery{};
+        std::uint32_t command_timeout_ms = 100;
+        core::TimeUs source_timeout_us = 100000;
         core::TimeUs max_cycle_us = 20000, measurement_timeout_us = 300000;
-        std::uint32_t permission_timeout_ms = 300, fault_retry_ms = 100;
+        std::uint32_t permission_timeout_ms = 300;
         bool require_power_budget = false;
         bool power_model_calibrated = false, allow_estimated_power = false;
         bool power_control_calibrated = false;
@@ -39,7 +38,7 @@ public:
         ChassisPowerLimiter::Config limiter{};
     };
     ChassisExecutor(SwerveHardware &hardware, const SwerveChassis::Config &chassis, const Config &config)
-        : hardware_(hardware), chassis_(chassis), config_(config), recovery_(config.recovery), limiter_(config.limiter) {}
+        : hardware_(hardware), chassis_(chassis), config_(config), limiter_(config.limiter) {}
     int begin();
     RunStatus update(const ChassisExecutionInputs &inputs, core::TimeUs now_us);
     RunStatus suspend(core::TimeUs now_us, WaitReason reason, int error = 0, bool blocked = false);
@@ -56,20 +55,16 @@ private:
     SwerveHardware &hardware_;
     SwerveChassis chassis_;
     Config config_;
-    RecoveryGate recovery_;
     ChassisPowerLimiter limiter_;
     RunStatus status_{};
     ChassisOutput output_{};
     ChassisFeedback feedback_{};
     PowerMeasurement selected_power_{};
     core::TimeUs previous_us_ = 0;
-    std::uint64_t retry_ms_ = 0;
     std::uint32_t production_sequence_ = 0;
     float effort_scale_ = 0, steer_effort_scale_ = 0;
-    int config_error_ = 0, hard_error_ = 0;
-    WaitReason hard_reason_ = WaitReason::Drive;
-    bool begin_attempted_ = false, configured_ = false, have_time_ = false, emergency_latched_ = false;
-    bool explicit_clear_pending_ = false;
+    int config_error_ = 0;
+    bool begin_attempted_ = false, configured_ = false, have_time_ = false;
 };
 
 } // namespace skywalker::robotics

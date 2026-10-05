@@ -73,11 +73,12 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
     (void)link_.latestHeartbeat(next.peer);
     next.online = link_.peerOnline(now, config_.heartbeat_timeout_ms);
     if (peer_online_ && !next.online) link_.invalidateControl();
-    if (next.online && (!peer_online_ || peer_boot_ != next.peer.sender_boot_id ||
-                        peer_generation_ != next.peer.resume_generation)) {
+    if (next.online && (!peer_online_ || peer_boot_ != next.peer.sender_boot_id)) {
         baseline_sequence_ = outgoing.command.stamp.sequence;
         have_baseline_ = outgoing.command.stamp.valid;
-        peer_boot_ = next.peer.sender_boot_id; peer_generation_ = next.peer.resume_generation;
+        big_yaw_baseline_sequence_ = outgoing.big_yaw_request.stamp.sequence;
+        have_big_yaw_baseline_ = outgoing.big_yaw_request.stamp.valid;
+        peer_boot_ = next.peer.sender_boot_id;
     }
     peer_online_ = next.online;
     if (next.online) {
@@ -104,15 +105,6 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
         next.control.global_action = SafetyAction::Disable;
         next.big_yaw_request.mode = BigYawMode::Disabled;
     }
-    const bool axis_context = next.online && next.big_yaw_feedback.valid && next.big_yaw_feedback.resume_generation;
-    if (axis_context && (!big_yaw_context_valid_ || big_yaw_peer_boot_ != next.peer.sender_boot_id ||
-                         big_yaw_peer_generation_ != next.big_yaw_feedback.resume_generation)) {
-        big_yaw_baseline_sequence_ = outgoing.big_yaw_request.source_sequence;
-        have_big_yaw_baseline_ = outgoing.big_yaw_request.stamp.valid;
-        big_yaw_peer_boot_ = next.peer.sender_boot_id;
-        big_yaw_peer_generation_ = next.big_yaw_feedback.resume_generation;
-    }
-    big_yaw_context_valid_ = axis_context;
     if (transport_ready && now >= next_tx_ms_ && !transport_.txBusy()) {
         std::uint8_t batch[InterBoardTransport::kTxCapacity]{};
         std::size_t used = 0;
@@ -135,7 +127,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
             BoardHeartbeat heartbeat{};
             heartbeat.role = config_.role; heartbeat.sender_boot_id = boot_id_;
             heartbeat.sender_uptime_ms = static_cast<std::uint32_t>(now);
-            heartbeat.resume_generation = outgoing.status.generation; heartbeat.ready = feedback.ready;
+            heartbeat.ready = feedback.ready;
             heartbeat.safety_state = feedback.safety_state; heartbeat.active_reasons = feedback.active_reasons;
             heartbeat.sync_requested = !next.online;
             return InterBoardCodec::encodeHeartbeat(heartbeat, seq, bytes, cap);
@@ -163,20 +155,20 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 append(MessageId::ChassisControl, [&](auto seq, auto *bytes, auto cap) {
                     RemoteChassisControl control{};
                     control.command = outgoing.command; control.stamp = outgoing.command.stamp;
-                    control.receiver_boot_id = peer_boot_; control.resume_generation = peer_generation_;
+                    control.receiver_boot_id = peer_boot_;
                     control.global_action = control.command.mode == ChassisMode::Disabled ? SafetyAction::Disable : SafetyAction::Active;
                     return InterBoardCodec::encodeChassisControl(control, seq, bytes, cap);
                 });
-            if (axis_context && isFresh(outgoing.big_yaw_request.stamp, now, config_.command_timeout_ms) &&
+            if (next.online && isFresh(outgoing.big_yaw_request.stamp, now, config_.command_timeout_ms) &&
                 (outgoing.big_yaw_request.mode == BigYawMode::Disabled || !have_big_yaw_baseline_ ||
-                 sequenceAfter(outgoing.big_yaw_request.source_sequence, big_yaw_baseline_sequence_)))
+                 sequenceAfter(outgoing.big_yaw_request.stamp.sequence, big_yaw_baseline_sequence_)))
                 append(MessageId::BigYawRequest, [&](auto seq, auto *bytes, auto cap) {
                     auto request = outgoing.big_yaw_request;
                     const auto elapsed = age(request.stamp, now);
                     request.source_age_ms = addAge(request.source_age_ms, elapsed);
                     request.command_age_ms = addAge(request.command_age_ms, elapsed);
                     request.permission_age_ms = age(request.permission.stamp, now);
-                    request.receiver_boot_id = big_yaw_peer_boot_; request.resume_generation = big_yaw_peer_generation_;
+                    request.receiver_boot_id = peer_boot_;
                     return InterBoardCodec::encodeBigYawRequest(request, seq, bytes, cap);
                 });
             append(MessageId::ChassisConstraint, [&](auto seq, auto *bytes, auto cap) {

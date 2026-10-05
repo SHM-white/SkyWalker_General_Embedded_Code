@@ -66,18 +66,20 @@ void gimbalTask(void *, void *, void *) {
     communication::RemoteReceiver::Snapshot rc{}, operator_cache{};
     samples::control::RcControlAdapter controls;
     samples::control::SampleDiagnostics diagnostics;
-    bool estop_latched = false, rearm_allowed = false, enable_issued = false;
+    bool estop_latched = false;
+    int yaw_error = 0, pitch_error = 0, enable_error = 0, yaw_commit = 0, pitch_commit = 0;
     auto previous_ms = k_uptime_get();
     std::uint64_t next_telemetry = 0;
     for (;;) {
         (void)receiver.snapshot(operator_cache);
         const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const auto &operator_state = controls.update(operator_cache.remote, now);
-        const auto exercise = diagnostics.update(now, gimbal.active(),
+        const auto exercise = diagnostics.update(now, operator_state.run_allowed,
             !operator_state.fresh || operator_state.remote.left_switch == RcSwitch::Down);
         if (!exercise.input_paused) rc = operator_cache;
         const auto &remote = rc.remote;
-        if (exercise.execution_paused && operator_state.run_allowed && !operator_state.clear_fault) {
+        if (exercise.execution_paused && operator_state.run_allowed && !operator_state.clear_estop &&
+            !board_config::emergencyStopRequested()) {
             k_sleep(K_MSEC(5)); continue;
         }
         const float dt = (now - previous_ms) / 1000.0f;
@@ -87,79 +89,29 @@ void gimbalTask(void *, void *, void *) {
         if (estop && !estop_latched) {
             gimbal.disable();
             estop_latched = true;
-            enable_issued = false;
-            rearm_allowed = false;
         }
-        if ((operator_state.clear_fault || board_config::takeEmergencyResetRequest()) && !estop) {
+        if ((operator_state.clear_estop || board_config::takeEmergencyResetRequest()) && !estop) {
             gimbal.disable();
-            ret = gimbal.clearFault();
-            if (ret < 0)
-                LOG_ERR("group clear fault failed: %d", ret);
             estop_latched = false;
-            enable_issued = false;
-            rearm_allowed = false;
-        }
-
-        const auto yaw_status = yaw.poll(now);
-        const auto pitch_status = pitch.poll(now);
-        const bool yaw_ready = yaw_status.ready_for_enable;
-        const bool pitch_ready = pitch_status.ready_for_enable;
-        const bool feedback_ok = yaw_status.feedback_healthy && pitch_status.feedback_healthy;
-        const bool timing_ok = dt > 0.0f && dt <= 0.02f;
-        const bool new_command = remote.stamp.timestamp_ms >
-                                 std::max(yaw_status.ready_since_ms, pitch_status.ready_since_ms);
-        const auto group = gimbal.status();
-        if (enable_issued && !group.active && !group.enable_pending) {
-            enable_issued = false;
-            rearm_allowed = false;
             controls.withdraw();
         }
-        if (!fresh || !feedback_ok || !timing_ok || estop_latched || remote.left_switch == RcSwitch::Unknown)
-            rearm_allowed = false;
-        else
-            rearm_allowed = operator_state.run_allowed && yaw_ready && pitch_ready && new_command;
-
-        const bool requested = fresh && feedback_ok && timing_ok && !estop_latched && rearm_allowed && new_command &&
-                               operator_state.run_allowed && remote.left_switch == RcSwitch::Middle;
+        const bool requested = fresh && !estop_latched && operator_state.run_allowed &&
+                               remote.left_switch == RcSwitch::Middle;
         if (!requested) {
-            if (group.active || group.enable_pending) {
-                gimbal.disable();
-                enable_issued = false;
-            }
+            gimbal.disable();
+            enable_error = yaw_error = pitch_error = 0;
         }
-        else if (!enable_issued && gimbal.ready()) {
-            ret = yaw.reset();
-            if (ret == 0)
-                ret = pitch.reset();
-            if (ret == 0)
-                ret = gimbal.enable();
-            enable_issued = ret == 0;
-            if (ret < 0) {
-                rearm_allowed = false;
-                controls.withdraw();
-                LOG_ERR("group enable failed: %d", ret);
-            }
-        }
-        else if (gimbal.active()) {
+        else {
+            enable_error = gimbal.enable();
             const float yaw_rate = board_config::yaw_direction * samples::control::RcControlAdapter::normalize(remote.analog.right_x) *
                                    board_config::yaw.max_rate_rad_s;
             const float pitch_rate = board_config::pitch_direction * samples::control::RcControlAdapter::normalize(remote.analog.right_y) *
                                      board_config::pitch.max_rate_rad_s;
-            const int yr = yaw.updateRate(yaw_rate, dt);
-            const int pr = yr == 0 ? pitch.updateRate(pitch_rate, dt) : 0;
-            int submit = 0;
-            if (yr == 0 && pr == 0)
-                submit = yaw_bus.commit().error;
-            if (yr == 0 && pr == 0 && submit == 0 && split_buses)
-                submit = pitch_bus.commit().error;
-            if (yr < 0 || pr < 0 || submit < 0) {
-                gimbal.disable();
-                enable_issued = false;
-                rearm_allowed = false;
-                controls.withdraw();
-                LOG_ERR("axis update failed: yaw=%d pitch=%d commit=%d", yr, pr, submit);
-            }
+            yaw_error = yaw.updateRate(yaw_rate, dt);
+            pitch_error = pitch.updateRate(pitch_rate, dt);
         }
+        yaw_commit = yaw_bus.commit().error;
+        pitch_commit = split_buses ? pitch_bus.commit().error : 0;
 
         if (!exercise.status_paused && now >= next_telemetry) {
             next_telemetry = now + 1000;
@@ -169,15 +121,15 @@ void gimbalTask(void *, void *, void *) {
             const float channels[] = {
                 fresh ? 1.0f : 0.0f,
                 static_cast<float>(unsigned(remote.left_switch)),
-                rearm_allowed ? 1.0f : 0.0f,
+                requested ? 1.0f : 0.0f,
                 estop_latched ? 1.0f : 0.0f,
-                status.active ? 1.0f : 0.0f,
-                status.enable_pending ? 1.0f : 0.0f,
+                static_cast<float>(status.active_count),
+                static_cast<float>(status.enabled_count),
                 static_cast<float>(unsigned(ys.state)),
                 static_cast<float>(unsigned(ps.state)),
-                static_cast<float>(unsigned(status.last_fault.reason)),
-                static_cast<float>(yaw_bus.status().last_error),
-                static_cast<float>(split_buses ? pitch_bus.status().last_error : 0),
+                static_cast<float>(enable_error < 0 ? enable_error : yaw_error < 0 ? yaw_error : pitch_error),
+                static_cast<float>(yaw_commit),
+                static_cast<float>(pitch_commit),
             };
             constexpr auto channel_count = sizeof(channels) / sizeof(channels[0]);
             static_assert(channel_count <= VOFA_MAX_FLOATS);

@@ -10,7 +10,8 @@ inline skywalker::motor::dji::Config motorHardware() {
                                           .current_limit_a = 0.5f,
                                           .encoder_zero_ticks = 0,
                                           .current_mode_confirmed = true,
-                                          .timing = {20, 20, 20, 100}});
+                                          .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20,
+                                                     .enable_timeout_ms = 100, .retry_interval_ms = 100}});
 }
 // Limited topology requires calibrated DriverContinuous coordinates instead.
 inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Continuous, -3.14159265f,
@@ -18,7 +19,6 @@ inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::
 inline skywalker::control::PositionMotor::Config motorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::Ampere;
-    c.safety = {12, 70};
     c.reference = yaw.topology == skywalker::robotics::AxisTopology::Continuous
                       ? skywalker::control::PositionReference::AbsoluteNearest
                       : skywalker::control::PositionReference::DriverContinuous;

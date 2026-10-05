@@ -94,12 +94,9 @@ public:
     // different buses. Success acknowledges publication, not CAN completion.
     [[nodiscard]] CommitResult commit();
     BusStatus status() const;
-    // Topology query for setup only, before start(). No concurrent attachment.
-    bool exclusivelyOwnedBy(const Group &group) const;
     const device *busDevice() const { return can_; }
 
 private:
-    friend class Group;
     friend class Motor;
 
     static constexpr std::size_t kMaxMotors = CONFIG_SKYWALKER_MOTOR_MAX_MOTORS_PER_BUS;
@@ -124,8 +121,7 @@ private:
         std::uint64_t bus_generation = 0;
         std::uint64_t operation_id = 0;
         std::uint64_t submitted_ms = 0;
-        std::uint64_t enable_generation = 0;
-        std::uint64_t clear_generation = 0;
+        std::uint64_t protocol_generation = 0;
         std::uint64_t stop_generations[kMaxMotors]{};
         std::size_t unit_index = 0;
         bool busy = false;
@@ -143,10 +139,16 @@ private:
     struct CandidateMotor {
         StagedCommand command{};
         std::uint64_t enable_generation = 0;
+        std::uint64_t cancellation_generation = 0;
+        std::uint64_t protocol_generation = 0;
+        std::uint64_t invalidated_effort_revision = 0;
         std::uint64_t stop_generation = 0;
         std::uint64_t feedback_ms = 0;
+        float native_position_rad = 0.0f;
+        bool native_position_valid = false;
         MotorState state = MotorState::Offline;
         bool included = false;
+        bool enabled_requested = false;
         bool output_permitted = false;
         bool motion = false;
         bool safe_action = false;
@@ -183,9 +185,9 @@ private:
     int submitCandidate();
     int buildTarget(std::uint64_t now_ms);
     int buildSafety();
+    int buildNeutral();
+    bool pumpProtocol(std::uint64_t now_ms, bool stops_only);
     std::uint32_t nextWaitMs(std::uint64_t now_ms) const;
-    bool unitHasPendingSafety(const TxUnit &unit) const;
-    bool unitNeedsDmSafetyProbe(const TxUnit &unit, std::uint64_t now_ms) const;
     void updateStopAfterTx(const InFlight &completed);
 
     const device *can_ = nullptr;
@@ -197,11 +199,10 @@ private:
     Route routes_[kMaxMotors]{};
     std::size_t route_count_ = 0;
     StagedCommand published_[kMaxMotors]{};
-    std::uint64_t neutral_done_generation_[kMaxMotors]{};
     std::uint64_t published_sequence_ = 0;
     std::size_t target_cursor_ = 0;
-    std::size_t safety_probe_cursor_ = 0;
-    bool target_before_safety_probe_ = true;
+    std::size_t protocol_cursor_ = 0;
+    bool protocol_before_target_ = false;
     std::size_t targets_remaining_ = 0;
     std::uint64_t bus_generation_ = 1;
     std::uint64_t next_operation_id_ = 1;

@@ -13,7 +13,7 @@ enum class MessageId : std::uint16_t {
     BigYawRequest = 0x0402,
     BigYawFeedback = 0x0403
 };
-inline constexpr std::uint8_t kInterBoardProtocolVersion = 3;
+inline constexpr std::uint8_t kInterBoardProtocolVersion = 4;
 constexpr std::size_t kMaxPayload = 128, kMaxFrame = 142;
 struct FrameMeta {
     BoardRole sender_role = BoardRole::Unknown;

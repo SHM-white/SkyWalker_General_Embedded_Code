@@ -69,142 +69,63 @@ skywalker::control::VelocityMotor::Config makeMotorConfig() {
     skywalker::control::VelocityMotor::Config config{};
     config.loop = makeVelocityLoopConfig();
     config.effort_unit = skywalker::control::EffortUnit::Ampere;
-    config.safety = {1.5f * kRequestedVelocityAbsMaxRadS, 0.0f};
+
     return config;
 }
 
 } // namespace
 
 int main() {
-    LOG_INF("M2006 speed control starting; text logs use the board UART console");
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
     const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
-    if (!device_is_ready(uart)) {
-        LOG_ERR("VOFA device %s is not ready", uart->name);
-        return -ENODEV;
-    }
-    if (!device_is_ready(can)) {
-        LOG_ERR("CAN device %s is not ready", can->name);
-        return -ENODEV;
-    }
+    if (!device_is_ready(can)) return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::m2006({
         .id = 1,
         .current_limit_a = 10.0f,
         .gear_ratio = 36.0f,
-        .timing = {20, 20, 20, 100},
+        .timing = {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
     })};
     static skywalker::motor::CanBus bus{can};
     static skywalker::control::VelocityMotor axis{drive, makeMotorConfig()};
     static Vofa vofa{};
-    int ret = vofa_init(&vofa, uart);
-    if (ret < 0) {
-        LOG_ERR("vofa_init(%s) failed: %d", uart->name, ret);
-        return ret;
-    }
-    ret = bus.attach(drive);
-    if (ret < 0) {
-        LOG_ERR("bus.attach failed: %d", ret);
-        return ret;
-    }
-    ret = bus.start();
-    if (ret < 0) {
-        LOG_ERR("bus.start(%s) failed: %d", can->name, ret);
-        return ret;
-    }
-    // Save the original fault before requesting an asynchronous safe stop.
-    const auto stop_with_error = [](const char *stage, int error) {
-        const auto motor = drive.snapshot();
-        const auto transport = bus.status();
-        const int stop_error = drive.disable();
-        LOG_ERR("%s failed: %d; motor state=%u fresh=%u permitted=%u fault=%u error=%d",
-                stage, error, unsigned(motor.state), unsigned(motor.feedback_fresh),
-                unsigned(motor.output_permitted), unsigned(motor.last_fault.reason), motor.last_fault.error);
-        LOG_ERR("feedback timestamp=%llu ms; bus state=%u error=%d; last TX valid=%u id=0x%x error=%d",
-                static_cast<unsigned long long>(motor.feedback.timestamp_ms), unsigned(transport.state),
-                transport.last_error, unsigned(transport.last_tx.valid), unsigned(transport.last_tx.can_id),
-                transport.last_tx.error);
-        if (stop_error < 0)
-            LOG_ERR("safe stop request failed: %d", stop_error);
-        return error;
-    };
-    ret = axis.configure();
-    if (ret < 0)
-        return stop_with_error("axis.configure", ret);
-    LOG_INF("Waiting up to 3000 ms for M2006 ID 1 on %s (feedback 0x201); VOFA=%s",
-            can->name, uart->name);
-    const auto ready_deadline = k_uptime_get() + 3000;
-    while (!drive.ready() && k_uptime_get() < ready_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.ready())
-        return stop_with_error("wait ready", -ETIMEDOUT);
-    LOG_INF("Motor ready; resetting controller and enabling drive");
-    ret = axis.reset(); // Check speed, temperature and reference before enabling.
-    if (ret < 0)
-        return stop_with_error("axis.reset", ret);
-    ret = drive.enable();
-    if (ret < 0)
-        return stop_with_error("drive.enable", ret);
-    const auto active_deadline = k_uptime_get() + 3000;
-    while (!drive.active() && k_uptime_get() < active_deadline)
-        k_sleep(K_MSEC(kControlPeriodMs));
-    if (!drive.active())
-        return stop_with_error("wait active", -ETIMEDOUT);
-    LOG_INF("Motor active; starting 5 ms control loop and 10-channel VOFA JustFloat stream");
+    const int vofa_error = vofa_init(&vofa, uart);
+    int ret = bus.attach(drive);
+    if (ret == 0) ret = bus.start();
+    if (ret == 0) ret = axis.configure();
+    if (ret < 0) return ret;
     const auto started_ms = k_uptime_get();
     auto previous_ms = started_ms;
-    std::int64_t next_vofa_warning_ms = 0;
-    while (k_uptime_get() - started_ms < kRunDurationMs) {
+    std::int64_t next_log_ms = 0;
+    int last_call_error = 0;
+    for (;;) {
         k_sleep(K_MSEC(kControlPeriodMs));
         const auto now = k_uptime_get();
-        const float dt_s = float(now - previous_ms) / 1000.0f;
+        const float dt = float(now - previous_ms) / 1000;
         previous_ms = now;
-        if (!drive.active())
-            return stop_with_error("drive inactive", -EHOSTDOWN);
+        const bool requested = now - started_ms < kRunDurationMs;
+        const int request_error = requested ? drive.enable() : drive.disable();
+        if (request_error < 0) last_call_error = request_error;
         const float target = now - started_ms < 100 ? 0.0f : kRequestedVelocityRadS;
-        ret = axis.update(target, dt_s);
-        if (ret < 0)
-            return stop_with_error("axis.update", ret);
-        ret = bus.commit().error;
-        if (ret < 0)
-            return stop_with_error("bus.commit", ret);
-#if DT_NODE_HAS_COMPAT(VOFA_UART_NODE, zephyr_cdc_acm_uart)
-        // USB enumeration does not mean a host is consuming telemetry. Keep
-        // controlling the motor, but do not fill VOFA's queue before port open.
-        std::uint32_t dtr = 0;
-        const int line_error = uart_line_ctrl_get(uart, UART_LINE_CTRL_DTR, &dtr);
-        if (line_error < 0 || dtr == 0) {
-            if (line_error < 0 && now >= next_vofa_warning_ms) {
-                LOG_WRN("VOFA DTR query failed: %d; control loop continues", line_error);
-                next_vofa_warning_ms = now + 1000;
-            }
-            continue;
-        }
-#endif
+        if (requested) { const int error = axis.update(target, dt); if (error < 0) last_call_error = error; }
+        const int commit_error = bus.commit().error;
+        if (commit_error < 0) last_call_error = commit_error;
         const auto data = axis.telemetry();
-        const auto &feedback = data.motor.feedback;
-        const auto &output = data.output;
-        const float channels[10] = {
-            target,
-            output.velocity_reference_rad_s,
-            feedback.velocity_rad_s,
-            output.regulator.feedback.error,
-            output.regulator.feedback.p,
-            output.regulator.feedback.i,
-            output.regulator.feedforward,
-            output.effort_command,
-            output.regulator.feedback.saturated ? 1.0f : 0.0f,
-            static_cast<float>(k_uptime_get() - feedback.timestamp_ms),
-        };
-        const int telemetry_error = vofa_send(&vofa, channels, 10);
-        if (telemetry_error < 0 && now >= next_vofa_warning_ms) {
-            LOG_WRN("vofa_send failed: %d; control loop continues", telemetry_error);
-            next_vofa_warning_ms = now + 1000;
+        const auto &f = data.motor.feedback;
+        const auto &o = data.output;
+        if (vofa_error == 0) {
+            const float channels[12] = {target, o.velocity_reference_rad_s, f.velocity_rad_s,
+                o.filtered_velocity_rad_s, o.velocity_error_rad_s, o.regulator.feedback.p,
+                o.regulator.feedback.i, o.regulator.feedback.d, o.regulator.feedforward,
+                requested && data.output_valid ? o.effort_command : 0,
+                float(data.output_valid && requested), float(now >= f.timestamp_ms ? now - f.timestamp_ms : 0)};
+            (void)vofa_send(&vofa, channels, 12);
+        }
+        if (now >= next_log_ms) {
+            next_log_ms = now + 1000;
+            LOG_INF("run=%d state=%u target=%.3f seq=%llu output=%d wait=%u call=%d",
+                requested, unsigned(data.motor.state), double(target),
+                static_cast<unsigned long long>(data.target_sequence), data.output_valid && requested,
+                unsigned(data.issue), last_call_error);
         }
     }
-    ret = drive.disable();
-    if (ret < 0)
-        LOG_ERR("stop failed: %d", ret);
-    else
-        LOG_INF("Run duration reached; safe stop requested");
-    return ret;
 }

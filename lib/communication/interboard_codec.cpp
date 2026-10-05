@@ -31,7 +31,7 @@ bool header(const FrameMeta &m, MessageId id, BoardRole role) {
 }
 }
 int InterBoardCodec::decodeHeartbeat(const FrameMeta &m, const std::uint8_t *p, std::size_t n, BoardHeartbeat &out) {
-    if (!p || n != 24 || m.version != kInterBoardProtocolVersion || m.message_id != MessageId::Heartbeat ||
+    if (!p || n != 20 || m.version != kInterBoardProtocolVersion || m.message_id != MessageId::Heartbeat ||
         (m.sender_role != BoardRole::GimbalController && m.sender_role != BoardRole::ChassisController) ||
         p[0] != static_cast<std::uint8_t>(m.sender_role) || p[1] > 6 || p[2] > 1 || p[3] > 1 || !loadLe64(p + 12))
         return -EINVAL;
@@ -43,13 +43,12 @@ int InterBoardCodec::decodeHeartbeat(const FrameMeta &m, const std::uint8_t *p, 
     t.active_reasons = loadLe32(p + 4);
     t.sender_uptime_ms = loadLe32(p + 8);
     t.sender_boot_id = loadLe64(p + 12);
-    t.resume_generation = loadLe32(p + 20);
     t.stamp = {m.local_receive_ms, m.frame_sequence, true};
     out = t;
     return 0;
 }
 int InterBoardCodec::encodeHeartbeat(const BoardHeartbeat &t, std::uint32_t seq, std::uint8_t *out, std::size_t cap) {
-    std::uint8_t p[24]{};
+    std::uint8_t p[20]{};
     p[0] = static_cast<std::uint8_t>(t.role);
     p[1] = static_cast<std::uint8_t>(t.safety_state);
     p[2] = t.ready;
@@ -57,7 +56,6 @@ int InterBoardCodec::encodeHeartbeat(const BoardHeartbeat &t, std::uint32_t seq,
     storeLe32(p + 4, t.active_reasons);
     storeLe32(p + 8, t.sender_uptime_ms);
     storeLe64(p + 12, t.sender_boot_id);
-    storeLe32(p + 20, t.resume_generation);
     BoardHeartbeat check{};
     int ret = decodeHeartbeat({t.role, MessageId::Heartbeat, seq, 0}, p, sizeof(p), check);
     if (ret < 0)
@@ -66,7 +64,7 @@ int InterBoardCodec::encodeHeartbeat(const BoardHeartbeat &t, std::uint32_t seq,
 }
 int InterBoardCodec::decodeChassisControl(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
                                           RemoteChassisControl &out) {
-    if (!p || n != 36 || !header(m, MessageId::ChassisControl, BoardRole::GimbalController) || p[0] > 2 || p[1] > 4 ||
+    if (!p || n != 32 || !header(m, MessageId::ChassisControl, BoardRole::GimbalController) || p[0] > 2 || p[1] > 4 ||
         p[2] > 2 || p[3])
         return -EINVAL;
     RemoteChassisControl t{};
@@ -81,14 +79,13 @@ int InterBoardCodec::decodeChassisControl(const FrameMeta &m, const std::uint8_t
     t.active_reasons = loadLe32(p + 16);
     t.command.stamp = {m.local_receive_ms, loadLe32(p + 20), true};
     t.receiver_boot_id = loadLe64(p + 24);
-    t.resume_generation = loadLe32(p + 32);
     t.stamp = t.command.stamp;
     out = t;
     return 0;
 }
 int InterBoardCodec::encodeChassisControl(const RemoteChassisControl &t, std::uint32_t seq, std::uint8_t *out,
                                           std::size_t cap) {
-    std::uint8_t p[36]{};
+    std::uint8_t p[32]{};
     p[0] = static_cast<std::uint8_t>(t.command.mode);
     p[1] = static_cast<std::uint8_t>(t.command.source);
     p[2] = static_cast<std::uint8_t>(t.global_action);
@@ -98,7 +95,6 @@ int InterBoardCodec::encodeChassisControl(const RemoteChassisControl &t, std::ui
     storeLe32(p + 16, t.active_reasons);
     storeLe32(p + 20, t.command.stamp.sequence);
     storeLe64(p + 24, t.receiver_boot_id);
-    storeLe32(p + 32, t.resume_generation);
     RemoteChassisControl check{};
     int ret = decodeChassisControl({BoardRole::GimbalController, MessageId::ChassisControl, seq, 0}, p, sizeof(p),
                                    check);
@@ -218,42 +214,42 @@ int InterBoardCodec::decodeOperatorControl(const FrameMeta &m, const std::uint8_
     out = t; return 0;
 }
 int InterBoardCodec::encodeBigYawRequest(const BigYawRequest &t, std::uint32_t seq, std::uint8_t *out, std::size_t cap) {
-    std::uint8_t p[40]{};
+    std::uint8_t p[36]{};
     p[0] = static_cast<std::uint8_t>(t.mode); p[1] = t.permission.valid; p[2] = t.permission.enabled;
     storeFloatLe(p + 4, t.target_rate_rad_s); storeLe32(p + 8, t.source_sequence); storeLe32(p + 12, t.source_age_ms);
-    storeLe32(p + 16, t.command_age_ms); storeLe64(p + 20, t.receiver_boot_id); storeLe32(p + 28, t.resume_generation);
-    storeLe32(p + 32, t.permission_age_ms); storeLe32(p + 36, t.stamp.sequence);
+    storeLe32(p + 16, t.command_age_ms); storeLe64(p + 20, t.receiver_boot_id);
+    storeLe32(p + 28, t.permission_age_ms); storeLe32(p + 32, t.stamp.sequence);
     BigYawRequest check{};
     int ret = decodeBigYawRequest({BoardRole::GimbalController, MessageId::BigYawRequest, seq, 0}, p, sizeof(p), check);
     return ret < 0 ? ret : frame(BoardRole::GimbalController, MessageId::BigYawRequest, seq, p, sizeof(p), out, cap);
 }
 int InterBoardCodec::decodeBigYawRequest(const FrameMeta &m, const std::uint8_t *p, std::size_t n, BigYawRequest &out) {
-    if (!p || n != 40 || !header(m, MessageId::BigYawRequest, BoardRole::GimbalController) || p[0] > 1 || p[1] > 1 || p[2] > 1 || p[3]) return -EINVAL;
+    if (!p || n != 36 || !header(m, MessageId::BigYawRequest, BoardRole::GimbalController) || p[0] > 1 || p[1] > 1 || p[2] > 1 || p[3]) return -EINVAL;
     BigYawRequest t{};
     t.mode = static_cast<BigYawMode>(p[0]); t.target_rate_rad_s = loadFloatLe(p + 4);
     if (!std::isfinite(t.target_rate_rad_s)) return -EINVAL;
     t.source_sequence = loadLe32(p + 8); t.source_age_ms = loadLe32(p + 12); t.command_age_ms = loadLe32(p + 16);
-    t.receiver_boot_id = loadLe64(p + 20); t.resume_generation = loadLe32(p + 28); t.permission_age_ms = loadLe32(p + 32);
-    t.stamp = {m.local_receive_ms, loadLe32(p + 36), true};
+    t.receiver_boot_id = loadLe64(p + 20); t.permission_age_ms = loadLe32(p + 28);
+    t.stamp = {m.local_receive_ms, loadLe32(p + 32), true};
     t.permission.valid = p[1]; t.permission.enabled = p[2]; t.permission.stamp = {m.local_receive_ms, m.frame_sequence, bool(p[1])};
     out = t; return 0;
 }
 int InterBoardCodec::encodeBigYawFeedback(const BigYawFeedback &t, std::uint32_t seq, std::uint8_t *out, std::size_t cap) {
-    std::uint8_t p[28]{};
+    std::uint8_t p[24]{};
     p[0] = static_cast<std::uint8_t>(t.execution_state); p[1] = t.ready; p[2] = t.armed; p[3] = t.valid;
-    storeFloatLe(p + 4, t.actual_rate_rad_s); storeLe32(p + 8, t.active_reasons); storeLe32(p + 12, t.resume_generation);
-    storeLe32(p + 16, t.last_command_sequence); storeLe32(p + 20, t.source_sequence); storeLe32(p + 24, t.production_age_ms);
+    storeFloatLe(p + 4, t.actual_rate_rad_s); storeLe32(p + 8, t.active_reasons);
+    storeLe32(p + 12, t.last_command_sequence); storeLe32(p + 16, t.source_sequence); storeLe32(p + 20, t.production_age_ms);
     BigYawFeedback check{};
     int ret = decodeBigYawFeedback({BoardRole::ChassisController, MessageId::BigYawFeedback, seq, 0}, p, sizeof(p), check);
     return ret < 0 ? ret : frame(BoardRole::ChassisController, MessageId::BigYawFeedback, seq, p, sizeof(p), out, cap);
 }
 int InterBoardCodec::decodeBigYawFeedback(const FrameMeta &m, const std::uint8_t *p, std::size_t n, BigYawFeedback &out) {
-    if (!p || n != 28 || !header(m, MessageId::BigYawFeedback, BoardRole::ChassisController) || p[0] > 5 || p[1] > 1 || p[2] > 1 || p[3] > 1) return -EINVAL;
+    if (!p || n != 24 || !header(m, MessageId::BigYawFeedback, BoardRole::ChassisController) || p[0] > 5 || p[1] > 1 || p[2] > 1 || p[3] > 1) return -EINVAL;
     BigYawFeedback t{};
     t.execution_state = static_cast<ExecutionState>(p[0]); t.ready = p[1]; t.armed = p[2]; t.valid = p[3];
     t.actual_rate_rad_s = loadFloatLe(p + 4); if (!std::isfinite(t.actual_rate_rad_s)) return -EINVAL;
-    t.active_reasons = loadLe32(p + 8); t.resume_generation = loadLe32(p + 12); t.last_command_sequence = loadLe32(p + 16);
-    t.source_sequence = loadLe32(p + 20); t.production_age_ms = loadLe32(p + 24); t.stamp = {m.local_receive_ms, m.frame_sequence, true};
+    t.active_reasons = loadLe32(p + 8); t.last_command_sequence = loadLe32(p + 12);
+    t.source_sequence = loadLe32(p + 16); t.production_age_ms = loadLe32(p + 20); t.stamp = {m.local_receive_ms, m.frame_sequence, true};
     out = t; return 0;
 }
 }

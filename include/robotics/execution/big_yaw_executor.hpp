@@ -1,7 +1,8 @@
 #pragma once
 #include <control/velocity_motor.hpp>
 #include <core/measurement.hpp>
-#include <robotics/execution/recovery_gate.hpp>
+#include <robotics/execution/run_status.hpp>
+#include <robotics/command/command_source.hpp>
 #include <robotics/messages/interboard.hpp>
 
 namespace skywalker::robotics {
@@ -11,7 +12,7 @@ struct BigYawExecutionInputs {
     bool peer_online = false;
     bool transport_ready = false;
     bool emergency_stop = false;
-    bool clear_fault = false;
+    bool clear_estop = false;
 };
 // A dedicated velocity inner loop and recovery context. No absolute mechanical
 // zero and no chassis/wheel recovery authority are required. The application
@@ -19,8 +20,9 @@ struct BigYawExecutionInputs {
 class BigYawExecutor {
 public:
     struct Config {
-        RecoveryGate::Config recovery{};
-        std::uint32_t permission_timeout_ms = 300, fault_retry_ms = 100;
+        std::uint32_t command_timeout_ms = 100;
+        core::TimeUs source_timeout_us = 100000;
+        std::uint32_t permission_timeout_ms = 300;
         core::TimeUs max_cycle_us = 20000;
         float rate_abs_max_rad_s = 1;
         float motor_to_joint_ratio = 1, direction = 1;
@@ -37,12 +39,10 @@ private:
     motor::Motor &drive_;
     control::VelocityMotor axis_;
     const Config config_;
-    RecoveryGate recovery_;
     RunStatus status_{};
     core::TimeUs previous_us_ = 0;
-    std::uint64_t retry_ms_ = 0;
     std::uint32_t production_sequence_ = 0;
-    int config_error_ = 0, latched_error_ = 0;
-    bool configured_ = false, begin_attempted_ = false, emergency_latched_ = false;
+    int config_error_ = 0;
+    bool configured_ = false, begin_attempted_ = false;
 };
 } // namespace skywalker::robotics

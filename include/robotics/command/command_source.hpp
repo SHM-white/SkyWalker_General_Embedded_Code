@@ -38,4 +38,13 @@ struct CommandSnapshot {
     CommandDecision decision{};
     SourceDiagnostics remote{}, vision{}, permission{};
 };
+// Preserve the selected producer stamp rather than arbitration/poll time.
+inline core::Stamp sourceStamp(const CommandSnapshot &frame, ControlSource source) {
+    if (source == ControlSource::Remote || source == ControlSource::KeyboardMouse) {
+        const auto &s = frame.observed.remote.stamp;
+        return {s.timestamp_ms * 1000, s.sequence, s.valid && frame.observed.remote.online};
+    }
+    if (source == ControlSource::Vision) return frame.decision.selected_vision.stamp;
+    return {};
+}
 }
