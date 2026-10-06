@@ -1,5 +1,9 @@
 #pragma once
 #include <core/clock.hpp>
+#ifdef CONFIG_SKYWALKER_LIB_VOFA
+#include <cmath>
+#include <lib/vofa/vofa.h>
+#endif
 #include <drivers/motor/can_bus.hpp>
 #include <robotics/command/command_manager.hpp>
 #include <robotics/command/receiver_sources.hpp>
@@ -118,6 +122,17 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
     control::RcShooterRequest firing;
     communication::RemoteReceiver::Snapshot operator_cache{};
     std::uint64_t next_log = 0;
+#ifdef CONFIG_SKYWALKER_LIB_VOFA
+    static_assert(DT_NODE_HAS_COMPAT(DT_ALIAS(telemetry_uart), zephyr_cdc_acm_uart),
+                  "Shooter bench VOFA requires USB CDC ACM");
+    static Vofa vofa{};
+    const auto *telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
+    const int vofa_ret = vofa_init(&vofa, telemetry_uart);
+    printk("VOFA device=%s init=%d; JustFloat 16 channels, 50 Hz\n", telemetry_uart->name, vofa_ret);
+    std::uint64_t next_telemetry = 0;
+    std::uint32_t telemetry_sequence = 0;
+    int last_send_error = 0;
+#endif
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now = now_us / 1000;
         (void)receiver.snapshot(operator_cache);
@@ -165,6 +180,57 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                 }
             }
         }
+#ifdef CONFIG_SKYWALKER_LIB_VOFA
+        if (!exercise.status_paused && now >= next_telemetry) {
+            next_telemetry = now + 20;
+            const auto left = hardware.left.snapshot(), right = hardware.right.snapshot();
+            const auto dial = hardware.dial.snapshot();
+            const auto dt = hardware.shooter.dialTelemetry();
+            const auto valid = [](const auto &view, auto field, float value) {
+                return view.feedback_fresh && (view.feedback.valid & field) && std::isfinite(value);
+            };
+            const bool lv = valid(left, motor::FeedbackVelocity, left.feedback.velocity_rad_s);
+            const bool rv = valid(right, motor::FeedbackVelocity, right.feedback.velocity_rad_s);
+            const bool dp = dial.position_reference_valid &&
+                            valid(dial, motor::FeedbackPosition, dial.feedback.position_rad);
+            const bool dv = valid(dial, motor::FeedbackVelocity, dial.feedback.velocity_rad_s);
+            const bool dc = valid(dial, motor::FeedbackCurrent, dial.feedback.current_a);
+            const bool output = !exercise.execution_paused && shooter.feed.requested && dt.output_valid &&
+                                dial.feedback_fresh && dial.output_permitted &&
+                                dial.state == motor::MotorState::Active &&
+                                dt.motor.enable_generation == dial.enable_generation &&
+                                dt.motor.reference_generation == dial.reference_generation;
+            const unsigned validity = unsigned(lv) | (unsigned(rv) << 1) | (unsigned(dp) << 2) |
+                                      (unsigned(dv) << 3) | (unsigned(dc) << 4) | (unsigned(output) << 5);
+            telemetry_sequence = (telemetry_sequence + 1) % 1000000;
+            const float channels[] = {
+                float(telemetry_sequence),
+                shooter.friction.requested ? vehicle::friction_speed_rad_s * vehicle::friction[0].direction : 0.0f,
+                lv ? left.feedback.velocity_rad_s : 0.0f,
+                shooter.friction.requested ? vehicle::friction_speed_rad_s * vehicle::friction[1].direction : 0.0f,
+                rv ? right.feedback.velocity_rad_s : 0.0f,
+                float(shooter.dial_target_rad),
+                dp ? dial.feedback.position_rad : 0.0f,
+                dv ? dial.feedback.velocity_rad_s : 0.0f,
+                output ? dt.effort_command : 0.0f,
+                dc ? dial.feedback.current_a : 0.0f,
+                shooter.friction_ready ? 1.0f : 0.0f,
+                float(unsigned(shooter.feed.state)),
+                float(unsigned(shooter.feed.reason)),
+                shooter.dial_busy ? 1.0f : 0.0f,
+                shooter.jammed ? 1.0f : 0.0f,
+                float(validity),
+            };
+            constexpr auto count = sizeof(channels) / sizeof(channels[0]);
+            static_assert(count <= VOFA_MAX_FLOATS);
+            if (vofa_ret == 0) {
+                const int error = vofa_send(&vofa, channels, static_cast<std::uint8_t>(count));
+                if (error < 0 && error != last_send_error)
+                    printk("VOFA send=%d seq=%u\n", error, telemetry_sequence);
+                last_send_error = error;
+            }
+        }
+#endif
         if (!exercise.status_paused && now >= next_log) {
             next_log = now + 200;
             printk(
