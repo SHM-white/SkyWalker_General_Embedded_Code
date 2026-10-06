@@ -6,8 +6,8 @@
 namespace bench {
 inline const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
 inline skywalker::motor::dji::Config motorHardware() {
-    return skywalker::motor::dji::gm6020({.id = 1,
-                                          .current_limit_a = 0.5f,
+    return skywalker::motor::dji::gm6020({.id = 7,
+                                          .current_limit_a = 1.0f,
                                           .encoder_zero_ticks = 0,
                                           .current_mode_confirmed = true,
                                           .timing = {.feedback_timeout_ms = 20,
@@ -25,7 +25,7 @@ inline skywalker::control::PositionMotor::Config motorConfig() {
                       ? skywalker::control::PositionReference::AbsoluteNearest
                       : skywalker::control::PositionReference::DriverContinuous;
     c.loop.position = {3, 0, 0, 0, -3, 3, -6, 6, .01f, .001f, .02f};
-    c.loop.velocity.regulator.feedback = {.03f, .1f, 0, 0, -.3f, .3f, -.3f, .3f, 0, .001f, .02f};
+    c.loop.velocity.regulator.feedback = {.3f, .1f, 0, 0, -.3f, .3f, -.3f, .3f, 0, .001f, .02f};
     c.loop.velocity.reference_slew = {5, 5};
     c.loop.velocity.requested_velocity_abs_max_rad_s = 6;
     c.loop.velocity.effort_abs_max = .3f;

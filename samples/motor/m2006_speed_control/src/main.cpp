@@ -143,7 +143,7 @@ int main() {
     //         {.feedback_timeout_ms = 20, .command_timeout_ms = 20, .enable_timeout_ms = 100, .retry_interval_ms = 100},
     // })};
     static skywalker::motor::Motor drive{skywalker::motor::dji::m2006({
-        .id = 1,
+        .id = 4,
         .current_limit_a = 10.0f,
         .gear_ratio = 36.0f,
         .timing =

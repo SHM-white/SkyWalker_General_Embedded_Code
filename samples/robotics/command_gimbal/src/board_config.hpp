@@ -75,14 +75,14 @@ inline skywalker::motor::dm::Config pitchHardware() {
 inline constexpr float yaw_command_sign = calibration::small_yaw.direction,
                        pitch_command_sign = calibration::pitch.direction;
 // Limited axes use calibrated driver coordinates, not a startup-relative zero.
-// Yaw uses the calibrated encoder range; replace the pitch placeholder with measured limits.
+// Yaw and pitch use the coordinates calibrated in gimbal_control.
 inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Limited,
                                                            yaw_min_angle_rad,
                                                            yaw_max_angle_rad,
                                                            calibration::small_yaw.velocity_limit_rad_s,
                                                            true,
                                                            skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
-// Pitch mechanical limits are still placeholders until measured on the installed gimbal.
+// Pitch range is synchronized with the current gimbal_control bench configuration.
 inline constexpr skywalker::robotics::GimbalAxisConfig
     pitch{skywalker::robotics::AxisTopology::Limited,
           calibration::pitch_min_rad,
@@ -106,7 +106,7 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
                        .deadband = 0.012f,
                        .dt_min_s = 0.001f,
                        .dt_max_s = 0.020f};
-    c.loop.velocity.regulator.feedback = {.kp = 0.43f,
+    c.loop.velocity.regulator.feedback = {.kp = 0.33f,
                                           .ki = 0.55f,
                                           .kd = 0.00005f,
                                           .derivative_tau_s = 0.0f,
@@ -120,17 +120,15 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     c.loop.velocity.reference_slew = {20.0f, 20.0f};
     c.loop.velocity.measurement_filter_tau_s = 0.0f;
     c.loop.velocity.soft_deadband_rad_s = 0.0f;
-    c.loop.velocity.requested_velocity_abs_max_rad_s = calibration::small_yaw.velocity_limit_rad_s;
-    c.loop.velocity.effort_abs_max = calibration::small_yaw.effort_limit;
-    c.loop.velocity.regulator.feedback.output_min = -calibration::small_yaw.effort_limit;
-    c.loop.velocity.regulator.feedback.output_max = calibration::small_yaw.effort_limit;
+    c.loop.velocity.requested_velocity_abs_max_rad_s = 4.0f;
+    c.loop.velocity.effort_abs_max = 1.2f;
     return c;
 }
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
     c.reference = skywalker::control::PositionReference::DriverContinuous;
-    c.loop.position = {.kp = 0.8f,
+    c.loop.position = {.kp = 10.0f,
                        .ki = 0.1f,
                        .kd = 0.0f,
                        .derivative_tau_s = 0.0f,
@@ -141,24 +139,22 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
                        .deadband = 0.01f,
                        .dt_min_s = 0.001f,
                        .dt_max_s = 0.020f};
-    c.loop.velocity.regulator.feedback = {.kp = 0.03f,
-                                          .ki = 0.1f,
+    c.loop.velocity.regulator.feedback = {.kp = 0.25f,
+                                          .ki = 0.20f,
                                           .kd = 0.0f,
                                           .derivative_tau_s = 0.0f,
-                                          .integral_min = -0.3f,
-                                          .integral_max = 0.3f,
-                                          .output_min = -0.5f,
-                                          .output_max = 0.5f,
+                                          .integral_min = -0.7f,
+                                          .integral_max = 0.7f,
+                                          .output_min = -1.8f,
+                                          .output_max = 1.8f,
                                           .deadband = 0.0f,
                                           .dt_min_s = 0.001f,
                                           .dt_max_s = 0.020f};
-    c.loop.velocity.reference_slew = {2.0f, 2.0f};
+    c.loop.velocity.reference_slew = {8.0f, 8.0f};
     c.loop.velocity.measurement_filter_tau_s = 0.02f;
     c.loop.velocity.soft_deadband_rad_s = 0.02f;
-    c.loop.velocity.requested_velocity_abs_max_rad_s = calibration::pitch.velocity_limit_rad_s;
-    c.loop.velocity.effort_abs_max = calibration::pitch.effort_limit;
-    c.loop.velocity.regulator.feedback.output_min = -calibration::pitch.effort_limit;
-    c.loop.velocity.regulator.feedback.output_max = calibration::pitch.effort_limit;
+    c.loop.velocity.requested_velocity_abs_max_rad_s = 5.0f;
+    c.loop.velocity.effort_abs_max = 0.8f;
     return c;
 }
 

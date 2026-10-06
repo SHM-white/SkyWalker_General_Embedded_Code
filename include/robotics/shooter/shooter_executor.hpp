@@ -63,6 +63,10 @@ public:
     ShooterStatus status() const {
         return status_;
     } // Execution owner only.
+    // Read-only controller diagnostics; does not enable or stage any output.
+    control::PositionMotor::Telemetry dialTelemetry() const {
+        return dial_control_.telemetry();
+    }
 private:
     void stopFriction(WaitReason, int);
     void stopFeed(WaitReason, int);
