@@ -1,0 +1,12 @@
+/* Shared CAN1 motors and independent Pitch CAN2 use the board wiring. */
+/ {
+    aliases {
+        telemetry-uart = &cdc_acm_uart0;
+    };
+};
+&zephyr_udc0 {
+    cdc_acm_uart0: cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "VOFA";
+    };
+};
