@@ -30,9 +30,11 @@ struct ShooterExecutionInputs {
 };
 struct ShooterStatus {
     RunStatus friction{}, feed{};
+    // dial_busy reports target generation, not physical arrival. jammed is reserved.
     bool friction_ready = false, dial_busy = false, jammed = false;
     std::uint32_t last_event_id = 0, shots = 0;
     double dial_target_rad = 0;
+    float dial_requested_velocity_rad_s = 0; // Signed generated travel / cycle time, output shaft.
     float reserved_heat = 0;
     MessageStamp stamp{};
 };
@@ -45,13 +47,16 @@ public:
         std::uint32_t command_timeout_ms = 100;
         core::TimeUs source_timeout_us = 100000;
         std::uint32_t permission_timeout_ms = 300, heat_timeout_ms = 300, gimbal_timeout_ms = 100;
-        std::uint32_t friction_dwell_ms = 200, dial_settle_ms = 30, jam_timeout_ms = 1500;
+        std::uint32_t friction_dwell_ms = 200;
+        // Legacy configuration fields; the time-driven generator does not wait for arrival.
+        std::uint32_t dial_settle_ms = 30, jam_timeout_ms = 1500;
         core::TimeUs max_cycle_us = 20000;
         float friction_speed_rad_s = 40, friction_tolerance_rad_s = 2;
         std::array<float, 2> friction_direction{1, -1};
         float dial_direction = 1, dial_step_rad = 0.7853982f;
+        float dial_speed_rad_s = 1.5707964f; // Output-shaft target speed magnitude.
         float dial_tolerance_rad = 0.03f, dial_settle_velocity_rad_s = 0.2f;
-        float heat_per_round = 10, max_fire_rate_hz = 5;
+        float heat_per_round = 10, max_fire_rate_hz = 50;
         bool allow_relative_dial_reseed = false; // Empty indexing bench only.
     };
     ShooterExecutor(motor::Motor &left, motor::Motor &right, motor::Motor &dial, motor::Group &friction_group,
@@ -79,11 +84,12 @@ private:
     Config config_;
     ShooterStatus status_{};
     core::TimeUs previous_us_ = 0;
-    std::uint64_t friction_good_since_ms_ = 0, step_started_ms_ = 0, dial_good_since_ms_ = 0;
-    std::uint64_t next_shot_ms_ = 0, last_shot_ms_ = 0, dial_reference_ = 0;
+    std::uint64_t friction_good_since_ms_ = 0;
+    std::uint64_t last_shot_ms_ = 0, dial_reference_ = 0;
+    double dial_remaining_rad_ = 0; // Reserved target travel; independent of measured error.
     std::uint32_t heat_sequence_ = 0, production_sequence_ = 0;
     int configuration_error_ = 0;
     bool configured_ = false, begin_attempted_ = false, have_time_ = false;
-    bool have_dial_reference_ = false;
+    bool have_dial_reference_ = false, continuous_generating_ = false;
 };
 } // namespace skywalker::robotics

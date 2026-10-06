@@ -39,21 +39,21 @@ inline control::PositionMotor::Config dialMotorConfig() {
     c.effort_unit = control::EffortUnit::Ampere;
     // M2006/C610 has no supported temperature feedback in this driver.
     c.reference = control::PositionReference::DriverContinuous;
-    c.loop.position = {8, 0.4, 0, 0, -2, 2, -20, 20, .01f, .001f, .02f};
+    c.loop.position = {6.0, 2.0, 0, 0, -4.0, 4.0, -20, 20, .01f, .001f, .02f};
     // Tune the dial independently: friction-wheel changes must not alter indexing.
     const float current_limit = std::min(3.0f, dial.effort_limit);
-    c.loop.velocity.regulator.feedback = {.kp = 0.45f,
-                                          .ki = 0.8f,
+    c.loop.velocity.regulator.feedback = {.kp = 2.0f,
+                                          .ki = 1.0f,
                                           .kd = 0.0f,
                                           .derivative_tau_s = 0.0f,
                                           .integral_min = -current_limit,
                                           .integral_max = current_limit,
-                                          .output_min = -current_limit,
-                                          .output_max = current_limit,
+                                          .output_min = -20,
+                                          .output_max = 20,
                                           .deadband = 0.0f,
                                           .dt_min_s = 0.001f,
                                           .dt_max_s = 0.020f};
-    c.loop.velocity.reference_slew = {20, 20};
+    c.loop.velocity.reference_slew = {30, 30};
     c.loop.velocity.requested_velocity_abs_max_rad_s = dial.velocity_limit_rad_s;
     c.loop.velocity.effort_abs_max = current_limit;
     // TODO(dial): establish indexing/home and gear ratio before feeding rounds.
@@ -65,6 +65,7 @@ inline ShooterExecutor::Config shooterExecutionConfig(bool unloaded_relative = f
     c.friction_direction = {friction[0].direction, friction[1].direction};
     c.dial_direction = dial.direction;
     c.dial_step_rad = dial_step_rad;
+    c.dial_speed_rad_s = dial_speed_rad_s;
     c.heat_per_round = heat_per_round;
     c.allow_relative_dial_reseed = unloaded_relative;
     return c;

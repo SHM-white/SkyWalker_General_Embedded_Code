@@ -17,13 +17,11 @@ int ShooterExecutor::begin() {
     begin_attempted_ = true;
     const bool valid = config_.max_cycle_us && config_.max_cycle_us <= 20000 && config_.command_timeout_ms &&
                        config_.source_timeout_us && config_.permission_timeout_ms && config_.heat_timeout_ms &&
-                       config_.gimbal_timeout_ms && config_.friction_dwell_ms && config_.dial_settle_ms &&
-                       config_.jam_timeout_ms && std::isfinite(config_.friction_speed_rad_s) &&
+                       config_.gimbal_timeout_ms && config_.friction_dwell_ms && std::isfinite(config_.friction_speed_rad_s) &&
                        config_.friction_speed_rad_s > 0 && std::isfinite(config_.friction_tolerance_rad_s) &&
                        config_.friction_tolerance_rad_s > 0 && std::isfinite(config_.dial_step_rad) &&
-                       config_.dial_step_rad > 0 && std::isfinite(config_.dial_tolerance_rad) &&
-                       config_.dial_tolerance_rad > 0 && std::isfinite(config_.dial_settle_velocity_rad_s) &&
-                       config_.dial_settle_velocity_rad_s > 0 && std::isfinite(config_.heat_per_round) &&
+                       config_.dial_step_rad > 0 && std::isfinite(config_.dial_speed_rad_s) &&
+                       config_.dial_speed_rad_s > 0 && std::isfinite(config_.heat_per_round) &&
                        config_.heat_per_round > 0 && std::isfinite(config_.max_fire_rate_hz) &&
                        config_.max_fire_rate_hz > 0 && std::fabs(config_.friction_direction[0]) == 1 &&
                        std::fabs(config_.friction_direction[1]) == 1 && std::fabs(config_.dial_direction) == 1;
@@ -48,8 +46,10 @@ void ShooterExecutor::stopFriction(WaitReason reason, int error) {
 }
 void ShooterExecutor::stopFeed(WaitReason reason, int error) {
     dial_group_.disable();
+    status_.dial_requested_velocity_rad_s = 0;
     status_.dial_busy = false;
-    step_started_ms_ = dial_good_since_ms_ = next_shot_ms_ = 0;
+    dial_remaining_rad_ = 0;
+    continuous_generating_ = false;
     status_.feed.requested = false;
     status_.feed.ready = false;
     status_.feed.state = RunState::Disabled;
@@ -80,6 +80,7 @@ ShooterStatus ShooterExecutor::suspend(core::TimeUs now, WaitReason reason, int 
 }
 ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::TimeUs now_us) {
     const auto now = now_us / 1000;
+    status_.dial_requested_velocity_rad_s = 0;
     const bool cycle = have_time_ && now_us > previous_us_ && now_us - previous_us_ <= config_.max_cycle_us;
     const float dt = cycle ? float(now_us - previous_us_) / 1e6f : 0;
     previous_us_ = now_us;
@@ -138,7 +139,7 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
         friction_good_since_ms_ = now;
     status_.friction_ready = speeds_good && now >= friction_good_since_ms_ &&
                              now - friction_good_since_ms_ >= config_.friction_dwell_ms;
-    // These are the existing feed/heat/jam business prerequisites, not motor recovery authorization.
+    // Feed permissions gate the generator; position error never gates its progress.
     const bool aiming = !in.require_gimbal || (isFresh(in.gimbal.stamp, now, config_.gimbal_timeout_ms) &&
                                                in.gimbal.state == RunState::Active && in.gimbal.ready);
     const bool heat_good = !in.require_heat ||
@@ -164,16 +165,18 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
             dial = dial_.snapshot();
         }
     }
-    if (!have_dial_reference_ && dial.feedback_fresh && dial.position_reference_valid &&
+    if ((!have_dial_reference_ || dial.reference_generation != dial_reference_) &&
+        dial.feedback_fresh && dial.position_reference_valid &&
         (dial.feedback.valid & motor::FeedbackPosition)) {
         status_.dial_target_rad = dial.feedback.position_rad;
+        dial_remaining_rad_ = 0;
+        status_.dial_busy = false;
         dial_reference_ = dial.reference_generation;
         have_dial_reference_ = true;
     }
     const bool dial_available = dial.feedback_fresh && dial.position_reference_valid &&
                                 (dial.feedback.valid & (motor::FeedbackPosition | motor::FeedbackVelocity)) ==
-                                    (motor::FeedbackPosition | motor::FeedbackVelocity) &&
-                                dial.state == motor::MotorState::Active;
+                                    (motor::FeedbackPosition | motor::FeedbackVelocity);
     if (!have_dial_reference_ || !dial_available || !cycle) {
         discardEvent(in.command); // Do not replay a discrete event received while unavailable.
         (void)dial_control_.update(status_.dial_target_rad, dt);
@@ -182,9 +185,7 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
         status_.feed.reason = !cycle                           ? WaitReason::Cycle
                               : !dial.position_reference_valid ? WaitReason::Reference
                                                                : WaitReason::Feedback;
-        // A communication gap is not a mechanical jam timeout.
-        if (status_.dial_busy)
-            step_started_ms_ = now;
+        // Invalid time/reference freezes generation; never integrate a missed interval.
         return finish();
     }
     if (in.require_heat && in.heat.stamp.sequence != heat_sequence_) {
@@ -193,43 +194,56 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
         if (in.heat.stamp.timestamp_ms > last_shot_ms_)
             status_.reserved_heat = 0;
     }
-    if (status_.dial_busy) {
-        const bool settled = std::fabs(static_cast<double>(dial.feedback.position_rad) - status_.dial_target_rad) <=
-                                 static_cast<double>(config_.dial_tolerance_rad) &&
-                             std::fabs(dial.feedback.velocity_rad_s) <= config_.dial_settle_velocity_rad_s;
-        if (!settled)
-            dial_good_since_ms_ = 0;
-        else if (!dial_good_since_ms_)
-            dial_good_since_ms_ = now;
-        if (settled && now - dial_good_since_ms_ >= config_.dial_settle_ms)
-            status_.dial_busy = false;
-        if (status_.dial_busy && now - step_started_ms_ >= config_.jam_timeout_ms) {
-            status_.jammed = true;
-            discardEvent(in.command);
-            stopFeed(WaitReason::Drive, -ETIMEDOUT);
-            status_.feed.state = RunState::Blocked;
-            return finish();
-        }
-    }
     const bool new_single = in.command.mode == ShooterMode::FireSingle && in.command.fire_event_id &&
                             (!status_.last_event_id ||
                              sequenceAfter(in.command.fire_event_id, status_.last_event_id)) &&
                             isFresh(in.command.fire_event_stamp, now, config_.command_timeout_ms);
-    const bool continuous = in.command.mode == ShooterMode::FireContinuous && in.command.fire_rate_hz > 0 &&
-                            now >= next_shot_ms_;
-    const bool budget = !in.require_heat ||
-                        in.heat.heat + status_.reserved_heat + config_.heat_per_round <= in.heat.limit;
-    if ((new_single || continuous) && !status_.dial_busy && budget) {
-        status_.dial_target_rad += static_cast<double>(config_.dial_step_rad * config_.dial_direction);
-        status_.dial_busy = true;
-        step_started_ms_ = last_shot_ms_ = now;
-        dial_good_since_ms_ = 0;
-        ++status_.shots;
+    const bool continuous = in.command.mode == ShooterMode::FireContinuous && in.command.fire_rate_hz > 0;
+    if (continuous_generating_ && !continuous)
+        dial_remaining_rad_ = 0; // Releasing continuous fire holds the current generated target.
+    continuous_generating_ = continuous;
+    const auto heatAvailable = [&] {
+        return !in.require_heat ||
+               in.heat.heat + status_.reserved_heat + config_.heat_per_round <= in.heat.limit;
+    };
+    const auto reserveStep = [&] {
+        dial_remaining_rad_ += static_cast<double>(config_.dial_step_rad);
+        ++status_.shots; // Requested rounds, not confirmation of mechanical arrival.
         status_.reserved_heat += config_.heat_per_round;
-        const float rate = std::clamp(in.command.fire_rate_hz, 0.1f, config_.max_fire_rate_hz);
-        next_shot_ms_ = now + static_cast<std::uint64_t>(1000.0f / rate);
+        last_shot_ms_ = now;
+    };
+    if (new_single && heatAvailable())
+        reserveStep();
+    // A continuous command requests a uniform target speed. The fire rate is
+    // an upper bound in rounds/s; neither actual position nor PID readiness is used.
+    const double speed = continuous
+                             ? std::min(double(config_.dial_speed_rad_s),
+                                        double(config_.dial_step_rad) *
+                                            std::min(in.command.fire_rate_hz, config_.max_fire_rate_hz))
+                             : double(config_.dial_speed_rad_s);
+    double travel = speed * double(dt);
+    double generated_travel = 0;
+    bool budget = true;
+    while (travel > 0) {
+        if (dial_remaining_rad_ <= 0) {
+            if (!continuous)
+                break;
+            if (!heatAvailable()) {
+                budget = false;
+                break;
+            }
+            reserveStep();
+        }
+        const double advance = std::min(travel, dial_remaining_rad_);
+        status_.dial_target_rad += double(config_.dial_direction) * advance;
+        generated_travel += advance;
+        dial_remaining_rad_ -= advance;
+        travel -= advance;
     }
-    discardEvent(in.command); // Busy/denied single events are dropped, never replayed.
+    status_.dial_requested_velocity_rad_s =
+        static_cast<float>(double(config_.dial_direction) * generated_travel / double(dt));
+    status_.dial_busy = dial_remaining_rad_ > 0 || (continuous && budget);
+    discardEvent(in.command); // Consume each single edge exactly once, without waiting for arrival.
     ret = dial_control_.update(status_.dial_target_rad, dt);
     if (ret < 0) {
         stopFeed(WaitReason::Drive, ret);

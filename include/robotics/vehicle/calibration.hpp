@@ -29,7 +29,7 @@ inline constexpr std::array<MotorCalibration, 2> friction{{
     {1, 0, 19, -1, 2, 60, 0},
     {2, 0, 19, 1, 2, 60, 0},
 }};
-inline constexpr MotorCalibration dial{4, 0, 36, 1, 10.0, 10, 0};
+inline constexpr MotorCalibration dial{4, 0, 36, 1, 10.0, 20, 0};
 // Candidate records from h7_framework-main-source.zip (2026-10-02).
 // FL, FR, RL, RR; ticks point forward. Verify unchanged assembly before
 // connections_confirmed. Encoder polarity is fixed for every motion mode.
@@ -72,6 +72,8 @@ inline constexpr core::OrientationReference chassis_reference{1, 1}, carrier_ref
 inline constexpr float power_idle_w = 5, power_per_abs_amp_w = 8;
 // TODO(shooter): calibrate wheel speed -> projectile speed, dial angle per round,
 // speed tolerance, dwell, jam current/time, heat per round and cooling data.
-inline constexpr float friction_speed_rad_s = 10, dial_step_rad = two_pi / 9;
+inline constexpr float friction_speed_rad_s = 20, dial_step_rad = two_pi / 9;
+// Output-shaft position target speed; independent of the position-loop gains.
+inline constexpr float dial_speed_rad_s = 20.0f * dial_step_rad;
 inline constexpr float heat_per_round = 10;
 } // namespace skywalker::robotics::vehicle

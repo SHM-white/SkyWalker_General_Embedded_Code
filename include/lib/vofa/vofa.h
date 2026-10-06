@@ -17,7 +17,7 @@ extern "C" {
  */
 typedef void (*vofa_cmd_handler)(const char *key, float val);
 
-#define VOFA_MAX_FLOATS 16
+#define VOFA_MAX_FLOATS 19
 #define VOFA_TX_QUEUE_DEPTH 4
 #define VOFA_FRAME_SIZE ((VOFA_MAX_FLOATS + 1) * sizeof(float))
 
@@ -52,7 +52,7 @@ int vofa_init(Vofa *vofa, const struct device *uart);
 
 /**
  * 非阻塞复制完整 JustFloat 帧到队列，可在线程或普通 ISR 中调用。
- * num 为 1..16。返回 0 仅表示入队成功，调用方可以立即复用 data。
+ * num 为 1..VOFA_MAX_FLOATS。返回 0 仅表示入队成功，调用方可以立即复用 data。
  * 队列满返回 -ENOBUFS（整帧拒绝）；其他错误为 -EINVAL、-ENODEV 或驱动错误。
  * 不保证主机接收，不等待 USB/DTR；多个生产者可共享同一实例。
  */
