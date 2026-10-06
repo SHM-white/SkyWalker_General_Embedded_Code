@@ -26,17 +26,17 @@ public:
             command.mode = ShooterMode::Ready;
         command.fire_event_id = 0;
         command.fire_event_stamp = {};
-        command.fire_rate_hz = 2;
+        command.fire_rate_hz = 40;
         const bool new_event = rc.shot_event_id && rc.shot_event_id != consumed_;
         const bool aligned = frame.observed.remote.stamp.valid && rc.shot_stamp.valid &&
                              (frame.observed.remote.stamp.sequence == rc.shot_stamp.sequence ||
                               sequenceAfter(frame.observed.remote.stamp.sequence, rc.shot_stamp.sequence));
         if (new_event && (!isFresh(rc.shot_stamp, now_ms, 100) || aligned)) {
             consumed_ = rc.shot_event_id;
-            // Once arbitration has observed this edge, denial or a busy dial
+            // Once arbitration has observed this edge, denial
             // consumes it immediately. A later readiness change cannot fire it.
             if (aligned && permitted && isFresh(rc.shot_stamp, now_ms, 100) && status.friction_ready &&
-                status.feed.state == RunState::Active && !status.dial_busy && !status.jammed) {
+                !status.jammed) {
                 command.mode = ShooterMode::FireSingle;
                 command.fire_event_id = rc.shot_event_id;
                 command.fire_event_stamp = rc.shot_stamp;

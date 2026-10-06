@@ -128,7 +128,7 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
     static Vofa vofa{};
     const auto *telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
     const int vofa_ret = vofa_init(&vofa, telemetry_uart);
-    printk("VOFA device=%s init=%d; JustFloat 16 channels, 50 Hz\n", telemetry_uart->name, vofa_ret);
+    printk("VOFA device=%s init=%d; JustFloat 19 channels, 50 Hz\n", telemetry_uart->name, vofa_ret);
     std::uint64_t next_telemetry = 0;
     std::uint32_t telemetry_sequence = 0;
     int last_send_error = 0;
@@ -200,8 +200,12 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                                 dial.state == motor::MotorState::Active &&
                                 dt.motor.enable_generation == dial.enable_generation &&
                                 dt.motor.reference_generation == dial.reference_generation;
+            const bool request_valid = !exercise.execution_paused && shooter.stamp.valid &&
+                                       shooter.stamp.timestamp_ms == now &&
+                                       std::isfinite(shooter.dial_requested_velocity_rad_s);
             const unsigned validity = unsigned(lv) | (unsigned(rv) << 1) | (unsigned(dp) << 2) |
-                                      (unsigned(dv) << 3) | (unsigned(dc) << 4) | (unsigned(output) << 5);
+                                      (unsigned(dv) << 3) | (unsigned(dc) << 4) | (unsigned(output) << 5) |
+                                      (unsigned(request_valid) << 6);
             telemetry_sequence = (telemetry_sequence + 1) % 1000000;
             const float channels[] = {
                 float(telemetry_sequence),
@@ -220,6 +224,9 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                 shooter.dial_busy ? 1.0f : 0.0f,
                 shooter.jammed ? 1.0f : 0.0f,
                 float(validity),
+                request_valid ? shooter.dial_requested_velocity_rad_s : 0.0f,
+                dv ? dial.feedback.velocity_rad_s : 0.0f,
+                dv ? dial.feedback.velocity_rad_s * vehicle::dial.gear_ratio * 60.0f / vehicle::two_pi : 0.0f,
             };
             constexpr auto count = sizeof(channels) / sizeof(channels[0]);
             static_assert(count <= VOFA_MAX_FLOATS);
