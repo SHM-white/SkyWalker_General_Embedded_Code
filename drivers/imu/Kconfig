@@ -12,11 +12,11 @@ config SKYWALKER_IMU_HEATER
     select SKYWALKER_LIB_CONTROL
 
 config SKYWALKER_IMU_DM_PROTOCOL
-    bool "DM-IMU-L1 active serial protocol"
+    bool "DM-IMU-L1 USB and RS485 protocols"
     depends on SKYWALKER_IMU
 
 config SKYWALKER_IMU_DM_RS485
-    bool "DM-IMU-L1 active RS485 source"
+    bool "DM-IMU-L1 firmware 2.x request/reply RS485 source"
     depends on SKYWALKER_IMU && SKYWALKER_UART_TRANSPORT
     select SKYWALKER_IMU_DM_PROTOCOL
 

@@ -17,9 +17,11 @@
     dma-names = "tx", "rx";
 };
 &usart2 {
-    current-speed = <1000000>;
-    dmas = <&dmamux1 8 43 STM32_DMA_PERIPH_RX>;
-    dma-names = "rx";
+    /* Firmware 2.x head IMU: RX DMA8, TX DMA11, 2 Mbps request/reply. */
+    current-speed = <2000000>;
+    dmas = <&dmamux1 8 43 STM32_DMA_PERIPH_RX>,
+           <&dmamux1 11 44 STM32_DMA_PERIPH_TX>;
+    dma-names = "rx", "tx";
 };
 &usart3 {
     /* TODO(electrical): this board connector is RS485. Referee User UART is

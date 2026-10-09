@@ -8,7 +8,7 @@
         referee-uart = &usart1;
     };
 };
-/* DMA: SPI2 owns 1/2, UART7 uses 5/7, UART5 uses 6, head RX uses 8. */
+/* DMA: SPI2 owns 1/2, UART7 uses 5/7, UART5 uses 6, head RX/TX use 8/11. */
 &uart7 {
     current-speed = <115200>;
     dmas = <&dmamux1 5 80 STM32_DMA_PERIPH_TX>,
@@ -16,8 +16,9 @@
     dma-names = "tx", "rx";
 };
 &usart2 {
-    current-speed = <1000000>;
-    dmas = <&dmamux1 8 43 STM32_DMA_PERIPH_RX>;
-    dma-names = "rx";
+    current-speed = <2000000>;
+    dmas = <&dmamux1 8 43 STM32_DMA_PERIPH_RX>,
+           <&dmamux1 11 44 STM32_DMA_PERIPH_TX>;
+    dma-names = "rx", "tx";
 };
 &usart1 { current-speed = <115200>; };
