@@ -1,5 +1,6 @@
 #pragma once
 #include <variant>
+#include <cerrno>
 #include <robotics/command/command_inputs.hpp>
 
 namespace skywalker::robotics {
@@ -24,6 +25,11 @@ public:
     // Bounded, preserve original timestamps. 0 writes a complete sample (which
     // may be offline/invalid); -EAGAIN retains cache; other errors invalidate it.
     virtual int sample(SourceSample &out) = 0;
+    // Optional full-frame queue; only the manager worker consumes it. Diagnostic
+    // snapshot readers never remove frames. -ENOTSUP means snapshot-only source.
+    virtual int nextOperatorFrame(RemoteState &) {
+        return -ENOTSUP;
+    }
 };
 // Permission is a constraint, not a competing motion source.
 class IPermissionSource {

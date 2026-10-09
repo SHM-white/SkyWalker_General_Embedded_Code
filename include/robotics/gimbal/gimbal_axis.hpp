@@ -15,6 +15,10 @@ struct GimbalAxisConfig {
     float min_angle_rad = -3.14159265f, max_angle_rad = 3.14159265f, max_rate_rad_s = 3;
     bool hold_on_zero_rate = true;
     AxisReferenceInit reference_init = AxisReferenceInit::Preserve;
+    // Limited Rate targets only, in calibrated joint coordinates. Zero disables
+    // the guard. Tune against measured tracking error and acceptable stopping tail;
+    // input beyond this lead is discarded rather than replayed after saturation.
+    float max_lead_rad = 0;
 };
 
 struct AxisCommand {
@@ -31,6 +35,19 @@ public:
         bool feedback_healthy = false;
         int error = 0; // Current feedback/reference preparation error, not a latched drive fault.
     };
+    struct TargetStatus {
+        double target_rad = 0;
+        double measured_rad = 0;
+        float requested_rate_rad_s = 0;
+        float limited_rate_rad_s = 0;
+        float last_dt_s = 0;
+        float integration_dt_s = 0;
+        bool target_valid = false;
+        bool feedback_healthy = false;
+        bool rate_limited = false;
+        bool mechanical_limited = false;
+        bool lead_limited = false;
+    };
 
     GimbalAxis(motor::Motor &drive, const control::PositionMotor::Config &position_config,
                const GimbalAxisConfig &config)
@@ -45,6 +62,9 @@ public:
     int begin();                       // Configure after CanBus::start(); never enables the drive.
     Status poll(std::uint64_t now_ms); // May reseed a disabled Limited axis when explicitly configured.
     int reset(); // Reset control history and target from fresh feedback; never reseeds driver coordinates.
+    // Explicit withdrawal: discard targets/control history and staged effort.
+    // The next Rate/Hold session seeds from fresh feedback, with no deferred motion.
+    void withdraw();
     int update(const AxisCommand &, SafetyAction, float dt_s);
     int updateRate(float rate_rad_s, float dt_s); // Convenience for an already authorized Active path.
     double targetAngleRad() const {
@@ -53,6 +73,9 @@ public:
     control::PositionMotor::Telemetry telemetry() const {
         return position_.telemetry();
     }
+    const TargetStatus &targetStatus() const {
+        return target_status_;
+    } // Execution-thread only; targets and measurements share the joint reference.
 
 private:
     int feedbackError(const motor::MotorSnapshot &) const;
@@ -62,7 +85,9 @@ private:
     control::PositionMotor position_;
     GimbalAxisConfig config_;
     Status status_{};
-    double target_angle_rad_ = 0, pending_rate_delta_rad_ = 0;
+    TargetStatus target_status_{};
+    double target_angle_rad_ = 0;
+    std::uint64_t observed_enable_generation_ = 0, observed_reference_generation_ = 0;
     SafetyAction previous_action_ = SafetyAction::Disable;
     GimbalMode previous_mode_ = GimbalMode::Disabled;
     bool configured_ = false;

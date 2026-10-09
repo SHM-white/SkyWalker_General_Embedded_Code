@@ -31,6 +31,11 @@ int RemoteReceiver::snapshot(Snapshot &out) {
                         robotics::isFresh(out.remote.stamp, now, config_.remote.offline_timeout_ms);
     return ret;
 }
+int RemoteReceiver::nextFrame(robotics::RemoteState &out) {
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
+    return service_.nextFrame(static_cast<std::uint64_t>(k_uptime_get()), out);
+}
 
 void RemoteReceiver::threadEntry(void *self, void *, void *) {
     static_cast<RemoteReceiver *>(self)->run();

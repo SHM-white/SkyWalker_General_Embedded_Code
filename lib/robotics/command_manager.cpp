@@ -18,7 +18,22 @@ bool matches(SourceRole role, const SourceValue &value) {
 }
 }
 CommandManager::CommandManager(const Config &config)
-    : arbiter_(config), require_permissions_(config.require_referee_for_motion) {
+    : arbiter_(config), require_permissions_(config.require_referee_for_motion),
+      permission_timeout_ms_(config.permission_timeout_ms),
+      require_external_gate_(config.require_external_run_gate) {
+}
+void CommandManager::setOperatorGate(bool allowed, std::uint32_t session) {
+    if (k_is_in_isr())
+        return;
+    const auto now = core::monotonicTimeUs() / 1000;
+    const auto key = k_spin_lock(&operator_gate_lock_);
+    if (operator_gate_.allowed != allowed || operator_gate_.session != session) {
+        operator_gate_.allowed = allowed;
+        operator_gate_.session = session;
+        operator_gate_.boundary_ms = now;
+        ++operator_gate_.revision;
+    }
+    k_spin_unlock(&operator_gate_lock_, key);
 }
 int CommandManager::registerSource(ICommandSource &source) {
     if (k_is_in_isr())
@@ -125,6 +140,8 @@ void CommandManager::entry(void *self, void *, void *) {
     static_cast<CommandManager *>(self)->run();
 }
 void CommandManager::run() {
+    std::uint32_t gate_revision = 0;
+    bool safe_gate_latched = false;
     for (;;) {
         CommandSnapshot next{};
         for (std::size_t i = 0; i < source_count_; ++i) {
@@ -173,6 +190,57 @@ void CommandManager::run() {
             next.permission = permission_diagnostics_;
         }
         next.observed.now_us = core::monotonicTimeUs();
+        const auto now_ms = next.observed.now_us / 1000;
+        OperatorGate gate{};
+        if (require_external_gate_) {
+            const auto key = k_spin_lock(&operator_gate_lock_);
+            gate = operator_gate_;
+            k_spin_unlock(&operator_gate_lock_, key);
+            if (gate.revision != gate_revision) {
+                gate_revision = gate.revision;
+                safe_gate_latched = false;
+                arbiter_.withdrawMouseShooter();
+            }
+            next.observed.run_allowed = gate.allowed && !safe_gate_latched;
+        }
+        const auto permission_available = [&](const OutputPermission &permission) {
+            return !require_permissions_ ||
+                   (permission.valid && permission.enabled &&
+                    isFresh(permission.stamp, now_ms, permission_timeout_ms_));
+        };
+        const bool output_allowed = permission_available(next.observed.referee.robot.shooter_output) &&
+                                    permission_available(next.observed.referee.robot.gimbal_output);
+        for (std::size_t i = 0; i < source_count_; ++i) {
+            auto &slot = sources_[i];
+            if (slot.role != SourceRole::Operator)
+                continue;
+            // 调参：每轮消费上限与接收队列容量一致，避免失控的源占满管理线程。
+            for (unsigned budget = 0; budget < 32; ++budget) {
+                RemoteState frame{};
+                const int ret = slot.source->nextOperatorFrame(frame);
+                if (ret == -ENOTSUP || ret == -EAGAIN)
+                    break;
+                if (ret < 0) {
+                    arbiter_.withdrawMouseShooter();
+                    slot.cached.diagnostics.sample_error = ret;
+                    next.remote.sample_error = ret;
+                    break;
+                }
+                const bool after_boundary = !require_external_gate_ || frame.stamp.timestamp_ms > gate.boundary_ms;
+                if (require_external_gate_ && after_boundary && frame.left_switch == RcSwitch::Down) {
+                    safe_gate_latched = true;
+                    next.observed.run_allowed = false;
+                }
+                const bool frame_allowed = next.observed.run_allowed && after_boundary && output_allowed;
+                arbiter_.observeRemoteFrame(frame, frame_allowed, now_ms);
+                // 接收线程可能在 snapshot 后生产新帧；仲裁不可再退回旧快照。
+                if (!next.observed.remote.stamp.valid ||
+                    sequenceAfter(frame.stamp.sequence, next.observed.remote.stamp.sequence)) {
+                    next.observed.remote = frame;
+                    slot.cached.value = frame;
+                }
+            }
+        }
         next.decision = arbiter_.update(next.observed);
         publish(next);
         k_sleep(K_MSEC(CONFIG_SKYWALKER_COMMAND_PERIOD_MS));

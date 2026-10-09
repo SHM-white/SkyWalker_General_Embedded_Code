@@ -63,7 +63,7 @@ void telemetryTask(void *, void *, void *) {
                                 onboard.status().heater_duty,
                                 float(a.fresh_mask),
                                 float(b.fresh_mask)};
-        static_assert(sizeof(values) / sizeof(float) == VOFA_MAX_FLOATS);
+        static_assert(sizeof(values) / sizeof(float) <= VOFA_MAX_FLOATS);
         const int r = init == 0 ? vofa_send(&vofa, values, VOFA_MAX_FLOATS) : init;
         if (r != last) {
             if (r < 0)

@@ -91,10 +91,30 @@ inline constexpr skywalker::robotics::GimbalAxisConfig
           true,
           skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
 
+// 调参：仅鼠标/发射台架启用的关节目标领先上限（rad）。初值约为
+// Yaw 8.6°、Pitch 5.7°，需结合目标-反馈误差及停止拖尾逐轴标定。
+// 超出上限的鼠标输入会被丢弃；过小会减弱跟踪/保持，0 表示关闭。
+// 不修改上面的通用轴配置，也不将这项关节限幅用于惯性角目标。
+inline constexpr float shooter_yaw_max_lead_rad = 0.15f;
+inline constexpr float shooter_pitch_max_lead_rad = 0.10f;
+inline skywalker::robotics::GimbalAxisConfig shooterYawAxisConfig() {
+    auto c = yaw;
+    c.max_lead_rad = shooter_yaw_max_lead_rad;
+    return c;
+}
+inline skywalker::robotics::GimbalAxisConfig shooterPitchAxisConfig() {
+    auto c = pitch;
+    c.max_lead_rad = shooter_pitch_max_lead_rad;
+    return c;
+}
+
 inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::Ampere;
     c.reference = skywalker::control::PositionReference::DriverContinuous;
+    // 调参：先确认速度内环，再改位置外环增益/积分限幅；保持原有初值，
+    // 不通过提高 kp 掩盖速度、电流饱和。deadband 单位 rad，0.012约0.69°；
+    // 根据静止噪声与机械间隙逐步缩小，不能直接清零来消除微调台阶。
     c.loop.position = {.kp = 20.0f,
                        .ki = 0.5f,
                        .kd = 1.48f,
@@ -106,6 +126,8 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
                        .deadband = 0.012f,
                        .dt_min_s = 0.001f,
                        .dt_max_s = 0.020f};
+    // 调参：Yaw速度内环。误差单位 rad/s，输出/积分限幅单位 A；
+    // 增益、微分滤波和限幅按电流/转速反馈分别调，勿同时改多组参数。
     c.loop.velocity.regulator.feedback = {.kp = 0.33f,
                                           .ki = 0.55f,
                                           .kd = 0.00005f,
@@ -117,9 +139,12 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
                                           .deadband = 0.0f,
                                           .dt_min_s = 0.001f,
                                           .dt_max_s = 0.020f};
+    // 调参：速度参考升/降斜率（rad/s²），决定启动、停转和反向响应。
     c.loop.velocity.reference_slew = {20.0f, 20.0f};
+    // 调参：速度反馈滤波时间常数（s），0直通；软死区单位rad/s。
     c.loop.velocity.measurement_filter_tau_s = 0.0f;
     c.loop.velocity.soft_deadband_rad_s = 0.0f;
+    // 调参：内环速度/电流上限；与硬件能力协调，鼠标灵敏度独立设置。
     c.loop.velocity.requested_velocity_abs_max_rad_s = 4.0f;
     c.loop.velocity.effort_abs_max = 1.2f;
     return c;
@@ -128,6 +153,8 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
     c.reference = skywalker::control::PositionReference::DriverContinuous;
+    // 调参：Pitch位置外环，保持既有PID；deadband=0.01 rad约0.57°。
+    // 先记录重力负载、静止噪声和跟踪误差，再逐项调整增益/死区/积分。
     c.loop.position = {.kp = 10.0f,
                        .ki = 0.1f,
                        .kd = 0.0f,
@@ -139,6 +166,8 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
                        .deadband = 0.01f,
                        .dt_min_s = 0.001f,
                        .dt_max_s = 0.020f};
+    // 调参：Pitch速度内环输出单位N·m；先看速度跟踪与力矩饱和，
+    // 再改增益，避免用外环增益补偿内环或机构不足。
     c.loop.velocity.regulator.feedback = {.kp = 0.25f,
                                           .ki = 0.20f,
                                           .kd = 0.0f,
@@ -150,9 +179,13 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
                                           .deadband = 0.0f,
                                           .dt_min_s = 0.001f,
                                           .dt_max_s = 0.020f};
+    // 调参：Pitch升/降斜率（rad/s²）与Yaw独立，过小会增加停转拖尾。
     c.loop.velocity.reference_slew = {8.0f, 8.0f};
+    // 调参：反馈滤波时间常数（s），此处0.02不是鼠标输入固定延迟；
+    // 软死区（rad/s）影响小速度跟踪，须结合噪声分别调整。
     c.loop.velocity.measurement_filter_tau_s = 0.02f;
     c.loop.velocity.soft_deadband_rad_s = 0.02f;
+    // 调参：机构速度/力矩上限，保留原值并按安全机械能力逐步确认。
     c.loop.velocity.requested_velocity_abs_max_rad_s = 5.0f;
     c.loop.velocity.effort_abs_max = 0.8f;
     return c;
@@ -171,6 +204,28 @@ inline const skywalker::robotics::CommandManager::Config command_policy = [] {
     c.expected_vision_reference = calibration::head_reference;
     return c;
 }();
+inline skywalker::robotics::CommandManager::Config shooterCommandPolicy() {
+    auto c = command_policy;
+    // 台架专用：左拨杆 Down=Safe、Middle=RC、Up=键鼠；不改其他应用Auto。
+    c.mapper.input_profile = skywalker::robotics::RemoteInputProfile::ShooterSelectable;
+    c.require_external_run_gate = true;
+    c.allow_auto = false;
+    c.require_referee_for_motion = false;
+    // 调参：连点间隔严格小于500 ms；达到500 ms无新点击则撤销连发。
+    // 长按250 ms是未实机确认的初值，与连点门槛独立。
+    c.mouse_gesture.rapid_click_gap_ms = 500;
+    c.mouse_gesture.hold_to_auto_ms = 250;
+    // 调参：按DR16速度量合同映射，单位为(rad/s)/原始输入单位。
+    // 透传量尚未确认是真实鼠标counts；固定DPI/客户端/视场角后标定。
+    // 保留旧未饱和区比例，不随下面的机构限速变化，不叠加鼠标滤波。
+    c.mapper.mouse_yaw_rate_per_unit = 0.002f;
+    c.mapper.mouse_pitch_rate_per_unit = 0.0016f;
+    // 调参：独立的操作角速度上限（rad/s）；提高前先确认两轴机械能力。
+    c.max_gimbal_yaw_rate_rad_s = 1.0f;
+    c.max_gimbal_pitch_rate_rad_s = 0.8f;
+    // 统一射频由发射台架用vehicle配置赋值；RC、快速连点与长按共用。
+    return c;
+}
 inline const skywalker::robotics::GimbalExecutor::Config execution_policy{
     .command_timeout_ms = command_timeout_ms,
     .source_timeout_us = command_timeout_ms * 1000ULL,

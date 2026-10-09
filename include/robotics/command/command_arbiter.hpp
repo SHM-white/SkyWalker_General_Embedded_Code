@@ -16,7 +16,12 @@ public:
         core::TimeUs vision_timeout_us = 100000;
         core::OrientationReference expected_vision_reference{1, 1};
         float max_vision_yaw_acceleration_rad_s2 = 30, max_vision_pitch_acceleration_rad_s2 = 20;
+        // 调参：RC、鼠标连点和长按共用此射频；应按摩擦轮/拨盘/热量能力标定。
         float requested_fire_rate_hz = 5;
+        // 调参：250 ms 长按为建议初值，500 ms 连点窗来自用户规则。
+        MouseShooterGesture::Config mouse_gesture{};
+        // 台架由执行线程显式授权；开启后 CommandManager 初始门控为关闭。
+        bool require_external_run_gate = false;
         float override_enter_norm = 0.15f, override_exit_norm = 0.05f;
         core::TimeUs override_release_us = 200000;
     };
@@ -27,10 +32,15 @@ public:
     }
     [[nodiscard]] CommandDecision update(const CommandInputs &);
     void reset();
+    // 唯一管理线程按原始队列顺序调用；update 再处理快照和退出期限。
+    int observeRemoteFrame(const RemoteState &, bool run_allowed, std::uint64_t now_ms);
+    void withdrawMouseShooter();
 
 private:
     Config config_;
     const int config_error_;
+    MouseShooterGesture mouse_gesture_;
+    MouseFireIntent mouse_fire_{};
     int validateConfig() const;
     std::uint32_t sequence_ = 0;
     OperatorMode previous_mode_ = OperatorMode::Safe;

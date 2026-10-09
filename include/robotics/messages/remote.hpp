@@ -15,9 +15,9 @@ struct RemoteAnalog {
     std::int16_t wheel = 0;
 };
 struct RemoteMouse {
-    // 鼠标水平位移。
+    // DR16 透传水平原始量；默认按速度映射，未确认是鼠标硬件 counts。
     std::int16_t x = 0;
-    // 鼠标垂直位移。
+    // DR16 透传垂直原始量；单位/PC 缩放须现场确认。
     std::int16_t y = 0;
     // 鼠标滚轮位移。
     std::int16_t z = 0;
@@ -62,6 +62,9 @@ struct OperatorIntent {
     float gimbal_yaw_rate_norm = 0;
     // 云台俯仰角速度的归一化请求，范围为 [-1, 1]。
     float gimbal_pitch_rate_norm = 0;
+    // 独立灵敏度计算的鼠标角速度，避免机构限速改变未饱和区灵敏度。
+    float mouse_yaw_rate_rad_s = 0, mouse_pitch_rate_rad_s = 0;
+    bool mouse_rate_mapping = false;
     // 是否请求启动摩擦轮。
     bool friction_requested = false;
     // 是否请求发射。
