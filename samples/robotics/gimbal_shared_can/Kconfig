@@ -5,5 +5,12 @@ config SHOOTER_UNLOADED_FEED
     help
         Empty mechanism only. Loaded shooting requires live heat and permission
         sources; these must be wired before disabling this bench bypass.
+config SHOOTER_MOUSE_AIM_TELEMETRY
+    bool "Use the 19-channel mouse/gimbal tuning telemetry layout"
+    depends on SKYWALKER_LIB_VOFA
+    default n
+    help
+        Replace shooter channels with raw mouse input, input age, cycle time,
+        joint targets/feedback, effort, validity and saturation flags.
 rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"

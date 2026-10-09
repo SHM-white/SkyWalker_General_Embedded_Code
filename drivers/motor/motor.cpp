@@ -578,7 +578,7 @@ int Motor::reseedPosition(double position) {
         error = -EOVERFLOW;
     else if (auto *state = std::get_if<DjiRuntime>(&protocol_state_)) {
         const auto &cfg = std::get<dji::Config>(config_);
-        const double ticks = position * cfg.gear_ratio * kDjiEncoderTicks / kTwoPi;
+        const double ticks = position * static_cast<double>(cfg.gear_ratio) * kDjiEncoderTicks / kTwoPi;
         if (!std::isfinite(ticks) || std::fabs(ticks) >= static_cast<double>(std::numeric_limits<std::int64_t>::max()))
             error = -ERANGE;
         else

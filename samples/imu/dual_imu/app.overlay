@@ -1,8 +1,16 @@
 / {
     aliases {
-        telemetry-uart = &usart1;
+        telemetry-uart = &cdc_acm_uart0;
     };
 };
+
+&zephyr_udc0 {
+    cdc_acm_uart0: cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "VOFA";
+    };
+};
+
 // Board alias rs485-2 already maps to this remapped USART2 (PD4/PD5/PD6).
 // RX only: firmware never transmits configuration commands to the DM module.
 &usart2 {
@@ -10,6 +18,4 @@
     dmas = <&dmamux1 5 43 STM32_DMA_PERIPH_RX>;
     dma-names = "rx";
 };
-&usart1 {
-    current-speed = <115200>;
-};
+

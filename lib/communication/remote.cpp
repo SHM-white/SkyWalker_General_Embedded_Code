@@ -59,14 +59,60 @@ int RemoteService::processBytes(const std::uint8_t *p, std::size_t n, std::uint6
     for (std::size_t i = 0; i < n; ++i) {
         buffer_[used_++] = p[i];
         if (used_ == buffer_.size()) {
-            if (decoder_.decodeFrame(buffer_.data(), used_, now, latest_) == 0)
+            if (decoder_.decodeFrame(buffer_.data(), used_, now, latest_) == 0) {
+                publishFrame(latest_);
                 used_ = 0;
+            }
             else {
                 std::memmove(buffer_.data(), buffer_.data() + 1, --used_);
             }
         }
     }
     return 0;
+}
+void RemoteService::invalidateFrames() {
+    const auto key = k_spin_lock(&frame_lock_);
+    frame_head_ = frame_count_ = 0;
+    frame_loss_ = true;
+    k_spin_unlock(&frame_lock_, key);
+}
+void RemoteService::publishFrame(const RemoteState &frame) {
+    const auto key = k_spin_lock(&frame_lock_);
+    if (!frame_loss_) {
+        if (frame_count_ == frames_.size()) {
+            // 不猜测丢失边沿；丢弃整个会话队列，消费者必须重新见到左键释放。
+            frame_head_ = frame_count_ = 0;
+            frame_loss_ = true;
+        }
+        else {
+            frames_[(frame_head_ + frame_count_) % frames_.size()] = frame;
+            ++frame_count_;
+        }
+    }
+    k_spin_unlock(&frame_lock_, key);
+}
+int RemoteService::nextFrame(std::uint64_t now, RemoteState &out) {
+    const auto key = k_spin_lock(&frame_lock_);
+    int ret = -EAGAIN;
+    if (frame_loss_) {
+        frame_loss_ = false;
+        frame_head_ = frame_count_ = 0;
+        ret = -EOVERFLOW;
+    }
+    else if (frame_count_) {
+        if (!isFresh(frames_[frame_head_].stamp, now, config_.offline_timeout_ms)) {
+            frame_head_ = frame_count_ = 0;
+            ret = -ESTALE;
+        }
+        else {
+            out = frames_[frame_head_];
+            frame_head_ = (frame_head_ + 1) % frames_.size();
+            --frame_count_;
+            ret = 0;
+        }
+    }
+    k_spin_unlock(&frame_lock_, key);
+    return ret;
 }
 bool RemoteService::online(std::uint64_t now) const {
     return isFresh(latest_.stamp, now, config_.offline_timeout_ms);

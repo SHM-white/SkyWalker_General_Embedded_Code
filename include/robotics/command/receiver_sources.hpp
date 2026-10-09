@@ -21,6 +21,7 @@ public:
     }
     int start() override;
     int sample(SourceSample &out) override;
+    int nextOperatorFrame(RemoteState &out) override;
 
 private:
     communication::RemoteReceiver &receiver_;

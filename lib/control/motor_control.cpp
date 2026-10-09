@@ -9,7 +9,7 @@
 namespace skywalker::control {
 namespace {
 bool finiteFloat(double value) {
-    return std::isfinite(value) && std::fabs(value) <= std::numeric_limits<float>::max();
+    return std::isfinite(value) && std::fabs(value) <= static_cast<double>(std::numeric_limits<float>::max());
 }
 int validateEffort(const motor::MotorInfo &info, EffortUnit unit, float requested) {
     if (!std::isfinite(requested) || requested < 0)
@@ -35,7 +35,8 @@ ControlCheck checkMeasurement(const motor::MotorSnapshot &s, std::uint32_t requi
 }
 }
 
-VelocityMotor::VelocityMotor(motor::Motor &m, const Config &c) : motor_(m), config_(c) {
+VelocityMotor::VelocityMotor(motor::Motor &m, const Config &c, const void *owner)
+    : motor_(m), producer_(owner ? owner : this), config_(c) {
 }
 int VelocityMotor::configure() {
     if (configured_)
@@ -49,7 +50,7 @@ int VelocityMotor::configure() {
         return ret;
     if (!(info.capabilities & motor::FeedbackVelocity))
         return -ENOTSUP;
-    ret = motor_.bindProducer(this);
+    ret = motor_.bindProducer(producer_);
     if (ret < 0)
         return ret;
     configured_ = true;
@@ -69,7 +70,7 @@ int VelocityMotor::reset() {
     if (!configured_)
         return -EACCES;
     history_valid_ = false;
-    (void)motor_.invalidateComputedEffortFrom(this);
+    (void)motor_.invalidateComputedEffortFrom(producer_);
     return 0;
 }
 void VelocityMotor::publish(const Telemetry &next) {
@@ -84,13 +85,13 @@ VelocityMotor::Telemetry VelocityMotor::telemetry() const {
     return copy;
 }
 int VelocityMotor::stageEffort(float effort, std::uint64_t generation) {
-    return config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, effort, generation)
-                                                     : motor_.setTorqueFrom(this, effort, generation);
+    return config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(producer_, effort, generation)
+                                                     : motor_.setTorqueFrom(producer_, effort, generation);
 }
 int VelocityMotor::fail(int error, const motor::MotorSnapshot &s, ControlIssue issue) {
     history_valid_ = false;
     if (configured_)
-        (void)motor_.invalidateComputedEffortFrom(this);
+        (void)motor_.invalidateComputedEffortFrom(producer_);
     Telemetry next{};
     next.motor = s;
     next.target_rad_s = latest_target_rad_s_;
@@ -160,7 +161,8 @@ int VelocityMotor::update(float target, float dt) {
     return 0;
 }
 
-PositionMotor::PositionMotor(motor::Motor &m, const Config &c) : motor_(m), config_(c) {
+PositionMotor::PositionMotor(motor::Motor &m, const Config &c, const void *owner)
+    : motor_(m), producer_(owner ? owner : this), config_(c) {
 }
 int PositionMotor::configure() {
     if (configured_)
@@ -184,7 +186,7 @@ int PositionMotor::configure() {
                                                                                    : motor::FeedbackPosition);
     if ((info.capabilities & required) != required)
         return -ENOTSUP;
-    ret = motor_.bindProducer(this);
+    ret = motor_.bindProducer(producer_);
     if (ret < 0)
         return ret;
     configured_ = true;
@@ -226,7 +228,7 @@ int PositionMotor::resolveMeasurement(const motor::MotorSnapshot &s, double &pos
         const int ret = control_shortest_angle_error(angle, previous_absolute_rad_, &delta);
         if (ret < 0)
             return ret;
-        absolute_local_position_rad_ += delta;
+        absolute_local_position_rad_ += static_cast<double>(delta);
         previous_absolute_rad_ = angle;
         previous_absolute_stamp_ms_ = s.feedback.timestamp_ms;
     }
@@ -238,7 +240,7 @@ int PositionMotor::reset() {
         return -EACCES;
     history_valid_ = false;
     absolute_local_valid_ = false;
-    (void)motor_.invalidateComputedEffortFrom(this);
+    (void)motor_.invalidateComputedEffortFrom(producer_);
     return 0;
 }
 void PositionMotor::publish(const Telemetry &next) {
@@ -253,14 +255,14 @@ PositionMotor::Telemetry PositionMotor::telemetry() const {
     return copy;
 }
 int PositionMotor::stageEffort(float effort, std::uint64_t generation) {
-    return config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(this, effort, generation)
-                                                     : motor_.setTorqueFrom(this, effort, generation);
+    return config_.effort_unit == EffortUnit::Ampere ? motor_.setCurrentFrom(producer_, effort, generation)
+                                                     : motor_.setTorqueFrom(producer_, effort, generation);
 }
 int PositionMotor::fail(int error, const motor::MotorSnapshot &s, ControlIssue issue) {
     history_valid_ = false;
     absolute_local_valid_ = false;
     if (configured_)
-        (void)motor_.invalidateComputedEffortFrom(this);
+        (void)motor_.invalidateComputedEffortFrom(producer_);
     Telemetry next{};
     next.motor = s;
     next.requested_position_rad = latest_target_rad_;
@@ -324,7 +326,7 @@ int PositionMotor::update(double target, float dt) {
         ret = control_shortest_angle_error(static_cast<float>(target), snapshot.feedback.absolute_position_rad, &error);
         if (ret < 0)
             return fail(ret, snapshot, ControlIssue::InvalidTarget);
-        resolved = position + error;
+        resolved = position + static_cast<double>(error);
     }
     if (!finiteFloat(resolved))
         return fail(-ERANGE, snapshot, ControlIssue::InvalidTarget);
@@ -362,7 +364,7 @@ int PositionMotor::update(double target, float dt) {
     next.requested_position_rad = target;
     next.target_position_rad = resolved;
     next.position_rad = absolute
-                            ? snapshot.feedback.absolute_position_rad
+                            ? static_cast<double>(snapshot.feedback.absolute_position_rad)
                             : position -
                                   (config_.reference == PositionReference::StartupRelative ? initial_position_rad_ : 0);
     next.dt_s = dt;

@@ -3,6 +3,7 @@
 #include <robotics/messages/command.hpp>
 #include <robotics/messages/referee.hpp>
 #include <robotics/messages/remote.hpp>
+#include <robotics/command/mouse_shooter_gesture.hpp>
 
 namespace skywalker::robotics {
 
@@ -11,6 +12,8 @@ struct CommandInputs {
     RemoteState remote{};
     core::Measurement<communication::vision::AimCommand> vision{};
     RefereeState referee{};
+    // 外部执行线程提供已解锁/无故障状态；未启用外部门控的应用维持 true。
+    bool run_allowed = true;
 };
 
 enum ArbitrationReason : std::uint32_t {
@@ -34,6 +37,7 @@ enum ArbitrationReason : std::uint32_t {
     ManualOverride = 1u << 17,
     OverrideQuiet = 1u << 18,
     AutoUnavailable = 1u << 19,
+    OperatorGateDenied = 1u << 20,
 };
 
 struct CommandDecision {
@@ -46,6 +50,7 @@ struct CommandDecision {
     std::uint32_t chassis_reasons = 0, gimbal_reasons = 0, shooter_reasons = 0;
     // 最终采用视觉目标时保留完整目标及原始时间；Hold/Disabled 时清空。
     core::Measurement<communication::vision::AimCommand> selected_vision{};
+    MouseFireIntent mouse_fire{};
     std::uint32_t reasons() const {
         return chassis_reasons | gimbal_reasons | shooter_reasons;
     }

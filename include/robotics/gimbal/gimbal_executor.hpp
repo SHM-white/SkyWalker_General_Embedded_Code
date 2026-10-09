@@ -49,6 +49,18 @@ public:
     double pitchTargetRad() const {
         return pitch_.targetAngleRad();
     }
+    control::PositionMotor::Telemetry yawTelemetry() const {
+        return yaw_.telemetry();
+    }
+    control::PositionMotor::Telemetry pitchTelemetry() const {
+        return pitch_.telemetry();
+    }
+    const GimbalAxis::TargetStatus &yawTargetDiagnostics() const {
+        return yaw_.targetStatus();
+    }
+    const GimbalAxis::TargetStatus &pitchTargetDiagnostics() const {
+        return pitch_.targetStatus();
+    } // Execution-thread only.
     const RunStatus &status() const {
         return status_;
     } // Execution-thread only.

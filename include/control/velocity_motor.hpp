@@ -30,7 +30,9 @@ public:
         ControlIssue issue = ControlIssue::None;
     };
 
-    VelocityMotor(motor::Motor &motor, const Config &config);
+    // A shared identity belongs to one execution thread, which chooses a
+    // single active controller. Omission preserves exclusive ownership.
+    VelocityMotor(motor::Motor &motor, const Config &config, const void *execution_owner = nullptr);
     VelocityMotor(const VelocityMotor &) = delete;
     VelocityMotor &operator=(const VelocityMotor &) = delete;
 
@@ -50,6 +52,7 @@ private:
     void publish(const Telemetry &next);
 
     motor::Motor &motor_;
+    const void *producer_;
     Config config_{};
     float latest_target_rad_s_ = 0.0f;
     float latest_dt_s_ = 0.0f;

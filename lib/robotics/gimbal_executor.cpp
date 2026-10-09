@@ -30,6 +30,8 @@ int GimbalExecutor::begin() {
 }
 void GimbalExecutor::withdraw(WaitReason, int, bool) {
     group_.disable();
+    yaw_.withdraw();
+    pitch_.withdraw();
     status_.ready = status_.requested = false;
 }
 RunStatus GimbalExecutor::publish(core::TimeUs now, RunState state, WaitReason reason, int error) {
@@ -69,6 +71,8 @@ RunStatus GimbalExecutor::update(const GimbalExecutionInputs &in, core::TimeUs n
     if (in.require_permission && (!in.permission.valid || !in.permission.enabled ||
                                   !isFresh(in.permission.stamp, now_ms, config_.permission_timeout_ms)))
         return suspend(now, WaitReason::Power, -EACCES);
+    if (!cycle)
+        return suspend(now, WaitReason::Cycle);
     status_.requested = true;
     status_.last_command_sequence = in.command.stamp.sequence;
     int error = group_.enable();

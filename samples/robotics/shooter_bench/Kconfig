@@ -2,5 +2,12 @@ mainmenu "Shooter bench"
 config SHOOTER_UNLOADED_FEED
     bool "Empty mechanism indexing without referee constraints"
     default y
+config SHOOTER_MOUSE_AIM_TELEMETRY
+    bool "Use the 19-channel mouse/gimbal tuning telemetry layout"
+    depends on SKYWALKER_LIB_VOFA
+    default n
+    help
+        Intended for the shared-CAN gimbal sample; gimbal measurements remain
+        invalid in this shooter-only entry point.
 rsource "../common/sample_control.Kconfig"
 source "Kconfig.zephyr"

@@ -5,6 +5,9 @@ namespace skywalker::robotics {
 int RemoteSource::start() {
     return receiver_.start();
 }
+int RemoteSource::nextOperatorFrame(RemoteState &out) {
+    return receiver_.nextFrame(out);
+}
 int RemoteSource::sample(SourceSample &out) {
     const int ret = receiver_.snapshot(cached_);
     out.value = cached_.remote;

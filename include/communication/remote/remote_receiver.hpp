@@ -35,6 +35,8 @@ public:
     // On -EAGAIN retain the caller's previous value, but still expire its online
     // flag. Each reader must initialize and retain its own Snapshot{}.
     int snapshot(Snapshot &out);
+    // Thread context; exactly one consumer. Original full decoded frames/stamps.
+    int nextFrame(robotics::RemoteState &out);
 
 private:
     static void threadEntry(void *self, void *, void *);

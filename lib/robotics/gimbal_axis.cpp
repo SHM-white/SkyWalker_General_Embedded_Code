@@ -9,7 +9,8 @@ namespace skywalker::robotics {
 int GimbalAxis::validate() const {
     if (config_.topology > AxisTopology::Limited || !std::isfinite(config_.max_rate_rad_s) ||
         config_.max_rate_rad_s <= 0 || !std::isfinite(config_.min_angle_rad) || !std::isfinite(config_.max_angle_rad) ||
-        config_.min_angle_rad >= config_.max_angle_rad)
+        config_.min_angle_rad >= config_.max_angle_rad || !std::isfinite(config_.max_lead_rad) ||
+        config_.max_lead_rad < 0 || (config_.topology == AxisTopology::Continuous && config_.max_lead_rad != 0))
         return -EINVAL;
     if (config_.topology == AxisTopology::Continuous &&
         position_.reference() != control::PositionReference::AbsoluteNearest)
@@ -89,17 +90,28 @@ int GimbalAxis::seed(const motor::MotorSnapshot &snapshot) {
     const int ret = feedbackError(snapshot);
     if (ret < 0)
         return ret;
-    target_angle_rad_ = (config_.topology == AxisTopology::Continuous ? double(snapshot.feedback.absolute_position_rad)
-                                                                      : double(snapshot.feedback.position_rad)) +
-                        pending_rate_delta_rad_;
-    pending_rate_delta_rad_ = 0;
+    target_angle_rad_ = config_.topology == AxisTopology::Continuous ? double(snapshot.feedback.absolute_position_rad)
+                                                                  : double(snapshot.feedback.position_rad);
+    observed_enable_generation_ = snapshot.enable_generation;
+    observed_reference_generation_ = snapshot.reference_generation;
     initialized_ = true;
     return 0;
+}
+void GimbalAxis::withdraw() {
+    initialized_ = false;
+    target_angle_rad_ = 0;
+    target_status_ = {};
+    observed_enable_generation_ = observed_reference_generation_ = 0;
+    previous_action_ = SafetyAction::Disable;
+    previous_mode_ = GimbalMode::Disabled;
+    if (configured_)
+        (void)position_.reset();
 }
 int GimbalAxis::reset() {
     if (!configured_)
         return -EACCES;
-    // Explicit business operation: acquire a Hold target. Driver recovery never calls it.
+    withdraw();
+    // Reset the controller and acquire a Hold target only from the current reference.
     return seed(drive_.snapshot());
 }
 int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt) {
@@ -109,35 +121,60 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
         !std::isfinite(command.rate_rad_s) || !std::isfinite(command.target_rad))
         return -EINVAL;
     if (action == SafetyAction::Disable || command.mode == GimbalMode::Disabled) {
-        previous_action_ = action;
-        previous_mode_ = command.mode;
+        withdraw();
         return position_.update(target_angle_rad_, 0);
     }
     (void)poll(drive_.snapshot().feedback.timestamp_ms);
     const auto snapshot = drive_.snapshot();
-    const bool measured = feedbackError(snapshot) == 0;
+    const int feedback_error = feedbackError(snapshot);
+    if (feedback_error < 0 || snapshot.state != motor::MotorState::Active || !snapshot.output_permitted) {
+        // Feedback loss/drive recovery must never accumulate a future Rate target.
+        withdraw();
+        target_status_.feedback_healthy = feedback_error == 0;
+        target_status_.last_dt_s = dt;
+        if (!feedback_error)
+            target_status_.measured_rad = config_.topology == AxisTopology::Continuous
+                                              ? snapshot.feedback.absolute_position_rad
+                                              : snapshot.feedback.position_rad;
+        const int ret = position_.update(target_angle_rad_, 0);
+        return feedback_error < 0 ? feedback_error : ret;
+    }
+    if (initialized_ && (snapshot.enable_generation != observed_enable_generation_ ||
+                         snapshot.reference_generation != observed_reference_generation_))
+        withdraw();
+    target_status_ = {};
+    target_status_.feedback_healthy = true;
+    target_status_.last_dt_s = dt;
+    target_status_.measured_rad = config_.topology == AxisTopology::Continuous
+                                     ? snapshot.feedback.absolute_position_rad
+                                     : snapshot.feedback.position_rad;
     const bool hold = action == SafetyAction::Hold || command.mode == GimbalMode::Hold;
     const bool was_hold = previous_action_ == SafetyAction::Hold || previous_mode_ == GimbalMode::Hold;
-    const float integration_dt = dt <= 0.02f ? dt : 0;
+    // Do not integrate across a recovery interval. The current input starts on
+    // the next valid execution interval after the feedback target is established.
+    const float integration_dt = initialized_ && dt <= 0.02f ? dt : 0;
     if (!initialized_) {
         if (command.mode == GimbalMode::AbsoluteAngle && !hold) {
             target_angle_rad_ = command.target_rad;
+            observed_enable_generation_ = snapshot.enable_generation;
+            observed_reference_generation_ = snapshot.reference_generation;
             initialized_ = true;
         }
-        else if (measured)
+        else
             (void)seed(snapshot);
-        else if (command.mode == GimbalMode::Rate && !hold)
-            pending_rate_delta_rad_ += std::clamp(command.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s) *
-                                       integration_dt;
     }
-    if (hold && !was_hold && measured)
+    if (hold && !was_hold)
         (void)seed(snapshot);
     if (initialized_ && !hold) {
         double delta = 0;
         if (command.mode == GimbalMode::Rate) {
-            if (command.rate_rad_s == 0 && !config_.hold_on_zero_rate && measured)
+            if (command.rate_rad_s == 0 && !config_.hold_on_zero_rate)
                 (void)seed(snapshot);
-            delta = std::clamp(command.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s) * integration_dt;
+            target_status_.requested_rate_rad_s = command.rate_rad_s;
+            target_status_.limited_rate_rad_s =
+                std::clamp(command.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s);
+            target_status_.rate_limited = target_status_.limited_rate_rad_s != command.rate_rad_s;
+            delta = target_status_.limited_rate_rad_s * integration_dt;
         }
         else if (command.mode == GimbalMode::AbsoluteAngle) {
             if (config_.topology == AxisTopology::Continuous) {
@@ -155,10 +192,28 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
         }
         target_angle_rad_ += delta;
     }
-    if (config_.topology == AxisTopology::Limited)
-        target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad), double(config_.max_angle_rad));
+    if (config_.topology == AxisTopology::Limited) {
+        const auto candidate = target_angle_rad_;
+        target_angle_rad_ = std::clamp(candidate, double(config_.min_angle_rad), double(config_.max_angle_rad));
+        target_status_.mechanical_limited = target_angle_rad_ != candidate;
+        if (!hold && command.mode == GimbalMode::Rate && config_.max_lead_rad > 0) {
+            // The measured joint coordinate was validated above for freshness,
+            // reference validity and mechanical range. Do not apply this to an
+            // inertial AbsoluteAngle target or to a wrapped continuous axis.
+            const auto before_lead = target_angle_rad_;
+            target_angle_rad_ = std::clamp(before_lead,
+                                           target_status_.measured_rad - double(config_.max_lead_rad),
+                                           target_status_.measured_rad + double(config_.max_lead_rad));
+            target_status_.lead_limited = target_angle_rad_ != before_lead;
+            target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad),
+                                           double(config_.max_angle_rad));
+        }
+    }
     else
         target_angle_rad_ = std::remainder(target_angle_rad_, 6.283185307179586);
+    target_status_.target_rad = target_angle_rad_;
+    target_status_.target_valid = initialized_;
+    target_status_.integration_dt_s = integration_dt;
     previous_action_ = action;
     previous_mode_ = command.mode;
     return position_.update(target_angle_rad_, initialized_ ? dt : 0);

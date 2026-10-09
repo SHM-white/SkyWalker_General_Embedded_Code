@@ -39,7 +39,9 @@ public:
         ControlIssue issue = ControlIssue::None;
     };
 
-    PositionMotor(motor::Motor &motor, const Config &config);
+    // Controllers used by one execution owner may share its output identity.
+    // That owner must select exactly one controller to write each cycle.
+    PositionMotor(motor::Motor &motor, const Config &config, const void *execution_owner = nullptr);
     PositionMotor(const PositionMotor &) = delete;
     PositionMotor &operator=(const PositionMotor &) = delete;
 
@@ -63,6 +65,7 @@ private:
     void publish(const Telemetry &next);
 
     motor::Motor &motor_;
+    const void *producer_;
     Config config_{};
     double latest_target_rad_ = 0.0;
     float latest_dt_s_ = 0.0f;

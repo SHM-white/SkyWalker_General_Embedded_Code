@@ -26,6 +26,12 @@ public:
     // refreshes timestamps: consumers must still enforce command expiry.
     int current(RobotCommand &out) const;
     int snapshot(CommandSnapshot &out) const;
+    // Thread-only; call after local unlock/fault handling. A change of enabled or
+    // session withdraws old clicks. Increment session for a fault-clear boundary.
+    void setOperatorGate(bool run_allowed, std::uint32_t session = 0);
+    void setRunAllowed(bool run_allowed) {
+        setOperatorGate(run_allowed);
+    }
 
 private:
     struct Slot {
@@ -39,6 +45,15 @@ private:
     int failStart(int error, std::uint32_t reason);
     CommandArbiter arbiter_;
     const bool require_permissions_;
+    const std::uint32_t permission_timeout_ms_;
+    const bool require_external_gate_;
+    struct OperatorGate {
+        bool allowed = false;
+        std::uint32_t session = 0, revision = 0;
+        std::uint64_t boundary_ms = 0;
+    };
+    OperatorGate operator_gate_{};
+    mutable k_spinlock operator_gate_lock_{};
     std::array<Slot, 2> sources_{};
     std::size_t source_count_ = 0;
     IPermissionSource *permissions_ = nullptr;
