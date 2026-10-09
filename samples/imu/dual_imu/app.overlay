@@ -12,10 +12,11 @@
 };
 
 // Board alias rs485-2 already maps to this remapped USART2 (PD4/PD5/PD6).
-// RX only: firmware never transmits configuration commands to the DM module.
+// Firmware 2.x requires read requests; no configuration commands are sent.
 &usart2 {
-    current-speed = <1000000>;
-    dmas = <&dmamux1 5 43 STM32_DMA_PERIPH_RX>;
-    dma-names = "rx";
+    current-speed = <2000000>;
+    dmas = <&dmamux1 5 43 STM32_DMA_PERIPH_RX>,
+           <&dmamux1 7 44 STM32_DMA_PERIPH_TX>;
+    dma-names = "rx", "tx";
 };
 

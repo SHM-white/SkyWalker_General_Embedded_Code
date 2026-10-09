@@ -24,6 +24,104 @@ std::uint16_t dmImuCrc16(const std::uint8_t *p, std::size_t size) {
         crc = std::uint16_t((std::uint32_t(crc) << 1) ^ table[std::uint8_t((crc >> 8) ^ p[i])]);
     return crc;
 }
+int DmImuRs485Parser::init() {
+    if (initialized_)
+        return -EALREADY;
+    if (!config_.assembly_timeout_us)
+        return -EINVAL;
+    used_ = 0;
+    stats_ = {};
+    initialized_ = true;
+    return 0;
+}
+int DmImuRs485Parser::encodeRead(std::uint8_t rid, std::uint8_t *out, std::size_t capacity) const {
+    if (!out || capacity < frame_size || rid > 3)
+        return -EINVAL;
+    std::memset(out, 0, frame_size);
+    out[0] = 0xa5;
+    out[1] = 0x0d;
+    out[2] = config_.id;
+    out[3] = rid;
+    out[23] = 0x5a;
+    return frame_size;
+}
+void DmImuRs485Parser::drop() {
+    --used_;
+    std::memmove(bytes_, bytes_ + 1, used_);
+    std::memmove(times_, times_ + 1, used_ * sizeof(times_[0]));
+}
+int DmImuRs485Parser::consume(const std::uint8_t *p, std::size_t size, core::TimeUs rx,
+                             DmImuRs485Sink &sink) {
+    if (!initialized_)
+        return -EACCES;
+    if (!p && size)
+        return -EINVAL;
+    if (used_ && (rx < times_[used_ - 1] || rx - times_[0] > config_.assembly_timeout_us)) {
+        used_ = 0;
+        ++stats_.assembly_timeouts;
+    }
+    int accepted = 0;
+    for (std::size_t i = 0; i < size; ++i) {
+        bytes_[used_] = p[i];
+        times_[used_++] = rx;
+        while (used_) {
+            if (bytes_[0] != 0xa5) {
+                drop();
+                continue;
+            }
+            if (used_ < 5)
+                break;
+            if (bytes_[1] != 0x0d || bytes_[2] != config_.id || bytes_[3] > 3 || bytes_[4] != 0) {
+                ++stats_.invalid_frames;
+                drop();
+                continue;
+            }
+            if (used_ < frame_size)
+                break;
+            if (bytes_[22] != 0 || bytes_[23] != 0x5a) {
+                ++stats_.invalid_frames;
+                drop();
+                continue;
+            }
+            const auto rid = bytes_[3], code = bytes_[21];
+            Update u{};
+            bool valid = true;
+            if (code == 0) {
+                const core::Stamp stamp{times_[23], 0, true};
+                const float x = core::wire::f32(bytes_ + 5), y = core::wire::f32(bytes_ + 9),
+                            z = core::wire::f32(bytes_ + 13);
+                valid = core::finite(core::Vec3{x, y, z});
+                if (rid == 0) {
+                    u.updated_mask = Accel;
+                    u.sample.accel_m_s2 = {{x, y, z}, stamp};
+                }
+                else if (rid == 1) {
+                    u.updated_mask = Gyro;
+                    u.sample.gyro_rad_s = {{x, y, z}, stamp};
+                }
+                else if (rid == 3) {
+                    u.updated_mask = Orientation;
+                    u.sample.orientation = {{x, y, z, core::wire::f32(bytes_ + 17)}, stamp};
+                    u.sample.attitude_quality = AttitudeQuality::Unknown;
+                    valid = core::normalize(u.sample.orientation.value);
+                }
+            }
+            if (!valid) {
+                ++stats_.invalid_frames;
+                drop();
+                continue;
+            }
+            ++stats_.frames;
+            const int result = sink.acceptDmRs485(rid, code, u, times_[0], times_[23]);
+            if (result > 0)
+                accepted += result;
+            else if (result < 0)
+                ++stats_.invalid_frames;
+            used_ = 0;
+        }
+    }
+    return accepted;
+}
 int DmImuParser::init() {
     if (initialized_)
         return -EALREADY;
