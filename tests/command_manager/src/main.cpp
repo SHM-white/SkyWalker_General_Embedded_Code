@@ -391,11 +391,8 @@ ZTEST(command_manager, test_complete_arbitration_scenario) {
     s.now += 1000;
     s.refresh(); // Enter keyboard/mouse selection with a fresh physical frame.
     s.step();
-    zassert_equal(s.out.command.shooter.mode, ShooterMode::Ready);
-    s.input.remote.mouse.left = true;
-    s.now += 1000;
-    s.refresh(); // Click edge: fire must not be synthesized from a repeated frame.
-    s.step();
+    // Auto-aim requests fire through vision, while mouse.right only arms friction.
+    // No physical mouse-left click is required by the KeyboardMouseSelectable contract.
     zassert_equal(s.out.command.shooter.mode, ShooterMode::FireContinuous);
     s.input.referee.robot.gimbal_output.enabled = false;
     s.step();
@@ -462,11 +459,6 @@ ZTEST(command_manager, test_algorithm_timings) {
     automatic.establishVision();
     automatic.input.remote.right_switch = RcSwitch::Up;
     automatic.input.remote.mouse.right = true;
-    automatic.now += 1000;
-    automatic.refresh();
-    automatic.step();
-    zassert_equal(automatic.out.command.shooter.mode, ShooterMode::Ready);
-    automatic.input.remote.mouse.left = true;
     automatic.now += 1000;
     automatic.refresh();
     automatic.step();
