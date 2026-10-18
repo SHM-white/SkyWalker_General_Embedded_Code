@@ -3,13 +3,7 @@ name: Unit tests
 on:
   push:
     paths:
-      - 'tests/algorithms/**'
-      - 'tests/command_manager/**'
-      - 'tests/command_service/**'
-      - 'tests/execution/**'
-      - 'tests/motor/regression/**'
-      - 'tests/vision_imu/**'
-      - 'tests/common/**'
+      - 'tests/**'
       - 'include/**'
       - 'lib/**'
       - 'drivers/**'
@@ -22,13 +16,7 @@ on:
       - '.github/workflows/unit-tests.yml'
   pull_request:
     paths:
-      - 'tests/algorithms/**'
-      - 'tests/command_manager/**'
-      - 'tests/command_service/**'
-      - 'tests/execution/**'
-      - 'tests/motor/regression/**'
-      - 'tests/vision_imu/**'
-      - 'tests/common/**'
+      - 'tests/**'
       - 'include/**'
       - 'lib/**'
       - 'drivers/**'
@@ -94,13 +82,9 @@ jobs:
       - name: Build and run unit tests
         run: |
           set -euo pipefail
+          # Twister recursively discovers every testcase.yaml under tests.
           west twister \
-            -T skywalker_code/tests/algorithms \
-            -T skywalker_code/tests/command_manager \
-            -T skywalker_code/tests/command_service \
-            -T skywalker_code/tests/execution \
-            -T skywalker_code/tests/motor/regression \
-            -T skywalker_code/tests/vision_imu \
+            -T skywalker_code/tests \
             -p native_sim/native/64 \
             --inline-logs \
             --jobs 2 \

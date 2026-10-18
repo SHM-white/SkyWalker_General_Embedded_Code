@@ -21,9 +21,10 @@ struct Scenario {
     CommandInputs input{};
     CommandDecision out{};
     core::TimeUs now = 1000000;
+    std::uint32_t remote_sequence = 0;
 
     void refresh() {
-        input.remote.stamp = {now / 1000, 1, true};
+        input.remote.stamp = {now / 1000, ++remote_sequence, true};
         const OutputPermission permit{true, true, {now / 1000, 1, true}};
         input.referee.robot.chassis_output = permit;
         input.referee.robot.gimbal_output = permit;
