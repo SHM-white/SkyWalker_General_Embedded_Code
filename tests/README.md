@@ -31,3 +31,11 @@ west twister -T skywalker_code/tests -p native_sim/native/64 --inline-logs --job
 电机发送/停止竞态、CAN 恢复、`drivers/imu/bmi088_imu.cpp`、`drivers/imu/dm_imu_rs485.cpp`、`lib/communication/async_uart.cpp`、`lib/communication/*interboard_transport.cpp`、`lib/communication/remote_receiver.cpp`、`lib/communication/vision_receiver.cpp`、实体 CAN/UART/PWM 以及机器人应用装配需要硬件或 Zephyr 驱动替身。**本次 PR 不声称已实现这些模块的单元测试覆盖或真实板级验证**。纯逻辑和数据契约必须先通过 Actions。
 
 Actions 会在 Workflow Summary 输出逐套通过数和算法耗时，上传 Twister JSON/XML、构建及 handler 日志（14 天）。CI 失败时先看单项测试及对应编译日志；不要仅根据样例固件能编译就判定测试通过。
+
+## 预构建的 Zephyr native_sim 容器
+
+`Unit tests` 使用 GHCR `ghcr.io/shm-white/skywalker-zephyr-native-ci:<hash>`，标签取自 `west.yml` 与 `.github/ci/zephyr-native.Dockerfile` 的内容。镜像内预装固定 Zephyr/West/modules、Python/Twister 依赖和宿主 GCC/CMake。镜像存在时仅拉取镜像、checkout 当前 PR 源码和运行测试，不再在每次 CI 中 `apt install`、`pip install`、`west update`。
+
+`prepare-image` 会检查 GHCR：首次没有相应标签时使用 Buildx 构建并推送一次（这次仍会较慢），后续复用；变更 manifest 或 Dockerfile 会产生新标签。推送使用本仓库的 `GITHUB_TOKEN` 和 `packages:write`，无需个人令牌。来自 fork 的 PR 不允许首次发布镜像，避免授予不受信任的 Dockerfile 推送权限。容器中的 west workspace 由 `.github/ci/link-prebuilt-workspace.sh` 链入 GitHub runner 工作区，业务源码始终采用本次 PR 的 checkout。
+
+若 GHCR 包尚未授权给此仓库，需在包设置中允许仓库的 Actions 访问；只读/可拉取权限同样适用于 `jobs.container`。本镜像仅服务 `native_sim/native/64`，`dm_mc02/stm32h723xx` 固件依旧通过独立 ARM SDK CI 构建。

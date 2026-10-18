@@ -422,7 +422,8 @@ ZTEST(command_manager, test_complete_arbitration_scenario) {
     zassert_true(s.out.gimbal_reasons & VisionStale);
     // Overall referee online cannot extend individual permission lifetimes.
     s.now += 301000;
-    s.input.remote.stamp = {s.now / 1000, 1, true};
+    // New receiver frame after a long idle period, not a replay.
+    s.input.remote.stamp = {s.now / 1000, ++s.remote_sequence, true};
     s.input.referee.online = true;
     s.input.referee.stamp = {s.now / 1000, 99, true};
     s.step();
