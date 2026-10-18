@@ -39,3 +39,5 @@ Actions 会在 Workflow Summary 输出逐套通过数和算法耗时，上传 Tw
 `prepare-image` 会检查 GHCR：首次没有相应标签时使用 Buildx 构建并推送一次（这次仍会较慢），后续复用；变更 manifest 或 Dockerfile 会产生新标签。推送使用本仓库的 `GITHUB_TOKEN` 和 `packages:write`，无需个人令牌。来自 fork 的 PR 不允许首次发布镜像，避免授予不受信任的 Dockerfile 推送权限。容器中的 west workspace 由 `.github/ci/link-prebuilt-workspace.sh` 链入 GitHub runner 工作区，业务源码始终采用本次 PR 的 checkout。
 
 若 GHCR 包尚未授权给此仓库，需在包设置中允许仓库的 Actions 访问；只读/可拉取权限同样适用于 `jobs.container`。本镜像仅服务 `native_sim/native/64`，`dm_mc02/stm32h723xx` 固件依旧通过独立 ARM SDK CI 构建。
+
+**注意**：容器中预构建的 Zephyr 工程使用一个仅含 `west.yml` 的 manifest self 占位目录，因此 Twister 必须用 `-x=ZEPHYR_EXTRA_MODULES=<checkout>/skywalker_code` 显式加载当前 PR 的 Zephyr 模块，否则 Kconfig 会找不到自定义 `SKYWALKER_*` 符号。

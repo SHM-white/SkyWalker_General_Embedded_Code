@@ -126,6 +126,7 @@ jobs:
           west twister \
             -T skywalker_code/tests \
             -p native_sim/native/64 \
+            -x=ZEPHYR_EXTRA_MODULES=${{ github.workspace }}/skywalker_code \
             --inline-logs \
             --jobs 2 \
             -O build/unit-tests

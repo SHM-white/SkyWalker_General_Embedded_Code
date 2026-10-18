@@ -17,5 +17,7 @@ while IFS= read -r project_path; do
     ln -s "$source_path" "$project_path"
 done < <(cd "$image_root" && west list -f '{path}')
 west list -f '{name} {path}'
+# The manifest self project is deliberately bound explicitly in Twister via
+# ZEPHYR_EXTRA_MODULES, avoiding CMake discovering the image's stub self project.
 python -c 'import yaml, elftools, west'
 echo "Prebuilt Zephyr: $(git -C zephyr rev-parse --short HEAD)"
