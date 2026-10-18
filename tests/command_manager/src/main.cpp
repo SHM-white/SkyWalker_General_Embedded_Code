@@ -398,7 +398,9 @@ ZTEST(command_manager, test_complete_arbitration_scenario) {
     s.step();
     zassert_equal(s.out.command.gimbal.mode, GimbalMode::Disabled);
     zassert_false(s.out.selected_vision.stamp.valid);
-    zassert_equal(s.out.command.shooter.mode, ShooterMode::Ready);
+    // Removing gimbal permission withdraws the mouse firing gate as well.
+    zassert_equal(s.out.command.shooter.mode, ShooterMode::Disabled);
+    zassert_true(s.out.shooter_reasons & ShooterNotArmed);
     near(s.out.command.shooter.fire_rate_hz, 0);
     s.refresh();
     s.input.vision.value.control_requested = false;
