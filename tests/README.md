@@ -41,3 +41,5 @@ Actions 会在 Workflow Summary 输出逐套通过数和算法耗时，上传 Tw
 若 GHCR 包尚未授权给此仓库，需在包设置中允许仓库的 Actions 访问；只读/可拉取权限同样适用于 `jobs.container`。本镜像仅服务 `native_sim/native/64`，`dm_mc02/stm32h723xx` 固件依旧通过独立 ARM SDK CI 构建。
 
 **注意**：容器中预构建的 Zephyr 工程使用一个仅含 `west.yml` 的 manifest self 占位目录，因此 Twister 必须用 `-x=ZEPHYR_EXTRA_MODULES=<checkout>/skywalker_code` 显式加载当前 PR 的 Zephyr 模块，否则 Kconfig 会找不到自定义 `SKYWALKER_*` 符号。
+
+容器 job 的模块路径必须读取容器环境变量 `$GITHUB_WORKSPACE`，不要直接使用 Actions 在宿主机展开的 `${{ github.workspace }}`（宿主 `/home/runner/work` 与容器 `/__w` 不相同）。

@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+      ZEPHYR_BASE: /opt/skywalker-zephyr/zephyr
       ZEPHYR_TOOLCHAIN_VARIANT: host/gnu
     defaults:
       run:
@@ -126,7 +126,7 @@ jobs:
           west twister \
             -T skywalker_code/tests \
             -p native_sim/native/64 \
-            -x=ZEPHYR_EXTRA_MODULES=${{ github.workspace }}/skywalker_code \
+            -x=ZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code" \
             --inline-logs \
             --jobs 2 \
             -O build/unit-tests
