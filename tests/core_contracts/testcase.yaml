@@ -1,0 +1,5 @@
+tests:
+  skywalker.core.contracts:
+    platform_allow: [native_sim/native/64]
+    tags: [core, codec, time, contracts]
+    timeout: 60
