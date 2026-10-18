@@ -324,7 +324,9 @@ ZTEST(command_manager, test_invalid_config_clock_regression_and_reset) {
     zassert_equal(s.out.command.stamp.sequence, sequence + 1);
     disabled(s.out);
     s.manager.reset();
-    s.now = 100000;
+    // The arbiter restarts its sequence, but the physical receiver clock and
+    // frame sequence must remain monotonic across a software reset.
+    s.now += 1000;
     s.refresh();
     s.vision(1);
     s.step();
@@ -386,6 +388,13 @@ ZTEST(command_manager, test_complete_arbitration_scenario) {
     // Even visual fire requires keyboard friction-wheel arming.
     s.input.remote.right_switch = RcSwitch::Up;
     s.input.remote.mouse.right = true;
+    s.now += 1000;
+    s.refresh(); // Enter keyboard/mouse selection with a fresh physical frame.
+    s.step();
+    zassert_equal(s.out.command.shooter.mode, ShooterMode::Ready);
+    s.input.remote.mouse.left = true;
+    s.now += 1000;
+    s.refresh(); // Click edge: fire must not be synthesized from a repeated frame.
     s.step();
     zassert_equal(s.out.command.shooter.mode, ShooterMode::FireContinuous);
     s.input.referee.robot.gimbal_output.enabled = false;
@@ -453,6 +462,15 @@ ZTEST(command_manager, test_algorithm_timings) {
     automatic.establishVision();
     automatic.input.remote.right_switch = RcSwitch::Up;
     automatic.input.remote.mouse.right = true;
+    automatic.now += 1000;
+    automatic.refresh();
+    automatic.step();
+    zassert_equal(automatic.out.command.shooter.mode, ShooterMode::Ready);
+    automatic.input.remote.mouse.left = true;
+    automatic.now += 1000;
+    automatic.refresh();
+    automatic.step();
+    zassert_equal(automatic.out.command.shooter.mode, ShooterMode::FireContinuous);
     skywalker::test::benchmark("command.arbiter.vision", 2048, [&](std::uint32_t) {
         automatic.out = automatic.manager.update(automatic.input);
         error |= automatic.out.error;

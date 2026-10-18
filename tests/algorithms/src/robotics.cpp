@@ -48,21 +48,7 @@ SwerveChassis::Config chassisConfig() {
         config.modules[i] = moduleConfig(radii[i]);
     return config;
 }
-void expect_module_equal(const ModuleOutput &actual, const ModuleOutput &expected) {
-    zassert_within(actual.optimized_angle_rad, expected.optimized_angle_rad, 1e-5f);
-    zassert_within(actual.optimized_wheel_velocity_m_s, expected.optimized_wheel_velocity_m_s, 1e-5f);
-    zassert_within(actual.steer_continuous_target_rad, expected.steer_continuous_target_rad, 1e-5f);
-    zassert_within(actual.drive_target_rad_s, expected.drive_target_rad_s, 1e-5f);
-    zassert_within(actual.steer_effort, expected.steer_effort, 1e-5f);
-    zassert_within(actual.drive_effort, expected.drive_effort, 1e-5f);
-}
-void expect_chassis_equal(const ChassisOutput &actual, const ChassisOutput &expected) {
-    for (unsigned i = 0; i < 4; ++i) {
-        zassert_within(actual.target[i].angle_rad, expected.target[i].angle_rad, 1e-5f);
-        zassert_within(actual.target[i].wheel_velocity_m_s, expected.target[i].wheel_velocity_m_s, 1e-5f);
-        expect_module_equal(actual.module[i], expected.module[i]);
-    }
-}
+
 }
 
 ZTEST(swerve_kinematics, test_straight_and_sideways_translation) {
