@@ -1,0 +1,5 @@
+tests:
+  skywalker.motor_protocols.contracts:
+    platform_allow: [native_sim/native/64]
+    tags: [motor, can, dji, dm, protocol]
+    harness: ztest

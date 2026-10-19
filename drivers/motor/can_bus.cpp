@@ -546,7 +546,7 @@ void CanBus::checkDeadlines() {
 }
 
 void CanBus::captureCandidate(std::size_t unit_index, TxPurpose purpose) {
-    candidate_ = {};
+    candidate_ = TxCandidate{};
     candidate_.unit_index = unit_index;
     candidate_.purpose = purpose;
     candidate_.bus_generation = bus_generation_;

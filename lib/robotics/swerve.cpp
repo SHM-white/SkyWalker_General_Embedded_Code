@@ -115,7 +115,7 @@ int SwerveModule::steer(const ModuleFeedback &f, float dt, ModuleOutput &out) {
             steer_history_valid_ = false;
             return ret;
         }
-        steer_local_position_rad_ += delta;
+        steer_local_position_rad_ += static_cast<double>(delta);
         previous_absolute_rad_ = f.steer_absolute_rad;
         previous_steer_stamp_ms_ = f.steer_feedback_stamp_ms;
     }
@@ -124,7 +124,7 @@ int SwerveModule::steer(const ModuleFeedback &f, float dt, ModuleOutput &out) {
         steer_history_valid_ = false;
         return ret;
     }
-    out.steer_continuous_target_rad = static_cast<float>(steer_local_position_rad_ + out.alignment_error_rad);
+    out.steer_continuous_target_rad = static_cast<float>(steer_local_position_rad_ + static_cast<double>(out.alignment_error_rad));
     if (!std::isfinite(out.steer_continuous_target_rad)) {
         steer_history_valid_ = false;
         return -ERANGE;
@@ -142,7 +142,7 @@ int SwerveModule::steer(const ModuleFeedback &f, float dt, ModuleOutput &out) {
         next.position.previous_measurement -= static_cast<float>(steer_local_position_rad_ - origin);
         origin = steer_local_position_rad_;
     }
-    const control_motor_position_input input{static_cast<float>(reference - origin),
+    const control_motor_position_input input{static_cast<float>(static_cast<double>(reference) - origin),
                                              static_cast<float>(steer_local_position_rad_ - origin),
                                              f.steer_velocity_rad_s,
                                              dt,
