@@ -21,9 +21,10 @@ struct Scenario {
     CommandInputs input{};
     CommandDecision out{};
     core::TimeUs now = 1000000;
+    std::uint32_t remote_sequence = 0;
 
     void refresh() {
-        input.remote.stamp = {now / 1000, 1, true};
+        input.remote.stamp = {now / 1000, ++remote_sequence, true};
         const OutputPermission permit{true, true, {now / 1000, 1, true}};
         input.referee.robot.chassis_output = permit;
         input.referee.robot.gimbal_output = permit;
@@ -323,7 +324,9 @@ ZTEST(command_manager, test_invalid_config_clock_regression_and_reset) {
     zassert_equal(s.out.command.stamp.sequence, sequence + 1);
     disabled(s.out);
     s.manager.reset();
-    s.now = 100000;
+    // The arbiter restarts its sequence, but the physical receiver clock and
+    // frame sequence must remain monotonic across a software reset.
+    s.now += 1000;
     s.refresh();
     s.vision(1);
     s.step();
@@ -385,13 +388,19 @@ ZTEST(command_manager, test_complete_arbitration_scenario) {
     // Even visual fire requires keyboard friction-wheel arming.
     s.input.remote.right_switch = RcSwitch::Up;
     s.input.remote.mouse.right = true;
+    s.now += 1000;
+    s.refresh(); // Enter keyboard/mouse selection with a fresh physical frame.
     s.step();
+    // Auto-aim requests fire through vision, while mouse.right only arms friction.
+    // No physical mouse-left click is required by the KeyboardMouseSelectable contract.
     zassert_equal(s.out.command.shooter.mode, ShooterMode::FireContinuous);
     s.input.referee.robot.gimbal_output.enabled = false;
     s.step();
     zassert_equal(s.out.command.gimbal.mode, GimbalMode::Disabled);
     zassert_false(s.out.selected_vision.stamp.valid);
-    zassert_equal(s.out.command.shooter.mode, ShooterMode::Ready);
+    // Removing gimbal permission withdraws the mouse firing gate as well.
+    zassert_equal(s.out.command.shooter.mode, ShooterMode::Disabled);
+    zassert_true(s.out.shooter_reasons & ShooterNotArmed);
     near(s.out.command.shooter.fire_rate_hz, 0);
     s.refresh();
     s.input.vision.value.control_requested = false;
@@ -413,7 +422,8 @@ ZTEST(command_manager, test_complete_arbitration_scenario) {
     zassert_true(s.out.gimbal_reasons & VisionStale);
     // Overall referee online cannot extend individual permission lifetimes.
     s.now += 301000;
-    s.input.remote.stamp = {s.now / 1000, 1, true};
+    // New receiver frame after a long idle period, not a replay.
+    s.input.remote.stamp = {s.now / 1000, ++s.remote_sequence, true};
     s.input.referee.online = true;
     s.input.referee.stamp = {s.now / 1000, 99, true};
     s.step();
@@ -452,6 +462,10 @@ ZTEST(command_manager, test_algorithm_timings) {
     automatic.establishVision();
     automatic.input.remote.right_switch = RcSwitch::Up;
     automatic.input.remote.mouse.right = true;
+    automatic.now += 1000;
+    automatic.refresh();
+    automatic.step();
+    zassert_equal(automatic.out.command.shooter.mode, ShooterMode::FireContinuous);
     skywalker::test::benchmark("command.arbiter.vision", 2048, [&](std::uint32_t) {
         automatic.out = automatic.manager.update(automatic.input);
         error |= automatic.out.error;

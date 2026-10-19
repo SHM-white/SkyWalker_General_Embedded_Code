@@ -1,126 +1,64 @@
+// Rewritten for the current execution contract: RecoveryGate was retired.
+// Test live status publication, stale authority, snapshot isolation and link behavior.
 #include <cerrno>
 #include <cstring>
 #include <communication/interboard/interboard_endpoint.hpp>
-#include <robotics/execution/recovery_gate.hpp>
 #include <robotics/execution/snapshot_cache.hpp>
 #include <zephyr/ztest.h>
-
 using namespace skywalker;
 using namespace skywalker::robotics;
 
-ZTEST(execution, test_recovery_requires_new_original_input) {
-    RecoveryGate gate({100, 100000});
-    gate.prepared(100);
-    zassert_equal(gate.generation(), 1);
-    gate.prepared(101);
-    zassert_equal(gate.boundaryUs(), 100000);
-    // Fresh arbitration of a cached input cannot authorize recovery.
-    zassert_false(gate.accept({110, 8, true}, {99000, 5, true}, 110));
-    zassert_false(gate.accept({110, 9, true}, {100000, 6, true}, 110));
-    zassert_equal(gate.stage(), RecoveryGate::Stage::WaitingCommand);
-    zassert_true(gate.accept({111, 10, true}, {111000, 7, true}, 111));
-    zassert_equal(gate.stage(), RecoveryGate::Stage::Enabling);
-    gate.enabled();
-    zassert_equal(gate.stage(), RecoveryGate::Stage::Active);
-    // Arbitrator still producing, original source stopped.
-    zassert_false(gate.accept({212, 11, true}, {111000, 7, true}, 212));
-    zassert_equal(gate.stage(), RecoveryGate::Stage::WaitingPrerequisites);
-    gate.prepared(212);
-    zassert_equal(gate.generation(), 2);
-    zassert_false(gate.accept({213, 12, true}, {111000, 7, true}, 213));
-    zassert_true(gate.accept({214, 13, true}, {214000, 8, true}, 214));
-}
-
-ZTEST(execution, test_pending_enable_revokes_and_mechanisms_recover_independently) {
-    RecoveryGate yaw({100, 100000}), wheels({100, 100000});
-    yaw.prepared(10);
-    wheels.prepared(10);
-    zassert_true(yaw.accept({11, 1, true}, {11000, 1, true}, 11));
-    zassert_true(wheels.accept({11, 1, true}, {11000, 1, true}, 11));
-    wheels.enabled();
-    zassert_false(yaw.accept({12, 2, false}, {12000, 2, true}, 12));
-    zassert_equal(yaw.stage(), RecoveryGate::Stage::WaitingPrerequisites);
-    yaw.enabled();
-    zassert_equal(yaw.stage(), RecoveryGate::Stage::WaitingPrerequisites);
-    yaw.prepared(12);
-    zassert_equal(yaw.generation(), 2);
-    zassert_equal(wheels.generation(), 1);
-    zassert_equal(wheels.stage(), RecoveryGate::Stage::Active);
-    yaw.withdraw(WaitReason::Drive, -EIO, true);
-    yaw.prepared(13);
-    zassert_equal(yaw.stage(), RecoveryGate::Stage::Blocked);
-    zassert_false(yaw.accept({14, 3, true}, {14000, 3, true}, 14));
-    yaw.withdraw(WaitReason::Reference);
-    yaw.prepared(14);
-    zassert_equal(yaw.generation(), 3);
-    zassert_true(yaw.accept({15, 4, true}, {15000, 4, true}, 15));
-}
-
-ZTEST(execution, test_future_and_cached_command_stamps_reject_enable) {
-    RecoveryGate gate({100, 100000});
-    gate.prepared(100);
-    zassert_false(gate.accept({101, 1, true}, {102000, 1, true}, 101));
-    zassert_false(gate.accept({102, 2, true}, {101000, 2, true}, 101));
-    zassert_false(gate.accept({99, 3, true}, {101000, 3, true}, 101));
-    zassert_true(gate.accept({101, 4, true}, {101000, 4, true}, 101));
-    // A stopped manager must expire even when a different source is current.
-    zassert_false(gate.accept({101, 4, true}, {202000, 5, true}, 202));
-}
-
-ZTEST(execution, test_invalid_recovery_configuration_cannot_prepare) {
-    RecoveryGate no_command_lifetime({0, 100000}), no_source_lifetime({100, 0});
-    no_command_lifetime.prepared(10);
-    no_source_lifetime.prepared(10);
-    zassert_equal(no_command_lifetime.stage(), RecoveryGate::Stage::Blocked);
-    zassert_equal(no_source_lifetime.stage(), RecoveryGate::Stage::Blocked);
-    zassert_equal(no_command_lifetime.error(), -EINVAL);
-    zassert_equal(no_source_lifetime.error(), -EINVAL);
-    zassert_false(no_command_lifetime.accept({11, 1, true}, {11000, 1, true}, 11));
-}
-
-ZTEST(execution, test_source_stamp_preserves_selected_producer) {
-    CommandSnapshot frame{};
-    frame.observed.remote.online = true;
-    frame.observed.remote.stamp = {10, 3, true};
-    frame.decision.command.gimbal.stamp = {99, 100, true};
-    const auto remote = sourceStamp(frame, ControlSource::Remote);
-    zassert_equal(remote.time_us, 10000);
-    zassert_equal(remote.sequence, 3);
-    frame.decision.selected_vision.stamp = {20001, 7, true};
-    const auto vision = sourceStamp(frame, ControlSource::Vision);
-    zassert_equal(vision.time_us, 20001);
-    zassert_equal(vision.sequence, 7);
-    frame.observed.remote.online = false;
-    zassert_false(sourceStamp(frame, ControlSource::Remote).valid);
-    zassert_false(sourceStamp(frame, ControlSource::None).valid);
-}
-
-ZTEST(execution, test_status_cache_never_renews_age) {
+ZTEST(execution, test_empty_snapshot_does_not_overwrite_destination) {
     SnapshotCache<RunStatus> cache;
-    RunStatus first{};
-    first.error = 42;
-    zassert_equal(cache.snapshot(first), -EAGAIN);
-    zassert_equal(first.error, 42);
+    RunStatus output{};
+    output.error=314;
+    zassert_equal(cache.snapshot(output),-EAGAIN);
+    zassert_equal(output.error,314);
+}
+
+ZTEST(execution, test_multiple_readers_retain_original_production_stamp) {
+    SnapshotCache<RunStatus> cache;
     RunStatus produced{};
-    produced.state = RunState::Active;
-    produced.ready = true;
-    produced.generation = 5;
-    produced.stamp = {50, 3, true};
+    produced.state=RunState::Active;
+    produced.ready=true;
+    produced.stamp={100,22,true};
+    produced.last_command_sequence=9;
     zassert_ok(cache.publish(produced));
-    RunStatus second{};
-    zassert_ok(cache.snapshot(first));
-    zassert_ok(cache.snapshot(second));
-    zassert_equal(first.stamp.timestamp_ms, 50);
-    zassert_equal(second.stamp.sequence, 3);
-    zassert_true(wireFeedback(first, 150, 100).armed);
-    const auto stale = wireFeedback(second, 151, 100);
-    zassert_false(stale.ready);
-    zassert_false(stale.armed);
-    zassert_equal(stale.execution_state, ExecutionState::Waiting);
-    zassert_equal(stale.active_reasons, FeedbackStale);
-    zassert_false(wireFeedback(second, 49, 100).ready);
-    second.stamp.valid = false;
-    zassert_false(wireFeedback(second, 50, 100).ready);
+    RunStatus a{},b{};
+    zassert_ok(cache.snapshot(a));
+    zassert_ok(cache.snapshot(b));
+    zassert_equal(a.stamp.timestamp_ms,100u);
+    zassert_equal(b.stamp.sequence,22u);
+    zassert_true(wireFeedback(a,200,100).armed);
+    zassert_false(wireFeedback(b,201,100).armed);
+    zassert_equal(wireFeedback(b,201,100).active_reasons,FeedbackStale);
+    zassert_false(wireFeedback(b,99,100).ready);
+    produced.stamp={300,23,true};
+    zassert_ok(cache.publish(produced));
+    zassert_ok(cache.snapshot(a));
+    zassert_equal(a.stamp.sequence,23u);
+    zassert_equal(b.stamp.sequence,22u);
+}
+
+ZTEST(execution, test_wait_reasons_have_distinct_wire_reason_bits) {
+    const struct { WaitReason reason; std::uint32_t expected; } cases[]={
+        {WaitReason::Command,CommandStale},
+        {WaitReason::Transport,TransportUnavailable},
+        {WaitReason::Feedback,FeedbackStale},
+        {WaitReason::Reference,RecoveryBoundary},
+        {WaitReason::Cycle,RecoveryBoundary},
+        {WaitReason::Drive,InvalidConfiguration},
+        {WaitReason::Configuration,InvalidConfiguration},
+        {WaitReason::Power,PowerBudgetStale}};
+    for (const auto &test:cases) {
+        RunStatus status{};
+        status.state=RunState::Recovering;
+        status.reason=test.reason;
+        status.stamp={10,1,true};
+        auto frame=wireFeedback(status);
+        zassert_equal(frame.active_reasons,test.expected);
+        zassert_false(frame.armed);
+    }
 }
 
 namespace {
@@ -156,7 +94,6 @@ ZTEST(execution, test_live_endpoint_stopped_status_producer_withdraws_ready) {
     RunStatus status{};
     status.state = RunState::Active;
     status.ready = true;
-    status.generation = 7;
     status.last_command_sequence = 42;
     status.stamp = {1000, 1, true};
     endpoint.setStatus(status);
@@ -177,7 +114,6 @@ ZTEST(execution, test_live_endpoint_stopped_status_producer_withdraws_ready) {
     zassert_ok(transport.observer.latestHeartbeat(heartbeat));
     zassert_ok(transport.observer.latestChassisFeedback(feedback));
     zassert_false(heartbeat.ready);
-    zassert_equal(heartbeat.resume_generation, 7);
     zassert_equal(heartbeat.active_reasons, FeedbackStale);
     zassert_false(feedback.ready);
     zassert_false(feedback.armed);
@@ -192,4 +128,13 @@ ZTEST(execution, test_live_endpoint_stopped_status_producer_withdraws_ready) {
     zassert_equal(transport.sends, 4);
 }
 
+ZTEST(execution, test_endpoint_invalid_timeouts_fail_closed_without_sends) {
+    CapturingTransport transport;
+    communication::InterBoardEndpoint endpoint(transport, {BoardRole::ChassisController, 0, 100, 60, 100});
+    endpoint.poll(100);
+    zassert_equal(endpoint.snapshot().error,-EINVAL);
+    zassert_false(endpoint.snapshot().online);
+    zassert_equal(transport.sends,0u);
+}
 ZTEST_SUITE(execution, nullptr, nullptr, nullptr, nullptr, nullptr);
+
