@@ -42,6 +42,8 @@ static communication::InterBoardEndpoint link(
 
 发送保留原生产年龄，重发同一 producer sequence 不能刷新控制命令缓存年龄。frame sequence 仅是通信发送次数，不是目标生产次数。状态停止生产后，不再宣告旧 ready/armed，但反馈状态不能反向停止新的目标发送。
 
+`BigYawRequest` 在传输可用时按约10 ms周期发送。对端离线、操作授权停止/急停/过期、请求过期或重连后尚无新生产请求时，发送端改发 `Disabled + 0`，仍保留原生产序号与累计年龄。接收端允许更新的 frame sequence 将同一 producer sequence 从运行降为停止，不更新缓存时间戳，也不允许相同 producer sequence 恢复运行。链路故障时发送不保证送达，接收端超时和急停保护继续生效。
+
 详细字节偏移与年龄例子见[实施指南](../../dev/电机持续指令与独立自动恢复重构实施指南.md)，角色/传输入口见[板间样例](../../../samples/communication/interboard/README.md)。
 
 ## 实际硬件路径

@@ -135,6 +135,9 @@ inline MessageStamp forwardedStamp(const MessageStamp &received, std::uint32_t a
 }
 
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
+// The execution thread produces targets; the communication thread publishes
+// fresh requests without extending the lifetime of an old motion target.
+inline SnapshotCache<BigYawRequest> big_yaw_targets;
 inline communication::AsyncUart::DmaBuffers remote_dma __nocache;
 inline communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
                                             IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS)
@@ -256,6 +259,8 @@ inline YawCenteringController::Config centeringConfig() {
     YawCenteringController::Config c{};
     c.center_rad = calibration::yaw_center_rad;
     c.follow_direction = calibration::small_yaw.direction;
+    c.max_rate_rad_s = 0.6f;
+    c.acceleration_rad_s2 = 0.8f;
     return c;
 }
 // Convert between local body yaw and the peer's shared command/feedback coordinate.
@@ -276,11 +281,10 @@ inline void produceShotEvent(const MessageStamp &stamp, std::uint32_t &counter) 
 inline void communicationTask(void *, void *, void *) {
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
     CommandSnapshot frame{};
-#if !defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
     communication::RemoteReceiver::Snapshot raw{};
-#endif
     control::OperatorControlPublisher operator_publisher;
-    std::uint64_t next_command_ms = 0;
+    std::uint64_t next_command_ms = 0, next_big_yaw_ms = 0;
+    std::uint32_t big_yaw_sequence = 0;
 #if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
     control::RcControlState operator_state{};
 #else
@@ -293,6 +297,8 @@ inline void communicationTask(void *, void *, void *) {
     for (;;) {
         const auto now_ms = static_cast<std::uint64_t>(k_uptime_get());
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
+        (void)remote.snapshot(raw);
+        const bool remote_fresh = raw.remote.online && isFresh(raw.remote.stamp, now_ms, kCommandTimeoutMs);
 #if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
         // Local RC arming is owned by the execution loop, as in dual_yaw_centering.
         // Communication forwards only fresh snapshots and never owns the local gate.
@@ -307,7 +313,6 @@ inline void communicationTask(void *, void *, void *) {
             operator_state.run_allowed = false;
         }
 #else
-        (void)remote.snapshot(raw);
         (void)console_clear_requests.snapshot(clear_request);
         const MessageStamp clear_stamp{clear_request.time_us / 1000, static_cast<std::uint32_t>(clear_request.sequence),
                                        clear_request.valid};
@@ -318,6 +323,36 @@ inline void communicationTask(void *, void *, void *) {
                                          raw.remote.stamp, static_cast<std::uint32_t>(clear_request.sequence),
                                          clear_stamp, now_ms);
 #endif
+        if (now_ms >= next_big_yaw_ms) {
+            next_big_yaw_ms = now_ms + 10;
+            BigYawRequest target{}, request{};
+            const bool target_fresh = big_yaw_targets.snapshot(target) == 0 &&
+                                      forwardedFresh(target.stamp, target.source_age_ms, now_ms, kCommandTimeoutMs) &&
+                                      forwardedFresh(target.stamp, target.command_age_ms, now_ms, kCommandTimeoutMs);
+#if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
+            const bool allowed = operator_state.run_allowed;
+#else
+            const bool allowed = operator_run;
+#endif
+            if (remote_fresh && allowed && !atomic_get(&estop) && !atomic_get(&clear_requested) &&
+                !atomic_get(&input_paused) && !atomic_get(&execution_paused) && target_fresh &&
+                target.mode == BigYawMode::FollowCenter) {
+                request = target;
+                // Freshness checks above bound both sums by kCommandTimeoutMs.
+                const auto elapsed = ageMs(target.stamp, now_ms);
+                request.source_age_ms += elapsed;
+                request.command_age_ms += elapsed;
+            }
+            else {
+                // A newly produced stop can be fresh even when the motion
+                // producer is unavailable. It never grants output permission.
+                request.source_sequence = raw.remote.stamp.sequence;
+                request.source_age_ms = ageMs(raw.remote.stamp, now_ms);
+                request.permission = {remote_fresh, false, raw.remote.stamp};
+            }
+            request.stamp = {now_ms, ++big_yaw_sequence, true};
+            endpoint.submitBigYaw(request);
+        }
         if (now_ms >= next_command_ms && commands.snapshot(frame) == 0) {
             next_command_ms = now_ms + 10;
             auto wheel_command = frame.decision.command.chassis;
@@ -747,7 +782,11 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             const bool follow_ready = hardware.gimbal.yawTelemetry().output_valid;
 #else
             const bool head_stable = inertial.stabilization_valid && observation.mechanism.state == RunState::Active;
-            const bool follow_ready = head_stable;
+            // Centering remains available while the head tracks its target.
+            // Require valid control outputs; settling still gates shooting.
+            const bool follow_ready = inertial.yaw_output_valid &&
+                                      (IS_ENABLED(CONFIG_VEHICLE_LOCK_PITCH) || inertial.pitch_output_valid) &&
+                                      observation.mechanism.state == RunState::Active;
 #endif
             OutputPermission movement_permission{};
 #if defined(CONFIG_VEHICLE_REFEREE)
@@ -789,7 +828,7 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             big_request.command_age_ms = ageMs(inertial_input.command.stamp, now_ms);
             big_request.permission = movement_permission;
             big_request.stamp = centered.stamp;
-            endpoint.submitBigYaw(big_request);
+            (void)big_yaw_targets.publish(big_request);
             ShooterExecutionInputs shooter_input{};
             shooter_input.command = frame.decision.command.shooter;
             shooter_input.source_stamp = sourceStamp(frame, shooter_input.command.source);

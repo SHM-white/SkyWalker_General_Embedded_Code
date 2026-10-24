@@ -1,6 +1,6 @@
 # 哨兵云台应用
 
-默认使用头部 IMU 模式（`CONFIG_VEHICLE_ENCODER_ONLY=n`），遥控解锁方式与双 Yaw 样例相同：左右拨杆 Down、摇杆和拨轮归中保持500 ms，再将左拨杆切到 Middle。右横杆控制小Yaw，右纵杆控制Pitch（`CONFIG_VEHICLE_LOCK_PITCH=n`），头部稳定后大Yaw根据关节中心偏差跟随。三轴不设置固定锁定，仍保留解锁、反馈有效性、关节限位和回中就绪条件。
+默认使用头部 IMU 模式（`CONFIG_VEHICLE_ENCODER_ONLY=n`），遥控解锁方式与双 Yaw 样例相同：左右拨杆 Down、摇杆和拨轮归中保持500 ms，再将左拨杆切到 Middle。右横杆控制小Yaw，右纵杆控制Pitch（`CONFIG_VEHICLE_LOCK_PITCH=n`），惯性控制输出有效且云台执行处于 Active 时，大Yaw根据关节中心偏差跟随。头部姿态误差超过稳定阈值不再单独撤销大Yaw跟随；头部稳定判定仍用于发射约束。三轴不设置固定锁定，仍保留解锁、反馈有效性、关节限位和回中就绪条件。
 
 ```sh
 west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d build/sentry_gimbal_can
@@ -12,6 +12,12 @@ west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d build/sentry_gim
 
 总云台继续发送v4底盘行走 `ChassisControl`、操作授权 `OperatorControl` 和独立大Yaw `BigYawRequest`。另一套底盘需返回有效心跳以建立链路。编码器模式即使没有有效 `BigYawFeedback`，也按回中算法正常发送目标速度，不因对端速度反馈失效而清零或重置斜坡。有效速度反馈仅用于小Yaw的实测反向补偿；缺少它时不做该补偿，因此不能保证双Yaw协调回中，小Yaw偏差持续存在时大Yaw可能持续收到转速请求。遥控停止、急停、输入/关节反馈超时、限速和链路上线条件仍生效。本地小Yaw不等待大Yaw上线。
 
+大Yaw请求 `0x0402` 由通信线程每10 ms独立发布一次，使用新的请求时间戳和递增生产序号，不依赖执行循环是否正在输出。遥控器在线且数据新鲜时，即使未解锁或控制条件未满足，也持续发布新鲜的 `Disabled + 0`；运行条件有效时发布 `FollowCenter + 目标角速度`。执行线程只更新目标快照，通信线程保留并累加原控制输入和命令的年龄，超过100 ms未更新的运动目标会转为新生成的停止请求，不会被保活。
+
+停止、急停、控制条件失效或对端离线时发送 `Disabled + 0`。本地传输正常时发送周期约10 ms，低于250 ms；物理断线、传输故障或发送忙时不能保证送达，底盘仍须独立执行超时失能。重新上线后仍要求有效操作授权，旧运动请求不能自动恢复。协议端重发同一个请求时不刷新其生产时间或序号，通信线程生成新请求也不会刷新旧运动目标或操作授权的原始年龄。
+
+接收端允许更新的传输帧将同一生产序号降为 `Disabled`，但不刷新该请求的年龄；同一生产序号不能再次恢复为 `FollowCenter`。使用其他底盘程序时，应同时处理模式、原始年龄及这一停止规则；零速失能帧不表示零速保持。
+
 | 用途 | 接口 | 接线/配置 |
 | --- | --- | --- |
 | 板间通信 | USART10 | TX PE3、RX PE2，双板交叉并共地，460800、8N1 |
@@ -19,7 +25,7 @@ west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d build/sentry_gim
 | 遥控器 | UART5 / DBUS | 接云台板，保留板上DBUS电气通路 |
 | 小Yaw / Pitch | CAN1 / CAN2 | 电机ID、限位沿用中央标定 |
 
-当前按对端安装方向启用 `CONFIG_VEHICLE_BIG_YAW_REVERSE=y`，将 `0x0402` 的大Yaw目标速度反号；收到的 `0x0403` 实测速度使用同一符号转换后参与小Yaw补偿，要求对端反馈与命令采用相同的正方向。`request_mrad_s` 显示转换后的发送目标。大Yaw回中目标限幅为±0.3 rad/s，斜坡为0.4 rad/s²；底盘拨轮旋转 `0x0101.wz_rad_s` 独立限幅为±0.5 rad/s，左摇杆前后/横移分别为±0.3 m/s。对端自身的限幅由另一套底盘程序决定。
+当前按对端安装方向启用 `CONFIG_VEHICLE_BIG_YAW_REVERSE=y`，将 `0x0402` 的大Yaw目标速度反号；收到的 `0x0403` 实测速度使用同一符号转换后参与小Yaw补偿，要求对端反馈与命令采用相同的正方向。`request_mrad_s` 显示转换后的发送目标。大Yaw回中目标限幅为±0.6 rad/s，斜坡为0.8 rad/s²，配置位于共享 `vehicle_bench.hpp` 的 `centeringConfig()`；底盘拨轮旋转 `0x0101.wz_rad_s` 独立限幅为±0.5 rad/s，左摇杆前后/横移分别为±0.3 m/s。对端自身的限幅由另一套底盘程序决定。
 
 USART10的TX/RX DMA使用DMAMUX通道3/4，请求号119/118；UART7使用轮询日志，移除继承的DMA配置。串口覆盖仅作用于本应用。启动日志显示 `reference=encoders` 或 `reference=head IMU`；诊断含 `rcFresh/allowed`、`followReady/peerRateValid/centerReason` 及链路错误。
 
