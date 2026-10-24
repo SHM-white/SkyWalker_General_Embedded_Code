@@ -86,4 +86,17 @@ west build -p always -b dm_mc02/stm32h723xx samples/imu/dual_imu \
 
 字段分别盖接收时间，收到 accel 不会给旧 quat 续期。新 RS485 帧不含 CRC，不应套用 USB CRC。已知外置归零/校准后，拥有 source 的线程调用 resetReference() 更新本地 epoch 并让旧请求应答窗口过期；协议无法自动识别全部静默重启。当前协议适配仍需目标固件实机确认。
 
-CAN 只在 include/drivers/imu/dm_imu_can.hpp 保留抽象接口，没有接收器、解码实现或启用开关。
+## 外置 IMU 改用 CAN
+
+默认样例仍为 RS485；选择下列配置后改用 `DmImuCanSource`，接 MC02 CAN3（`imu-can` alias），1 Mbps、从机 ID=0x1、主机 ID=0x11。CAN3 必须独占；本样例没有电机控制。
+
+```sh
+# 模块已设主动上报时
+west build -b dm_mc02/stm32h723xx samples/imu/dual_imu -d build/imu_can_active -- -DEXTRA_CONF_FILE=can_active.conf
+# 模块已设被动应答时
+west build -b dm_mc02/stm32h723xx samples/imu/dual_imu -d build/imu_can_passive -- -DEXTRA_CONF_FILE=can_passive.conf
+```
+
+主动模式在上位机启用 CAN 输出、四元数、角速度、加速度/温度并保存；上报周期先设 5ms（200Hz），须小于字段有效期 20ms。被动模式会轮询四元数、角速度、加速度，超时与重试不刷新旧字段。两种模式复用原 VOFA 通道，CAN 外置的全部字段新鲜时 `fresh_mask=15`（含温度），RS485 仍为 7。
+
+`dm_imu_can` 每秒打印模式、地址、接收/发布/请求/应答/超时/非法计数。主动模式 `tx=0` 正常；`rx` 不增先核对 CAN3、波特率、主机 ID、CAN 输出开关和温控门控。实物验证尚未执行。详见 [CAN 协议与边界](../../../docs/modules/drivers/imu.md#dm-imu-l1-can)。

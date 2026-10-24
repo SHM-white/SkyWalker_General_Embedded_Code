@@ -20,6 +20,35 @@ config SKYWALKER_IMU_DM_RS485
     depends on SKYWALKER_IMU && SKYWALKER_UART_TRANSPORT
     select SKYWALKER_IMU_DM_PROTOCOL
 
+config SKYWALKER_IMU_DM_CAN
+    bool "DM-IMU-L1 classic CAN active/report and request/reply source"
+    depends on SKYWALKER_IMU && CAN
+    help
+        Uses a dedicated CAN controller with a bounded receive queue.
+        Configure the IMU's interface, mode, IDs and output bitmap using the
+        vendor tool. The driver does not write module configuration.
+
+config SKYWALKER_IMU_DM_CAN_PASSIVE
+    bool "Use request/reply mode in the CAN IMU application profiles"
+    depends on SKYWALKER_IMU_DM_CAN
+    default n
+    help
+        The sentry vehicle and dual_imu profiles use this to choose the
+        source mode. Disabled means the module actively reports data.
+        Explicit C++ Config::mode remains per instance.
+
+config SKYWALKER_IMU_DM_CAN_SLAVE_ID
+    hex "CAN IMU slave ID (module receives requests)"
+    depends on SKYWALKER_IMU_DM_CAN
+    range 0x0 0x7ff
+    default 0x1
+
+config SKYWALKER_IMU_DM_CAN_FEEDBACK_ID
+    hex "CAN IMU master ID (module sends measurements)"
+    depends on SKYWALKER_IMU_DM_CAN
+    range 0x0 0x7ff
+    default 0x11
+
 config SKYWALKER_IMU_RECEIVER
     bool "Threaded IMU acquisition and optional heater"
     depends on SKYWALKER_IMU

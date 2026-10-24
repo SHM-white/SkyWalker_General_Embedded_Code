@@ -6,7 +6,8 @@
 
 ~~~text
 BMI088 sensor → Bmi088Imu → 可选 QuaternionEkf → ImuState → Snapshot
-DM RS485 → AsyncUart → DmImuParser → 单位/安装变换 → ImuState → Snapshot
+DM RS485 → AsyncUart → DmImuRs485Parser → 单位/安装变换 → ImuState → Snapshot
+DM CAN → 接收队列 → DmImuCanSource → 安装变换 → ImuState → Snapshot
 有效板载温度 → 独立 ImuHeater → PWM
 ~~~
 
@@ -83,17 +84,36 @@ ImuHeater 显式传入 pwm_dt_spec 与温控配置。init 写零占空比，upda
 
 ## DM-IMU-L1 RS485
 
-DmImuRs485Source 只接收主动模式，不自动配置、归零、校准或加热。先用厂家上位机设置并保存，实物重上电确认。
+DmImuRs485Source 使用固件 2.0.3.0 的固定 24 字节 A5/5A 请求应答协议，轮询 RID 3/1/0（四元数/角速度/加速度），默认超时 50ms、最多重试两次。RS485 不主动上报。旧 55 AA + CRC 解析器仅保留供 USB/旧串行流使用，不用于当前 RS485 源。详细接线见双 IMU 样例。
 
-- 固定头 55 AA，ID，type 01/02/03/04；三轴帧 19 字节，四元数帧 23 字节，float 小端，尾 0A。
-- 四类数据全开共 80 字节，但按四个独立帧解析。
-- CRC 初值 FFFF、0x1021 表、左移 1 位更新；从帧头覆盖到数据末尾，CRC 低字节先发。19 字节算法已有手册实帧依据。
-- Euler 仅校验/消耗，不覆盖权威四元数。首版没有温度能力。
-- UART overflow 丢弃半包，保留原测量时间；部分初始化失败保留对象，由 service 重试。对象、DMA 缓冲和设备必须覆盖回调寿命。
-- Config 可指定 ID、安装旋转、单位缩放和设备四元数方向。默认 SI 缩放 1、sensor→world，实物还须确认。
-- resetReference() 只在源所有者线程调用，用于已知设备归零/重启；它不会发送任何命令，也不能自动发现全部远端静默重启。
+## DM-IMU-L1 CAN
 
-CAN 只保留 DmImuCanSource 抽象接口与 Config，未实现接收、映射或寄存器事务，不提供 CAN 开关；当前可用外置实现是主动流式 RS485。
+`DmImuCanSource` 是可实例化的 `ImuSource`，开启 `CONFIG_CAN`、`CONFIG_SKYWALKER_IMU_DM_CAN`，交给 `ImuReceiver` 调度。构造不做 I/O；`init/service/resetReference` 仅由采集所有者调用，`snapshot` 允许多读者。设备和实例必须长期存活。
+
+协议依据工作区 [V1.3 手册](../../datasheets/DM-IMU-L1%20六轴惯性测量单元使用说明书%20V1.3%202026-09-22.pdf) 附录 B/C。手册没有列出读取请求字节和四元数各字节拆分，补充依据[厂家 MC02 CAN 示例](https://github.com/dmBots/DM-IMU/blob/ca10a12d46c4df9e219b696f2e0b016fc43a9a58/examples/mc02-can-transmit-receive-example/DM-IMU/dm_imu.c)。请求实现采用该示例的寄存器读取协议，与 V1.3 的从机 ID 接收、主机 ID 返回描述一致；新固件实机兼容性尚未验证，不采用旧版 0x6FF/DLC4 请求。
+
+| 配置 | 默认值与含义 |
+|---|---|
+| `can` | 独占 CAN 控制器；应用 DT alias `imu-can` 指向云台 CAN3 |
+| `feedback_id / slave_id` | 0x11 / 0x1，分别对应上位机的主机地址 / 从机地址 |
+| `mode` | `Mode::ActiveReport`；可选 `Mode::RequestReply` |
+| `attitude` | `Attitude::Quaternion`；可选 `Attitude::Euler`，由 ZYX 欧拉角转换四元数 |
+| `request_interval_us` | 完成一个请求后至少等待 1000µs；不是每字段输出周期 |
+| `response_timeout_us / max_retries` | 50000µs / 2；超时重试后推进下一字段 |
+| `sensor_to_body / reference` | 与 RS485 同义；应用沿用中央头部安装标定 |
+| `freshness` | 加速度、角速度、姿态各 20ms；温度 1s |
+
+主动模式不发送读取请求，处理模块输出的标准数据帧。被动模式按姿态 → 角速度 → 加速度/温度循环，单次最多一个未完成请求：发送到从机 ID，DLC=8，`CC RID 00 DD 00 00 00 00`，RID 为 4（或 Euler=3）、2、1；接收主机 ID 的对应类型和时间窗口内的回包。CAN 协议没有事务序号，无法完全识别同 RID 的迟到回复；模块必须与所选模式一致，不应在主动输出时用被动模式推断请求匹配。
+
+所有回包为经典 CAN 标准数据帧、DLC=8。加速度按 `raw/65535*470.4-235.2` 转 m/s²；角速度按 `raw/65535*69.76-34.88` 转 rad/s。类型 1 的温度字节直接按整数 ℃ 发布。四元数按 W/X/Y/Z 连续四个 14 位字段拆分，高位先行，每分量 `raw/16383*2-1`，检查范数后归一化；W 的低六位使用 `DATA[2] >> 2`，保留 bit2。Euler 的数据顺序为 pitch/yaw/roll，单位度，转换后才应用安装旋转。只发布所选姿态格式，另一种姿态帧不会替旧姿态续期。
+
+ISR 只入有界队列并记录本地单调接收时间；采集线程执行解码和安装变换。字段独立盖时间，`fresh_mask` 全部新鲜时为 15。断流自然过期，错误不刷新旧值；总线故障进入 Fault，独占控制器停启恢复，在途 TX 回调退休后才复用发送上下文。若控制器已被其他组件启动，初始化报 `-EBUSY`，不接管电机总线。当前不支持与 `motor::CanBus` 共用同一个控制器。
+
+每秒输出 `dm_imu_can` 日志：`mode/slave/feedback/rx/updates/tx/replies/timeouts/invalid`。主动模式 `tx=0` 正常；被动模式应看到 `tx/replies` 增长。`init` 失败查 `ImuReceiver::status()`，当前有效性看 `snapshot`；计数与最近错误保留历史，不因成功清零。
+
+`resetReference()` 不发送归零命令；仅在已知远端参考变化后由源所有者调用，递增 epoch、撤销旧姿态、清队列并隔离一个应答超时窗口。在途请求存在时返回 `-EBUSY`，所有者需稍后调用；不能从另一个线程直接调用。远端静默重启不能自动可靠识别。
+
+上位机负责选择 CAN、主动/被动模式、波特率、主从地址和输出项并保存。本驱动不自动写配置、归零或校准。开启主动上报时至少选择四元数、角速度、加速度（含温度），位图为 0x0D；开启 Euler 也可，默认不会用它覆盖四元数。若模块已应用安装旋转，软件不能再重复应用同一变换。
 
 ## 配置与样例
 
@@ -104,10 +124,13 @@ CAN 只保留 DmImuCanSource 抽象接口与 Config，未实现接收、映射�
 | SKYWALKER_IMU_BMI088 | SENSOR/BMI08X 采样 |
 | SKYWALKER_ATTITUDE_EKF | 实例化算法，固定数组，无 device/DSP 注册依赖 |
 | SKYWALKER_IMU_HEATER | 可选 PWM 和控制算法 |
-| SKYWALKER_IMU_DM_PROTOCOL | 主动串行流式解码 |
-| SKYWALKER_IMU_DM_RS485 | 协议加 UART_TRANSPORT 后端 |
+| SKYWALKER_IMU_DM_PROTOCOL | USB/旧串行解析与新 RS485 请求应答解析 |
+| SKYWALKER_IMU_DM_RS485 | 固件 2.x 请求应答 UART_TRANSPORT 后端 |
+| SKYWALKER_IMU_DM_CAN | 独占经典 CAN 接收与可选轮询 |
+| SKYWALKER_IMU_DM_CAN_PASSIVE | 应用/双 IMU 样例选择被动模式，默认 n |
+| SKYWALKER_IMU_DM_CAN_SLAVE_ID / FEEDBACK_ID | 应用/双 IMU 样例的从机/主机地址 |
 
 [双 IMU 样例](../../../samples/imu/dual_imu/README.md) 同时启用板载采样/滤波/温控和 485-2 外置模块，并给出 VOFA 通道。samples/imu_test 作为单板载入口已迁移新 API，输出 roll/pitch/yaw、温度、duty、fresh_mask 六通道。算法/协议/过期及模拟 PWM 的运行检查见 [主流程验收](../../../tests/vision_imu/README.md)。
 
-没有进行实物温控、SPI、RS485 或姿态方向验收。目标固件 23 字节四元数、单位、方向和实际可持续频率应上板核对。
+没有进行实物温控、SPI、RS485、CAN 或姿态方向验收；协议兼容性、方向和实际可持续频率应上板确认。
 \n\n更多封装对象的初始化和周期调用见[封装模块调用示例](../../../call-examples.md)。\n

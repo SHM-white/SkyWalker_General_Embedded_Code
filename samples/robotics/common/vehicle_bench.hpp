@@ -22,7 +22,11 @@
 #include "operator_controls.hpp"
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
 #include "shooter_bench.hpp"
+#if defined(CONFIG_SKYWALKER_IMU_DM_CAN)
+#include <drivers/imu/dm_imu_can.hpp>
+#else
 #include <drivers/imu/dm_imu_rs485.hpp>
+#endif
 #include <drivers/imu/imu_receiver.hpp>
 #include <robotics/gimbal/inertial_gimbal.hpp>
 #include <robotics/gimbal/yaw_centering.hpp>
@@ -126,7 +130,7 @@ inline MessageStamp forwardedStamp(const MessageStamp &received, std::uint32_t a
 }
 
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
-inline communication::AsyncUart::DmaBuffers remote_dma __nocache, head_dma __nocache;
+inline communication::AsyncUart::DmaBuffers remote_dma __nocache;
 inline communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
                                             IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS)
                                                 ? control::receiverConfig()
@@ -201,6 +205,20 @@ public:
 };
 inline PausableVision vision_source;
 #endif
+#if defined(CONFIG_SKYWALKER_IMU_DM_CAN)
+inline imu::DmImuCanSource::Config headConfig() {
+    imu::DmImuCanSource::Config c{};
+    c.can = DEVICE_DT_GET(DT_ALIAS(imu_can));
+    c.feedback_id = CONFIG_SKYWALKER_IMU_DM_CAN_FEEDBACK_ID;
+    c.slave_id = CONFIG_SKYWALKER_IMU_DM_CAN_SLAVE_ID;
+    c.mode = IS_ENABLED(CONFIG_SKYWALKER_IMU_DM_CAN_PASSIVE) ? imu::DmImuCanSource::Mode::RequestReply
+                                                         : imu::DmImuCanSource::Mode::ActiveReport;
+    c.reference = calibration::head_reference;
+    c.sensor_to_body = calibration::head_sensor_to_body;
+    return c;
+}
+inline imu::DmImuCanSource head_source(headConfig());
+#else
 inline imu::DmImuRs485Source::Config headConfig() {
     imu::DmImuRs485Source::Config c{};
     c.protocol = {1, 20000};
@@ -210,7 +228,9 @@ inline imu::DmImuRs485Source::Config headConfig() {
     // and the policy for vendor packets without estimator-quality metadata.
     return c;
 }
+inline communication::AsyncUart::DmaBuffers head_dma __nocache;
 inline imu::DmImuRs485Source head_source(DEVICE_DT_GET(DT_ALIAS(rs485_2)), head_dma, headConfig());
+#endif
 inline imu::ImuReceiver head(head_source, {.poll_interval_us = 1000, .priority = 6});
 inline InertialGimbalAdapter::Config inertialConfig() {
     InertialGimbalAdapter::Config c{};

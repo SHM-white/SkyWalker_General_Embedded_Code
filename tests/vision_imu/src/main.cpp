@@ -4,7 +4,6 @@
 #include <core/clock.hpp>
 #include <drivers/imu/dm_imu_protocol.hpp>
 #include <drivers/imu/imu_heater.hpp>
-#include <drivers/imu/dm_imu_can.hpp>
 #include <control/attitude_ekf.hpp>
 #include <communication/vision/ab_protocol.hpp>
 #include <communication/vision/vision_link.hpp>
@@ -41,7 +40,6 @@ public:
 };
 }
 ZTEST(vision_imu, test_end_to_end) {
-    static_assert(std::is_abstract_v<imu::DmImuCanSource>);
     using Ekf = skywalker::control::QuaternionEkf;
     Ekf first({}), second({});
     zassert_ok(first.init());
