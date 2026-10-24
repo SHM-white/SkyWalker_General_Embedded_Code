@@ -107,11 +107,11 @@ skywalker::control::PositionMotor::Config makeMotorConfig() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+    const device *can = DEVICE_DT_GET(DT_NODELABEL(can3));
     if (!device_is_ready(can))
         return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dm::j4310Mit({
-        .id = 1,
+        .id = 6,
         .master_id = 0x11,
         .position_max_rad = 12.5f,
         .velocity_max_rad_s = 30.0f,
