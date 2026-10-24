@@ -1,4 +1,13 @@
 mainmenu "Shared CAN mechanical bench"
+config SHOOTER_INTERBOARD_BIG_YAW
+    bool "Control chassis big Yaw over UART using the RC wheel, without IMU"
+    depends on SKYWALKER_INTERBOARD_ENDPOINT && SKYWALKER_UART_TRANSPORT
+    default n
+    help
+        Keep local gimbal/shooter controls and use the existing RC snapshot to
+        send manual big-Yaw velocity. Pair with big_yaw_interboard chassis.conf.
+        A lost peer revokes only the big-Yaw release gate.
+
 config SHOOTER_UNLOADED_FEED
     bool "Permit unloaded dial indexing"
     default y

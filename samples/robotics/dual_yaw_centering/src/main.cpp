@@ -4,6 +4,7 @@
 #include "../../common/operator_controls.hpp"
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <communication/interboard/interboard_endpoint.hpp>
 #include <communication/interboard/configured_interboard_transport.hpp>
 #include <core/clock.hpp>
@@ -48,7 +49,7 @@ void commTask(void *, void *, void *) {
     }
 }
 #if !defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
-communication::AsyncUart::DmaBuffers remote_dma __nocache, head_dma __nocache;
+communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, samples::control::receiverConfig());
 RemoteSource original_source(remote);
 class PausableSource final : public ICommandSource {
@@ -64,14 +65,17 @@ public:
     }
 } source;
 CommandManager commands(board_config::command_policy);
+#if !defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
+communication::AsyncUart::DmaBuffers head_dma __nocache;
 imu::DmImuRs485Source head_source(inertial_bench::head_uart, head_dma, inertial_bench::head_sensor());
 imu::ImuReceiver head(head_source, inertial_bench::head_receiver);
+InertialGimbalAdapter adapter(inertial_bench::controller());
+#endif
 motor::Motor yaw(board_config::yawHardware()), pitch(board_config::pitchHardware());
 motor::Group group(yaw, pitch);
 motor::CanBus yaw_bus(board_config::yaw_can), pitch_bus(board_config::pitch_can);
 GimbalExecutor gimbal(yaw, pitch, group, board_config::yawMotorConfig(), board_config::yaw,
                       board_config::pitchMotorConfig(), board_config::pitch, board_config::execution_policy);
-InertialGimbalAdapter adapter(inertial_bench::controller());
 YawCenteringController::Config centeringConfig() {
     YawCenteringController::Config c{};
     c.center_rad = vehicle::yaw_center_rad;
@@ -147,7 +151,11 @@ int main() {
         k_sleep(K_MSEC(5));
     }
 #else
-    int ret = head.start();
+    LOG_INF("dualYaw reference=%s", IS_ENABLED(CONFIG_DUAL_YAW_ENCODER_ONLY) ? "encoders" : "head IMU");
+    int ret = 0;
+#if !defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
+    ret = head.start();
+#endif
     if (ret == 0)
         ret = commands.registerSource(source);
     if (ret == 0)
@@ -178,7 +186,11 @@ int main() {
     samples::control::SampleDiagnostics diagnostics;
     samples::control::OperatorControlPublisher operator_controls;
     communication::RemoteReceiver::Snapshot operator_cache{};
+#if !defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
     imu::Snapshot head_cache{};
+#else
+    bool peer_rate_was_valid = false;
+#endif
     int yaw_commit_error = 0, pitch_commit_error = 0;
     for (;;) {
         const auto now = core::monotonicTimeUs(), ms = now / 1000;
@@ -200,23 +212,48 @@ int main() {
         CommandSnapshot frame{};
         (void)commands.snapshot(frame);
         InertialGimbalInputs input{};
+#if !defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
         if (!exercise.head_paused)
             head_cache = head.snapshot();
         input.head = head_cache;
+#endif
         input.yaw = yaw.snapshot();
         input.pitch = pitch.snapshot();
         input.command = frame.decision.command.gimbal;
         input.source_stamp = sourceStamp(frame, input.command.source);
         if (!operator_state.run_allowed)
             input.command.mode = GimbalMode::Disabled;
+        const auto rx = endpoint.snapshot();
+        GimbalExecutionInputs gimbal_input{};
+#if defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
+        const auto &peer = rx.big_yaw_feedback;
+        const bool peer_rate_valid = rx.online && peer.valid &&
+                                     forwardedFresh(peer.stamp, peer.production_age_ms, ms, 50) &&
+                                     std::isfinite(peer.actual_rate_rad_s) &&
+                                     std::fabs(peer.actual_rate_rad_s) <= vehicle::big_yaw.velocity_limit_rad_s;
+        gimbal_input.command = input.command;
+        gimbal_input.source_stamp = input.source_stamp;
+        // Manual rates are in body coordinates; executor targets are joint coordinates.
+        // Subtract measured carrier motion, never the requested big-Yaw speed.
+        if (input.command.mode == GimbalMode::Rate) {
+            const float carrier_rate = peer_rate_valid ? peer.actual_rate_rad_s : 0;
+            gimbal_input.command.yaw_rate_rad_s = vehicle::small_yaw.direction *
+                                                 (input.command.yaw_rate_rad_s - carrier_rate);
+            gimbal_input.command.pitch_rate_rad_s = IS_ENABLED(CONFIG_INERTIAL_GIMBAL_LOCK_PITCH)
+                                                       ? 0
+                                                       : vehicle::pitch.direction * input.command.pitch_rate_rad_s;
+        }
+        else
+            gimbal_input.command.mode = GimbalMode::Disabled;
+#else
         input.prerequisites_ready = started && inertial_bench::mounting_configured;
         auto inertial = adapter.update(input, now);
-        GimbalExecutionInputs gimbal_input{};
         gimbal_input.command = inertial.command;
         gimbal_input.source_stamp = inertial.source_stamp;
-        gimbal_input.transport_ready = started;
         gimbal_input.yaw_output_valid = inertial.yaw_output_valid;
         gimbal_input.pitch_output_valid = inertial.pitch_output_valid;
+#endif
+        gimbal_input.transport_ready = started;
         gimbal_input.emergency_stop = board_config::emergencyStopRequested();
         gimbal_input.clear_estop = operator_state.clear_estop || board_config::takeEmergencyResetRequest();
         run = started ? gimbal.update(gimbal_input, now)
@@ -225,18 +262,40 @@ int main() {
             yaw_commit_error = yaw_bus.commit().error;
             pitch_commit_error = split ? pitch_bus.commit().error : 0;
         }
-        const auto rx = endpoint.snapshot();
         YawCenteringInputs follow{};
         follow.joint_yaw_rad = input.yaw.feedback.position_rad;
         follow.joint_stamp = {input.yaw.feedback.timestamp_ms * 1000, input.yaw.feedback.timestamp_ms,
                               input.yaw.feedback_fresh};
         follow.source_stamp = input.source_stamp;
         follow.enabled = input.command.mode != GimbalMode::Disabled && operator_state.run_allowed;
+#if defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
+        follow.enabled = follow.enabled && input.command.mode == GimbalMode::Rate;
+        // In this explicit bench mode the prerequisite is a working joint loop,
+        // not a claim that the head has an inertially stable orientation.
+        follow.head_stable = gimbal.yawTelemetry().output_valid;
+#else
         follow.head_stable = inertial.stabilization_valid;
+#endif
         // Explicit unloaded bench permission. Vehicle integration uses referee authority.
         follow.permission_valid = vehicle::connections_confirmed && operator_state.run_allowed &&
-                                  !gimbal_input.emergency_stop;
-        const auto centered = centering.update(follow, now);
+                                  !gimbal_input.emergency_stop && !gimbal_input.clear_estop;
+#if defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
+        // Reset only on feedback transitions. Resetting on every missing sample
+        // erases the cycle clock forever and prevents the zero-rate enable request.
+        // Reset again on recovery so no rate accumulated while waiting is applied.
+        if (peer_rate_valid != peer_rate_was_valid)
+            centering.reset();
+        peer_rate_was_valid = peer_rate_valid;
+#endif
+        auto centered = centering.update(follow, now);
+#if defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
+        if (!peer_rate_valid) {
+            // A zero-rate FollowCenter request lets a silent/disabled DM drive
+            // enable and produce feedback. Do not require ready/armed to start.
+            // Missing or stale measured speed must never sustain a turn.
+            centered.velocity_rad_s = 0;
+        }
+#endif
         BigYawRequest request{};
         request.mode = centered.enabled ? BigYawMode::FollowCenter : BigYawMode::Disabled;
         request.target_rate_rad_s = centered.velocity_rad_s;
@@ -257,7 +316,11 @@ int main() {
             endpoint.setStatus(run);
         if (ms >= next_log) {
             next_log = ms + 200;
-            LOG_INF("headStable=%d centerError=%f request=%f peerRate=%f online=%d ready=%d localRun=%u commit=%d/%d",
+            LOG_INF("rcFresh=%d centered=%d armReady=%d allowed=%d mode=%u started=%d init=%d reason=%u error=%d",
+                    operator_state.fresh, controls.controlsCentered(), controls.armReady(),
+                    operator_state.run_allowed, unsigned(gimbal_input.command.mode), started, ret,
+                    unsigned(run.reason), run.error);
+            LOG_INF("followReady=%d centerError=%f request=%f peerRate=%f online=%d ready=%d localRun=%u commit=%d/%d",
                     follow.head_stable, double(centered.center_error_rad), double(centered.velocity_rad_s),
                     double(rx.big_yaw_feedback.actual_rate_rad_s), rx.online, rx.big_yaw_feedback.ready,
                     unsigned(run.state), yaw_commit_error, pitch_commit_error);

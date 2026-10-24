@@ -6,8 +6,8 @@ config VEHICLE_SAMPLE_CONTROLS
     bool "Use physical RC gestures for the vehicle sample"
     default n
     help
-        The vehicle sample selects stick/switch/wheel control. Applications
-        keep their explicit keyboard/mouse and console operation profile.
+        Select stick/switch/wheel control and the neutral-position arming
+        gesture. Disable for the keyboard/mouse and console operation profile.
 
 config VEHICLE_REFEREE
     bool "Require real referee movement permissions"
@@ -17,6 +17,15 @@ config VEHICLE_REFEREE
         Cloud/gimbal board reads its actual referee port. Chassis board uses
         forwarded production ages; no missing permission is synthesized.
 
+config VEHICLE_ENCODER_ONLY
+    bool "Use joint encoders instead of the head IMU for the gimbal bench"
+    default n
+    depends on !VEHICLE_CHASSIS_ROLE && !VEHICLE_VISION_EXECUTE
+    help
+        Manual bench control with measured big-Yaw velocity compensation.
+        Does not start the head IMU and cannot maintain world heading.
+        Inertial stabilization is never reported valid for loaded shooting.
+
 config VEHICLE_POWER_BUDGET
     bool "Require measured power and real forwarded power budgets"
     default n
@@ -24,6 +33,15 @@ config VEHICLE_POWER_BUDGET
     help
         Chassis remains disabled until a real IPowerMeasurementSource is
         supplied. An invalid sensor sample is never replaced by a budget.
+
+config VEHICLE_BIG_YAW_REVERSE
+    bool "Reverse the peer big-Yaw velocity coordinate"
+    default n
+    depends on !VEHICLE_CHASSIS_ROLE
+    help
+        Reverse outgoing big-Yaw speed and convert incoming measured speed
+        by the same sign before encoder-only carrier compensation.
+        The peer must report actual speed in its command coordinate.
 
 config VEHICLE_VISION_OBSERVE
     bool "Observe vision without enabling automatic execution"

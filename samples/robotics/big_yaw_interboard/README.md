@@ -2,6 +2,8 @@
 
 云台板接收 DR16 拨轮，经 USART1 板间协议 v4 发送速度请求；底盘板使用现有 `BigYawExecutor` 驱动真实大 Yaw，并回传实际速度和执行状态。两端均不启动 IMU。云台板不驱动小 Yaw/Pitch，底盘板不启动四舵轮。此入口用于手动速度调试，不执行双 Yaw 自动回中或惯性稳定。
 
+若需同时控制小 Yaw/Pitch、摩擦轮和拨盘，云台板改烧 [gimbal_shared_can + big_yaw.conf](../gimbal_shared_can/README.md)，底盘板仍使用本文的 `chassis.conf`。该组合在遥控和键鼠模式下均用物理拨轮控制大 Yaw。
+
 ## 接线
 
 两块 MC02 使用相同版本的本样例，分别构建下述角色。
