@@ -29,7 +29,43 @@ CAN1 统一连接小 Yaw GM6020、两个摩擦轮 M3508 和拨盘 M2006，Pitch 
 
 鼠标默认按 DR16 速度字段解释：`ω = -raw × sensitivity`，单位为 (rad/s)/输入单位，再独立按机构请求上限限幅；GimbalAxis 用真实执行周期积分一次。Yaw/Pitch 灵敏度初值为 0.002/0.0016，保持原映射未饱和区比例，右键不改变比例。当前 PC 客户端是否使用真实 counts、DPI 或其他缩放尚待确认，不能直接套用 rad/count 公式。
 
-有限关节的 Rate 目标同时受机械范围和相对实际角的领先角限制。样例领先角初值 Yaw 0.15 rad、Pitch 0.10 rad，均需逐轴标定；限制触发时会舍弃超出机构能力的输入。失联、无效周期、禁用和参考变更清除旧目标，恢复时从新鲜同坐标反馈重建。当前仍为关节控制；惯性稳定与大 Yaw 协同需要有效 IMU 和安装标定后另行接入。
+有限关节的 Rate 目标同时受机械范围和相对实际角的领先角限制。样例领先角初值 Yaw 0.15 rad、Pitch 0.10 rad，均需逐轴标定；限制触发时会舍弃超出机构能力的输入。失联、无效周期、禁用和参考变更清除旧目标，恢复时从新鲜同坐标反馈重建。当前仍为关节控制；惯性稳定与双 Yaw 自动回中需要有效 IMU 和安装标定后另行接入。无 IMU 的手动大 Yaw 板间控制使用下述 `big_yaw.conf`。
+
+## 小云台、发射机构与大 Yaw 联调（无需 IMU）
+
+云台板烧本项目并加载 `big_yaw.conf`，底盘板烧 `big_yaw_interboard` 的底盘角色。云台板保留小 Yaw/Pitch、摩擦轮、拨盘和 USB VOFA，使用同一个 DR16 接收器的快照发送大 Yaw 请求。底盘板只驱动真实大 Yaw，不启动四舵轮。发射沿用默认无弹空载模式，未补齐实测热量和许可来源前不用于有载发射。
+
+从仓库根目录分别构建、给对应板烧录：
+
+```sh
+# 云台板：gimbal_shared_can + 大 Yaw 发送
+west build -b dm_mc02/stm32h723xx samples/robotics/gimbal_shared_can -d build/gimbal_shared_big_yaw -- -DEXTRA_CONF_FILE=big_yaw.conf
+west flash -d build/gimbal_shared_big_yaw
+
+# 底盘板：只执行大 Yaw
+west build -b dm_mc02/stm32h723xx samples/robotics/big_yaw_interboard -d build/big_yaw_interboard_chassis -- -DEXTRA_CONF_FILE=chassis.conf
+west flash -d build/big_yaw_interboard_chassis
+```
+
+| 连接 | 用途 |
+| --- | --- |
+| DR16 → 云台板 UART5 | 两板共用的遥控输入，底盘板无需接遥控器 |
+| 云台板 CAN1 / CAN2 | 小 Yaw、摩擦轮、拨盘 / Pitch，沿用原接线 |
+| 云台 PA9 TX → 底盘 PA10 RX，底盘 PA9 TX → 云台 PA10 RX，GND 相连 | USART1 板间通信，460800 baud |
+| 底盘板 CAN3 | 当前中央 `chassis_can.hpp` 中的大 Yaw 总线，1 Mbps |
+| 云台板 USB / 两板 USART10 | VOFA / console 日志，互不占用 USART1 |
+
+大 Yaw 电机 ID、方向、减速比和速度/力矩限幅沿用 `calibration.hpp` 与 `big_yaw_profile.hpp`。确认双方 `online=1`，按原流程双 Down 归中 500 ms、左 Middle 解锁：
+
+- 左 Middle：右摇杆控制小 Yaw/Pitch，右拨杆控制摩擦与连发，**拨轮控制大 Yaw ±0.1 rad/s**。
+- 左 Up：鼠标控制小 Yaw/Pitch、鼠标按键控制摩擦与发射，**大 Yaw 仍由物理遥控拨轮控制**；不是鼠标滚轮。
+- 拨轮归中请求大 Yaw 零速度；左 Down 停止全部机构，重新启动按原解锁手势。
+
+大 Yaw 速度幅值位于 `../common/manual_big_yaw_link.hpp` 的 `manual_rate_max_rad_s`。新日志行 `bigYaw` 显示 `online/run/source/target/actual/ready/valid/link/rejected`；`valid=0` 时不得把 `actual` 当作有效反馈。原 19 通道 USB VOFA 布局保持不变。
+
+大 Yaw 有独立的遥控解锁状态：板间断线或底盘板重启时仅撤销大 Yaw 解锁，本地云台与发射继续服从原有有效遥控。链路恢复后重新双 Down 归中再左 Middle，才能恢复大 Yaw；电机/CAN 单独恢复不撤销遥控解锁。沿用 100 ms 原始输入/板间请求有效期，重复发送不会刷新旧输入时间。诊断暂停输入或执行时也撤销大 Yaw 请求。
+
+本组合只增加手动速度控制，不进行 IMU 稳定、自瞄或双 Yaw 自动回中。编译不代表实机验收，实际方向、线束转动空间和停止延迟仍需现场确认。
 
 ## 调参入口
 

@@ -4,6 +4,14 @@ source "Kconfig.zephyr"
 config DUAL_YAW_CHASSIS_ROLE
     bool "Build the dedicated big-Yaw chassis peer"
     default n
+config DUAL_YAW_ENCODER_ONLY
+    bool "Run the dual-Yaw bench without a head IMU"
+    default y
+    help
+      Use joint encoders and measured big-Yaw speed for coordinated centering.
+      Does not start the head IMU or require its mounting confirmation.
+      This bench mode cannot reject chassis rotation or maintain world heading.
+      Disable to use the original head-IMU inertial controller.
 config INERTIAL_GIMBAL_LOCK_PITCH
-    bool "Keep pitch inertial target locked for initial head-hold bench"
+    bool "Keep pitch target locked for the initial dual-Yaw bench"
     default y

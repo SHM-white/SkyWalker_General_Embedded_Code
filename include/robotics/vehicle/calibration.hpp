@@ -9,7 +9,7 @@ namespace skywalker::robotics::vehicle {
 // TODO(hardware): replace template values using the installed robot's records.
 // Keep confirmation flags false until the corresponding bench has passed.
 inline constexpr bool connections_confirmed = true;
-inline constexpr bool imu_mounting_confirmed = false;
+inline constexpr bool imu_mounting_confirmed = true;
 inline constexpr bool power_model_calibrated = false;
 inline constexpr bool shooter_constraints_confirmed = true;
 

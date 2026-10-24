@@ -2,8 +2,19 @@
 / {
     aliases {
         telemetry-uart = &cdc_acm_uart0;
+        interboard-uart = &usart10;
     };
 };
+
+/* Optional big_yaw.conf owns USART1; USB CDC continues to carry VOFA. */
+&usart10 {
+    current-speed = <460800>;
+};
+
+&rng {
+    status = "okay";
+};
+
 &zephyr_udc0 {
     cdc_acm_uart0: cdc_acm_uart0 {
         compatible = "zephyr,cdc-acm-uart";

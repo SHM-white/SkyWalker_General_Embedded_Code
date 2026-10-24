@@ -1,1 +1,35 @@
 #include "../../samples/robotics/common/vehicle_mc02.overlay"
+
+/* USART10 interboard link, UART7 diagnostic console. */
+/ {
+    aliases {
+        interboard-uart = &usart10;
+        /delete-property/ telemetry-uart;
+    };
+    chosen {
+        zephyr,console = &uart7;
+        zephyr,shell-uart = &uart7;
+    };
+};
+
+&usart10 {
+    status = "okay";
+    current-speed = <460800>;
+    data-bits = <8>;
+    parity = "none";
+    stop-bits = "1";
+    dmas = <&dmamux1 3 119 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 4 118 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
+};
+
+/* UART7 is reserved for logs; remap vision-uart before enabling vision. */
+&uart7 {
+    status = "okay";
+    current-speed = <115200>;
+    data-bits = <8>;
+    parity = "none";
+    stop-bits = "1";
+    /delete-property/ dmas;
+    /delete-property/ dma-names;
+};

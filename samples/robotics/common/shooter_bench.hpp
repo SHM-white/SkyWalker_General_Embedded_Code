@@ -13,6 +13,9 @@
 #include "rc_controls.hpp"
 #include "sample_diagnostics.hpp"
 #include "shooter_rc.hpp"
+#if defined(CONFIG_SHOOTER_INTERBOARD_BIG_YAW)
+#include "manual_big_yaw_link.hpp"
+#endif
 
 namespace skywalker::samples::shooter {
 using namespace robotics;
@@ -39,11 +42,15 @@ public:
           shooter(left, right, dial, friction_group, dial_group, vehicle::frictionMotorConfig(),
                   vehicle::dialMotorConfig(), vehicle::shooterExecutionConfig(unloaded_relative)) {
     }
-    int start(bool with_gimbal) {
+    int start(bool with_gimbal, bool with_shooter = true) {
         if (!vehicle::connections_confirmed)
             return -ENODEV;
         if (!attached_) {
-            int ret = with_gimbal ? dji_bus.attach(yaw, left, right, dial) : dji_bus.attach(left, right, dial);
+            if (!with_gimbal && !with_shooter)
+                return -EINVAL;
+            int ret = with_shooter ? (with_gimbal ? dji_bus.attach(yaw, left, right, dial)
+                                                : dji_bus.attach(left, right, dial))
+                                   : dji_bus.attach(yaw);
             if (ret < 0)
                 return ret;
             if (with_gimbal) {
@@ -53,6 +60,7 @@ public:
             }
             attached_ = true;
             with_gimbal_ = with_gimbal;
+            with_shooter_ = with_shooter;
         }
         if (!dji_started_) {
             const int ret = dji_bus.start();
@@ -67,7 +75,7 @@ public:
             pitch_started_ = true;
         }
         if (!controllers_started_) {
-            int ret = shooter.begin();
+            int ret = with_shooter_ ? shooter.begin() : 0;
             if (ret == 0 && with_gimbal_)
                 ret = gimbal.begin();
             if (ret < 0)
@@ -87,7 +95,7 @@ public:
 
 private:
     bool attached_ = false, dji_started_ = false, pitch_started_ = false;
-    bool controllers_started_ = false, with_gimbal_ = false;
+    bool controllers_started_ = false, with_gimbal_ = false, with_shooter_ = true;
 };
 
 inline int run(bool with_gimbal, bool unloaded_feed) {
@@ -148,6 +156,9 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                                                      operator_state.remote.left_switch == RcSwitch::Down);
         const bool clear = operator_state.clear_estop;
         const bool estop = board_config::emergencyStopRequested();
+#if defined(CONFIG_SHOOTER_INTERBOARD_BIG_YAW)
+        manual_big_yaw::update(operator_state, estop, exercise.input_paused || exercise.execution_paused, now);
+#endif
         if (operator_state.start_event_id != last_start_event || operator_state.clear_event_id != last_clear_event) {
             last_start_event = operator_state.start_event_id;
             last_clear_event = operator_state.clear_event_id;
@@ -312,6 +323,9 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
 #endif
         if (!exercise.status_paused && now >= next_log) {
             next_log = now + 200;
+#if defined(CONFIG_SHOOTER_INTERBOARD_BIG_YAW)
+            manual_big_yaw::printStatus();
+#endif
             printk(
                 "src=%u cmd=%u input=%u gesture=%u gimbal=%u friction=%u ready=%d feed=%u wait=%u active=%u/%u event=%u accepted=%u rejected=%u completed=%u reservations=%u mode=%u busy=%d jam=%d bus=%u\n",
                 frame.observed.remote.stamp.sequence, local_request.stamp.sequence, unsigned(local_request.source),

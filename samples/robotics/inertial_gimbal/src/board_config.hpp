@@ -2,12 +2,13 @@
 
 #include "../../command_gimbal/src/board_config.hpp"
 #include <drivers/imu/dm_imu_rs485.hpp>
+#include <drivers/imu/dm_imu_can.hpp>
 #include <drivers/imu/imu_receiver.hpp>
 #include <robotics/gimbal/inertial_gimbal.hpp>
 #include <robotics/vehicle/calibration.hpp>
 
 namespace inertial_bench {
-inline const device *head_uart = DEVICE_DT_GET(DT_ALIAS(rs485_2));
+inline const device *head_uart = DEVICE_DT_GET(DT_ALIAS(can3));
 inline constexpr bool mounting_configured = skywalker::robotics::vehicle::imu_mounting_confirmed;
 inline constexpr skywalker::imu::ImuReceiver::Config head_receiver{.poll_interval_us = 1000, .priority = 6};
 

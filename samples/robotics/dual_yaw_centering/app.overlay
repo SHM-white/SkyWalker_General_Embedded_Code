@@ -1,6 +1,40 @@
-/* USART1 is dedicated to board-to-board transport; use USART10 console for logs.
- * TODO(wiring): cloud head IMU uses MC02 rs485-2, RC uses UART5. */
-/ { aliases { interboard-uart = &usart1; }; };
-&usart1 { current-speed = <460800>; };
-&can2 { status = "okay"; bitrate = <1000000>; };
-&rng { status = "okay"; };
+/* USART10: interboard TX PE3 / RX PE2, 460800 baud.
+ * USART1: console TX PA9 / RX PA10, 115200 baud.
+ * Head IMU uses MC02 RS485-2; RC uses UART5.
+ */
+/ {
+	aliases {
+		interboard-uart = &usart10;
+		/* USART1 belongs to the console in this sample. */
+		/delete-property/ telemetry-uart;
+	};
+
+	chosen {
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
+	};
+};
+
+&usart10 {
+	status = "okay";
+	current-speed = <460800>;
+	data-bits = <8>;
+	parity = "none";
+	stop-bits = "1";
+	/* Reuse USART1's DMA channels with the USART10 request IDs. */
+	dmas = <&dmamux1 3 119 STM32_DMA_PERIPH_TX>,
+	       <&dmamux1 4 118 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
+};
+
+&usart1 {
+	status = "okay";
+	current-speed = <115200>;
+	/* Console uses polling; DMA channels 3/4 now belong to USART10. */
+	/delete-property/ dmas;
+	/delete-property/ dma-names;
+};
+
+&rng {
+	status = "okay";
+};

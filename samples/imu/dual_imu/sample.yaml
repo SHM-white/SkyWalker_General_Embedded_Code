@@ -1,6 +1,6 @@
 sample:
-  name: SkyWalker onboard and RS485 IMU with VOFA
-  description: BMI088 EKF and heater together with DM-IMU-L1 on rs485-2
+  name: SkyWalker onboard and CAN IMU with VOFA
+  description: BMI088 EKF and heater together with DM-IMU-L1 on CAN3
 common:
   tags: [skywalker, hardware, imu]
   platform_allow: [dm_mc02/stm32h723xx]
