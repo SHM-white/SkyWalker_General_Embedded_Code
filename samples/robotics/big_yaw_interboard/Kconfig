@@ -1,0 +1,7 @@
+mainmenu "Manual interboard big Yaw without IMU"
+
+config BIG_YAW_INTERBOARD_CHASSIS_ROLE
+    bool "Build the chassis board driving the real big-Yaw motor"
+    default n
+
+source "Kconfig.zephyr"

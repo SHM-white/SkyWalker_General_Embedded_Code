@@ -1,0 +1,8 @@
+/* USART1: PA9 TX -> peer PA10 RX, PA10 RX <- peer PA9 TX; common GND.
+ * RC remains on the gimbal board's UART5; USART10 is the log console.
+ * Motor ownership follows ../common/chassis_can.hpp (currently CAN3).
+ */
+/ { aliases { interboard-uart = &usart1; }; };
+&usart1 { current-speed = <460800>; };
+&can3 { status = "okay"; bitrate = <1000000>; };
+&rng { status = "okay"; };

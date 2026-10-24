@@ -23,17 +23,17 @@ constexpr std::int64_t kControlPeriodMs = 5;
 constexpr float kSpeedSafetyMarginRadS = 0.5f;
 constexpr float kTemperatureCutoffC = 60.0f;
 
-float targetVelocityRadS() {
-    return 0.5f;
+float targetVelocityRadS(int64_t dt) {
+    return 5.0f * std::sin(float(dt) / 1000.0f);
 }
 
 } // namespace
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    static skywalker::samples::dm::Session session{DEVICE_DT_GET(DT_NODELABEL(can1)),
+    static skywalker::samples::dm::Session session{DEVICE_DT_GET(DT_NODELABEL(can3)),
                                                    skywalker::motor::dm::j4310Velocity(
-                                                       {.id = 1,
+                                                       {.id = 6,
                                                         .master_id = 0x11,
                                                         .position_max_rad = 12.5f,
                                                         .velocity_max_rad_s = 45.0f,
@@ -54,7 +54,7 @@ int main() {
     for (;;) {
         const auto now = k_uptime_get();
         const bool requested = true;
-        const float target = targetVelocityRadS();
+        const float target = targetVelocityRadS(now - started_ms);
         const int request_error = requested ? session.motor.enable() : session.motor.disable();
         if (request_error < 0)
             last_call_error = request_error;
