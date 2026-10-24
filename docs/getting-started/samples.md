@@ -92,6 +92,7 @@ DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致
 | [samples/robotics/inertial_gimbal](../../samples/robotics/inertial_gimbal/README.md) | 头部 IMU → 惯性适配 → 机械双轴，锁 Pitch/释放 Pitch 配置 | 是，安装确认默认关闭 |
 | [samples/robotics/gimbal_shared_can](../../samples/robotics/gimbal_shared_can/README.md) | 小云台、双摩擦轮、拨盘共享 DJI CAN，独立故障组 | 是，无弹空载，默认连接未配置 |
 | [samples/robotics/big_yaw](../../samples/robotics/big_yaw/README.md) | 大 Yaw 独立 MIT 软件速度环，连续旋转 | 是，默认连接未配置 |
+| [samples/robotics/big_yaw_interboard](../../samples/robotics/big_yaw_interboard/README.md) | 无 IMU：云台板 DR16 拨轮经板间通信控制底盘板真实大 Yaw | 是，双角色，沿用中央接线确认 |
 | [samples/robotics/dual_yaw_centering](../../samples/robotics/dual_yaw_centering/README.md) | 双板头部惯性保持、中心外环与大 Yaw 内环 | 是，双角色，默认连接未配置 |
 | [samples/robotics/four_swerve](../../samples/robotics/four_swerve/README.md) | 四舵四驱、完整 SwerveChassis、双 CAN 统一提交 | 是，默认连接未配置 |
 | [samples/robotics/chassis_power](../../samples/robotics/chassis_power/README.md) | 裁判预算、真实功率测量合同和八电机执行器 | 是，完整功率标定默认关闭 |
