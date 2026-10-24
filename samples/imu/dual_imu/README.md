@@ -18,10 +18,13 @@ start 返回值仅表示线程启动结果；初始化结果和温控诊断用 s
 | 加热 | TIM3 CH4 / PB1，PWM 周期 20ms，目标 50℃、测量上限 65℃ |
 | 外置 IMU | DM-IMU-L1，DT_ALIAS(imu_can) → CAN3，PD12 RX、PD13 TX |
 | 外置 CAN | 1 Mbit/s、经典 CAN 标准帧，默认主动上报；从机 ID=0x1、主机/反馈 ID=0x11 |
+| 外置供电 | PC15 / Power_5V_EN，高电平开启；sample 启动时自动使能 CAN3 接口所在的对外 5V 电源 |
 | VOFA | 主控 USB CDC，JustFloat；样例 overlay 覆盖 telemetry-uart alias |
 | 日志 | USART10，保持板级 console 设置 |
 
 CAN3 由外置 IMU 数据源独占。默认主动模式只接收测量，不发送请求；可用 can_passive.conf 切换为请求/应答模式。驱动不发送配置、归零或校准指令。
+
+app.overlay 中的 `external_5v` 使用 `regulator-boot-on`，在 Zephyr 设备初始化阶段自动拉高 PC15，无需 main() 手动开电。根据[厂家原理图](https://github.com/dmBots/DM-MC02/blob/master/drawings/2d/schematics/CtrBoard-H7_V1.0-240124.pdf)，此对外 5V 电源与部分 UART、PWM 接口共用，开启后这些接口也会获得供电；它由主电源降压产生，仅接 USB 不能提供这一路对外 5V。XT30 的 power1 / power2 仍按板级配置默认关闭。此设置仅作用于本 sample。
 
 ## 上电与运行
 

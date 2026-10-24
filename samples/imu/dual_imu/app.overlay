@@ -3,6 +3,16 @@
         telemetry-uart = &cdc_acm_uart0;
         imu-can = &can3;
     };
+
+    // MC02 Power_5V_EN: shared external 5 V rail, including CAN3 connector power.
+    external_5v: regulator-external-5v {
+        compatible = "regulator-fixed";
+        regulator-name = "EXTERNAL_5V";
+        regulator-min-microvolt = <5000000>;
+        regulator-max-microvolt = <5000000>;
+        enable-gpios = <&gpioc 15 GPIO_ACTIVE_HIGH>;
+        regulator-boot-on;
+    };
 };
 
 &can3 { status = "okay"; bitrate = <1000000>; };
