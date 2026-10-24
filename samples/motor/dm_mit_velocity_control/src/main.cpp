@@ -20,9 +20,9 @@ LOG_MODULE_REGISTER(dm_mit_velocity_control, LOG_LEVEL_INF);
 
 namespace {
 constexpr std::int64_t kControlPeriodMs = 5;
-constexpr float kSoftwareTorqueAbsMaxNm = 0.5f;
-constexpr float kRequestedVelocityAbsMaxRadS = 3.0f;
-constexpr float kVelocityCutoffRadS = 10.0f;
+constexpr float kSoftwareTorqueAbsMaxNm = 0.1f;
+constexpr float kRequestedVelocityAbsMaxRadS = 0.10f;
+constexpr float kVelocityCutoffRadS = 1.0f;
 constexpr float kTemperatureCutoffC = 60.0f;
 
 static_assert(kRequestedVelocityAbsMaxRadS > 0.0f && kRequestedVelocityAbsMaxRadS < kVelocityCutoffRadS,
@@ -36,11 +36,11 @@ float targetVelocityRadS() {
 
 int main() {
     const device *uart = DEVICE_DT_GET(VOFA_UART_NODE);
-    const device *can = DEVICE_DT_GET(DT_NODELABEL(can1));
+    const device *can = DEVICE_DT_GET(DT_NODELABEL(can3));
     if (!device_is_ready(can))
         return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dm::j4310Mit({
-        .id = 1,
+        .id = 6,
         .master_id = 0x11,
         .position_max_rad = 12.5f,
         .velocity_max_rad_s = 30.0f,
@@ -56,8 +56,8 @@ int main() {
                  config.loop = []() {
                      control_motor_velocity_config config{};
                      config.regulator.feedback = {
-                         .kp = 0.02f,
-                         .ki = 0.15f,
+                         .kp = 0.002f,
+                         .ki = 0.0f,
                          .kd = 0.0f,
                          .derivative_tau_s = 0.0f,
                          .integral_min = -0.3f,

@@ -1,2 +1,13 @@
 /* DM MIT ID1 / master 0x11 and its limits are configured in src/main.cpp. */
-/ {};
+/ {
+    aliases {
+        telemetry-uart = &cdc_acm_uart0;
+    };
+};
+
+&zephyr_udc0 {
+    cdc_acm_uart0: cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "VOFA";
+    };
+};
