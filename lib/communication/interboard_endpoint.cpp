@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <zephyr/random/random.h>
@@ -221,18 +222,35 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                                                                                           : SafetyAction::Active;
                     return InterBoardCodec::encodeChassisControl(control, seq, bytes, cap);
                 });
-            if (next.online && isFresh(outgoing.big_yaw_request.stamp, now, config_.command_timeout_ms) &&
-                (outgoing.big_yaw_request.mode == BigYawMode::Disabled || !have_big_yaw_baseline_ ||
-                 sequenceAfter(outgoing.big_yaw_request.stamp.sequence, big_yaw_baseline_sequence_)))
-                append(MessageId::BigYawRequest, [&](auto seq, auto *bytes, auto cap) {
-                    auto request = outgoing.big_yaw_request;
-                    const auto elapsed = age(request.stamp, now);
-                    request.source_age_ms = addAge(request.source_age_ms, elapsed);
-                    request.command_age_ms = addAge(request.command_age_ms, elapsed);
-                    request.permission_age_ms = age(request.permission.stamp, now);
-                    request.receiver_boot_id = peer_boot_;
-                    return InterBoardCodec::encodeBigYawRequest(request, seq, bytes, cap);
-                });
+            append(MessageId::BigYawRequest, [&](auto seq, auto *bytes, auto cap) {
+                auto request = outgoing.big_yaw_request;
+                const auto &authority = outgoing.operator_control;
+                const bool authorized = next.online && authority.run_allowed && !authority.emergency_stop &&
+                                        authority.receiver_boot_id == peer_boot_ &&
+                                        forwardedFresh(authority.stamp, authority.source_age_ms, now,
+                                                       config_.command_timeout_ms);
+                const bool current = forwardedFresh(request.stamp, request.source_age_ms, now,
+                                                    config_.command_timeout_ms) &&
+                                     forwardedFresh(request.stamp, request.command_age_ms, now,
+                                                    config_.command_timeout_ms) &&
+                                     (!have_big_yaw_baseline_ ||
+                                      sequenceAfter(request.stamp.sequence, big_yaw_baseline_sequence_));
+                const auto elapsed = age(request.stamp, now);
+                request.source_age_ms = addAge(request.source_age_ms, elapsed);
+                request.command_age_ms = addAge(request.command_age_ms, elapsed);
+                request.permission_age_ms = age(request.permission.stamp, now);
+                request.receiver_boot_id = peer_boot_;
+                if (!authorized || !current || request.mode != BigYawMode::FollowCenter ||
+                    !request.permission.valid || !request.permission.enabled ||
+                    !std::isfinite(request.target_rate_rad_s)) {
+                    request.mode = BigYawMode::Disabled;
+                    request.target_rate_rad_s = 0;
+                    request.permission.enabled = false;
+                }
+                // Keep sending stops at the normal cadence, even without a peer
+                // heartbeat or a live producer. Never renew producer stamps/ages.
+                return InterBoardCodec::encodeBigYawRequest(request, seq, bytes, cap);
+            });
             append(MessageId::ChassisConstraint, [&](auto seq, auto *bytes, auto cap) {
                 ChassisConstraint constraint{};
                 constraint.output = outgoing.referee.robot.chassis_output;

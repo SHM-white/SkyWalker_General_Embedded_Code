@@ -70,6 +70,14 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
         if (ret == 0 &&
             (!big_yaw_request_.stamp.valid || sequenceAfter(r.stamp.sequence, big_yaw_request_.stamp.sequence)))
             big_yaw_request_ = r;
+        else if (ret == 0 && r.mode == BigYawMode::Disabled &&
+                 r.stamp.sequence == big_yaw_request_.stamp.sequence) {
+            // A newer wire frame may revoke the same producer request. Do not
+            // renew its age or allow an equal-sequence frame to re-enable it.
+            big_yaw_request_.mode = BigYawMode::Disabled;
+            big_yaw_request_.target_rate_rad_s = 0;
+            big_yaw_request_.permission.enabled = false;
+        }
         break;
     }
     case MessageId::BigYawFeedback:

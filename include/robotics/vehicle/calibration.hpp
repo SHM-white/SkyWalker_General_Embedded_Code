@@ -66,7 +66,7 @@ inline constexpr float chassis_steer_scale = 1, chassis_drive_scale = 1;
 inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us = 1000000;
 
 inline constexpr float two_pi = 6.2831853071795864769f;
-// 调参：小 Yaw 真实安全行程端点，ticks（8192 ticks/转）；按机构测量，保留端点余量。
+// 调参：小 Yaw 原始编码器上下限，ticks（8192 ticks/转）；当前为全量程，非实测机械安全端点。
 inline constexpr std::uint16_t yaw_low_ticks = 5770, yaw_high_ticks = 7340;
 inline constexpr float yaw_min_rad = (yaw_low_ticks - small_yaw.encoder_zero_ticks) * two_pi / 8192;
 inline constexpr float yaw_max_rad = (yaw_high_ticks - small_yaw.encoder_zero_ticks) * two_pi / 8192;
