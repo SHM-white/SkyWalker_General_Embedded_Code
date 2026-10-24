@@ -1,8 +1,11 @@
 / {
     aliases {
         telemetry-uart = &cdc_acm_uart0;
+        imu-can = &can3;
     };
 };
+
+&can3 { status = "okay"; bitrate = <1000000>; };
 
 &zephyr_udc0 {
     cdc_acm_uart0: cdc_acm_uart0 {

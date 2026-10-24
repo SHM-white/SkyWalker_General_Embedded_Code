@@ -2,13 +2,13 @@
 
 源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
-BMI088 和达妙 RS485 共用带时间戳的快照，不同来源独立采集与独立诊断。
+BMI088、达妙 RS485 和 CAN 共用带时间戳的快照，不同来源独立采集与独立诊断。
 
 **接入状态：接入 / 配置未完成。** 板载与外置统一采集已实现，整车云台装配头部外置 IMU 与惯性适配；imu_mounting_confirmed 默认 false，姿态质量与参考仍须实测。
 
 ## 职责与关联
 
-ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度；ImuReceiver 独占采集循环并可管理 ImuHeater。BMI088 可挂 QuaternionEkf 估计姿态；RS485 直接使用设备主动上报的四元数。
+ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度；ImuReceiver 独占采集循环并可管理 ImuHeater。BMI088 可挂 QuaternionEkf 估计姿态；RS485 通过请求应答读取设备四元数；CAN 支持主动上报和被动轮询。
 
 输入 / 依赖：[板级：MC02 / RoboMaster Type-C](boards.md)、[姿态 EKF 与通用 Kalman / Matrix](kalman.md)、[PID、前馈、斜坡与角度工具](pid.md)、[异步 UART 与 DMA](uart.md)
 
@@ -56,7 +56,7 @@ Bmi088Imu::Bmi088Imu(const device *accel, const device *gyro, const Config &c, c
 DmImuRs485Source::DmImuRs485Source(const device *uart, communication::AsyncUart::DmaBuffers &dma, const Config &c); int DmImuRs485Source::init(); int DmImuRs485Source::service(); int DmImuRs485Source::resetReference()
 ```
 
-消费DM-IMU-L1主动串行帧，应用缩放和安装旋转；遇UART故障可内部重试。resetReference在已知设备复位/清零/标定后递增epoch并撤销旧姿态，不向设备发送配置命令。
+请求并消费 DM-IMU-L1 固件 2.x 的 RS485 应答，应用缩放和安装旋转；遇UART故障可内部重试。resetReference在已知设备复位/清零/标定后递增epoch并撤销旧姿态，不向设备发送配置命令。
 
 | 参数 | 含义与边界 |
 | --- | --- |
@@ -70,7 +70,7 @@ DmImuRs485Source::DmImuRs485Source(const device *uart, communication::AsyncUart:
 
 **线程 / 时序：** 一个所有者调用；UART ISR只推进AsyncUart事件，不在ISR解析或算姿态。接收线程运行时不得外部直接resetReference。
 
-**错误 / 边界：** -EINVAL：配置错误；-EALREADY：重复init；-EACCES：尚未初始化；-EAGAIN：无新帧/等待恢复；传输溢出丢掉半帧并记录transportGap；CRC/帧错误在diagnostics报告。
+**错误 / 边界：** -EINVAL：配置错误；-EALREADY：重复init；-EACCES：尚未初始化；-EAGAIN：无新帧/等待恢复；传输溢出丢掉半帧并记录transportGap；帧错误在diagnostics报告，当前 RS485 帧没有 CRC。
 
 ### 4. ImuReceiver::ImuReceiver(ImuSource &source, const Config &config, ImuHeater *heater = nullptr); int ImuReceiver::start()
 
@@ -223,12 +223,12 @@ int main() {
 | --- | --- |
 | `CONFIG_SKYWALKER_IMU / BMI088 / RECEIVER` | 基础、板载传感器源、独立采集线程分别按需开启。 |
 | `CONFIG_SKYWALKER_ATTITUDE_EKF` | 为BMI088生成姿态；不依赖线性Kalman或Matrix库。 |
-| `CONFIG_SKYWALKER_IMU_DM_RS485` | 依赖UART_TRANSPORT并选择DM主动协议；设备单位、主动输出和速率需工具配置。 |
+| `CONFIG_SKYWALKER_IMU_DM_RS485` | 依赖 UART_TRANSPORT，使用固件 2.x 请求应答协议；设备地址与速率需工具配置。 |
 | `CONFIG_SKYWALKER_IMU_HEATER` | 需PWM，选择控制算法库；控制与source独立，但可由同一receiver持有。 |
 | `Freshness` | 默认加速度/角速度/姿态20ms、温度1s；heater自己另外要求温度200ms内新鲜。 |
 | `RX_STACK_SIZE / RX_PRIORITY` | 默认8192字节/优先级6；每个receiver独立线程，涉及浮点时按FPU配置分配寄存器上下文。 |
 
-- DM CAN 类保留纯虚init/service/snapshot，不能直接实例化；没有CAN接收器或对应Kconfig。
+- `DmImuCanSource(const Config &)` 已实现 `init/service/snapshot/resetReference`；开启 `CONFIG_SKYWALKER_IMU_DM_CAN`，默认主动接收，可选请求应答，需独占 CAN 控制器。完整协议与配置见 [CAN 驱动说明](../modules/drivers/imu.md#dm-imu-l1-can)。
 - 两颗IMU不代表已融合。reference身份与epoch必须匹配消费者约定，不能随意相减不同零点的yaw。
 - fresh_mask按字段变化；Running但Orientation不新鲜时不能使用上次四元数继续控制。
 - ImuReceiver没有stop或析构协议，main栈上的短寿命对象不可交给它。
@@ -245,6 +245,7 @@ int main() {
 - [接收线程API](../../include/drivers/imu/imu_receiver.hpp)
 - [BMI088输入](../../drivers/imu/bmi088_imu.cpp)
 - [RS485输入](../../drivers/imu/dm_imu_rs485.cpp)
+- [CAN输入](../../drivers/imu/dm_imu_can.cpp)
 - [加热保护](../../drivers/imu/imu_heater.cpp)
 - [双IMU样例](../../samples/imu/dual_imu/src/main.cpp)
 

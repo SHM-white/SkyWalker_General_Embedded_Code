@@ -1,6 +1,10 @@
 #pragma once
 #include <drivers/imu/bmi088_imu.hpp>
+#if defined(CONFIG_SKYWALKER_IMU_DM_CAN)
+#include <drivers/imu/dm_imu_can.hpp>
+#else
 #include <drivers/imu/dm_imu_rs485.hpp>
+#endif
 #include <drivers/imu/imu_heater.hpp>
 #include <drivers/imu/imu_receiver.hpp>
 #include <robotics/vehicle/calibration.hpp>
@@ -18,7 +22,9 @@ inline constexpr skywalker::imu::ImuReceiver::Config onboard_receiver{.poll_inte
 inline constexpr skywalker::imu::ImuReceiver::Config external_receiver{.poll_interval_us = 1000, .priority = 6};
 inline const device *accel = DEVICE_DT_GET(DT_ALIAS(accel0));
 inline const device *gyro = DEVICE_DT_GET(DT_ALIAS(gyro0));
+#if !defined(CONFIG_SKYWALKER_IMU_DM_CAN)
 inline const device *external_uart = DEVICE_DT_GET(DT_ALIAS(rs485_2));
+#endif
 inline const device *telemetry_uart = DEVICE_DT_GET(DT_ALIAS(telemetry_uart));
 inline constexpr skywalker::control::QuaternionEkf::Config estimator{};
 inline constexpr skywalker::imu::Bmi088Imu::Config onboard{.reference = chassis_board ? calibration::chassis_reference
@@ -27,6 +33,17 @@ inline constexpr skywalker::imu::Bmi088Imu::Config onboard{.reference = chassis_
                                                                                  ? calibration::chassis_sensor_to_body
                                                                                  : calibration::carrier_sensor_to_body,
                                                            .freshness = {20000, 20000, 20000, 200000}};
+#if defined(CONFIG_SKYWALKER_IMU_DM_CAN)
+inline const skywalker::imu::DmImuCanSource::Config external{
+    .can = DEVICE_DT_GET(DT_ALIAS(imu_can)),
+    .feedback_id = CONFIG_SKYWALKER_IMU_DM_CAN_FEEDBACK_ID,
+    .slave_id = CONFIG_SKYWALKER_IMU_DM_CAN_SLAVE_ID,
+    .mode = IS_ENABLED(CONFIG_SKYWALKER_IMU_DM_CAN_PASSIVE)
+                ? skywalker::imu::DmImuCanSource::Mode::RequestReply
+                : skywalker::imu::DmImuCanSource::Mode::ActiveReport,
+    .reference = calibration::head_reference,
+    .sensor_to_body = calibration::head_sensor_to_body};
+#else
 inline constexpr skywalker::imu::DmImuRs485Source::Config external{.protocol = {1, 20000},
                                                                    .reference = calibration::head_reference,
                                                                    .sensor_to_body = calibration::head_sensor_to_body,
@@ -35,6 +52,7 @@ inline constexpr skywalker::imu::DmImuRs485Source::Config external{.protocol = {
                                                                    .angular_velocity_scale = 1,
                                                                    .response_timeout_us = 50000,
                                                                    .max_retries = 2};
+#endif
 inline const skywalker::imu::ImuHeater::Config heater{.pwm = PWM_DT_SPEC_GET(DT_ALIAS(imu_heater)),
                                                       .target_c = 50,
                                                       .maximum_c = 65};

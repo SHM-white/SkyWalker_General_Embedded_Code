@@ -8,10 +8,14 @@ LOG_MODULE_REGISTER(dual_imu_bench, LOG_LEVEL_INF);
 namespace imu = skywalker::imu;
 namespace core = skywalker::core;
 namespace {
-static skywalker::communication::AsyncUart::DmaBuffers external_dma __nocache;
 skywalker::control::QuaternionEkf estimator(bench::estimator);
 imu::Bmi088Imu onboard_source(bench::accel, bench::gyro, bench::onboard, &estimator);
+#if defined(CONFIG_SKYWALKER_IMU_DM_CAN)
+imu::DmImuCanSource external_source(bench::external);
+#else
+static skywalker::communication::AsyncUart::DmaBuffers external_dma __nocache;
 imu::DmImuRs485Source external_source(bench::external_uart, external_dma, bench::external);
+#endif
 imu::ImuHeater heater(bench::heater);
 imu::ImuReceiver onboard(onboard_source, bench::onboard_receiver, &heater);
 imu::ImuReceiver external(external_source, bench::external_receiver);

@@ -7,6 +7,8 @@
         interboard-uart = &usart1;
         vision-uart = &uart7;
         referee-uart = &usart3;
+        /* Dedicated on the gimbal board; chassis CAN3 remains a motor bus. */
+        imu-can = &can3;
     };
 };
 &usart1 { current-speed = <460800>; };

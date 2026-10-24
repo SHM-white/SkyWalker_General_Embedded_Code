@@ -109,7 +109,7 @@ window.SKYWALKER_MODULES = [
     "category": "驱动与感知",
     "status": "partial",
     "summary": "BMI088 和达妙 RS485 共用带时间戳的快照，不同来源独立采集与独立诊断。",
-    "responsibility": "ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度；ImuReceiver 独占采集循环并可管理 ImuHeater。BMI088 可挂 QuaternionEkf 估计姿态；RS485 直接使用设备主动上报的四元数。",
+    "responsibility": "ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度；ImuReceiver 独占采集循环并可管理 ImuHeater。BMI088 可挂 QuaternionEkf 估计姿态；RS485 通过请求应答读取设备四元数；CAN 支持主动上报和被动轮询。",
     "statusNote": "板载与外置统一采集已实现，整车云台装配头部外置 IMU 与惯性适配；imu_mounting_confirmed 默认 false，姿态质量与参考仍须实测。",
     "depends": [
       "boards",
