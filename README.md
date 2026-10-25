@@ -7,7 +7,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 ```text
 应用 / 样例
 ├── samples/                    独立可构建的硬件验证项目
-└── applications/               双主控底盘 / 云台应用骨架
+└── applications/               独立装配的双主控手动底盘 / 云台应用
         │
         ├── lib/                可复用算法、通信和机器人决策层
         └── drivers/            Zephyr 设备驱动与 CAN 电机驱动
@@ -24,7 +24,8 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 | 第一次配置、构建和烧录     | [快速开始](docs/getting-started/quickstart.md) → [样例索引](docs/getting-started/samples.md)                                              |
 | 理解工程分层和硬件         | [架构与构建](docs/getting-started/architecture.md) → [板级支持](docs/getting-started/boards.md)                                                |
 | 调电机与控制环             | [DJI](docs/modules/drivers/motor-dji.md) / [达妙](docs/modules/drivers/motor-dm.md) → [电机工作链路](docs/guides/motor-workflow.md) |
-| 做遥控、板间通信和整机应用 | [通信](docs/modules/communication/communication.md) → [机器人算法](docs/modules/robotics/robotics.md) → [应用骨架](docs/applications/dual-controller.md)           |
+| 做遥控、板间通信和整机应用 | [通信](docs/modules/communication/communication.md) → [机器人算法](docs/modules/robotics/robotics.md) → [双主控应用](docs/applications/dual-controller.md)           |
+| 按当前实车接线逐模块上车 | [独立上车入口](samples/bringup/README.md) → [共享配置与资源](config/vehicle/installed/README.md) → [板间 v4 契约](docs/protocols/interboard-v4.md) |
 | 查现场问题                 | [故障排查](docs/guides/troubleshooting.md)                                                                               |
 | 查设计记录和专题分析       | [开发专题索引](docs/dev/README.md)                                                                                   |
 
@@ -32,7 +33,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 在线阅读：[GitHub Pages 架构与接口手册](https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/)；本地启动和私有站点见 [架构浏览器](docs/architecture-browser/README.md)。
 
-本文与接口手册对齐 `main@99a97c9`（2026-10-05）：共用整车运行时、板间 v4、持续目标与逐轴自动恢复。单舵轮调试进展不代表整车已验收。
+本轮应用与上车文档对齐固件 `48984ed90898`（2026-10-25）：21 个独立上车工程、共享实车配置、DAPLink 单串口诊断，以及各自装配的双主控手动应用。此前 27 个相关工程已编译、链接通过，尚未测试、烧录或实板验证；视觉、实测功率闭环与有载发射仍待接入。
 
 ## 当前能力
 
@@ -51,7 +52,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - 达妙：DM-J4310-2EC V1.1；支持 MIT、位置-速度、速度三种原生 CAN 模式，以及 Enable/Disable/ClearError/SaveZero。
 - 统一 CAN 电机驱动：`CanBus` 管物理传输，`Motor` 管端点，`Group` 提供显式批量启停，不传播成员故障；`VelocityMotor`、`PositionMotor` 复用纯 C 控制算法并暂存目标。
 - 纯 C 控制库：PID、前馈、复合前馈 PID、斜坡限幅、角度工具、速度环和位置-速度串级。
-- IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM-IMU-L1 通过主动 RS485 帧接入统一快照。
+- IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM IMU 支持 RS485 和 CAN 来源。当前实车云台与惯性上车入口使用 CAN3 主动四元数反馈。
 
 ### 通信与机器人算法
 
@@ -60,6 +61,16 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - 裁判系统：RM2026 V1.3 profile、CRC8/CRC16、权限和功率快照。
 - 板间协议：统一 v4 帧格式、CRC16、生产者序号、boot_id 和原始输入年龄；电机独立自动恢复。
 - 机器人算法：CommandArbiter 同步仲裁；CommandManager 注册来源并后台发布快照；公开 GimbalExecutor、ChassisExecutor、BigYawExecutor 和 ShooterExecutor 消费新鲜输入；惯性适配与舵轮逐轴计算，Motor/CAN 独立恢复。
+
+## 当前实车入口
+
+从 [上车入口表](samples/bringup/README.md) 选择目录，每个工程使用独立构建目录，不叠加角色宏或 `EXTRA_CONF_FILE`。先诊断与输入观察，再单轴、组合和双板。当前诊断候选映射是 UART7，经 DAPLink 虚拟串口观察，不依赖目标板 USB；实际接线仍需现场确认。
+
+```bash
+west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_io -d ../build/bringup/gimbal_io
+```
+
+修改 [diagnostics_config.hpp](include/robotics/vehicle/diagnostics_config.hpp) 中唯一的 `diagnostic_output` 后重编译烧录，即可选择 Log 或 Vofa；同一 UART、115200 8N1、运行期间固定模式。VOFA 的 19 通道布局、有效位与阻塞原因见入口说明。
 
 ## 构建一个样例
 
@@ -107,8 +118,10 @@ skywalker_code/
 │   ├── robotics/               命令、安全、舵轮、云台算法
 │   ├── matrix/                 CMSIS-DSP 矩阵封装和可选 Flash 存储
 │   └── vofa/                   VOFA+ JustFloat
-├── samples/                    单一功能和真实外设台架样例
-├── applications/               sentry_chassis / sentry_gimbal 应用骨架
+├── config/vehicle/installed/   云台 / 底盘共享 overlay 与基础配置
+├── samples/bringup/            21 个固定装配的实车上车工程
+├── samples/                    其他单一功能与教学台架样例
+├── applications/               各自装配的 sentry_chassis / sentry_gimbal 手动应用
 ├── tests/motor/regression/     电机软件回归测试
 ├── docs/                       当前文档与原始 PDF 手册
 ├── west.yml                    Zephyr 与依赖 revision
@@ -122,7 +135,7 @@ skywalker_code/
 3. `motor::Feedback::position_rad` 是首帧归零的连续输出轴角度，可在禁用状态通过 `reseedPosition()` 建立已知坐标；GM6020 的 `absolute_position_rad` 是固定零点单圈角。
 4. 同一物理 CAN 只创建一个 `CanBus`：各 `Motor` 暂存目标后，由总线 `commit()` 提交；只有机械联动的电机才放入同一个 `Group`。
 5. `disable()` 立即撤销软件输出许可，安全帧异步发送；这不等于机械制动，也不切断板上动力电源。运行意图仍有效时，每轴反馈恢复后自动执行最新目标；用户主动停止会取消旧目标。
-6. `samples/` 是已存在的验证入口；`applications/sentry_*` 是需要按真实机器人修改 overlay 和 `src/board_config.hpp` 的应用骨架，不应被描述为开箱即用整机固件。
+6. 实车逐模块入口使用 `samples/bringup/`；两个 `applications/sentry_*` 分别拥有自己的 `main.cpp`，共享 `config/vehicle/installed/` 和 `include/robotics/vehicle/` 参数，不再调用公共整车 `run()`。其他教学样例仍可能使用独立接线与 USB 观测，不能直接当作同配置的上车固件。
 7. `tests/` 提供电机、算法、命令服务、执行与视觉/IMU 软件测试入口；通过情况以 CI 为准，硬件链路另做台架验证。
 
 电机调试前必须让机构悬空或脱离负载，准备物理断电手段，并先从低限幅开始。完整的安全检查见 [12 故障排查](docs/guides/troubleshooting.md)。

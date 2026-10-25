@@ -69,7 +69,23 @@ west flash -d build/dji_position
 &can1 { status = "okay"; };
 ```
 
-应用通过 `DEVICE_DT_GET(DT_NODELABEL(can1))` 获取物理 CAN，电机对象由 `motor::dji::gm6020(...)` 等工厂构造。`applications/sentry_*` 的 `board_config.hpp` 保留 `connections_configured=false` 安全默认值，实机接线和参数确认后再启用。
+应用通过 `DEVICE_DT_GET(DT_NODELABEL(can1))` 获取物理 CAN，电机对象由 `motor::dji::gm6020(...)` 等工厂构造。两个 `applications/sentry_*` 与新的上车工程共享 `include/robotics/vehicle/` profile 和标定，不维护应用私有 `board_config.hpp`。当前中央连接/IMU/发射确认值为 true、功率模型为 false；这些值仍需现场核对，不能当作验收结果。
+
+### 当前实车共享 overlay
+
+上面的 console/telemetry 映射是板级默认值。`samples/bringup/` 和两个最终应用固定包含 [config/vehicle/installed](../../config/vehicle/installed/README.md) 的两板 overlay，实际使用：
+
+| 用途 | 云台板 | 底盘板 |
+| --- | --- | --- |
+| 单口诊断 | UART7，PE8 TX / PE7 RX，115200 8N1，无 DMA | 同左 |
+| 板间 UART | USART10，PE3 TX / PE2 RX，460800，DMA 通道 3/4 | USART1，460800，DMA 通道 3/4 |
+| CAN1 | 小 Yaw | 四舵向 |
+| CAN2 | Pitch | 四轮驱 |
+| CAN3 | DM 头部 IMU 独占 | 大 Yaw |
+
+云台 USART1 释放 DMA 3/4 给 USART10；板载 SPI2 的 DMA1 通道 1/2 保留。新配置关闭 console/shell/banner，删除 `telemetry-uart` 并使用 `diagnostic-uart`，不提供 `vision-uart`。UART7 是 DAPLink 诊断候选，实际接线尚需确认，不能同时交给视觉或第二个发送者。各阶段只启动需要的对象，设备树中的其他设备声明不会自动使能电机。
+
+固定模式选择见 [诊断配置](../../include/robotics/vehicle/diagnostics_config.hpp)，工程导航见 [独立上车入口](../../samples/bringup/README.md)。
 
 ## 5. 设备树配置排查
 

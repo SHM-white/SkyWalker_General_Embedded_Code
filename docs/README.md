@@ -2,13 +2,15 @@
 
 文档按当前源码边界组织：工程与板级入口、可复用模块、跨模块工作流、整机应用。旧的 docs/01…19 文件名保留为迁移提示；正文以本目录链接指向的新页面为准。设计记录和待实施方案仍放在 dev/，不能当作当前 API 契约。
 
-当前维护基线：`main@99a97c9`（2026-10-05）。在线浏览器读取同一套正文；实机验收、待标定配置与已有软件能力分别说明。
+本轮应用、实车配置和诊断文档对齐固件 `48984ed90898`（2026-10-25）。21 个独立上车工程、两个手动应用和四个受迁移影响的旧样例已完成共 27 项编译、链接；未执行测试、烧录或实板验证。未变化模块的接口页保留各自历史基线，设计记录不自动升级为实机验收。
 
 ## 按任务开始
 
 | 目标 | 阅读路线 |
 |---|---|
 | 首次构建和烧录 | [快速开始](getting-started/quickstart.md) → [板级支持](getting-started/boards.md) → [样例索引](getting-started/samples.md) |
+| 当前实车逐模块上车 | [独立上车入口表](../samples/bringup/README.md) → [共享实车配置](../config/vehicle/installed/README.md) → [诊断与观测](guides/debugging.md) |
+| 对接另一套底盘 / 云台 | [板间 v4 字节与物理量契约](protocols/interboard-v4.md) → [无输出板间观察](../samples/bringup/gimbal_link_observe/README.md) |
 | 直接查接口，不开服务 | [独立 Markdown 接口参考](api/README.md)；签名、参数、示例和时序均可直接阅读 |
 | 理解源码分层 | [架构与构建](getting-started/architecture.md) → [模块目录](modules/README.md) |
 | 控制 DJI / 达妙电机 | [公共电机模型](modules/drivers/motor.md) → [DJI](modules/drivers/motor-dji.md) / [达妙](modules/drivers/motor-dm.md) → [控制器](modules/control/motor-control.md) → [工作流](guides/motor-workflow.md)；旧代码见[迁移](guides/motor-migration.md) |
@@ -57,4 +59,5 @@
 - datasheets/ 保存电机、传感器、裁判系统和开发板 PDF；下载索引见 [DOWNLOAD_LINKS.txt](datasheets/DOWNLOAD_LINKS.txt)。
 - [架构与接口浏览器](architecture-browser/README.md) 提供当前双主控架构、最终上车蓝图、可点击模块关系、接口契约、调用示例和端到端链路；支持在页面内阅读本目录的 Markdown 正文及本地源码。运行 `bash docs/architecture-browser/run.sh`，打开脚本打印的地址。
 - [开发专题索引](dev/README.md) 收录设计方案、分析与待实施记录；以模块文档和源码判断当前状态。
-- samples/ 是独立验证入口；applications/sentry_* 是需按真实接线和安全策略配置的应用骨架。
+- `samples/bringup/` 是共享实车配置的固定上车入口；`applications/sentry_*` 各自装配手动整车。其他 `samples/` 保留教学与历史台架用法，接线及输出路径以各自 README 为准。
+- 共享接线、驱动后端与串口所有权见 [installed 配置](../config/vehicle/installed/README.md)；协议唯一规范入口为 [interboard-v4.md](protocols/interboard-v4.md)。视觉、功率实测与有载发射的接入状态单独登记。

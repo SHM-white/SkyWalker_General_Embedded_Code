@@ -2,6 +2,12 @@
 
 `samples/` 中的每个目录都是独立 Zephyr 应用，拥有自己的 `CMakeLists.txt`、`prj.conf`、overlay 和入口。样例用于功能验证和台架观察，不等同于完整机器人固件。
 
+## 0. 当前实车的独立上车工程
+
+现场使用优先从 [samples/bringup 入口表](../../samples/bringup/README.md) 选目录：诊断与 RC/CAN IMU 观察 → 小 Yaw/Pitch 单轴 → 机械/惯性双轴 → 板间只观察 → 大 Yaw/双 Yaw → 固定 FL/FR/RL/RR → 四轮直线与低速行走。共有 21 个独立工程，每个 main 只装配所需对象，不用角色宏或额外 conf 换机构。
+
+所有入口共享 [实车配置](../../config/vehicle/installed/README.md) 和 `include/robotics/vehicle/` 参数，诊断用 DAPLink 单口 Log/Vofa，模式由代码变量选定后重编译烧录。2026-10-25 的 27 项相关工程编译记录见入口表；实板输入、单机构与组合均待确认。其余本页样例用于学习模块或历史台架，不能由旧目录名推断接线与当前实车一致。
+
 ## 1. 基础与算法
 
 | 样例 | 作用 | 主要前提 |
@@ -87,17 +93,17 @@ DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致
 | [samples/robotics/execution_skeleton](../../samples/robotics/execution_skeleton/README.md) | 真实命令服务、独立消费者、生产停更与自动恢复 | 否，执行器模拟 |
 | `samples/robotics/yaw_gimbal` | GM6020 Yaw，Hold/Rate/AbsoluteAngle | 是，单电机 |
 | `samples/robotics/swerve` | 单物理舵轮：GM6020 舵向 + M3508 驱动 | 是，单模块 |
-| `samples/robotics/gimbal_control` | DJI + DM 双轴 Group 云台台架 | 是，双轴联动，默认连接未配置 |
-| [samples/robotics/command_gimbal](../../samples/robotics/command_gimbal/README.md) | CommandManager → 小 Yaw/Pitch 双轴机械执行器，统一总线提交 | 是，双 CAN，默认连接未配置 |
-| [samples/robotics/inertial_gimbal](../../samples/robotics/inertial_gimbal/README.md) | 头部 IMU → 惯性适配 → 机械双轴，锁 Pitch/释放 Pitch 配置 | 是，安装确认默认关闭 |
+| `samples/robotics/gimbal_control` | DJI + DM 双轴 Group 云台台架 | 是，双轴联动；确认值来自中央标定 |
+| [samples/robotics/command_gimbal](../../samples/robotics/command_gimbal/README.md) | CommandManager → 小 Yaw/Pitch 双轴机械执行器，统一总线提交 | 是，双 CAN；使用共享 PID/标定 |
+| [samples/robotics/inertial_gimbal](../../samples/robotics/inertial_gimbal/README.md) | 头部 IMU → 惯性适配 → 机械双轴，锁 Pitch/释放 Pitch 配置 | 是，当前使用 CAN3 头 IMU；安装待实板核对 |
 | [samples/robotics/gimbal_shared_can](../../samples/robotics/gimbal_shared_can/README.md) | 小云台、双摩擦轮、拨盘；`big_yaw.conf` 增加无 IMU 板间大 Yaw 手控 | 是，无弹空载，沿用中央接线确认 |
-| [samples/robotics/big_yaw](../../samples/robotics/big_yaw/README.md) | 大 Yaw 独立 MIT 软件速度环，连续旋转 | 是，默认连接未配置 |
+| [samples/robotics/big_yaw](../../samples/robotics/big_yaw/README.md) | 大 Yaw 独立 MIT 软件速度环，连续旋转 | 是，参数与实板状态见各 README |
 | [samples/robotics/big_yaw_interboard](../../samples/robotics/big_yaw_interboard/README.md) | 无 IMU：云台板 DR16 拨轮经板间通信控制底盘板真实大 Yaw | 是，双角色，沿用中央接线确认 |
-| [samples/robotics/dual_yaw_centering](../../samples/robotics/dual_yaw_centering/README.md) | 双板头部惯性保持、中心外环与大 Yaw 内环 | 是，双角色，默认连接未配置 |
-| [samples/robotics/four_swerve](../../samples/robotics/four_swerve/README.md) | 四舵四驱、完整 SwerveChassis、双 CAN 统一提交 | 是，默认连接未配置 |
+| [samples/robotics/dual_yaw_centering](../../samples/robotics/dual_yaw_centering/README.md) | 双板头部惯性保持、中心外环与大 Yaw 内环 | 是，历史双角色入口；优先新固定工程 |
+| [samples/robotics/four_swerve](../../samples/robotics/four_swerve/README.md) | 四舵四驱、完整 SwerveChassis、双 CAN 统一提交 | 是，参数与实板状态见各 README |
 | [samples/robotics/chassis_power](../../samples/robotics/chassis_power/README.md) | 裁判预算、真实功率测量合同和八电机执行器 | 是，完整功率标定默认关闭 |
 | [samples/robotics/shooter_bench](../../samples/robotics/shooter_bench/README.md) | 摩擦就绪、拨盘分度、单发/连发、恢复丢弃和卡滞 | 是，默认空载；loaded 条件缺失时禁用 |
-| [samples/robotics/vehicle_integration](../../samples/robotics/vehicle_integration/README.md) | 双板手动 → 视觉 → 发射阶段，复用机构执行器 | 是，默认连接未配置 |
+| [samples/robotics/vehicle_integration](../../samples/robotics/vehicle_integration/README.md) | 历史宏组合入口，保留原阶段配置，不再供两个应用共用运行体 | 是，参数与实板状态见各 README |
 
 典型构建：
 
@@ -114,16 +120,17 @@ west build -p -b dm_mc02/stm32h723xx -d build/swerve \
 
 键盘操作和默认 GPIO/CAN 配置见各 sample README 及 `src/board_config.hpp`。
 
-新增入口、配置变体、后续里程碑和实板验收记录见[逐级整车验证指南](../dev/项目优化与逐级整车验证样例实施指南.md)。上述索引描述代码入口，实板通过状态须以验收记录为准；单舵轮、视觉接收和历史设计方案不表示完成整车闭环。
+当前实车阶段和操作说明见[独立上车入口](../../samples/bringup/README.md)；[旧逐级整车验证指南](../dev/项目优化与逐级整车验证样例实施指南.md)仅作历史设计背景。上述索引描述代码入口，实板通过状态须以验收记录为准；单舵轮、视觉接收和历史设计方案不表示完成整车闭环。
 
 ## 6. applications 与 samples 的区别
 
 | 路径 | 状态 |
 |---|---|
-| `samples/` | 独立小项目，目标是验证一个驱动/协议/算法 |
-| `applications/sentry_chassis` | 复用整车运行入口：四舵轮与大 Yaw 独立执行和恢复，默认连接未配置 |
-| `applications/sentry_gimbal` | 复用整车运行入口：惯性云台、回中、仲裁和发射约束，默认连接未配置 |
+| `samples/bringup/` | 当前实车的 21 个固定装配入口，共享物理参数、纯配置和诊断 |
+| 其他 `samples/` | 教学或历史台架，接线、USB、角色配置以各样例为准 |
+| `applications/sentry_chassis` | 独立 main：四舵轮、大 Yaw、实际板间授权；不启用功率闭环 |
+| `applications/sentry_gimbal` | 独立 main：物理 RC、CAN3 头 IMU、惯性双轴与回中；不启动视觉/发射 |
 
-整机应用的配置和线程关系见 [15 应用骨架](../applications/dual-controller.md)；从遥控到执行器的调用顺序见 [模块联动](../applications/module-integration.md)。
+整机应用的配置和线程关系见 [双主控应用](../applications/dual-controller.md)；从遥控到执行器的调用顺序见 [模块联动](../applications/module-integration.md)。
 
 中央标定入口为 `include/robotics/vehicle/calibration.hpp`。所有新入口的源码 TODO 指向硬件端口、模式、机械参数、IMU 安装、索引/热量来源和实测性能；框架入口存在不代表实板通过。`command_gimbal` 另有裁判权限、视觉观察和视觉执行三种配置，视觉执行必须经过头部惯性参考适配。

@@ -1,10 +1,10 @@
 # VOFA、日志与一致快照：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+本轮实车诊断接口对齐固件 `48984ed90898`（2026-10-25）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 从同一帧快照解释来源、目标、许可、反馈和错误；JustFloat 有界排队，主机离线不阻塞控制。
 
-**接入状态：已有代码。** 单舵轮 16 通道，M2006 速度环 USB CDC 12 通道与反馈/CAN 前后快照诊断；详细通道见各样例 README。
+**接入状态：已有代码。** 实车独立工程与两个应用使用单一 DAPLink 诊断 UART，固定 Log/Vofa 模式、19 通道及有界队列。教学样例可继续使用 `lib/vofa`：单舵轮 16 通道、M2006 USB CDC 12 通道等，以各 README 为准。
 
 ## 职责与关联
 
@@ -14,7 +14,34 @@ VOFA 有界 JustFloat/调参行；Latest 与 SnapshotCache 交换值副本，应
 
 消费者：由应用或样例直接装配。
 
-## 接口契约
+## 实车统一诊断 API
+
+头文件：[diagnostics.hpp](../../include/robotics/vehicle/diagnostics.hpp)，命名空间 `skywalker::robotics::vehicle`。
+
+```cpp
+int Diagnostics::start(const char *application, const char *role,
+                       const char *limits = "see application profile");
+void Diagnostics::event(const char *step, int result);
+void Diagnostics::status(const DiagnosticStatus &sample);
+```
+
+- `start()` 在线程中尽早调用，提交启动状态；Log 模式输出应用/角色、源码版本、候选硬件/标定版本、协议和动作上限。返回诊断设备状态，通常为 0 或 `-ENODEV`；该结果不代表业务设备已经就绪。`application` 被保存为指针，使用字符串字面量或等同生命周期的存储。
+- `event()` 提交步骤及返回码；第一次负错误保留在该实例内，供后续状态报告，到复位或实例重建为止。Vofa 模式不发送事件文本，错误经状态通道报告。
+- `status()` 最快每 20 ms 提交一次当前状态；Log 模式通常 1 Hz，原因变化另报。`DiagnosticStatus` 包含 reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、extra0/1，量纲由具体入口声明。
+- 每个 `Diagnostics` 实例只有一个应用/观测线程调用。发送内容复制到共享固定队列，UART 由唯一低优先级 worker 发送；提交不等待串口或主机。队列 16 项、每项最多 192 字节，拥塞丢观测并计数，不改变电机授权。
+
+只改 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 的 `diagnostic_output` 为 `DiagnosticOutput::Log` 或 `DiagnosticOutput::Vofa`，重新编译烧录；不增加构建参数或运行时切换命令。当前候选 `diagnostic-uart` 为 UART7、115200 8N1，经 DAPLink 连接，实物接线仍待确认。
+
+`base.conf` 关闭 console/shell/banner 和默认串口日志后台。专用后台让 Log 模式的 LOG/printk 进入同一队列，Vofa 模式从初始化阶段丢弃文本。实车路径直接封装 JustFloat 经 worker 发送，不调用下文 `vofa_init()`；不要在这个 UART 再注册另一个回调或文本发送者。
+
+Vofa 布局 1 为 19 个 float，80 字节/帧、上限 50 Hz：layout、seq低/高16、uptime_ms低/高16、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低/高16、extra0/1。valid=false 时 feedback=NaN，未知 age=-1；大值拆分避免 float 丢低位。完整通道和 reason 编号见 [上车说明](../../samples/bringup/README.md)，target/feedback/extra 的物理含义见各工程 README。
+
+诊断初始化失败或系统致命故障可能停流，主机必须保留时间，不能把最后一帧当作持续有效。普通 RAM 历史不跨复位/烧录保存，日志与波形由电脑留存。
+
+## 通用 VOFA 与快照接口
+
+以下接口供独占 USART/USB CDC 的教学或自建观测路径使用，其队列与实车 `Diagnostics` 队列相互独立。
+
 
 ### 1. int vofa_init(Vofa *vofa, const struct device *uart)
 
@@ -47,7 +74,7 @@ int vofa_send(Vofa *vofa, const float *data, uint8_t num)
 | --- | --- |
 | `vofa` | 成功初始化的实例 |
 | `data` | num 个 float 的数组 |
-| `num` | 1～16 个通道，VOFA_MAX_FLOATS=16 |
+| `num` | 1～19 个通道，VOFA_MAX_FLOATS=19 |
 
 **返回 / 输出：** 0：完整帧已入队，不表示主机接收；负 errno：整帧拒绝。
 
@@ -155,7 +182,7 @@ int telemetryLoop(const device *telemetry_uart,
 | 配置项 | 作用与前提 |
 | --- | --- |
 | `CONFIG_SKYWALKER_LIB_VOFA` | 依赖 SERIAL 与 SERIAL_SUPPORT_INTERRUPT，选择 UART_INTERRUPT_DRIVEN。 |
-| `VOFA_MAX_FLOATS / VOFA_TX_QUEUE_DEPTH` | 16 个 float 通道、4 帧有界队列；不是无限数据缓存。 |
+| `VOFA_MAX_FLOATS / VOFA_TX_QUEUE_DEPTH` | 19 个 float 通道、4 帧有界队列；不是无限数据缓存。 |
 | `CONFIG_COMMAND_MANAGER_VOFA` | 三源 sample 的可选观测开关；串口选择和通道顺序见该 sample 配置。 |
 | `日志与观测周期` | 控制/仲裁线程持续运行，观测采用更低频率；当前命令台架 log=100 ms、VOFA=20 ms。 |
 
@@ -166,6 +193,8 @@ int telemetryLoop(const device *telemetry_uart,
 
 ## 正文与源码
 
+- [统一诊断实现](../../lib/robotics/vehicle_diagnostics.cpp)
+- [共享资源与模式选择](../../config/vehicle/installed/README.md)
 - [调试指南](../guides/debugging.md)
 - [命令观测通道](../../samples/robotics/command_manager/README.md)
 - [视觉 VOFA 示例](../../samples/communication/vision/README.md)

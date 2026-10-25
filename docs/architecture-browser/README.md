@@ -44,17 +44,15 @@ bash docs/architecture-browser/run.sh
 
 ## 当前源码与发布基线
 
-本轮对齐 `main@99a97c91e7e8ed684b9758e0edf6b12bf73b0d79`（2026-10-05）。顶部和总览显示基线；Markdown 与源码读取仍指向同份部署快照。GitHub Pages 在 main 合并后由 `.github/workflows/deploy-architecture-pages.yml` 自动部署；PR 分支先用于评审，不代表 Pages 已更新。
+本轮应用与实车文档对齐固件 `48984ed90898726e8a9d451ac07bdc88c4663f11`（2026-10-25）。Markdown 与源码读取指向本地或部署的同份快照；本轮只修改仓库文档及浏览器文档数据，没有发布在线站点。GitHub Pages 内容需等相应分支部署后才更新，不能把本地修改当成已上线。
 
-现有私有站点：[SkyWalker 双主控架构浏览器](https://skywalker-architecture-browser.docile-raven-1977.chatgpt.site/)。本轮将同一套静态内容同步到该站点，保留现有访问范围。
+当前两个 sentry 入口分别拥有 `main.cpp` 装配：云台是物理 RC、CAN3 头 IMU、惯性双轴与回中；底盘是四舵轮与独立大 Yaw。它们共享 [installed 配置](../../config/vehicle/installed/README.md) 和 `include/robotics/vehicle/` 纯参数，不再共用 `vehicle_bench.hpp::run()`。21 个固定上车工程见[入口表](../../samples/bringup/README.md)，历史宏组合 sample 仍保留用于理解演进。
 
-两个 sentry 入口共用 `samples/robotics/common/vehicle_bench.hpp`。云台装配头部 IMU、惯性双轴、可选视觉/裁判、发射框架和回中外环；底盘装配四舵轮与独立大 Yaw。机构公开 API 位于 `include/robotics`，旧应用私有 Executor 和两份 board_config 已删除。
+电机继续采用持续目标、逐轴反馈与独立恢复；状态生产 stamp 不因通信重发续期，板间固定 v4，完整线协议见[统一契约](../protocols/interboard-v4.md)。当前诊断候选为 UART7 经 DAPLink 单口选择 Log/Vofa；云台板间 USART10、底盘板间 USART1。
 
-电机使用持续目标、逐轴反馈计算和独立自动恢复。MotorSession、公共 ready/clearFault、Group 故障传播和恢复授权 generation 已移除；板间只接受 v4。RunStatus 已有执行生产 stamp，通信不能续期陈旧状态。当前源码已存在与实机完成必须分别理解。
+中央连接、IMU 安装和发射约束标志沿用 true，功率模型为 false；确认 bool 不能代替现场记录。上一轮共 27 个工程编译、链接通过，未运行测试、烧录或实板验证。当前最终应用不启动视觉或发射，不启用实测功率闭环；真实热量/发射许可、拨盘参考与视觉会话仍有输入缺口。协议车体实测速度/功率摘要尚未填充。
 
-中央连接/IMU/功率/发射确认默认关闭；真实功率、热量、拨盘原点与视觉弹速/弹数上行来源仍待接。车体实测速度/功率摘要尚未填充，搜索和导航仍未实现。最新提交记录单舵轮基本功能调通，不能扩大到整车验收。
-
-详情见[双主控正文](../applications/dual-controller.md)、[公开执行器](../modules/robotics/executors.md)、[电机工作流](../guides/motor-workflow.md)和[板间 v4](../modules/communication/interboard-transports.md)。
+详情见[双主控正文](../applications/dual-controller.md)、[公开执行器](../modules/robotics/executors.md)、[诊断 API](../api/telemetry.md)和[上车说明](../../samples/bringup/README.md)。在线私有站点原地址保留为 [历史部署入口](https://skywalker-architecture-browser.docile-raven-1977.chatgpt.site/)，本轮未向它发布。
 
 ## 为什么重建
 

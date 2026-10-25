@@ -2,6 +2,12 @@
 
 正式接口位于 include/drivers/imu/imu.hpp、imu_types.hpp。旧 imu.h/imu.c、skywalker,imu 聚合设备和 SKYWALKER_DRIVER_IMU 已移除，不提供兼容 wrapper。底层 Zephyr BMI08x sensor 驱动继续使用；姿态 EKF 不依赖通用线性 Kalman 或 Matrix 库；线性 Kalman 也已改为普通算法实例。
 
+## 当前实车入口
+
+当前云台应用及独立惯性上车工程使用 `DmImuCanSource`，参数来自 `include/robotics/vehicle/gimbal_profile.hpp::headSensorConfig()`：CAN3 独占、1 Mbps、主动四元数上报、从机 0x1 / 反馈 0x11，安装旋转和参考来自中央标定。`samples/robotics/inertial_gimbal` 也已从错误的 RS485/CAN 设备组合迁移到该 CAN 配置。
+
+先运行不注册电机的 [gimbal_head_imu](../../../samples/bringup/gimbal_head_imu/README.md)，再进入独立惯性单 Yaw/双轴。观测经 DAPLink 共享诊断口，不依赖目标板 USB。来源能力、姿态字段新鲜度、安装变换和参考一致性仍需实板确认；CAN3 不与 `motor::CanBus` 共享启动所有者。RS485 驱动继续供使用相应物理接线的教学样例或自建工程使用。
+
 ## 数据流和类型
 
 ~~~text

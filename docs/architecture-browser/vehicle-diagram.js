@@ -1,13 +1,13 @@
 'use strict';
-// Physical ownership: main@99a97c9, current and remaining integration targets.
+// Physical ownership: workspace 48984ed (2026-10-25), current assembly and remaining targets.
 window.SKYWALKER_VEHICLE_MAP = {
   "current": {
     "height": 770,
     "nodes": [
       {
         "id": "remote",
-        "title": "DR16 / 键鼠",
-        "detail": "Remote · 原始输入",
+        "title": "DR16 / 物理遥控",
+        "detail": "UART5 · 真实归中解锁",
         "moduleId": "remote",
         "x": 35,
         "y": 24,
@@ -18,20 +18,20 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "referee",
-        "title": "裁判 / 真实测量",
-        "detail": "可选权限 · 功率 / 热量",
+        "title": "裁判 / 测量（待接）",
+        "detail": "当前最终应用未装配",
         "moduleId": "referee",
         "x": 230,
         "y": 24,
         "w": 175,
         "h": 70,
-        "status": "partial",
+        "status": "planned",
         "zone": "input"
       },
       {
         "id": "imu",
         "title": "头部 IMU",
-        "detail": "已装配 · 安装待确认",
+        "detail": "CAN3 主动 · 安装待实查",
         "moduleId": "imu",
         "x": 470,
         "y": 24,
@@ -42,20 +42,20 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "host",
-        "title": "视觉 AB 主机",
-        "detail": "可选观察 / 执行 · 上行待补",
+        "title": "视觉 AB（待接）",
+        "detail": "无 alias · UART7 诊断独占",
         "moduleId": "vision",
         "x": 765,
         "y": 24,
         "w": 250,
         "h": 70,
-        "status": "partial",
+        "status": "planned",
         "zone": "host"
       },
       {
         "id": "command",
         "title": "CommandManager",
-        "detail": "Remote / 可选 Aim / Permission",
+        "detail": "RemoteSource · 真实 RC 门控",
         "moduleId": "command",
         "x": 55,
         "y": 175,
@@ -67,7 +67,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "glink",
         "title": "云台 Endpoint v4",
-        "detail": "目标 / 原年龄 · 1ms poll",
+        "detail": "USART10 · main 5ms poll",
         "moduleId": "interboard",
         "x": 380,
         "y": 175,
@@ -79,7 +79,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "clink",
         "title": "底盘 Endpoint v4",
-        "detail": "真实 boot · 状态生产年龄",
+        "detail": "USART1 · boot / 原年龄",
         "moduleId": "interboard",
         "x": 770,
         "y": 175,
@@ -114,20 +114,20 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "shooter",
-        "title": "摩擦轮 / 拨盘执行",
-        "detail": "热量 / 原点 Pending 无效",
+        "title": "摩擦轮 / 拨盘（待接）",
+        "detail": "当前最终云台未创建电机",
         "moduleId": "shooter",
         "x": 380,
         "y": 465,
         "w": 245,
         "h": 88,
-        "status": "partial",
+        "status": "planned",
         "zone": "gimbal"
       },
       {
         "id": "gmotor",
-        "title": "小云台与发射 / CAN",
-        "detail": "DJI CAN1 · Pitch DM CAN2",
+        "title": "小 Yaw / Pitch CAN",
+        "detail": "GM6020 CAN1 · DM CAN2",
         "moduleId": "motor-dji",
         "x": 55,
         "y": 650,
@@ -139,7 +139,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "centering",
         "title": "小 Yaw 中心外环",
-        "detail": "头部稳定 · 角速度 / 原年龄",
+        "detail": "双轴输出有效 · 关节 rad/s",
         "moduleId": "big-yaw",
         "x": 380,
         "y": 320,
@@ -151,7 +151,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "chassis",
         "title": "ChassisExecutor",
-        "detail": "八轴有效性 · 功率模式待测量",
+        "detail": "低电流机械链 · 无功率闭环",
         "moduleId": "chassis",
         "x": 770,
         "y": 320,
@@ -163,7 +163,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "wheel",
         "title": "四舵向 + 四轮驱",
-        "detail": "CAN1 / CAN3 · 2ms 绝对节拍",
+        "detail": "CAN1 / CAN2 · 2ms 绝对节拍",
         "moduleId": "motor-dji",
         "x": 770,
         "y": 465,
@@ -175,7 +175,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "bigyaw",
         "title": "大 Yaw 独立速度环",
-        "detail": "BigYawExecutor · DM CAN2",
+        "detail": "BigYawExecutor · DM CAN3",
         "moduleId": "big-yaw",
         "x": 770,
         "y": 650,
@@ -194,8 +194,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "command",
-        "label": "可选许可",
-        "kind": "permission",
+        "label": "后续接入",
+        "kind": "planned",
         "from": "referee",
         "points": [
           {
@@ -222,8 +222,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "command",
-        "label": "可选 Aim",
-        "kind": "command",
+        "label": "后续接入",
+        "kind": "planned",
         "from": "host",
         "points": [
           {
@@ -304,8 +304,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "gmotor",
-        "label": "共享 DJI stage",
-        "kind": "command",
+        "label": "后续接入",
+        "kind": "planned",
         "from": "shooter",
         "points": [
           {
@@ -332,8 +332,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "shooter",
-        "label": "发射请求",
-        "kind": "command",
+        "label": "后续接入",
+        "kind": "planned",
         "from": "command",
         "points": [
           {
@@ -424,7 +424,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "centering",
-        "label": "头部稳定",
+        "label": "输出有效 / Active",
         "kind": "feedback",
         "from": "inertial"
       },
@@ -616,7 +616,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "glink",
         "title": "云台 Endpoint v4",
-        "detail": "目标 / 原年龄 · 1ms poll",
+        "detail": "USART10 · main 5ms poll",
         "moduleId": "interboard",
         "x": 380,
         "y": 175,
@@ -628,7 +628,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "clink",
         "title": "底盘 Endpoint v4",
-        "detail": "真实 boot · 状态生产年龄",
+        "detail": "USART1 · boot / 原年龄",
         "moduleId": "interboard",
         "x": 770,
         "y": 175,
@@ -688,7 +688,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "centering",
         "title": "小 Yaw 中心外环",
-        "detail": "头部稳定 · 角速度 / 原年龄",
+        "detail": "双轴输出有效 · 关节 rad/s",
         "moduleId": "big-yaw",
         "x": 380,
         "y": 320,
@@ -712,7 +712,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "wheel",
         "title": "四舵向 + 四轮驱",
-        "detail": "CAN1 / CAN3 · 2ms 绝对节拍",
+        "detail": "CAN1 / CAN2 · 2ms 绝对节拍",
         "moduleId": "motor-dji",
         "x": 770,
         "y": 465,
@@ -724,7 +724,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "bigyaw",
         "title": "大 Yaw 独立速度环",
-        "detail": "BigYawExecutor · DM CAN2",
+        "detail": "BigYawExecutor · DM CAN3",
         "moduleId": "big-yaw",
         "x": 770,
         "y": 650,
@@ -973,7 +973,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "centering",
-        "label": "头部稳定",
+        "label": "输出有效 / Active",
         "kind": "feedback",
         "from": "inertial"
       },

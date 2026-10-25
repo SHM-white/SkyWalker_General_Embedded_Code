@@ -4,7 +4,7 @@
 
 统一 v4 字节契约，七类消息、boot/生产序号与原年龄，UART/RS485/CAN 三后端。
 
-**接入状态：已有代码。** v4 已实现，旧版本直接拒绝；恢复授权 generation 删除。真实两板应使用同版固件，整车默认 USART1 UART。
+**接入状态：已有代码。** v4 已实现，旧版本直接拒绝；恢复授权 generation 删除。真实两板须使用一致的 v4 契约。当前独立应用固定 UART：云台 USART10、底盘 USART1，均 460800 8N1；诊断另占 UART7。完整字节、单位、年龄、boot 与停止语义以 [interboard-v4.md](../protocols/interboard-v4.md) 为规范。
 
 ## 职责与关联
 
@@ -36,7 +36,7 @@ ConfiguredInterBoardTransport(const Config &, AsyncUart::DmaBuffers *dma = nullp
 InterBoardEndpoint(InterBoardTransport &, const Config &); void poll(uint64_t now_ms)
 ```
 
-唯一通信 owner 约 1 ms 推进；命令/心跳/status 默认 100 ms，TX 默认 60 ms。
+`poll()` 由唯一通信 owner 推进；默认命令/心跳/状态接收时限为 100 ms，TX 截止时限为 60 ms。独立应用在自己的控制循环内调用，云台 5 ms、底盘 2 ms；部分上车工程使用独立通信线程，以具体入口为准。
 
 **返回 / 输出：** void；服务、解析和在线诊断由 snapshot 返回。
 
