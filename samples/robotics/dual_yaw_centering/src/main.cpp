@@ -66,8 +66,7 @@ public:
 } source;
 CommandManager commands(board_config::command_policy);
 #if !defined(CONFIG_DUAL_YAW_ENCODER_ONLY)
-communication::AsyncUart::DmaBuffers head_dma __nocache;
-imu::DmImuRs485Source head_source(inertial_bench::head_uart, head_dma, inertial_bench::head_sensor());
+imu::DmImuCanSource head_source(inertial_bench::head_sensor());
 imu::ImuReceiver head(head_source, inertial_bench::head_receiver);
 InertialGimbalAdapter adapter(inertial_bench::controller());
 #endif

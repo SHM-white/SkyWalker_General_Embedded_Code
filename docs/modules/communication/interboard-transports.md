@@ -2,6 +2,8 @@
 
 三种方式均已实现。`InterBoardEndpoint` 保留 `submit / setReferee / setStatus / snapshot / poll`；构造时绑定 `InterBoardTransport`，此后不更换后端。当前统一 v4 业务帧保留 CRC、通信/生产者序号、boot_id 和原始输入有效期；恢复授权 generation 已删除。
 
+业务帧的完整偏移、枚举、物理量、停止与重启合同见[板间协议 v4](../../protocols/interboard-v4.md)。本页主要说明业务帧之外的传输封装和设备所有权。
+
 ## 初始化选择
 
 ```cpp

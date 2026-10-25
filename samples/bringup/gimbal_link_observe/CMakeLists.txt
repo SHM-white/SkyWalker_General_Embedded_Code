@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20.0)
+get_filename_component(INSTALLED_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/../../../config/vehicle/installed" ABSOLUTE)
+set(CONF_FILE "${INSTALLED_CONFIG}/base.conf" "${INSTALLED_CONFIG}/gimbal.conf" "${CMAKE_CURRENT_SOURCE_DIR}/prj.conf")
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(gimbal_link_observe)
+target_sources(app PRIVATE src/main.cpp)

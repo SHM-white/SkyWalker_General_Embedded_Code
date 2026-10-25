@@ -1,0 +1,32 @@
+/* Installed MC02 baseline, based on the current vehicle overlays. */
+/ {
+    aliases {
+        diagnostic-uart = &uart7;
+        remote-uart = &uart5;
+        referee-uart = &usart3;
+        /delete-property/ telemetry-uart;
+    };
+    chosen {
+        /delete-property/ zephyr,console;
+        /delete-property/ zephyr,shell-uart;
+    };
+};
+&uart7 {
+    status = "okay";
+    current-speed = <115200>;
+    data-bits = <8>;
+    parity = "none";
+    stop-bits = "1";
+    /delete-property/ dmas;
+    /delete-property/ dma-names;
+};
+&usart3 {
+    current-speed = <115200>;
+    dmas = <&dmamux1 9 46 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 10 45 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
+};
+&can1 { status = "okay"; bitrate = <1000000>; };
+&can2 { status = "okay"; bitrate = <1000000>; };
+&can3 { status = "okay"; bitrate = <1000000>; };
+&rng { status = "okay"; };

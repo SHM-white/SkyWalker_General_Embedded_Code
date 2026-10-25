@@ -6,7 +6,8 @@
 #include <cmath>
 #include <core/clock.hpp>
 #include <drivers/motor/can_bus.hpp>
-#include <lib/vofa/vofa.h>
+#include <limits>
+#include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/command/receiver_sources.hpp>
 #include <robotics/execution/snapshot_cache.hpp>
 #include <zephyr/logging/log.h>
@@ -17,7 +18,8 @@ using namespace skywalker;
 using namespace skywalker::robotics;
 
 namespace {
-communication::AsyncUart::DmaBuffers remote_dma __nocache, head_dma __nocache;
+vehicle::Diagnostics vehicle_diagnostics;
+communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, samples::control::receiverConfig());
 RemoteSource remote_source(remote);
 atomic_t input_paused = 0, execution_paused = 0, status_paused = 0, head_paused = 0;
@@ -35,7 +37,7 @@ public:
     }
 } input;
 CommandManager commands(board_config::command_policy);
-imu::DmImuRs485Source head_source(inertial_bench::head_uart, head_dma, inertial_bench::head_sensor());
+imu::DmImuCanSource head_source(inertial_bench::head_sensor());
 imu::ImuReceiver head(head_source, inertial_bench::head_receiver);
 motor::Motor yaw(board_config::yawHardware()), pitch(board_config::pitchHardware());
 motor::Group group(yaw, pitch);
@@ -50,67 +52,55 @@ struct Observation {
     core::TimeUs duration_us = 0;
     std::uint32_t overruns = 0;
     int yaw_commit_error = 0, pitch_commit_error = 0;
+    int startup_error = 0;
 };
 SnapshotCache<Observation> observation;
 K_SEM_DEFINE(telemetry_ready, 0, 1);
 
 void telemetryTask(void *, void *, void *) {
     k_sem_take(&telemetry_ready, K_FOREVER);
-    Vofa vofa{};
-    const int ret = vofa_init(&vofa, DEVICE_DT_GET(DT_ALIAS(telemetry_uart)));
-    std::uint64_t next_log_ms = 0;
     for (;;) {
         Observation seen{};
         (void)observation.snapshot(seen);
-        const auto now_ms = static_cast<std::uint64_t>(k_uptime_get());
-        const auto &a = seen.inertial;
-        const float age_ms = seen.head_stamp.valid && now_ms * 1000 >= seen.head_stamp.time_us
-                                 ? float(now_ms * 1000 - seen.head_stamp.time_us) * 0.001f
-                                 : -1;
-        const float values[] = {a.head_yaw_rad,
-                                a.head_pitch_rad,
-                                a.yaw_error_rad,
-                                a.pitch_error_rad,
-                                a.command.yaw_rate_rad_s,
-                                a.command.pitch_rate_rad_s,
-                                float(a.yaw_output_valid),
-                                float(seen.execution.active_count),
-                                float(unsigned(seen.execution.state)),
-                                float(unsigned(seen.execution.reason)),
-                                float(a.stabilization_valid),
-                                age_ms,
-                                float(seen.duration_us),
-                                float(seen.overruns),
-                                float(yaw_bus.status().last_error),
-                                float(pitch_bus.status().last_error)};
-        if (ret == 0)
-            (void)vofa_send(&vofa, values, 16);
-        if (now_ms >= next_log_ms) {
-            next_log_ms = now_ms + 1000;
-            LOG_INF(
-                "head_seq=%llu head_age_ms=%d requested=%d run=%u wait=%u active=%zu waiting=%zu stable=%d cycle_us=%u overruns=%u commit=%d/%d",
-                seen.head_stamp.sequence, int(age_ms), seen.execution.requested, unsigned(seen.execution.state),
-                unsigned(seen.execution.reason), seen.execution.active_count, seen.execution.waiting_count,
-                a.stabilization_valid, unsigned(seen.duration_us), seen.overruns, seen.yaw_commit_error,
-                seen.pitch_commit_error);
-        }
-        k_sleep(K_MSEC(50));
+        const auto now_us = core::monotonicTimeUs();
+        const bool head_valid = seen.head_stamp.valid && now_us >= seen.head_stamp.time_us;
+        const auto head_age_ms = head_valid ? (now_us - seen.head_stamp.time_us) / 1000 :
+                                             std::numeric_limits<std::uint32_t>::max();
+        const bool fresh = head_valid && head_age_ms < board_config::command_timeout_ms;
+        const bool active = seen.execution.state == RunState::Active;
+        const auto reason = seen.startup_error || seen.execution.state == RunState::Blocked
+                                ? vehicle::DiagnosticReason::InitFailed
+                            : !fresh ? vehicle::DiagnosticReason::ImuStale
+                            : active ? vehicle::DiagnosticReason::Ready
+                                     : vehicle::DiagnosticReason::Disarmed;
+        vehicle_diagnostics.status({.reason = reason,
+                                    .valid = fresh && seen.inertial.yaw_output_valid,
+                                    .enabled = active,
+                                    .target = seen.inertial.command.yaw_rate_rad_s,
+                                    .feedback = seen.inertial.head_yaw_rad,
+                                    .age_ms = static_cast<std::uint32_t>(head_age_ms),
+                                    .dt_us = float(seen.duration_us),
+                                    .detail = float(unsigned(seen.execution.reason)),
+                                    .error = seen.startup_error ? seen.startup_error : seen.execution.error,
+                                    .extra0 = seen.inertial.head_pitch_rad,
+                                    .extra1 = seen.inertial.pitch_error_rad});
+        k_sleep(K_MSEC(20));
     }
 }
 } // namespace
 K_THREAD_DEFINE(telemetry_thread, 4096, telemetryTask, nullptr, nullptr, nullptr, 7, K_FP_REGS, 0);
 
 int main() {
+    vehicle_diagnostics.start("inertial_gimbal", "gimbal", "yaw<=4rad/s,pitch<=5rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
     int ret = head.start();
+    vehicle_diagnostics.event("head.start", ret);
     if (ret == 0)
         ret = commands.registerSource(input);
     if (ret == 0)
         ret = commands.start();
+    const int source_startup_error = ret;
+    vehicle_diagnostics.event("sources.start", ret);
     k_sem_give(&telemetry_ready);
-    if (ret < 0) {
-        LOG_ERR("source startup=%d", ret);
-        return ret;
-    }
     LOG_INF("inertial head bench: motor_confirmation=%d mounting_confirmation=%d pitch_lock=%d",
             board_config::connections_configured, inertial_bench::mounting_configured,
             IS_ENABLED(CONFIG_INERTIAL_GIMBAL_LOCK_PITCH));
@@ -128,6 +118,7 @@ int main() {
     }
     core::TimeUs retry_us = 0, previous_us = 0;
     Observation current{};
+    current.startup_error = source_startup_error;
     imu::Snapshot head_cache{};
     samples::control::RcControlAdapter controls;
     samples::control::SampleDiagnostics diagnostics;

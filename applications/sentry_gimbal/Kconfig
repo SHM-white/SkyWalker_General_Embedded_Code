@@ -1,3 +1,2 @@
-mainmenu "SkyWalker sentry_gimbal vehicle role"
-rsource "../../samples/robotics/common/vehicle.Kconfig"
+mainmenu "SkyWalker sentry gimbal"
 source "Kconfig.zephyr"

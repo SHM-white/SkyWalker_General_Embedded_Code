@@ -1,0 +1,5 @@
+#include "common.overlay"
+/ {
+    aliases { interboard-uart = &usart1; };
+};
+&usart1 { current-speed = <460800>; };

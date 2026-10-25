@@ -1,1 +1,1 @@
-#include "../../samples/robotics/common/vehicle_mc02.overlay"
+#include "../../config/vehicle/installed/chassis.overlay"

@@ -1,156 +1,39 @@
 #pragma once
-#include <cstdint>
-#include <zephyr/device.h>
-#include <zephyr/devicetree.h>
-#include <control/position_motor.hpp>
-#include <drivers/motor/dji_motor.hpp>
-#include <drivers/motor/dm_motor.hpp>
-#include <robotics/gimbal/gimbal_axis.hpp>
+
+#include <robotics/vehicle/gimbal_profile.hpp>
 
 namespace board_config {
-// Set true only after checking BOTH motors, units, direction, zero and limits.
-inline constexpr bool connections_configured = true;
-inline constexpr std::uint32_t command_timeout_ms = 100;
-inline constexpr std::uint16_t yaw_encoder_zero_ticks = 5670;
-inline constexpr std::uint16_t yaw_encoder_min_ticks = 5670;
-inline constexpr std::uint16_t yaw_encoder_max_ticks = 7440;
-inline constexpr std::uint16_t yaw_travel_margin_ticks = 100;
-inline constexpr std::uint16_t yaw_travel_low_ticks = yaw_encoder_min_ticks + yaw_travel_margin_ticks;
-inline constexpr std::uint16_t yaw_travel_high_ticks = yaw_encoder_max_ticks - yaw_travel_margin_ticks;
+namespace calibration = skywalker::robotics::vehicle;
+inline constexpr bool connections_configured = calibration::connections_confirmed;
+inline constexpr std::uint32_t command_timeout_ms = calibration::gimbal_command_timeout_ms;
+inline constexpr std::uint16_t yaw_encoder_zero_ticks = calibration::small_yaw.encoder_zero_ticks;
+inline constexpr std::uint16_t yaw_travel_low_ticks = calibration::yaw_low_ticks;
+inline constexpr std::uint16_t yaw_travel_high_ticks = calibration::yaw_high_ticks;
 inline constexpr float dji_encoder_ticks_per_turn = 8192.0f;
-inline constexpr float two_pi = 6.2831853071795864769f;
-inline constexpr float yaw_min_angle_rad = (yaw_travel_low_ticks - yaw_encoder_zero_ticks) * two_pi /
-                                           dji_encoder_ticks_per_turn;
-inline constexpr float yaw_max_angle_rad = (yaw_travel_high_ticks - yaw_encoder_zero_ticks) * two_pi /
-                                           dji_encoder_ticks_per_turn;
-static_assert(yaw_encoder_min_ticks <= yaw_encoder_zero_ticks && yaw_encoder_zero_ticks < yaw_encoder_max_ticks &&
-              yaw_encoder_max_ticks < 8192 &&
-              2 * yaw_travel_margin_ticks < yaw_encoder_max_ticks - yaw_encoder_min_ticks);
+inline constexpr float two_pi = calibration::two_pi;
+inline constexpr float yaw_min_angle_rad = calibration::yaw_min_rad;
+inline constexpr float yaw_max_angle_rad = calibration::yaw_max_rad;
+inline constexpr float yaw_center_rad = calibration::yaw_center_rad;
 #if DT_NODE_HAS_STATUS(DT_ALIAS(remote_uart), okay)
 inline const device *remote_uart = DEVICE_DT_GET(DT_ALIAS(remote_uart));
 #else
 inline const device *remote_uart = nullptr;
 #endif
-// Change pitch_can to can2 for the cross-CAN Group example. Both buses must be
-// attached before either is started. CAN transceiver power follows can_start.
 inline const device *yaw_can = DEVICE_DT_GET(DT_NODELABEL(can1));
 inline const device *pitch_can = DEVICE_DT_GET(DT_NODELABEL(can2));
+using calibration::yawHardware;
+using calibration::pitchHardware;
+using calibration::yawMotorConfig;
+using calibration::pitchMotorConfig;
+inline constexpr auto yaw = calibration::yawAxisConfig();
+inline constexpr auto pitch = calibration::pitchAxisConfig();
+inline constexpr float yaw_command_sign = calibration::small_yaw.direction;
+inline constexpr float pitch_command_sign = calibration::pitch.direction;
 
-// Confirm these settings against the installed motors before enabling them.
-inline skywalker::motor::dji::Config yawHardware() {
-    return skywalker::motor::dji::gm6020({.id = 7,
-                                          .current_limit_a = 1.5f,
-                                          .encoder_zero_ticks = yaw_encoder_zero_ticks,
-                                          .current_mode_confirmed = true,
-                                          .timing = {.feedback_timeout_ms = 20,
-                                                     .command_timeout_ms = 20,
-                                                     .enable_timeout_ms = 100,
-                                                     .retry_interval_ms = 100}});
-}
-inline skywalker::motor::dm::Config pitchHardware() {
-    return skywalker::motor::dm::j4310Mit({.id = 1,
-                                           .master_id = 0x00,
-                                           .position_max_rad = 12.5f,
-                                           .velocity_max_rad_s = 30.0f,
-                                           .torque_max_nm = 10.0f,
-                                           .torque_limit_nm = 1.0f,
-                                           .timing = {.feedback_timeout_ms = 50,
-                                                      .command_timeout_ms = 20,
-                                                      .enable_timeout_ms = 3000,
-                                                      .retry_interval_ms = 100}});
-}
+// Connect physical estop/reset inputs here. RC disable remains recoverable.
+inline bool emergencyStopRequested() { return false; }
+inline bool takeEmergencyResetRequest() { return false; }
 
-inline constexpr float yaw_direction = -1.0f, pitch_direction = 1.0f;
-// Limited axes use calibrated driver coordinates, not a startup-relative zero.
-// Yaw uses the calibrated encoder range; pitch uses the measured DM coordinates.
-inline constexpr skywalker::robotics::GimbalAxisConfig yaw{skywalker::robotics::AxisTopology::Limited,
-                                                           yaw_min_angle_rad,
-                                                           yaw_max_angle_rad,
-                                                           4.0f,
-                                                           true,
-                                                           skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
-// Measured pitch endpoints: hanging/lower = 2.65 rad, upper = 3.40 rad.
-// Raising pitch increases the native angle; preserve the motor's calibrated zero.
-inline constexpr skywalker::robotics::GimbalAxisConfig
-    pitch{skywalker::robotics::AxisTopology::Limited,
-          2.50f,
-          3.50f,
-          5.0f,
-          true,
-          skywalker::robotics::AxisReferenceInit::CalibratedFeedback};
-
-inline skywalker::control::PositionMotor::Config yawMotorConfig() {
-    skywalker::control::PositionMotor::Config c{};
-    c.effort_unit = skywalker::control::EffortUnit::Ampere;
-    c.reference = skywalker::control::PositionReference::DriverContinuous;
-    c.loop.position = {.kp = 20.0f,
-                       .ki = 0.5f,
-                       .kd = 1.48f,
-                       .derivative_tau_s = 0.0f,
-                       .integral_min = -0.3f,
-                       .integral_max = 0.3f,
-                       .output_min = -4.0f,
-                       .output_max = 4.0f,
-                       .deadband = 0.012f,
-                       .dt_min_s = 0.001f,
-                       .dt_max_s = 0.020f};
-    c.loop.velocity.regulator.feedback = {.kp = 0.33f,
-                                          .ki = 0.55f,
-                                          .kd = 0.00005f,
-                                          .derivative_tau_s = 0.0f,
-                                          .integral_min = -1.2f,
-                                          .integral_max = 1.2f,
-                                          .output_min = -1.2f,
-                                          .output_max = 1.2f,
-                                          .deadband = 0.0f,
-                                          .dt_min_s = 0.001f,
-                                          .dt_max_s = 0.020f};
-    c.loop.velocity.reference_slew = {20.0f, 20.0f};
-    c.loop.velocity.measurement_filter_tau_s = 0.0f;
-    c.loop.velocity.soft_deadband_rad_s = 0.0f;
-    c.loop.velocity.requested_velocity_abs_max_rad_s = 4.0f;
-    c.loop.velocity.effort_abs_max = 1.2f;
-    return c;
-}
-inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
-    skywalker::control::PositionMotor::Config c{};
-    c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
-    c.reference = skywalker::control::PositionReference::DriverContinuous;
-    c.loop.position = {.kp = 10.0f,
-                       .ki = 0.1f,
-                       .kd = 0.0f,
-                       .derivative_tau_s = 0.0f,
-                       .integral_min = -0.3f,
-                       .integral_max = 0.3f,
-                       .output_min = -5.0f,
-                       .output_max = 5.0f,
-                       .deadband = 0.01f,
-                       .dt_min_s = 0.001f,
-                       .dt_max_s = 0.020f};
-    c.loop.velocity.regulator.feedback = {.kp = 0.25f,
-                                          .ki = 0.20f,
-                                          .kd = 0.0f,
-                                          .derivative_tau_s = 0.0f,
-                                          .integral_min = -0.7f,
-                                          .integral_max = 0.7f,
-                                          .output_min = -1.8f,
-                                          .output_max = 1.8f,
-                                          .deadband = 0.0f,
-                                          .dt_min_s = 0.001f,
-                                          .dt_max_s = 0.020f};
-    c.loop.velocity.reference_slew = {8.0f, 8.0f};
-    c.loop.velocity.measurement_filter_tau_s = 0.02f;
-    c.loop.velocity.soft_deadband_rad_s = 0.02f;
-    c.loop.velocity.requested_velocity_abs_max_rad_s = 5.0f;
-    c.loop.velocity.effort_abs_max = 0.8f;
-    return c;
-}
-
-// Connect physical estop/reset inputs here. RC disable is recoverable, not estop.
-inline bool emergencyStopRequested() {
-    return false;
-}
-inline bool takeEmergencyResetRequest() {
-    return false;
-}
+inline constexpr float yaw_direction = -yaw_command_sign;
+inline constexpr float pitch_direction = pitch_command_sign;
 } // namespace board_config
