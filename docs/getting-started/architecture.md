@@ -28,13 +28,16 @@ Zephyr device API / CAN / UART / SPI / PWM / CMSIS-DSP / STM32 HAL
 | boards/ | MC02、RoboMaster Type-C C 板的板级定义 |
 | dts/bindings/ | Zephyr 设备 binding |
 | drivers/motor/ | DJI / 达妙 CAN 电机协议与统一总线 |
-| drivers/imu/ | BMI088、DM-IMU RS485、ImuState、ImuReceiver 与可选 EKF/温控 |
+| drivers/imu/ | BMI088、DM-IMU RS485 / CAN、ImuState、ImuReceiver 与可选 EKF/温控 |
 | include/ | 对应 drivers/lib 的公共 C / C++ 头文件 |
 | lib/control/ | 数值控制算法、线性 Kalman、姿态 EKF 和速度/位置电机封装 |
 | lib/communication/ | UART 传输、DR16、裁判、板间、视觉协议与 receiver |
 | lib/robotics/ | 命令来源服务、仲裁、云台轴、舵轮和功率 limiter |
-| samples/ | 独立 west build 的台架与算法入口 |
-| applications/ | sentry_gimbal / sentry_chassis 应用骨架 |
+| config/vehicle/installed/ | 两板共享物理 overlay、基础 conf 与驱动后端 |
+| include/robotics/vehicle/ | 共享标定、PID、控制与固定阶段策略，无设备实例及启动副作用 |
+| samples/bringup/ | 21 个独立 main 的实车上车工程 |
+| samples/ | 其他独立 west build 的教学台架与算法入口 |
+| applications/ | sentry_gimbal / sentry_chassis 各自装配的手动应用 |
 | tests/ | 电机回归及命令、视觉/IMU 软件检查 |
 
 ## 3. Zephyr module 集成
@@ -56,6 +59,7 @@ SKYWALKER_IMU
   SKYWALKER_IMU_RECEIVER
   SKYWALKER_IMU_HEATER
   SKYWALKER_IMU_DM_PROTOCOL / SKYWALKER_IMU_DM_RS485
+  SKYWALKER_IMU_DM_CAN
   SKYWALKER_ATTITUDE_EKF
 ~~~
 
@@ -76,6 +80,8 @@ SKYWALKER_LIB_ROBOTICS
   SKYWALKER_ROBOTICS_COMMAND
   SKYWALKER_COMMAND_SERVICE
   SKYWALKER_ROBOTICS_SWERVE / SKYWALKER_ROBOTICS_GIMBAL
+  SKYWALKER_ROBOTICS_INERTIAL_GIMBAL / SKYWALKER_ROBOTICS_BIG_YAW
+  SKYWALKER_VEHICLE_DIAGNOSTICS
 ~~~
 
 SKYWALKER_COMMAND_SERVICE 需要显式启用；默认仲裁周期 10 ms。它依赖 SKYWALKER_ROBOTICS_COMMAND。当前没有 SKYWALKER_ROBOTICS_SAFETY 单独管理器选项。具体依赖以 lib/Kconfig、drivers/imu/Kconfig 和目标应用 prj.conf 为准。
@@ -106,7 +112,11 @@ RemoteReceiver / VisionReceiver / RefereeReceiver
 
 ### 应用线程
 
-sentry_gimbal 的 CommandManager 有自己的仲裁 worker；RemoteReceiver 也有接收 worker。两应用入口均调用公共 `samples/robotics/common/vehicle_bench.hpp`；linkTask 推进 InterBoardEndpoint，执行线程推进各机构并统一提交物理 CAN。底盘采用 2 ms 绝对节拍，云台约 5 ms。各静态对象及 DMA buffer 必须覆盖 worker 和 callback 的整个生命周期。
+两个应用分别在自己的 `main.cpp` 构造和启动所需对象，控制循环中推进 `InterBoardEndpoint::poll()`、执行器并提交本板物理 CAN；底盘 2 ms、云台 5 ms，使用绝对节拍。云台的 CommandManager、RemoteReceiver、ImuReceiver，以及各 CanBus 各自拥有工作线程；独立上车工程按职责选择调度方式，不要求复制整车线程。各静态对象与 DMA buffer 必须覆盖 worker 和 callback 的整个生命周期。
+
+应用与上车工程共用纯配置和普通模块 API，不共用整车 `run()`、角色宏或装配流程。每工程的 CMake 固定引用共享基础与板级 conf，本地 overlay 只包含对应共享物理配置；本地 `prj.conf` 选择模块能力。旧 `vehicle_bench.hpp` 仅供历史 `vehicle_integration` 使用，不能作为当前应用装配说明。
+
+`Diagnostics` 从初始化阶段接管单一诊断 UART，固定选择 Log 或 Vofa；生产者无等待入队，低优先级 worker 发送，满队列丢观测并计数。诊断不参与运行授权，详见[调试与观测](../guides/debugging.md)和[实车入口表](../../samples/bringup/README.md)。
 
 ## 6. 单位和状态
 

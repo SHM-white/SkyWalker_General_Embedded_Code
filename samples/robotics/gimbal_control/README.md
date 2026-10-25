@@ -1,17 +1,19 @@
-# 遥控双轴持续控制样例
+# 遥控双轴持续控制教学样例
+
+更新日期：2026-10-25。本入口保留USB CDC遥测和板级默认console，尚未迁移到共享installed overlay或DAPLink诊断。实际逐模块上车推荐 [小Yaw单轴](../../bringup/gimbal_yaw_encoder/README.md)、[Pitch单轴](../../bringup/gimbal_pitch_encoder/README.md)，通过后再运行 [机械双轴](../../bringup/gimbal_joint_pair/README.md)；完整入口见 [上车目录](../../bringup/README.md)。这些新入口与本教学样例的观测接口不同，不能仅因共享电机配置就沿用串口接线。
 
 一台 GM6020 电流模式 yaw 和一台 DM J4310 MIT pitch 使用两个独立控制器。Group 仅批量启停；一轴掉线不撤销另一轴目标。DR16 接收线程、应用控制线程与每条 CAN 的 I/O 线程分别运行。
 
-型号、ID、限幅、零点、协议量程和总线绑定在 `src/board_config.hpp`：
+电机型号、ID、方向、零点、限位和PID统一来自 [calibration.hpp](../../../include/robotics/vehicle/calibration.hpp) 与 [gimbal_profile.hpp](../../../include/robotics/vehicle/gimbal_profile.hpp)。本地 `src/board_config.hpp` 只转接共享配置并绑定设备，不再维护独立PID副本。当前配置快照如下；标定修改以后以共享文件为准：
 
 | 轴 | 默认设备 | 驱动限幅 | 控制输出限幅 |
 | --- | --- | --- | --- |
 | yaw | GM6020 CAN1 / ID7 | 1.5 A | ±1.2 A |
 | pitch | J4310 MIT CAN2 / ID1、Master 0x00 | 1.0 N·m | ±0.8 N·m |
 
-yaw 零点 5670 tick，端点 5670～7440 tick，两端各留 100 tick，目标范围为 5770～7340 tick，对应约 0.0767～1.281 rad。yaw PID 位置环 (20,0.5,1.48)、速度环 (0.43,0.55,0.00005)；pitch 位置环 (4.0,0.1,0)、速度环 (0.25,0.20,0)，速度环积分限幅 ±0.7 N·m，速度参考升降斜率均为 4 rad/s²。位置环积分在当前底层实现中冻结，配置的 Ki 不参与积分累积。DM PMAX 12.5 rad、VMAX 30 rad/s、TMAX 10 N·m 需与驱动器一致。Pitch 使用实测电机坐标：下垂最低位 2.65 rad、最高位 3.40 rad，抬起时角度增大；保留电机标定零点，目标范围为 [2.65, 3.40] rad。
+yaw零点5670tick，当前目标行程5770～7340tick，约0.0767～1.281rad；这些值须与实际安全行程记录对照。共享Yaw位置环为(20,0.5,1.48)、速度环为(0.33,0.55,0.00005)，速度参考升降斜率20rad/s²。共享Pitch位置环为(10,0.1,0)、速度环为(0.25,0.20,0)，速度环积分限幅±0.7N·m，速度参考升降斜率8rad/s²。Pitch驱动坐标目标范围当前为[2.50,3.50]rad，不能继续按旧文档的[2.65,3.40]rad调参。DM PMAX=12.5rad、VMAX=30rad/s、TMAX=10N·m仍须与驱动器一致。PID字段和控制器积分行为以共享实现为准，本文不将Ki配置等同于已观察到的实际积分效果。
 
-当前 `connections_configured` 为 true。配置合法并启动 CAN 后即可提交运行意图，不等待物理电机响应。当前 yaw 使用 CAN1、pitch 使用 CAN2；每周期两个轴分别 update，每个物理 CAN commit 一次，任何单轴错误都不会跳过另一轴。
+当前 `connections_configured` 读取中央connections_confirmed，当前值为true；这不是本次现场接线或方向已经确认的记录。配置合法并启动 CAN 后即可提交运行意图，不等待物理电机响应。当前 yaw 使用 CAN1、pitch 使用 CAN2；每周期两个轴分别 update，每个物理 CAN commit 一次，任何单轴错误都不会跳过另一轴。
 
 保持双 Down、全部通道归中 500 ms，再拨左 Middle启动。右摇杆横/纵给 yaw/pitch 角速度，左 Down停止，左 Up禁用。电机不存在或掉线时目标继续被接收；恢复后自动执行最新值。遥控失联按原输入时间停止。物理急停锁存后，显式解除只清急停，仍需新的用户启动。原先温度、实测超速和全组反馈门控已删除，数值、机械范围与PID限幅保留。
 
@@ -21,7 +23,7 @@ Limited轴需要可信位置参考。掉线导致多圈参考失效时只等待�
 west build -b dm_mc02/stm32h723xx samples/robotics/gimbal_control -d build/gimbal_control
 ```
 
-VOFA 默认使用 USB CDC ACM，USB 栈在启动时自动初始化，`telemetry-uart` 指向 `cdc_acm_uart0`。连接板子的 USB 数据口，在 VOFA 中选择枚举出的 USB 串口及 **JustFloat** 协议（串口设置可选 115200）。每 20 ms 尝试发送一帧，16 通道、68 字节，约 50 Hz；无需等待 DTR，USB 未连接不会阻塞控制循环。遥控仍使用 UART5，console 使用 USART10。启动日志应显示 `Telemetry device=...cdc_acm_uart0...`。
+本教学样例的VOFA仍使用USB CDC ACM，USB 栈在启动时自动初始化，`telemetry-uart` 指向 `cdc_acm_uart0`。连接板子的 USB 数据口，在 VOFA 中选择枚举出的 USB 串口及 **JustFloat** 协议（串口设置可选 115200）。每 20 ms 尝试发送一帧，16 通道、68 字节，约 50 Hz；无需等待 DTR，USB 未连接不会阻塞控制循环。遥控仍使用 UART5，console 使用 USART10。启动日志应显示 `Telemetry device=...cdc_acm_uart0...`。
 
 通道编号从 0 开始；本版改为双轴申请值与实际值对照，已有 VOFA 面板需要重新绑定。
 
@@ -41,10 +43,10 @@ VOFA 默认使用 USB CDC ACM，USB 栈在启动时自动初始化，`telemetry-
 
 数据不再使用 NaN：无效输出指令为0，缺失反馈字段为0，过期但仍有效的反馈字段保留最后一次测量。这些占位值不代表电机真实值；USART10 console 每秒报告 `fresh(y,p)`、`ref`、`output`、`issue`、使能/update/commit错误和最近发送结果。`send=0`仅表示入队成功。USB未连接或队列满时整帧拒绝，帧号允许跳变。
 
-`issue`：-1未请求运行、0正常、1未配置、2未Active、3反馈过期、4缺少反馈字段、5位置参考丢失、6测量无效、7目标无效、8控制周期无效、9输出被拒绝。若 pitch 初始位置超出 [2.65, 3.40] rad 且输出无效、issue=8，应检查零点与机械限位；目标无法初始化会传入 dt=0。端点范围检查使用完整精度，若下垂位置显示为2.65但仍无法初始化，应查看更高精度的CH5读数再校准下限。
+`issue`：-1未请求运行、0正常、1未配置、2未Active、3反馈过期、4缺少反馈字段、5位置参考丢失、6测量无效、7目标无效、8控制周期无效、9输出被拒绝。若 pitch 初始位置超出当前共享范围 [2.50, 3.50] rad 且输出无效、issue=8，应检查零点与机械限位；目标无法初始化会传入 dt=0。端点范围检查使用完整精度，若端点位置显示为2.50或3.50但仍无法初始化，应查看更高精度的CH5读数再校准下限。
 
 若曲线不动，先看 CH0：帧号递增说明控制循环仍在尝试发送且主机收到新帧；CH1=0先检查遥控解锁，CH1=1时拨动右摇杆应改变CH6/CH8。若CH0也停住，再结合console判断控制循环、USB传输或上位机解析；不能仅凭状态量恒定判断USB停发。诊断场景2/3会按配置暂停执行/遥测1.5秒，默认场景0不注入暂停。
 
-修改 USB 配置后建议使用全新构建目录，或在上述构建命令中加入 `-p always`。
+修改本旧样例USB配置后建议使用全新构建目录，或在上述构建命令中加入 `-p always`。共享 `diagnostic_output` 变量不会改变本样例的USB遥测；需要现场单DAPLink串口日志/VOFA切换时，使用前述bringup工程。
 
 诊断支持1输入、2执行、3状态暂停。原始时间保留，电机故障不会要求重复解锁。操作见 [统一遥控操作](../common/REMOTE_CONTROL.md)。初次运行支撑Pitch并确认实际方向与限位；尚无本次实板验收记录。

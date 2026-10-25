@@ -1,5 +1,23 @@
 # 11 调试与观测
 
+## 0. 当前实车通过 DAPLink 观察
+
+`samples/bringup/` 的 21 个独立工程和两个 sentry 应用，使用 [共享实车资源](../../config/vehicle/installed/README.md)。诊断候选是 UART7 PE8 TX 接 DAPLink RX、共地、115200 8N1；实际 DAPLink 接线尚需现场确认。云台板间是 USART10，底盘板间是 USART1，不把它们误当日志口。
+
+只修改 `include/robotics/vehicle/diagnostics_config.hpp`：
+
+```cpp
+inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Log;
+```
+
+改为 `DiagnosticOutput::Vofa` 后，按原工程命令重编译、烧录，再用 VOFA 打开同一 DAPLink COM 口并选择 JustFloat；Log 固件使用串口终端。运行期间不切换模式，不依赖目标板 USB 或串口接收命令。电脑端关闭当前工具后再由另一个工具占用同口。
+
+Log 模式报告启动身份、初始化步骤、低频状态和原因变化；Vofa 模式仅发送 19 通道布局 1，包含 reason、valid、enabled、target、feedback、age 和队列丢帧数，字段顺序与单位见 [上车入口表](../../samples/bringup/README.md) 和各工程 README。无效反馈为 NaN，未知年龄为 -1；不能只看数值为零就判断实际零速。若系统停止发送，主机应按时间判断停流。
+
+共享系统配置从初始化阶段关闭 console/shell/banner 和默认 UART 日志后台，由专用诊断后台决定文本是否入队。实车诊断使用 16 包队列与独立发送 worker；满队列丢观测并统计，控制线程不等待串口。不要在同口再调用 `vofa_init()`、启动 AsyncUart 或直接打印文本。下面的 `lib/vofa` 和 USB 示例仍适用于其他独占观测口的通用台架。
+
+先选无电机的 `gimbal_io`/`chassis_io`，再观察 RC、CAN IMU 和板间链路，随后进入单轴动作。当前编译通过记录不代表任何机构已经完成现场验证。
+
 ## 1. VOFA+ JustFloat
 
 `lib/vofa` 的发送帧是：
@@ -35,7 +53,7 @@ err = vofa_send(&vofa, channels, 2);
 
 两个设备使用完全相同的发送调用。也可像 `samples/hello` 一样使用 `DT_ALIAS(telemetry_uart)`，通过设备树选择目标。
 
-- 每帧 1–16 个 float，每个实例可排队 4 帧；驱动还有自己的发送缓冲。
+- 每帧 1–19 个 float，每个实例可排队 4 帧；驱动还有自己的发送缓冲。
 - 返回 0 表示已复制完整帧，可以立即复用输入数组；不表示主机已收到。
 - 队列满返回 `-ENOBUFS`，拒绝整帧；输入无效返回 `-EINVAL`，实例未成功初始化返回 `-ENODEV`。
 - FIFO 驱动返回负错误时停止该实例 TX，后续发送返回该错误；需要排查配置并重新启动，不支持原地重初始化。

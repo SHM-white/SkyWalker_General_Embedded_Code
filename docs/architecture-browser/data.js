@@ -62,9 +62,9 @@ window.SKYWALKER_MODULES = [
     "title": "双主控应用与执行器",
     "category": "机器人与仲裁",
     "status": "partial",
-    "summary": "两个 sentry 入口共用 vehicle_bench：云台惯性双轴/发射/回中，底盘四舵轮/大 Yaw，各机构统一物理 CAN 发布。",
-    "responsibility": "公共运行时持有物理设备、长期对象、输入/通信/观测线程与执行周期；公开执行器保存目标和消费新鲜输入，Motor/CAN 独立恢复。",
-    "statusNote": "软件框架已有，connections_confirmed、imu_mounting_confirmed 等中央确认默认关闭；功率、热量、拨盘原点与视觉反馈测量待接。",
+    "summary": "两个 sentry 工程各自独立装配：云台手动惯性双轴/回中发送，底盘四舵轮/大 Yaw 执行，共用实车配置和普通模块 API。",
+    "responsibility": "每个 main 持有长期对象、初始化顺序、执行循环和物理 CAN 提交；固定上车工程共用 installed overlay/conf 与纯配置 profile，不共享整车 run。",
+    "statusNote": "27 个相关工程编译完成，未实板验证；连接/IMU/发射确认现值 true、功率模型 false。当前最终应用不装配视觉/裁判/发射或功率闭环。",
     "depends": [
       "command",
       "interboard",
@@ -72,7 +72,6 @@ window.SKYWALKER_MODULES = [
       "gimbal",
       "chassis",
       "big-yaw",
-      "shooter",
       "boards"
     ],
     "reference": "docs/api/application.md"
@@ -108,9 +107,9 @@ window.SKYWALKER_MODULES = [
     "title": "IMU：独立采集、姿态与加热",
     "category": "驱动与感知",
     "status": "partial",
-    "summary": "BMI088 和达妙 RS485 共用带时间戳的快照，不同来源独立采集与独立诊断。",
+    "summary": "BMI088、达妙 RS485 与 CAN 来源共用带时间戳的快照，独立采集与诊断。",
     "responsibility": "ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度；ImuReceiver 独占采集循环并可管理 ImuHeater。BMI088 可挂 QuaternionEkf 估计姿态；RS485 通过请求应答读取设备四元数；CAN 支持主动上报和被动轮询。",
-    "statusNote": "板载与外置统一采集已实现，整车云台装配头部外置 IMU 与惯性适配；imu_mounting_confirmed 默认 false，姿态质量与参考仍须实测。",
+    "statusNote": "当前云台使用专用 CAN3 主动四元数上报(从机 1/反馈 0x11)与惯性适配；imu_mounting_confirmed 现值 true，安装/质量/参考仍待实车记录。",
     "depends": [
       "boards",
       "kalman",
@@ -162,8 +161,8 @@ window.SKYWALKER_MODULES = [
     "category": "工程与板级",
     "status": "ready",
     "summary": "把物理引脚、外设、alias、时钟、DMA与电源连接交给Zephyr，业务参数保留在应用配置。",
-    "responsibility": "DTS描述物理设备与连接，overlay选择应用实际使用的设备，Kconfig决定哪些实现进入构建，board_config.hpp提供电机ID/限幅/机械方向/链路身份。它们是四个不同层次。",
-    "statusNote": "两套板级存在；正式整车实物参数集中 calibration.hpp，connections_confirmed 默认 false；样例可另有 board_config。",
+    "responsibility": "DTS 描述物理设备；installed overlay/conf 固定板级资源和驱动，calibration/profile 提供标定与纯配置。各独立工程自行装配。",
+    "statusNote": "新上车入口和最终应用共用 config/vehicle/installed；云台 USART10 板间/CAN3 IMU、底盘 USART1 板间，两板 UART7 诊断。DAPLink 接线尚未实查。",
     "depends": [],
     "reference": "docs/api/boards.md"
   },
@@ -187,7 +186,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "从 18 字节 DR16 帧发布摇杆、开关、鼠标和键盘快照；脱机时保持数据但撤销 online。",
     "responsibility": "Dr16Decoder 解码单帧，RemoteService 负责流式对齐和超时，RemoteReceiver 拥有 UART worker。遥控输入如何变成运动模式由命令层决定。",
-    "statusNote": "DR16 receiver、独立样例和命令来源适配器已实现；sentry_gimbal 已接入 RemoteSource，硬件接线门禁仍需配置。",
+    "statusNote": "sentry_gimbal 使用 UART5 RemoteSource 与真实安全档归中解锁；底盘经板间接收原输入授权，恢复不能伪造永久运行。",
     "depends": [
       "uart"
     ],
@@ -200,7 +199,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "校验版本化裁判帧，分别记录机构输出许可、功率限额和缓冲能量的有效期。",
     "responsibility": "RefereeParser 负责 CRC 与已支持命令，RefereeService 计算在线状态，RefereeReceiver 用 poll 推进 UART。裁判许可约束运动命令，不能与遥控或视觉竞争控制来源。",
-    "statusNote": "当前实现 profile 为 Rm2026V1_3，识别 0x0201/0x0202；sentry_gimbal 的板级配置仍是 Unspecified，需要明确配置后才有有效许可。",
+    "statusNote": "Rm2026V1_3 库支持 0x0201/0x0202；当前两个最终应用不创建裁判接收器。真实许可、测量及电气适配仍需独立接入。",
     "depends": [
       "uart"
     ],
@@ -212,8 +211,8 @@ window.SKYWALKER_MODULES = [
     "category": "通信与输入",
     "status": "ready",
     "summary": "统一 v4 字节契约，七类消息、boot/生产序号与原年龄，UART/RS485/CAN 三后端。",
-    "responsibility": "Transport 管物理批次；Endpoint 唯一通信线程推进收发，其他线程复制输入/状态，不根据电机 ready 决定目标发送。",
-    "statusNote": "v4 已实现，旧版本直接拒绝；恢复授权 generation 删除。真实两板应使用同版固件，整车默认 USART1 UART。",
+    "responsibility": "Transport 管物理批次；Endpoint 由唯一 owner 推进，当前应用 main 调用 poll；其他接口交换值副本，目标发送不等待电机 ready。",
+    "statusNote": "v4 已实现并有独立字节契约；当前云台板间 USART10、底盘 USART1，460800。boot、原始年龄与状态生产时效分别检查。",
     "depends": [
       "uart",
       "boards"
@@ -227,7 +226,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "接收独立的 yaw/pitch 目标请求，提供带参考系与有效期的值；反馈由应用复制姿态等实测数据。",
     "responsibility": "AbProtocol 定义 29 字节下行/43 字节上行线协议；VisionLink 校验参考、时间与反馈；VisionReceiver 驱动独占 UART。模块不持有 IMU，不仲裁机器人命令，不操作电机和发射机构。",
-    "statusNote": "AB 接收已接入整车可选观察/执行阶段；自动执行要求头部参考匹配。弹速/弹数来源与显式视觉会话待补，反馈 TX 默认关闭。",
+    "statusNote": "AB 库与历史样例保留；当前最终应用未创建视觉来源，新共享配置不提供 vision-uart，UART7 专用诊断。参考会话和弹速/弹数仍需补齐。",
     "depends": [
       "uart"
     ],
@@ -240,7 +239,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "按 Safe/Manual/Auto、输入新鲜度、参考系、人工接管和裁判许可发布完整机器人命令。",
     "responsibility": "CommandArbiter 是同步策略核心；CommandManager 注册静态来源、启动来源并周期采样/仲裁，发布非消费快照。执行器负责本地电机反馈、使能与恢复。",
-    "statusNote": "注册来源与后台服务已实现；整车手动默认 Remote，裁判/视觉按 VEHICLE_* 阶段配置注册，不改变原输入年龄。",
+    "statusNote": "当前固定手动云台只注册 RemoteSource，真实 RC 解锁接入外部门控；视觉/裁判不是额外 conf 开启的当前应用能力。",
     "depends": [
       "command-sources"
     ],
@@ -253,7 +252,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "把接收器快照接到固定 Operator/Aim 角色；裁判单独作为 Permission，保留原始时间与诊断。",
     "responsibility": "ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionSource、RefereePermissionSource 适配接收器。ManualCommandMapper 把遥控值变成归一化操作意图，不输出电机电流。",
-    "statusNote": "注册来源与后台服务已实现；整车手动默认 Remote，裁判/视觉按 VEHICLE_* 阶段配置注册，不改变原输入年龄。",
+    "statusNote": "RemoteSource、VisionSource 与 RefereePermissionSource API 存在；当前最终云台只注册真实 RemoteSource，快照读取不刷新原输入年龄。",
     "depends": [
       "remote",
       "vision",
@@ -268,7 +267,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "机械单轴保存目标；公开双轴 GimbalExecutor 独立计算两轴并由应用统一提交总线。",
     "responsibility": "GimbalAxis 管机械范围与目标，PositionMotor 管本轴反馈计算；GimbalExecutor 管新鲜输入/许可和双轴调用，不持有 CAN。",
-    "statusNote": "正式云台已装配双轴与惯性适配框架，真实接线与安装确认默认关闭。",
+    "statusNote": "最终云台独立装配双轴与惯性适配，单轴/双轴有固定上车工程；中央连接/安装现值 true，不代表实板已通过。",
     "depends": [
       "motor-control",
       "command"
@@ -282,7 +281,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "四轮运动学与八轴独立有效性；公开 SwerveHardware/ChassisExecutor 持续暂存，应用统一 commit。",
     "responsibility": "SwerveKinematics 分目标，SwerveModule 独立转向/轮驱计算与翻转迟滞，SwerveHardware 映射八电机；功率执行使用可信预算与测量。",
-    "statusNote": "单舵轮最新提交记录基本功能调通；四轮/整车软件入口已有，真实几何与功率仍待标定。",
+    "statusNote": "独立单模块/四模块/跨板工程与最终底盘已编译；当前最终应用为中央低电流手动机械策略，未启用实测功率闭环。",
     "depends": [
       "pid",
       "motor-dji",
@@ -295,9 +294,9 @@ window.SKYWALKER_MODULES = [
     "title": "VOFA、日志与一致快照",
     "category": "调试与观测",
     "status": "ready",
-    "summary": "从同一帧快照解释来源、目标、许可、反馈和错误；JustFloat 有界排队，主机离线不阻塞控制。",
-    "responsibility": "VOFA 有界 JustFloat/调参行；Latest 与 SnapshotCache 交换值副本，应用观察线程不参与目标授权。",
-    "statusNote": "单舵轮 16 通道，M2006 速度环 USB CDC 12 通道与反馈/CAN 前后快照诊断；详细通道见各样例 README。",
+    "summary": "同一 DAPLink UART7 通过一个代码变量选择日志或 VOFA JustFloat，队列拥塞丢观测并计数。",
+    "responsibility": "Diagnostics 接收状态与事件；专用日志后台统一 LOG/printk，Vofa 模式丢弃文本；固定队列与唯一发送 worker 不参与电机授权。",
+    "statusNote": "diagnostics_config.hpp 选择 Log/Vofa 后重编译烧录；console/shell/banner 关闭。16×192 字节有界队列，通道/单位见 samples/bringup/README.md。",
     "depends": [],
     "reference": "docs/api/telemetry.md"
   },
@@ -308,7 +307,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
     "responsibility": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
-    "statusNote": "软件接口与整车装配已有；中央硬件/安装/测量确认未完成，不代表实机验收。",
+    "statusNote": "CAN3 头部 IMU 与独立惯性上车入口/最终装配已实现并编译；安装变换和实车性能仍需确认。",
     "depends": [
       "imu",
       "gimbal",
@@ -323,7 +322,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
     "responsibility": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
-    "statusNote": "软件接口与整车装配已有；中央硬件/安装/测量确认未完成，不代表实机验收。",
+    "statusNote": "独立请求/执行/双 Yaw 工程与最终装配已有；执行在底盘 CAN3，线上为关节 rad/s，保留当前反号适配；未实板验证。",
     "depends": [
       "gimbal",
       "motor-control",
@@ -338,7 +337,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "摩擦轮与拨盘独立持续目标；供弹业务检查热量/可信原点/摩擦稳定/头部状态；离散旧事件消费丢弃不重放。",
     "responsibility": "摩擦轮与拨盘独立持续目标；供弹业务检查热量/可信原点/摩擦稳定/头部状态；离散旧事件消费丢弃不重放。",
-    "statusNote": "软件接口与整车装配已有；中央硬件/安装/测量确认未完成，不代表实机验收。",
+    "statusNote": "库 API 与历史样例已有，当前最终云台未创建发射电机或执行器；真实热量/许可/可信归位仍待接入，有载发射未完成。",
     "depends": [
       "command",
       "gimbal",

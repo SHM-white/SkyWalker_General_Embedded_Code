@@ -82,9 +82,20 @@ west build -p -b dm_mc02/stm32h723xx \
 1. 调试器目标电压和地线已连接。
 2. `build/<name>/zephyr/runners.yaml` 中的 `flash-runner` 与实际探针一致。
 3. `rm_typec` 已连接外部 CMSIS-DAP / ST-Link；它没有板载调试器。
-4. 串口终端使用对应板卡的 console UART，默认 115200 8N1，具体以 board DTS 和样例 overlay 为准。
+4. 教学样例按对应 console UART 打开串口；实车 `samples/bringup/` 与两个应用关闭 console，统一使用 `diagnostic-uart`，当前候选为 UART7、115200 8N1，经 DAPLink 观察，须先确认实际接线。
 
 ## 4. 按目标选择样例
+
+按当前 MC02 实车接线上车时，先使用 [21 个独立入口](../../samples/bringup/README.md)，它们固定引用 [共享 overlay/conf](../../config/vehicle/installed/README.md) 与中央标定：
+
+```bash
+# 在 skywalker_code 仓库目录执行；每个阶段有自己的构建目录。
+west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_io -d ../build/bringup/gimbal_io
+west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_head_imu -d ../build/bringup/gimbal_head_imu
+west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_yaw_encoder -d ../build/bringup/gimbal_yaw_encoder
+```
+
+只选择源码目录，不叠加角色、锁 Pitch 或场景 conf。日志与 VOFA 通过同一 DAPLink 串口；仅修改 `include/robotics/vehicle/diagnostics_config.hpp` 的 `diagnostic_output`，按原命令重编译烧录。完整操作与通道顺序见各工程 README。下表其余样例用于通用教学/台架，可能采用其他接线和 USB 输出。
 
 | 目标 | 构建入口 |
 |---|---|
@@ -140,9 +151,9 @@ CONFIG_CAN=y
 
 以电机为例：
 
-1. 在 `app.overlay` 中声明电机 compatible、CAN phandle、ID、量程和减速比。
+1. 在 `app.overlay` 中启用物理 CAN/UART；实车工程包含对应 `config/vehicle/installed/` overlay。电机型号、ID、量程、减速比、零点与 PID 使用 C++ 配置，实车值集中于 `include/robotics/vehicle/`。
 2. 打开 `CONFIG_SKYWALKER_DRIVER_MOTOR=y` 以及对应的 `SKYWALKER_MOTOR_DJI` 或 `SKYWALKER_MOTOR_DM`。
-3. 用 `DEVICE_DT_GET(DT_ALIAS(motor0))` 获取设备。
+3. 用 `DEVICE_DT_GET` 获取物理 CAN 设备，按 profile 构造 `motor::Motor` 与唯一 `motor::CanBus`；先 attach 所需电机、start 总线，再 begin 控制器。
 4. 先确认 `device_is_ready()` 与能力/模式配置，按有效运行意图持续 enable/update/commit；反馈新鲜度与各轴输出有效性独立观察。
 5. 修改 overlay 后重新 pristine build。
 
@@ -164,4 +175,4 @@ CONFIG_CAN=y
 - 先理解构建门控：[02 架构与构建](architecture.md)
 - 先确认硬件：[03 板级支持](boards.md)
 - 调电机：[04 DJI](../modules/drivers/motor-dji.md)、[05 达妙](../modules/drivers/motor-dm.md)
-- 写整机应用：[13 通信](../modules/communication/communication.md)、[14 机器人算法](../modules/robotics/robotics.md)、[15 应用骨架](../applications/dual-controller.md)
+- 写整机应用：[13 通信](../modules/communication/communication.md)、[14 机器人算法](../modules/robotics/robotics.md)、[双主控应用](../applications/dual-controller.md)

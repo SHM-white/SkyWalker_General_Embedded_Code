@@ -1,5 +1,5 @@
 'use strict';
-// Facts checked against main@99a97c9; historical entries retain their original context.
+// Documentation snapshot of workspace 48984ed (2026-10-25); historical entries retain their context.
 window.SKYWALKER_ARCHITECTURE = {
   "history": [
     {
@@ -58,40 +58,40 @@ window.SKYWALKER_ARCHITECTURE = {
     }
   ],
   "current": {
-    "summary": "当前两个 sentry 入口共用 vehicle_bench。云台板运行命令服务、头部 IMU 惯性双轴、发射框架及小 Yaw 回中外环；底盘板运行四舵轮和大 Yaw 独立速度环。板间 v4，电机持续目标与逐轴恢复已实现；中央连接/安装确认关闭，真实功率/热量/拨盘原点和视觉上行来源仍待补，已有代码不等于实机闭环验收。",
+    "summary": "两个 sentry 最终工程各自独立装配并运行 main：云台为手动双轴惯性/大 Yaw 回中与行走发送，底盘为八电机轮控/大 Yaw 执行；上车工程共用 installed 配置与纯 profile。当前未装配视觉、裁判、发射或实测功率闭环。27 个相关工程已编译，尚未实板验证；连接/IMU/发射确认现值 true、功率模型 false，配置值不等于现场通过。",
     "lanes": [
       {
-        "title": "云台板：输入、惯性双轴与统一发布",
+        "title": "云台板：固定手动输入、CAN3 惯性双轴与统一提交",
         "steps": [
           {
-            "title": "DR16 与可选裁判/视觉",
+            "title": "DR16 与真实 RC 解锁",
             "moduleId": "command-sources",
-            "note": "默认 RemoteSource；VEHICLE_REFEREE、VISION_OBSERVE/EXECUTE 按阶段接入真实来源，保留原年龄。",
+            "note": "UART5 RemoteSource；Down/Down 归中 500ms 后左 Middle 解锁，输入失效/peer 重启撤权，CommandManager 外部门控保留原年龄。",
             "status": "ready"
           },
           {
             "title": "后台仲裁快照",
             "moduleId": "command",
-            "note": "CommandManager worker → CommandArbiter → CommandSnapshot，多个消费者非消费式读取。",
+            "note": "当前只注册 RemoteSource；CommandManager worker → CommandSnapshot，执行循环非消费式读取。",
             "status": "ready"
           },
           {
-            "title": "头部 IMU 惯性适配",
+            "title": "CAN3 头部惯性适配",
             "moduleId": "inertial",
-            "note": "外置头部 IMU 与两轴机械反馈转换成 Rate；两轴 output_valid 独立，imu_mounting_confirmed=false。",
+            "note": "DmImuCanSource 主动四元数 + 两轴机械反馈 → Rate；安装确认现值 true，实车安装/质量/参考待确认。",
             "status": "partial"
           },
           {
-            "title": "公开双轴执行器",
+            "title": "独立双轴执行器",
             "moduleId": "gimbal",
-            "note": "GimbalExecutor 持续更新小 Yaw/Pitch；输入/许可/急停检查保留，电机恢复不重采目标。",
+            "note": "main 每 5ms 更新 GimbalExecutor；小 Yaw CAN1、Pitch CAN2，每周期各提交一次；不创建发射机构。",
             "status": "ready"
           },
           {
-            "title": "共享 DJI 与 Pitch CAN",
-            "moduleId": "motor-dji",
-            "note": "小 Yaw、摩擦轮和拨盘 CAN1；Pitch DM CAN2。所有机构 stage 后每物理 CAN 一次 commit。",
-            "status": "partial"
+            "title": "DAPLink 单口诊断",
+            "moduleId": "telemetry",
+            "note": "UART7，diagnostic_output 选择 Log/Vofa 后重编译；启动失败继续报告状态，队列满丢观测并计数。",
+            "status": "ready"
           }
         ]
       },
@@ -101,19 +101,19 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "板间 v4 输入",
             "moduleId": "interboard",
-            "note": "七类消息保留 boot、producer sequence、原年龄；无恢复授权 generation，状态生产时效独立。",
+            "note": "云台 USART10 / 底盘 USART1，460800；main 推进 endpoint，真实 OperatorControl/boot/原年龄分别检查。",
             "status": "ready"
           },
           {
             "title": "四舵轮执行器",
             "moduleId": "chassis",
-            "note": "ChassisExecutor 注入 SwerveHardware，FL/FR/RL/RR 逐轴有效性；CAN1 舵向，CAN3 轮驱，底盘 2ms 绝对节拍。",
+            "note": "main 独立装配 SwerveHardware/ChassisExecutor，CAN1 舵向、CAN2 轮驱，2ms 绝对节拍；当前仅低电流手动机械链。",
             "status": "partial"
           },
           {
             "title": "大 Yaw 速度内环",
             "moduleId": "big-yaw",
-            "note": "云台独立小 Yaw 中心外环请求 → 底盘 BigYawExecutor → DM MIT 速度控制，CAN2；不需固定绝对零点。",
+            "note": "小 Yaw 中心外环 → v4 关节 rad/s → 底盘 BigYawExecutor/DM CAN3；原始年龄、boot 与本轴反馈独立检查。",
             "status": "partial"
           },
           {
@@ -131,25 +131,25 @@ window.SKYWALKER_ARCHITECTURE = {
         ]
       },
       {
-        "title": "阶段接入与剩余业务来源",
+        "title": "后续能力：当前最终应用未装配",
         "steps": [
           {
             "title": "摩擦轮与拨盘",
             "moduleId": "shooter",
-            "note": "公开 ShooterExecutor 已装配；热量/可信原点 Pending 无效，有载供弹不可执行。",
-            "status": "partial"
+            "note": "ShooterExecutor 库已有，当前最终云台不创建发射电机；真实热量/许可/归位未接，有载未完成。",
+            "status": "planned"
           },
           {
             "title": "视觉观察/执行阶段",
             "moduleId": "vision",
-            "note": "观察不参与执行；执行须头部参考一致。真实弹速/弹数和视觉会话待补，AB 反馈 TX 默认关闭。",
-            "status": "partial"
+            "note": "当前最终应用未创建视觉；UART7 诊断独占，无 vision-uart alias。需独立资源、参考会话及真实反馈后接入。",
+            "status": "planned"
           },
           {
             "title": "功率测量与标定",
             "moduleId": "chassis",
-            "note": "预算不是实测功率；IPowerMeasurementSource 默认 Pending，无效测量阻断功率模式。",
-            "status": "partial"
+            "note": "当前低电流机械策略不启用功率闭环；真实测量、预算与模型标定需独立接入，预算不能冒充实测。",
+            "status": "planned"
           },
           {
             "title": "搜索与导航",
@@ -162,44 +162,44 @@ window.SKYWALKER_ARCHITECTURE = {
     ],
     "gaps": [
       {
-        "title": "实物接线和标定确认关闭",
-        "detail": "calibration.hpp 的 connections_confirmed、imu_mounting_confirmed、power_model_calibrated、shooter_constraints_confirmed 默认 false；ID/方向/零点/范围、安装旋转和机械几何须逐项验证。单舵轮经验比例不证明整车几何。",
+        "title": "实物接线、确认值与标定记录",
+        "detail": "calibration.hpp 连接/IMU 安装/发射约束现值 true，功率模型 false；不代表本次已完成实板核对。ID/方向/零点/限位、IMU 安装与机械几何仍需逐项记录。",
         "source": "include/robotics/vehicle/calibration.hpp"
       },
       {
-        "title": "真实功率源仍为 Pending",
-        "detail": "run 支持注入 IPowerMeasurementSource；默认 PendingPowerSource 无效。裁判预算不能冒充实测功率，功率控制标定与估计回退默认不开放。",
-        "source": "samples/robotics/common/vehicle_bench.hpp"
+        "title": "实测功率与模型尚未接入最终应用",
+        "detail": "当前最终底盘为低电流手动机械链，不启用实测功率闭环或估计回退。历史 PendingPowerSource 仍不是有效测量。",
+        "source": "include/robotics/vehicle/chassis_profile.hpp"
       },
       {
-        "title": "有载供弹缺热量与可信原点",
-        "detail": "IShooterHeatSource 与 IDialHomeSource 默认 Pending 无效；旧单发事件不能在恢复后重放，shots 只是软件执行统计。",
+        "title": "有载供弹未装配，真实来源待补",
+        "detail": "当前最终云台不创建发射电机。库 API 保留，真实热量/许可与拨盘可信原点仍需独立接入和机构标定。",
         "source": "include/robotics/shooter/shooter_executor.hpp"
       },
       {
-        "title": "视觉反馈字段与参考会话未补齐",
-        "detail": "视觉目标已能按阶段进入惯性适配；AB 线上没有 epoch 元数据。弹速/弹数缺真实来源，反馈 TX 默认禁用，不填占位数据。",
-        "source": "samples/robotics/common/vehicle_bench.hpp"
+        "title": "视觉资源与参考会话未补齐",
+        "detail": "当前最终应用未装配视觉。新共享配置无 vision-uart，UART7 由诊断独占；AB 参考会话、真实弹速/弹数需补齐。",
+        "source": "config/vehicle/installed/README.md"
       },
       {
-        "title": "状态年龄已补，车体测量尚缺",
-        "detail": "RunStatus.stamp 由执行线程产生，Endpoint 能识别执行停更；wireFeedback 的车体 vx/vy/wz/power 有效位仍未由实际测量填充。",
+        "title": "状态年龄已保留，车体测量尚缺",
+        "detail": "RunStatus.stamp 由执行循环生产，Endpoint 识别执行停更；车体速度/功率有效位仍未由真实测量填入。",
         "source": "include/robotics/execution/run_status.hpp"
       },
       {
-        "title": "资源重分配与物理急停",
-        "detail": "整车 CAN1/2/3 均用于底盘电机，默认板间 USART1；头部 IMU USART2、裁判 USART3，不能直接改成同口板间 RS485。裁判 TTL 到板载 RS485 需真实电气适配；物理急停仍按实物接入。",
-        "source": "samples/robotics/common/vehicle_mc02.overlay"
+        "title": "DAPLink 接线与物理资源待现场核对",
+        "detail": "云台 USART10 板间/CAN3 IMU，底盘 USART1 板间/CAN1舵向/CAN2轮驱/CAN3大Yaw；两板候选 UART7 诊断，DAPLink 实际接线未实查。",
+        "source": "config/vehicle/installed/README.md"
       },
       {
-        "title": "搜索/里程计/导航与整车验收",
-        "detail": "搜索为设计记录，车体速度估计/导航未装配；最新提交单舵轮调通不扩展到双板惯性保持、四轮功率或有载发射。",
-        "source": "docs/dev/哨兵空闲巡航与搜索模式规划.md"
+        "title": "编译记录与实板结论分开",
+        "detail": "27 个相关工程编译完成，未实板运行；方向、停止时限和组合性能仍按独立上车阶段记录。搜索/里程计/导航尚未装配。",
+        "source": "samples/bringup/README.md"
       }
     ]
   },
   "target": {
-    "summary": "最终上车在现有双板框架上完成真实接线、IMU 安装、机械/功率/发射标定和来源闭环；绿色表示软件模块已有，待接来源与行为扩展明确标为未完成。惯性双轴、大 Yaw 回中与 ShooterExecutor 已有实现，搜索/导航仍为目标。",
+    "summary": "后续在独立工程和共享实车配置上逐级完成接线、安装、方向与机构记录，再接视觉、真实功率与有载发射来源。库实现、最终应用装配、工程编译和硬件通过分别登记；搜索/导航仍为目标。",
     "lanes": [
       {
         "title": "可信输入与机械标定",
@@ -236,7 +236,7 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "头部 IMU 惯性适配",
             "moduleId": "inertial",
-            "note": "外置头部 IMU 与两轴机械反馈转换成 Rate；两轴 output_valid 独立，imu_mounting_confirmed=false。",
+            "note": "CAN3 主动头部 IMU 与两轴机械反馈转换成 Rate；安装确认现值 true，实车安装/质量/参考仍待验证。",
             "status": "partial"
           },
           {
@@ -248,13 +248,13 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "四舵轮执行器",
             "moduleId": "chassis",
-            "note": "ChassisExecutor 注入 SwerveHardware，FL/FR/RL/RR 逐轴有效性；CAN1 舵向，CAN3 轮驱，底盘 2ms 绝对节拍。",
+            "note": "ChassisExecutor 注入应用持有的 SwerveHardware；CAN1 舵向、CAN2 轮驱，底盘 2ms 绝对节拍，当前为低电流机械策略。",
             "status": "partial"
           },
           {
             "title": "大 Yaw 速度内环",
             "moduleId": "big-yaw",
-            "note": "云台独立小 Yaw 中心外环请求 → 底盘 BigYawExecutor → DM MIT 速度控制，CAN2；不需固定绝对零点。",
+            "note": "小 Yaw 中心外环 → 底盘 BigYawExecutor → DM CAN3 关节速度内环；boot/来源年龄/反馈独立检查。",
             "status": "partial"
           }
         ]
@@ -324,12 +324,12 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "manual-gimbal",
       "title": "遥控如何驱动惯性双轴",
-      "summary": "当前公共整车框架调用链，实物确认默认关闭。",
+      "summary": "固定云台 main 的真实手动调用链；独立工程已编译，未进行实板动作。",
       "steps": [
         {
-          "title": "DR16 与可选裁判/视觉",
+          "title": "DR16 与真实 RC 解锁",
           "moduleId": "command-sources",
-          "detail": "默认 RemoteSource；VEHICLE_REFEREE、VISION_OBSERVE/EXECUTE 按阶段接入真实来源，保留原年龄。"
+          "detail": "固定手动入口只注册 UART5 RemoteSource，真实 RC 归中解锁接入外部门控；保留原输入年龄。"
         },
         {
           "title": "后台仲裁快照",
@@ -339,7 +339,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "头部 IMU 惯性适配",
           "moduleId": "inertial",
-          "detail": "外置头部 IMU 与两轴机械反馈转换成 Rate；两轴 output_valid 独立，imu_mounting_confirmed=false。"
+          "detail": "CAN3 主动头部 IMU 与两轴机械反馈转换成 Rate；安装确认现值 true，实车安装/质量/参考仍待验证。"
         },
         {
           "title": "公开双轴执行器",
@@ -347,15 +347,15 @@ window.SKYWALKER_ARCHITECTURE = {
           "detail": "GimbalExecutor 持续更新小 Yaw/Pitch；输入/许可/急停检查保留，电机恢复不重采目标。"
         },
         {
-          "title": "共享 DJI 与 Pitch CAN",
+          "title": "小 Yaw CAN1 与 Pitch CAN2",
           "moduleId": "motor-dji",
-          "detail": "小 Yaw、摩擦轮和拨盘 CAN1；Pitch DM CAN2。所有机构 stage 后每物理 CAN 一次 commit。"
+          "detail": "当前最终云台只装配小 Yaw CAN1 与 Pitch DM CAN2，每周期各提交一次；发射机构未装配。"
         }
       ],
       "sources": [
         {
-          "label": "vehicle_bench.hpp",
-          "path": "samples/robotics/common/vehicle_bench.hpp"
+          "label": "sentry_gimbal/main.cpp",
+          "path": "applications/sentry_gimbal/src/main.cpp"
         },
         {
           "label": "inertial_gimbal.cpp",
@@ -370,7 +370,7 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "vision-auto",
       "title": "视觉目标如何进入自动瞄准",
-      "summary": "已有可选观察/执行阶段，真实参考会话与反馈来源尚未完成。",
+      "summary": "后续接入路线；库与历史样例已有，当前两个最终应用未装配视觉。",
       "steps": [
         {
           "title": "AB 目标下行",
@@ -380,7 +380,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "按阶段注册 VisionSource",
           "moduleId": "command-sources",
-          "detail": "VEHICLE_VISION_EXECUTE 注册 Aim 并启用 Auto；观察配置不执行。"
+          "detail": "历史宏样例曾注册 VisionSource；新最终应用未注册，后续需独立观察/执行工程与专属串口。"
         },
         {
           "title": "Auto 仲裁",
@@ -395,13 +395,13 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "机械执行与真实反馈缺口",
           "moduleId": "gimbal",
-          "detail": "GimbalExecutor 更新双轴；弹速/弹数未接，AB 反馈 TX 禁用。"
+          "detail": "后续在参考一致和真实反馈来源具备后接入机械执行；当前最终应用未启用视觉或 AB 上行。"
         }
       ],
       "sources": [
         {
-          "label": "vehicle_bench.hpp",
-          "path": "samples/robotics/common/vehicle_bench.hpp"
+          "label": "历史 vehicle_integration 说明",
+          "path": "samples/robotics/vehicle_integration/README.md"
         },
         {
           "label": "vision.md",
@@ -416,7 +416,7 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "interboard-chassis",
       "title": "云台命令如何驱动轮控和大 Yaw",
-      "summary": "v4 输入身份/年龄与真实状态生产时效；电机反馈不门控目标发送。",
+      "summary": "固定两应用传输 v4 输入身份/原年龄与真实执行状态；云台 USART10、底盘 USART1。",
       "steps": [
         {
           "title": "板间 v4 输入",
@@ -426,12 +426,12 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "四舵轮执行器",
           "moduleId": "chassis",
-          "detail": "ChassisExecutor 注入 SwerveHardware，FL/FR/RL/RR 逐轴有效性；CAN1 舵向，CAN3 轮驱，底盘 2ms 绝对节拍。"
+          "detail": "ChassisExecutor 注入应用持有的 SwerveHardware；CAN1 舵向、CAN2 轮驱，底盘 2ms 绝对节拍，当前为低电流机械策略。"
         },
         {
           "title": "大 Yaw 速度内环",
           "moduleId": "big-yaw",
-          "detail": "云台独立小 Yaw 中心外环请求 → 底盘 BigYawExecutor → DM MIT 速度控制，CAN2；不需固定绝对零点。"
+          "detail": "小 Yaw 中心外环 → 底盘 BigYawExecutor → DM CAN3 关节速度内环；boot/来源年龄/反馈独立检查。"
         },
         {
           "title": "电机独立自动恢复",
@@ -445,6 +445,10 @@ window.SKYWALKER_ARCHITECTURE = {
         }
       ],
       "sources": [
+        {
+          "label": "sentry_chassis/main.cpp",
+          "path": "applications/sentry_chassis/src/main.cpp"
+        },
         {
           "label": "interboard_endpoint.cpp",
           "path": "lib/communication/interboard_endpoint.cpp"
@@ -462,12 +466,12 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "imu-feedback",
       "title": "IMU 如何进入惯性控制与视觉反馈",
-      "summary": "头部 IMU 惯性控制已装配，AB 反馈的非 IMU 字段仍待补。",
+      "summary": "当前 CAN3 头部 IMU 已进入惯性云台；视觉反馈属于未接入的后续能力。",
       "steps": [
         {
           "title": "头部外置采集",
           "moduleId": "imu",
-          "detail": "云台 USART2 主动 RS485 source → ImuReceiver，保留字段原 stamp/quality/reference。"
+          "detail": "云台 CAN3 DmImuCanSource 主动四元数 → ImuReceiver，保留原 stamp/quality/reference；不是 USART2 RS485。"
         },
         {
           "title": "IMU 与机械快照",
@@ -482,7 +486,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "视觉反馈完整来源",
           "moduleId": "vision",
-          "detail": "orientation/gyro 可由真实 IMU 组装；弹速/弹数和显式会话仍待补，上行默认关闭。"
+          "detail": "后续视觉可使用真实 orientation/gyro；当前未装配视觉，仍缺显式会话与弹速/弹数来源。"
         }
       ],
       "sources": [
@@ -495,8 +499,8 @@ window.SKYWALKER_ARCHITECTURE = {
           "path": "lib/robotics/inertial_gimbal.cpp"
         },
         {
-          "label": "vehicle_bench.hpp",
-          "path": "samples/robotics/common/vehicle_bench.hpp"
+          "label": "gimbal_profile.hpp",
+          "path": "include/robotics/vehicle/gimbal_profile.hpp"
         }
       ]
     },
@@ -554,7 +558,7 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "shooter",
       "title": "发射请求如何成为供弹动作",
-      "summary": "执行框架已有，有载真实来源默认无效。",
+      "summary": "后续有载发射路线；库/历史样例保留，当前最终云台未创建发射电机。",
       "steps": [
         {
           "title": "仲裁请求与离散事件",
@@ -574,7 +578,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "共享 DJI 提交",
           "moduleId": "motor-dji",
-          "detail": "小云台与发射全部 stage 后统一 CAN1 commit。"
+          "detail": "后续组合需所有 DJI 机构暂存后由唯一 owner 提交；当前最终云台只提交小 Yaw 与 Pitch。"
         }
       ],
       "sources": [
@@ -583,40 +587,40 @@ window.SKYWALKER_ARCHITECTURE = {
           "path": "lib/robotics/shooter_executor.cpp"
         },
         {
-          "label": "vehicle_bench.hpp",
-          "path": "samples/robotics/common/vehicle_bench.hpp"
+          "label": "历史发射样例",
+          "path": "samples/robotics/shooter_bench/README.md"
         }
       ]
     }
   ],
   "startup": [
     {
-      "title": "1 · 填真实中央标定与资源",
-      "detail": "calibration.hpp、vehicle_mc02.overlay、阶段 prj.conf；connections/IMU/power/shooter 的确认标志分别核对。"
+      "title": "1 · 选择固定工程与共享配置",
+      "detail": "按 samples/bringup 目录选择阶段；installed overlay/conf 固定资源，calibration/profile 共用标定。确认值 true 仍需实车记录。"
     },
     {
-      "title": "2 · 静态构造与启动",
-      "detail": "输入接收器、来源、Transport/Endpoint、Motor/CanBus、Group 和快照存储长期存活；应用 attach/start，机构 begin。"
+      "title": "2 · 先诊断，再装配业务对象",
+      "detail": "Diagnostics 先发布身份与资源；每个 main 自行创建长期来源/Endpoint/Motor/CanBus/Group，attach/start 后 begin；初始化失败保留诊断。"
     },
     {
-      "title": "3 · 注册来源并采样",
-      "detail": "默认 Remote，视觉/裁判按阶段选；start 成功仅表示线程启动，数据新鲜度仍独立检查。"
+      "title": "3 · 真实 RC 授权与原始输入",
+      "detail": "固定手动云台只注册 RemoteSource；Down/Down 归中 500ms 后左 Middle 解锁，底盘接收原始授权；start 成功不代表测量有效。"
     },
     {
       "title": "4 · 唯一执行 owner",
-      "detail": "云台约 5ms、底盘2ms绝对节拍；各机构先更新，统一每物理 CAN commit。通信1ms poll只交换快照。"
+      "detail": "云台 5ms、底盘 2ms 绝对节拍，main 内推进 endpoint；各机构 stage 后每物理 CAN 一次 commit，诊断 worker 只发送观测。"
     },
     {
       "title": "5 · 持续目标与逐轴恢复",
-      "detail": "运行意图有效即持续 enable/update/commit，不等全体 ready；本轴缺反馈或参考只作废本轴计算。"
+      "detail": "当前输入和许可有效时持续更新；Motor/CanBus 推进本轴恢复，不能伪造新的 RC 解锁或板间 boot。"
     },
     {
-      "title": "6 · 真实输入撤销",
-      "detail": "主动停止/急停/输入过期取消旧目标；电机上线不能复活停止前命令；真实 boot/link 变化按输入身份处理。"
+      "title": "6 · 原始年龄与真实停止",
+      "detail": "输入撤销/过期、实际 peer boot/link 改变撤权；v4 保留原始年龄与状态生产年龄，重发不延长旧运动。"
     },
     {
-      "title": "7 · 完成来源与验收",
-      "detail": "功率/热量/拨盘原点/视觉上行不使用占位值；按单轴到整车记录，单舵轮基本功能与整车验收分开。"
+      "title": "7 · 单口诊断与实车记录",
+      "detail": "只改 diagnostic_output 后重编译烧录选择 DAPLink Log/Vofa；27 工程仅编译完成，实板逐级确认，视觉/功率/有载发射继续独立接入。"
     }
   ],
   "sources": [
@@ -641,10 +645,6 @@ window.SKYWALKER_ARCHITECTURE = {
       "path": "docs/modules/communication/interboard-transports.md"
     },
     {
-      "label": "vehicle_bench.hpp",
-      "path": "samples/robotics/common/vehicle_bench.hpp"
-    },
-    {
       "label": "calibration.hpp",
       "path": "include/robotics/vehicle/calibration.hpp"
     },
@@ -655,11 +655,31 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "label": "README.md",
       "path": "samples/motor/m2006_speed_control/README.md"
+    },
+    {
+      "label": "独立上车工程",
+      "path": "samples/bringup/README.md"
+    },
+    {
+      "label": "实车共享配置",
+      "path": "config/vehicle/installed/README.md"
+    },
+    {
+      "label": "板间 v4 协议契约",
+      "path": "docs/protocols/interboard-v4.md"
+    },
+    {
+      "label": "sentry_gimbal/main.cpp",
+      "path": "applications/sentry_gimbal/src/main.cpp"
+    },
+    {
+      "label": "sentry_chassis/main.cpp",
+      "path": "applications/sentry_chassis/src/main.cpp"
     }
   ],
   "baseline": {
-    "branch": "main",
-    "commit": "99a97c91e7e8ed684b9758e0edf6b12bf73b0d79",
-    "date": "2026-10-05"
+    "branch": "工作区",
+    "commit": "48984ed90898726e8a9d451ac07bdc88c4663f11",
+    "date": "2026-10-25"
   }
 };

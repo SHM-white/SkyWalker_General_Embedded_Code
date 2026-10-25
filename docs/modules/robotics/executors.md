@@ -1,6 +1,8 @@
 # 机构执行器、惯性适配与大 Yaw 回中
 
-本文对齐 `main@99a97c9`（2026-10-05）。执行器位于 `include/robotics/` 与 `lib/robotics/`；两套 sentry 应用仅调用公共 `samples/robotics/common/vehicle_bench.hpp`。应用持有 Motor、Group、CanBus、输入来源和线程，完成 attach/start，并在所有机构暂存输出后对每条物理 CAN commit 一次。执行器不创建或提交 CAN 总线。
+更新日期：2026-10-25。执行器位于 `include/robotics/` 与 `lib/robotics/`；[云台应用](../../../applications/sentry_gimbal/README.md)与[底盘应用](../../../applications/sentry_chassis/README.md)各自在自己的 `src/main.cpp` 中构造对象、初始化资源并执行控制循环。它们不调用公共 `vehicle_bench.hpp`。应用持有 Motor、Group、CanBus 和输入来源，完成 attach/start，并在所有机构暂存输出后对每条物理 CAN commit 一次。执行器不创建或提交 CAN 总线。
+
+应用与[独立上车工程](../../../samples/bringup/README.md)共享 [installed 物理配置](../../../config/vehicle/installed/README.md)及 `include/robotics/vehicle/` 中的标定与纯配置工厂。云台使用 CAN1 小 Yaw、CAN2 Pitch、CAN3 头部 CAN IMU；底盘使用 CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw。UART7 为两板 DAPLink 诊断候选口，板间固定为云台 USART10、底盘 USART1。资源共用不会替代现场接线和标定确认。
 
 所有有状态 update、begin、suspend 和 status 引用访问由一个执行线程拥有。跨线程使用 SnapshotCache 或 Endpoint 的值副本；读者不刷新生产时间。SnapshotCache 争锁使用有界短自旋，首次尚无发布时 snapshot 返回 -EAGAIN，ISR 调用返回 -EWOULDBLOCK。初始化配置失败保持 Blocked；运行意图由新鲜输入决定，电机等待/故障不阻止其他轴持续生产目标。Group 只是批量启停，Motor/CAN 独立恢复。
 
@@ -40,17 +42,17 @@
 
 输出 `command` 是给 GimbalExecutor 的关节 Rate 命令，`source_stamp` 保留原输入时间，两个 output_valid 分别表示数学测量足够，`stabilization_valid` 用于回中/供弹业务。适配器只做坐标与目标计算，没有电机/总线所有权。
 
-默认头部 IMU 超时 20 ms，机械测量 50 ms，来源/命令 100 ms，周期上限 20 ms；Pitch 默认锁定。配置包括两轴方向、姿态误差增益、gyro damping、惯性 Pitch 范围、稳定误差阈值和姿态质量要求。IMU frame_id/epoch 是坐标身份；视觉目标与头部参考必须匹配，不能把世界角直接送机械编码器位置。电机恢复不重定义惯性业务目标。
+库 Config 默认头部 IMU 超时 20 ms，机械测量 50 ms，来源/命令 100 ms，周期上限 20 ms；Pitch 默认锁定。最终云台的 `manualInertialConfig()` 明确放开 Pitch，两个惯性上车工程则分别固定为仅 Yaw 或双轴，不靠锁轴宏选择。配置包括两轴方向、姿态误差增益、gyro damping、惯性 Pitch 范围、稳定误差阈值和姿态质量要求。IMU frame_id/epoch 是坐标身份；视觉目标与头部参考必须匹配，不能把世界角直接送机械编码器位置。电机恢复不重定义惯性业务目标。
 
 ## 小 Yaw 外环与 BigYawExecutor
 
 头文件：[yaw_centering.hpp](../../../include/robotics/gimbal/yaw_centering.hpp)、[big_yaw_executor.hpp](../../../include/robotics/execution/big_yaw_executor.hpp)。
 
-`YawCenteringController::update(const YawCenteringInputs &, now_us)` 使用已标定小 Yaw 中心、关节角及其采样时间、原始来源、head_stable 与 permission_valid，生成限速/斜坡后的大 Yaw 角速度。中心与编码器零点分开标定。默认死区 0.05 rad、迟滞 0.025 rad、kp=0.5、最大 0.3 rad/s、加速度 0.4 rad/s²。`reset()` 清外环历史。
+`YawCenteringController::update(const YawCenteringInputs &, now_us)` 使用已标定小 Yaw 中心、关节角及其采样时间、原始来源、head_stable 与 permission_valid，生成限速/斜坡后的大 Yaw 角速度。中心与编码器零点分开标定。库 Config 默认死区 0.05 rad、迟滞 0.025 rad、kp=0.5、最大 0.3 rad/s、加速度 0.4 rad/s²。最终云台 `manualCenteringConfig()` 的上限为 0.6 rad/s、加速度 0.8 rad/s²；独立双 Yaw 上车入口使用 `bringup::big_yaw_rate_rad_s=0.1 rad/s`，与其配套 `chassis_big_yaw` 接收上限一致。`reset()` 清外环历史。
 
 `BigYawExecutor` 注入独立 Motor、VelocityMotor::Config 与自身 Config；`begin()` 配置，`update(const BigYawExecutionInputs &, now_us)` 消费请求，`suspend(...)` 撤销输入，`feedback()` 返回 BigYawFeedback 值副本。它只控制连续旋转速度，不需要绝对机械零点，不从八电机轮控状态取得许可。
 
-v4 的 BigYawRequest 保留 receiver_boot_id、source_sequence 和来源/命令/权限年龄。resume_generation 已删除；发送不等电机 ready/armed。真实板重启、链路或输入过期仍使请求失效。BigYawFeedback 保留真实状态生产年龄与实际速度 valid，未获得有效测量时不得把目标速度作为反馈。
+v4 的 BigYawRequest 保留 receiver_boot_id、source_sequence 和来源/命令/权限年龄。resume_generation 已删除；库不以电机 ready/armed 作为发送授权。独立双 Yaw 上车入口额外要求真实反馈新鲜才发非零速度，缺测量时最多发已授权零速 FollowCenter。真实板重启、链路或输入过期仍使请求失效；当前应用的操作授权发布器在曾上线的对端掉线或 boot 改变时撤销本地 RC 解锁，需要重新归中解锁。BigYawFeedback 保留真实状态生产年龄与实际速度 valid，未获得有效测量时不得把目标速度作为反馈。速度单位、接口轴到关节轴换算与线上方向适配见[协议 v4 契约](../../protocols/interboard-v4.md)。
 
 ## ChassisExecutor 与 SwerveHardware
 
@@ -72,22 +74,28 @@ SwerveHardware 的 Motor 顺序为舵向 FL/FR/RL/RR，再轮驱 FL/FR/RL/RR。`
 
 摩擦速度稳定驻留、热量余量、拨盘可信原点、头部稳定/云台状态均属于发射业务条件。单发以 fire_event_id 与原始事件时间去重；忙碌、失效或恢复中不能执行的旧事件消费丢弃，恢复不重放。shots 是软件执行统计，不能直接当裁判实测弹数。卡滞与热量业务策略按现行实现保留，电机自动清错不能代替解除机械卡弹。
 
-整车 `run(IPowerMeasurementSource *, IShooterHeatSource *, IDialHomeSource *)` 支持注入真实来源；默认 PendingPowerSource、PendingHeatSource、PendingDialHomeSource 无效，功率/有载发射配置因缺测量保持不可执行。视觉 AB 反馈还缺可信弹速/弹数与显式视觉参考会话，TX 默认关闭。
+当前最终云台不构造 ShooterExecutor、摩擦轮或拨盘，不注册视觉来源，也不绑定裁判许可；最终底盘使用受中央电流上限约束的手动执行配置，`require_power_budget=false`、`power_control_calibrated=false`、`allow_estimated_power=false`。这些入口只实现手动机械链，没有接通实测功率、真实热量/发射许可和拨盘归位输入。
+
+历史 [vehicle_integration](../../../samples/robotics/vehicle_integration/README.md) 仍通过 `vehicle_bench.hpp` 的 `run(IPowerMeasurementSource *, IShooterHeatSource *, IDialHomeSource *)` 注入来源；其默认 PendingPowerSource、PendingHeatSource、PendingDialHomeSource 无效。该历史宏组合入口不再决定两个最终应用的装配方式。视觉 AB 反馈所需的可信弹速/弹数与显式视觉参考会话仍待补齐，不能通过打开历史功能开关认定已完成。
 
 ## 在应用周期中组合
 
 ```cpp
-// application 已静态创建 hardware/adapter，并完成 attach/start/begin。
+// 当前云台的周期形态：对象由本工程构造并完成 attach/start/begin。
 // source、IMU、MotorSnapshot 均保留原采样时间。
-const auto adapted = adapter.update(inertial_inputs, now_us);
+commands.setOperatorGate(operator_state.run_allowed, operator_state.clear_event_id);
+const auto adapted = inertial.update(inertial_inputs, now_us);
 gimbal_inputs.command = adapted.command;
 gimbal_inputs.source_stamp = adapted.source_stamp;
 gimbal_inputs.yaw_output_valid = adapted.yaw_output_valid;
 gimbal_inputs.pitch_output_valid = adapted.pitch_output_valid;
-const auto gimbal_status = hardware.gimbal.update(gimbal_inputs, now_us);
-const auto shooter_status = hardware.shooter.update(shooter_inputs, now_us);
-const int published = hardware.commit(); // DJI CAN1 和 Pitch CAN2 各一次
-// published 错误记录诊断；输入/急停仍由本周期显式撤销。
+const auto gimbal_status = gimbal.update(gimbal_inputs, now_us);
+const int yaw_error = yaw_bus.commit().error;
+const int pitch_error = pitch_bus.commit().error;
+endpoint.setStatus(gimbal_status); // 保留真实执行生产时间。
+// commit 错误进入诊断；输入/急停仍由本周期显式处理。
 ```
 
-这是公共 vehicle_bench 的周期组织示意，构造、设备和权限上下文以其源码为准。配置阶段、两板分工及默认阻断见[双主控应用](../../applications/dual-controller.md)，持续控制/取消版本见[电机工作流](../../guides/motor-workflow.md)。软件入口存在与单舵轮调通均不代表整车、视觉、功率或有载发射已验收。
+这是独立应用的周期组织示意；完整初始化、失败门控和执行循环以各应用源码为准。最终云台通过物理 RC 的 `require_external_run_gate=true` 获取本地操作授权，再将带原始年龄与 boot 绑定的操作授权、行走及大 Yaw 请求发给底盘；底盘不创建 CommandManager，而消费真实板间授权并分别更新 ChassisExecutor 与 BigYawExecutor。只有历史组合/发射样例需要在同一个 CAN 提交者中继续编排 ShooterExecutor。
+
+配置阶段与两板分工见[双主控应用](../../applications/dual-controller.md)，持续控制/取消版本见[电机工作流](../../guides/motor-workflow.md)。诊断 Log/VOFA 的单变量选择及固定通道见[上车入口说明](../../../samples/bringup/README.md)。软件入口存在、编译通过与单舵轮调通均不代表整车、视觉、功率或有载发射已验收。

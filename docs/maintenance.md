@@ -2,7 +2,7 @@
 
 每次代码变更使用本页待办逐项更新。目录扫描只能自动发现 Markdown，无法判断 API 或运行语义是否正确。接口详情维护在 `docs/api/*.md`，在线浏览器直接读取这些文件；不再另写 JS 接口契约数组。
 
-当前内容基线：`main@99a97c9`（2026-10-05）；浏览器导航与自动扫描是在该代码之上维护的文档功能。一次更新须记录实际核对的提交；文档提交或部署提交不应被误写成固件能力基线。
+本轮应用、实车配置和诊断文档基线：固件 `48984ed90898726e8a9d451ac07bdc88c4663f11`，2026-10-25。未变化 API 页可保留各自原基线；文档提交或部署提交不应被误写成固件能力基线。此次仅同步文档，沿用上轮 27 项编译结果，没有重新测试、构建或发布在线站点。
 
 ## 文档分工
 
@@ -12,6 +12,8 @@
 | `docs/modules/**` | 模块概念、职责、算法 / 协议、配置和使用前提 | 模块行为或配置变化 |
 | `docs/guides/**` | 跨模块初始化、周期调用、停止 / 恢复、排障和迁移 | 调用链、并发、时效或恢复改变 |
 | `docs/applications/**` | 应用线程、设备装配、权限、数据来源与真实缺口 | 正式应用配置或接入改变 |
+| `config/vehicle/installed/README.md`、`samples/bringup/README.md` | 实车资源、独立阶段、模式选择、诊断布局与上车登记 | 配置、装配、诊断或阶段改变 |
+| `docs/protocols/interboard-v4.md` | 字节布局、CRC、单位、方向、年龄、boot 与停止语义 | 线协议或其现行默认值变化 |
 | `samples/**/README.md`、`tests/**/README.md` | 独立入口、构建指令、硬件前提和预期现象 | 样例 / 验证入口改变 |
 | 根 `README.md`、`docs/README.md`、主题索引 | 推荐阅读路线、能力摘要、源码基线 | 大改动、迁移、新主题或能力变化 |
 | `docs/dev/**` | 历史设计与待实施方案 | 新设计或需要注明实施状态；不用于现行 API 定义 |
@@ -27,7 +29,7 @@
 | `include/control`、`lib/control` | [控制器主题](modules/control/motor-control.md)、[控制器接口](api/motor-control.md)、[算法接口](api/pid.md)、[Kalman](api/kalman.md)、受影响控制样例 |
 | `include/robotics`、`lib/robotics` | [执行器](modules/robotics/executors.md)、[机器人](modules/robotics/robotics.md)、[命令 / 恢复](modules/robotics/command-recovery.md)、对应 [API 参考](api/README.md)、调用链和主图 |
 | 通信 / 板间 wire version | 通信主题及对应 API，板间 v4、两板兼容前提、生产年龄 / 序号、应用链路与观测 |
-| `samples/robotics/common/vehicle_bench.hpp`、`applications/sentry_*` | 双主控说明、配置默认值、硬件确认、权限、测量来源、应用 / 执行器 API、当前主图及真实缺口 |
+| `applications/sentry_*`、`samples/bringup/*`、`config/vehicle/installed/*`、`include/robotics/vehicle/*` | 独立装配、共享物理配置/参数、阶段职责、诊断所有权、真实输入及实板记录；历史 vehicle_bench 不作当前应用入口 |
 | board / DTS / Kconfig / CMake | 快速开始、板级、样例构建方式、配置字段与线程资源说明 |
 
 ## 每次更新待办
@@ -68,7 +70,7 @@
 - [ ] 需要硬件验收时使用对应样例，记录板卡、接线、模式、参数和实际停止 / 重接现象；文档本身不替代验收。
 - [ ] PR 写明核对基线、行为变化、受影响文档、验证范围、未完成项和发布方式。
 - [ ] GitHub Pages 从部署树自动生成 `docs-index.json`；其他静态发布同样运行扫描器，打包包含索引与原始 Markdown。
-- [ ] 更新现有在线站点并确认部署状态；保持既定访问范围；记录部署提交和源码能力基线分别对应什么。
+- [ ] 若本次明确要求发布，更新在线站点并确认部署状态；保持既定访问范围；记录部署提交和源码能力基线分别对应什么。
 
 本地阅读 Markdown 不需要服务器。使用浏览器时运行 `bash docs/architecture-browser/run.sh`；动态扫描包含未提交文件。静态站点只展示已部署快照，新增内容在下一次部署出现。启动及静态生成命令见[浏览器说明](architecture-browser/README.md#自动发现-markdown)。
 
