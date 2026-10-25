@@ -1,4 +1,14 @@
 zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS vehicle_diagnostics.cpp)
+if(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
+    execute_process(COMMAND git describe --always --dirty --abbrev=12
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../..
+        OUTPUT_VARIABLE vehicle_source_version OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT vehicle_source_version)
+        set(vehicle_source_version "unknown")
+    endif()
+    zephyr_library_compile_definitions(SKYWALKER_SOURCE_VERSION="${vehicle_source_version}")
+endif()
 zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_COMMAND command.cpp mouse_shooter_gesture.cpp)
 zephyr_library_sources_ifdef(CONFIG_SKYWALKER_COMMAND_SERVICE command_manager.cpp receiver_sources.cpp)
 zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_SWERVE swerve.cpp chassis_power_limiter.cpp)

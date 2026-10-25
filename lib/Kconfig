@@ -117,6 +117,14 @@ config SKYWALKER_LIB_ROBOTICS
     depends on CPP
     select SKYWALKER_LIB_CONTROL
 
+config SKYWALKER_VEHICLE_DIAGNOSTICS
+    bool "Installed vehicle diagnostic UART backend"
+    depends on SKYWALKER_LIB_ROBOTICS && SERIAL && LOG
+    select LOG_OUTPUT
+    help
+      One bounded output queue for fixed Log or JustFloat output. Requires a
+      diagnostic-uart devicetree alias and exclusive ownership of that UART.
+
 config SKYWALKER_ROBOTICS_COMMAND
     bool "Manual mapper and command arbitration"
     default y

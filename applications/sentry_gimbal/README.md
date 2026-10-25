@@ -1,67 +1,39 @@
 # 哨兵云台应用
 
-默认使用头部 IMU 模式（`CONFIG_VEHICLE_ENCODER_ONLY=n`），遥控解锁方式与双 Yaw 样例相同：左右拨杆 Down、摇杆和拨轮归中保持500 ms，再将左拨杆切到 Middle。右横杆控制小Yaw，右纵杆控制Pitch（`CONFIG_VEHICLE_LOCK_PITCH=n`），惯性控制输出有效且云台执行处于 Active 时，大Yaw根据关节中心偏差跟随。头部姿态误差超过稳定阈值不再单独撤销大Yaw跟随；头部稳定判定仍用于发射约束。三轴不设置固定锁定，仍保留解锁、反馈有效性、关节限位和回中就绪条件。
+固定的手动双轴惯性云台 + 大 Yaw 回中发送 + 底盘行走发送入口。`src/main.cpp` 显式装配遥控、CAN3 头部 IMU、CAN1 小 Yaw、CAN2 Pitch、板间端点和控制器，不再调用样例公共 `vehicle::run()`。不启动摩擦轮、拨盘、视觉或裁判接收器。
 
 ```sh
-west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d build/sentry_gimbal_can
+west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d ../build/applications/sentry_gimbal
 ```
 
-当前 IMU 安装在 Pitch 头部，X前、Y左、Z上，使用中央标定中的单位四元数安装变换和安装确认参数。IMU 模式要求头部姿态与角速度反馈新鲜。若另行设置 `CONFIG_VEHICLE_ENCODER_ONLY=y`，则不启动头部IMU，不受安装确认参数阻挡，但不能保持对地惯性朝向；此时小Yaw用对端实际速度反向补偿，也不会把关节回中就绪伪装成惯性稳定来授权实弹供弹。默认仍关闭发射。若叠加 `referee.conf`，运动仍要求真实裁判许可。
+不叠加旧 `imu_*.conf`、`pitch_free.conf`、`referee.conf`、`shooting.conf`、`vision_*.conf` 等角色/场景配置。它们属于历史公共运行体的构建方式；机械单轴、IMU、板间观察应选择 [独立上车工程](../../samples/bringup/README.md) 中的相应目录。修改中央配置后重新构建相关固件。
 
-本地执行循环直接读取DR16并运行解锁状态机，与双Yaw样例一致；板间线程转发带原始时间戳的运行状态。链路丢失/对端重启仍撤销运行授权，需重新解锁。关闭 `VEHICLE_SHOOTING` 时仅将Yaw/Pitch加入电机总线并初始化云台控制器，摩擦轮/拨盘配置不再阻止云台启动。日志中 `allowed` 表示遥控解锁结果，`centered/armReady/neutralMs` 显示归中条件，`topology/run/reason/error` 用于区分已解锁但执行被阻止的情况。
+## 共用配置与接线
 
-总云台继续发送v4底盘行走 `ChassisControl`、操作授权 `OperatorControl` 和独立大Yaw `BigYawRequest`。另一套底盘需返回有效心跳以建立链路。编码器模式即使没有有效 `BigYawFeedback`，也按回中算法正常发送目标速度，不因对端速度反馈失效而清零或重置斜坡。有效速度反馈仅用于小Yaw的实测反向补偿；缺少它时不做该补偿，因此不能保证双Yaw协调回中，小Yaw偏差持续存在时大Yaw可能持续收到转速请求。遥控停止、急停、输入/关节反馈超时、限速和链路上线条件仍生效。本地小Yaw不等待大Yaw上线。
+物理配置使用 [gimbal.overlay](../../config/vehicle/installed/gimbal.overlay)、系统配置使用同目录的 `base.conf` 和 `gimbal.conf`。标定、硬件驱动、PID、关节限位分别来自 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp)、[gimbal_profile.hpp](../../include/robotics/vehicle/gimbal_profile.hpp)；手动策略来自 [manual_profile.hpp](../../include/robotics/vehicle/manual_profile.hpp)。阶段程序与最终应用共用这些配置。
 
-大Yaw请求 `0x0402` 由通信线程每10 ms独立发布一次，使用新的请求时间戳和递增生产序号，不依赖执行循环是否正在输出。遥控器在线且数据新鲜时，即使未解锁或控制条件未满足，也持续发布新鲜的 `Disabled + 0`；运行条件有效时发布 `FollowCenter + 目标角速度`。执行线程只更新目标快照，通信线程保留并累加原控制输入和命令的年龄，超过100 ms未更新的运动目标会转为新生成的停止请求，不会被保活。
+| 资源 | 固定用途 |
+| --- | --- |
+| UART5 / DBUS | DR16 遥控 |
+| USART10 PE3 TX / PE2 RX，460800 8N1 | v4 板间 UART |
+| UART7 PE8 TX / PE7 RX，115200 8N1 | DAPLink 单口诊断；TX 接 DAPLink RX 并共地 |
+| CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
+| CAN3，1 Mbps | 头部 DM IMU，主动上报，从机 0x1 / 反馈 0x11 |
 
-停止、急停、控制条件失效或对端离线时发送 `Disabled + 0`。本地传输正常时发送周期约10 ms，低于250 ms；物理断线、传输故障或发送忙时不能保证送达，底盘仍须独立执行超时失能。重新上线后仍要求有效操作授权，旧运动请求不能自动恢复。协议端重发同一个请求时不刷新其生产时间或序号，通信线程生成新请求也不会刷新旧运动目标或操作授权的原始年龄。
+UART7 被诊断独占，视觉不能再沿用这个端口。DAPLink 是否实际接到 UART7、IMU 安装变换和实车机械端点仍需按现场记录确认；共享配置的确认值保留现值，不能代替实板记录。
 
-接收端允许更新的传输帧将同一生产序号降为 `Disabled`，但不刷新该请求的年龄；同一生产序号不能再次恢复为 `FollowCenter`。使用其他底盘程序时，应同时处理模式、原始年龄及这一停止规则；零速失能帧不表示零速保持。
+## 运行与停止
 
-| 用途 | 接口 | 接线/配置 |
-| --- | --- | --- |
-| 板间通信 | USART10 | TX PE3、RX PE2，双板交叉并共地，460800、8N1 |
-| 日志 | UART7 | PE8 TX接适配器RX并共地；控制台输入使用PE7 RX，115200、8N1 |
-| 遥控器 | UART5 / DBUS | 接云台板，保留板上DBUS电气通路 |
-| 小Yaw / Pitch | CAN1 / CAN2 | 电机ID、限位沿用中央标定 |
+左右拨杆 Down，摇杆与拨轮归中保持 500 ms，再把左拨杆切到 Middle 解锁。右横杆控制小 Yaw，右纵杆控制 Pitch；左摇杆前后/横移各限 ±0.3 m/s，拨轮自转限 ±0.5 rad/s。左拨杆 Down 或遥控过期撤销运行；不支持自动视觉档。
 
-当前按对端安装方向启用 `CONFIG_VEHICLE_BIG_YAW_REVERSE=y`，将 `0x0402` 的大Yaw目标速度反号；收到的 `0x0403` 实测速度使用同一符号转换后参与小Yaw补偿，要求对端反馈与命令采用相同的正方向。`request_mrad_s` 显示转换后的发送目标。大Yaw回中目标限幅为±0.6 rad/s，斜坡为0.8 rad/s²，配置位于共享 `vehicle_bench.hpp` 的 `centeringConfig()`；底盘拨轮旋转 `0x0101.wz_rad_s` 独立限幅为±0.5 rad/s，左摇杆前后/横移分别为±0.3 m/s。对端自身的限幅由另一套底盘程序决定。
+双轴惯性输出有效且云台执行处于 Active 时，关节中心误差驱动大 Yaw 回中，限速 ±0.6 rad/s、斜坡 0.8 rad/s²。保留当前对端的线上反号适配 `big_yaw_wire_direction = -1`；不擅自统一两端正方向。协议速度是大 Yaw 关节侧 rad/s，见 [v4 协议契约](../../docs/protocols/interboard-v4.md)。头部 IMU 过期、初始化失败、输入撤销等情况下仍产生 `Disabled + 0` 请求。
 
-USART10的TX/RX DMA使用DMAMUX通道3/4，请求号119/118；UART7使用轮询日志，移除继承的DMA配置。串口覆盖仅作用于本应用。启动日志显示 `reference=encoders` 或 `reference=head IMU`；诊断含 `rcFresh/allowed`、`followReady/peerRateValid/centerReason` 及链路错误。
+应用循环每 5 ms 更新一次，每 10 ms 发布大 Yaw 请求及行走命令。请求携带原始输入与控制命令年龄，发送不会延长旧运动的有效期。链路曾上线后丢失或对端 boot 改变，会撤销本地解锁，必须归中重新解锁；本地初次调试不要求对端已上线。底盘自行约束 boot、授权、命令时效和反馈恢复。
 
-UART7当前专用于日志；共享设备树中的 `vision-uart` 别名仍指向UART7。默认配置未启动视觉接收器；启用 `vision_observe.conf` 或 `vision_execute.conf` 前，需将视觉串口及其DMA配置迁移到其他可用接口，避免与控制台争用。
+## 诊断
 
-接入IMU时，安装参考与变换仍取中央 `include/robotics/vehicle/calibration.hpp`。CAN1/CAN2 为现有电机总线，IMU 独占云台板 CAN3；底盘板CAN分配以对端程序为准。
+只修改 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 中的 `diagnostic_output`，然后重新编译烧录，选择文本日志或 VOFA JustFloat。使用同一 DAPLink COM 口与共享波特率；VOFA 固件不输出系统文本。初始化失败仍继续报告失败步骤与错误码。
 
-## 当前主动模式接入
+本应用提交的小 Yaw 诊断目标/反馈单位均为 rad，`enabled` 表示双轴执行 Active，`valid` 表示小 Yaw 测量有效，`age_ms` 为头部姿态年龄。通道顺序及布局版本沿用共享 [诊断说明](../../samples/bringup/README.md)。诊断字段不等于对端内部 PID 观测，也不证明实际停止时限或惯性稳定性已通过。
 
-- 将 IMU CANH/CANL 接云台板 CAN3，按实际总线连接公共参考地与终端电阻。
-- 厂家上位机选择 CAN、主动上报、1 Mbps，从机地址 `0x1`、主机地址 `0x11`。
-- 开启 CAN 输出、四元数、角速度、加速度/温度（输出位图 `0x0D`），先设置 5ms 上报周期并保存。若启用温控，等待模块的温控输出门控解除。
-- 非默认地址可修改 `CONFIG_SKYWALKER_IMU_DM_CAN_SLAVE_ID` 和 `CONFIG_SKYWALKER_IMU_DM_CAN_FEEDBACK_ID`；非默认速率修改设备树 `&can3` 的 `bitrate`。
-
-```sh
-west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d build/sentry_gimbal_can -- -DEXTRA_CONF_FILE=imu_can_active.conf
-```
-
-每秒 `dm_imu_can` 应显示 `mode=active slave=1 feedback=11`，`rx/updates` 增长、`tx=0`。快照全部新鲜时 `fresh_mask=15`。接收断流时字段到期失效，不保活旧姿态。
-
-## 切换模式
-
-模块先在上位机设置并保存被动应答，再编译：
-
-```sh
-west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d build/sentry_gimbal_can_passive -- -DEXTRA_CONF_FILE=imu_can_passive.conf
-```
-
-Pitch 默认已解锁，无需额外叠加 `pitch_free.conf`。`imu_can_active.conf`、`imu_can_passive.conf` 和 `imu_rs485.conf` 均显式关闭编码器模式。切换配置不自动修改 IMU 内部模式。
-
-恢复原 RS485 接线与驱动：
-
-```sh
-west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d build/sentry_gimbal_rs485 -- -DEXTRA_CONF_FILE=imu_rs485.conf
-```
-
-`vision_execute.conf` 和 `shooting.conf` 也会关闭编码器模式，恢复真实IMU要求。CAN 两种模式的共用解码依据工作区 V1.3 手册；被动请求格式由厂家 MC02 示例补充。未进行硬件通信验证。惯性模式的安装标定、`imu_mounting_confirmed` 以及执行约束仍需按实际机构配置；通信接入不代表已完成惯性云台标定。
-
-[CAN 协议、接口与诊断](../../docs/modules/drivers/imu.md#dm-imu-l1-can) · [无电机的双 IMU 观测样例](../../samples/imu/dual_imu/README.md#外置-imu-改用-can)
+尚未进行实板验证。射击真实热量/许可/归位、视觉参考会话与功率实测均属于独立后续能力。
