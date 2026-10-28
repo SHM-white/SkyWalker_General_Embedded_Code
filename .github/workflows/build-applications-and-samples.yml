@@ -2,9 +2,12 @@ name: Build applications and samples
 
 on:
   push:
+    branches: [main, dev]
     paths:
       - 'applications/**'
       - 'samples/**'
+      - 'config/**'
+      - 'tests/**'
       - 'boards/**'
       - 'drivers/**'
       - 'dts/**'
@@ -15,10 +18,13 @@ on:
       - 'CMakeLists.txt'
       - 'Kconfig'
       - '.github/workflows/build-applications-and-samples.yml'
+      - '.github/ci/**'
   pull_request:
     paths:
       - 'applications/**'
       - 'samples/**'
+      - 'config/**'
+      - 'tests/**'
       - 'boards/**'
       - 'drivers/**'
       - 'dts/**'
@@ -29,101 +35,247 @@ on:
       - 'CMakeLists.txt'
       - 'Kconfig'
       - '.github/workflows/build-applications-and-samples.yml'
+      - '.github/ci/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-applications-and-samples-${{ github.workflow }}-${{ github.ref }}
+  group: firmware-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build applications and samples
-    runs-on: ubuntu-latest
+  prepare-image:
+    name: Resolve pinned ARM toolchain image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          # west.yml declares the local manifest project as skywalker_code.
           path: skywalker_code
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          python-version: '3.12'
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Zephyr
-        uses: zephyrproject-rtos/action-zephyr-setup@v1
-        with:
-          app-path: skywalker_code
-          toolchains: arm-zephyr-eabi
-
-      - name: Build every project
+      - name: Select immutable toolchain version
+        id: image
         shell: bash
         run: |
-          set -uo pipefail
-
-          mapfile -t projects < <(
-            find skywalker_code/applications skywalker_code/samples \
-              -type f \
-              -name CMakeLists.txt \
-              -not -path '*/build/*' \
-              -exec dirname {} \; \
-              | sort -u
-          )
-
-          if ((${#projects[@]} == 0)); then
-            echo 'No applications or samples with CMakeLists.txt were found.' >&2
-            exit 1
+          set -euo pipefail
+          digest=$(sha256sum skywalker_code/west.yml skywalker_code/.github/ci/zephyr-arm.Dockerfile | sha256sum | cut -c1-20)
+          image="ghcr.io/shm-white/skywalker-zephyr-arm-ci:$digest"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Untrusted fork PRs can use an existing immutable tag, but must not
+      # publish arbitrary Dockerfile changes with the base repository token.
+      - name: Reject unpublished image from fork PR
+        if: steps.image.outputs.present != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        shell: bash
+        run: |
+          echo 'ARM image for this manifest is not published yet. Run the trusted workflow on main first.' >&2
+          exit 1
+
+      - name: Set up Docker Buildx
+        if: steps.image.outputs.present != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and publish missing ARM image
+        if: steps.image.outputs.present != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: skywalker_code
+          file: skywalker_code/.github/ci/zephyr-arm.Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+          cache-from: type=gha,scope=skywalker-zephyr-arm
+          cache-to: type=gha,mode=max,scope=skywalker-zephyr-arm
+
+  firmware:
+    name: MC02 firmware (shard ${{ matrix.shard }}/6)
+    needs: prepare-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    container:
+      image: ${{ needs.prepare-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user 0
+    env:
+      ZEPHYR_BASE: /opt/skywalker-zephyr/zephyr
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
+      SHARD_ID: ${{ matrix.shard }}
+      SHARD_COUNT: 6
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 300M
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: skywalker_code
+
+      - name: Link prebuilt Zephyr modules
+        run: bash skywalker_code/.github/ci/link-prebuilt-workspace.sh
+
+      - name: Configure compiler cache
+        run: |
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+
+      - name: Restore cached object files
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: arm-ccache-v1-${{ hashFiles('skywalker_code/west.yml') }}-shard${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            arm-ccache-v1-${{ hashFiles('skywalker_code/west.yml') }}-shard${{ matrix.shard }}-
+
+      - name: Build this shard of all applications and samples
+        run: |
+          set -euo pipefail
+          mapfile -t projects < <(
+            find skywalker_code/applications skywalker_code/samples \
+              -type f -name CMakeLists.txt -not -path '*/build/*' \
+              -exec dirname {} \; | sort -u
+          )
+          if (("${#projects[@]}" == 0)); then
+            echo 'No buildable applications or samples found.' >&2
+            exit 1
+          fi
+          echo "Total projects: ${#projects[@]}; building shard $SHARD_ID/$SHARD_COUNT"
           failures=()
-          echo "Found ${#projects[@]} projects."
-
-          for project in "${projects[@]}"; do
-            relative_project="${project#skywalker_code/}"
-            build_name="${relative_project//\//__}"
-
-            echo "::group::Building ${relative_project}"
-            if west build \
-              -p always \
-              -b dm_mc02/stm32h723xx \
-              -d "build/ci/${build_name}" \
-              "${project}"; then
-              echo "Build succeeded: ${relative_project}"
+          selected=0
+          for i in "${!projects[@]}"; do
+            if (( i % SHARD_COUNT != SHARD_ID )); then
+              continue
+            fi
+            project="${projects[i]}"
+            relative="${project#skywalker_code/}"
+            build_name="${relative//\//__}"
+            selected=$((selected + 1))
+            echo "::group::Building $relative"
+            if west build -p always \
+                -b dm_mc02/stm32h723xx \
+                -d "build/ci/$build_name" \
+                "$project" \
+                -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code" \
+                   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache; then
+              echo "PASS: $relative"
             else
-              echo "Build failed: ${relative_project}" >&2
-              failures+=("${relative_project}")
+              echo "::error title=Firmware build failed::$relative"
+              failures+=("$relative")
             fi
             echo '::endgroup::'
           done
-
-          if ((${#failures[@]} > 0)); then
-            echo 'The following projects failed to build:' >&2
-            printf ' - %s\n' "${failures[@]}" >&2
+          if ((selected == 0)); then
+            echo "Shard $SHARD_ID has no projects; check shard count." >&2
+            exit 1
+          fi
+          {
+            echo "## MC02 firmware shard $SHARD_ID"
+            echo "Projects selected: $selected of ${#projects[@]}"
+            echo "Failures: ${#failures[@]}"
+            printf '%s\n' "${failures[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if (("${#failures[@]}" != 0)); then
+            printf 'Build failed: %s\n' "${failures[@]}" >&2
             exit 1
           fi
 
-          echo 'All applications and samples built successfully.'
+      - name: Print ccache statistics
+        if: always()
+        run: ccache --show-stats || true
 
-      - name: Build registered staged hardware configurations
+      - name: Upload failed build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mc02-failure-logs-shard-${{ matrix.shard }}
+          path: |
+            build/ci/**/CMakeFiles/CMakeConfigureLog.yaml
+            build/ci/**/CMakeFiles/CMakeError.log
+            build/ci/**/zephyr/.config
+          if-no-files-found: ignore
+          retention-days: 7
+
+  variants:
+    name: MC02 staged configs and RM Type-C smoke
+    needs: prepare-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ${{ needs.prepare-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user 0
+    env:
+      ZEPHYR_BASE: /opt/skywalker-zephyr/zephyr
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
+    defaults:
+      run:
         shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: skywalker_code
+
+      - name: Link prebuilt Zephyr modules
+        run: bash skywalker_code/.github/ci/link-prebuilt-workspace.sh
+
+      - name: Build registered hardware configurations
         run: |
           set -euo pipefail
           west twister --build-only \
             -T skywalker_code/samples/robotics \
             -T skywalker_code/samples/imu/dual_imu \
             -T skywalker_code/samples/communication/interboard \
-            -p dm_mc02/stm32h723xx --inline-logs --jobs 2 \
+            -p dm_mc02/stm32h723xx \
+            -x=ZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code" \
+            --inline-logs --jobs 2 \
             -O build/staged-hardware-variants
 
-      - name: Upload staged hardware variant build reports
+      - name: Build alternate board smoke test
+        if: success()
+        run: |
+          set -euo pipefail
+          west build -p always -b rm_typec \
+            -d build/ci/rm_typec_dji_position \
+            skywalker_code/samples/motor/dji_position_control \
+            -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code"
+
+      - name: Upload hardware build reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: staged-hardware-mc02-builds
+          name: mc02-staged-hardware-reports
           path: |
             build/staged-hardware-variants/*.json
             build/staged-hardware-variants/*.xml

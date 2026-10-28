@@ -19,3 +19,7 @@ west build -b dm_mc02/stm32h723xx applications/sentry_chassis -d ../build/applic
 诊断用共享 `diagnostic-uart` 和 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 的唯一输出选择，日志/VOFA 都通过 DAPLink。初始化失败不退出，持续报告步骤、阻塞原因和数据年龄。共享通道顺序与布局版本见 [上车入口说明](../../samples/bringup/README.md)。本应用 `target` / `feedback` 分别为大 Yaw 请求/实测关节 rad/s，`valid` 为大 Yaw 测量有效性，`enabled` 为底盘或大 Yaw 有执行输出，`age_ms` 为行走命令年龄；不替代逐轮调试入口。
 
 尚未进行实板验证；每个方向、停止时限和机构组合结论需现场单独记录。
+
+舵轮新增最终优化角的 0.10/0.40 rad 驱动联锁和逐轮 cos³ 补偿；参考 2026-10-28
+标定以可切换候选保存在 calibration.hpp，默认保留旧值。见
+[符号、单位、故障与上车验收](../../docs/dev/哨兵参考工程移植验收.md)。

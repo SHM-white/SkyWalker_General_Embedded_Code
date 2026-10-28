@@ -21,7 +21,9 @@ struct ModuleOutput {
     float optimized_angle_rad = 0, optimized_wheel_velocity_m_s = 0;
     float steer_continuous_target_rad = 0, drive_target_rad_s = 0, steer_effort = 0, drive_effort = 0;
     float steer_reference_rad = 0, alignment_error_rad = 0;
+    float cosine_scale = 0;
     bool steer_output_valid = false, drive_output_valid = false;
+    bool steer_reinitialized = false, drive_permitted = false;
     bool flipped = false, coasting = false;
     std::uint64_t steer_enable_generation = 0, drive_enable_generation = 0;
 };
@@ -31,5 +33,6 @@ struct ChassisFeedback {
 struct ChassisOutput {
     ModuleTargets target{};
     std::array<ModuleOutput, 4> module{};
+    bool drive_permitted = false;
 };
 }

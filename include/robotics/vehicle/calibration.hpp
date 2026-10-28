@@ -46,19 +46,43 @@ inline constexpr float steer_bench_current_a = 0.8f, drive_bench_current_a = 0.5
 // ID1=FL, ID2=RL, ID3=RR, ID4=FR; 0..8191 ticks, indexed by motor ID - 1.
 // Old candidates from h7_framework-main-source.zip (2026-10-02), not a new calibration.
 inline constexpr std::array<std::uint16_t, 4> steer_zero_ticks_by_id{{3060, 2421, 2383, 3097}};
-inline constexpr std::array<MotorCalibration, 4> steer{{
+inline constexpr std::array<MotorCalibration, 4> legacy_steer{{
     {1, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[0]}, // FL
     {4, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[3]}, // FR
     {2, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[1]}, // RL
     {3, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[2]}, // RR
 }};
 // Preserve the original direction of each motor ID; reconfirm after remounting.
-inline constexpr std::array<MotorCalibration, 4> wheel{{
+inline constexpr std::array<MotorCalibration, 4> legacy_wheel{{
     {1, 0, wheel_gear_ratio, -1, drive_bench_current_a, 10, 0}, // FL
     {4, 0, wheel_gear_ratio, 1, drive_bench_current_a, 10, 0},  // FR
     {2, 0, wheel_gear_ratio, 1, drive_bench_current_a, 10, 0},  // RL
     {3, 0, wheel_gear_ratio, -1, drive_bench_current_a, 10, 0}, // RR
 }};
+// Source: JJL0612/sentry_onlychassis 7c7e870 (2026-10-28), NOT a new measurement.
+// Same FL/FR/RL/RR coordinates; hardware adapter owns both feedback/output signs.
+enum class SwerveCalibrationSet { LegacyCandidate, Reference20261028Candidate };
+inline constexpr SwerveCalibrationSet swerve_calibration_set = SwerveCalibrationSet::LegacyCandidate;
+inline constexpr std::array<MotorCalibration, 4> reference_steer = [] {
+    auto c = legacy_steer;
+    constexpr std::uint16_t zeros[] = {3060, 986, 2383, 4390};
+    for (std::size_t i = 0; i < 4; ++i) {
+        c[i].encoder_zero_ticks = zeros[i];
+        c[i].direction = -1;
+    }
+    return c;
+}();
+inline constexpr std::array<MotorCalibration, 4> reference_wheel = [] {
+    auto c = legacy_wheel;
+    for (auto &m : c) m.direction = -1;
+    return c;
+}();
+inline constexpr auto steer = swerve_calibration_set == SwerveCalibrationSet::Reference20261028Candidate
+                                  ? reference_steer : legacy_steer;
+inline constexpr auto wheel = swerve_calibration_set == SwerveCalibrationSet::Reference20261028Candidate
+                                  ? reference_wheel : legacy_wheel;
+// J4310 bus IDs are also unverified; MIT backend remains unchanged.
+inline constexpr MotorCalibration reference_big_yaw{6, 0x11, 1, -1, 0.5f, 1, 0};
 inline constexpr float steer_position_kp = 40, steer_velocity_kp = 0.20f;
 // A/(motor-shaft rad/s); swerve_profile converts once to wheel-shaft units.
 inline constexpr float drive_rotor_velocity_kp = 0.0515502929687f;

@@ -37,6 +37,23 @@ west twister -T skywalker_code/tests -p native_sim/native/64 --inline-logs --job
 
 Actions 会在 Workflow Summary 输出逐套通过数和算法耗时，上传 Twister JSON/XML、构建及 handler 日志（14 天）。CI 失败时先看单项测试及对应编译日志；不要仅根据样例固件能编译就判定测试通过。
 
+
+## 固件构建 CI：预构建 ARM 工具链与并行分片
+
+`Build applications and samples` 不再在每次运行时重新安装 SDK、执行 `west update`，而是使用内容版本化的 GHCR 镜像
+`ghcr.io/shm-white/skywalker-zephyr-arm-ci:<hash>`。镜像内容由 `west.yml`、`.github/ci/zephyr-arm.Dockerfile` 决定，
+预装 Zephyr、west 模块、构建 Python 依赖和 **Zephyr SDK 1.0.1 的 ARM 工具链**。仓库中的应用源码始终来自当前 PR 的 checkout，
+并通过 `.github/ci/link-prebuilt-workspace.sh` 接入镜像里的不可变依赖。
+
+- **MC02 全量编译**：对 `applications/`、`samples/` 下所有包含 `CMakeLists.txt` 的工程自动扫描，按排序后的序号分成 6 个并行 job。失败不会跳过其他分片，Summary 列出各分片的失败工程。
+- **增量编译复用**：各分片有独立 `ccache` 缓存；首次构建缓存为空，之后可以复用同一 west manifest 和分片中的目标文件。缓存不是测试结果，所有应用仍会执行实际的链接检查。
+- **额外编译覆盖**：单独 job 跑已登记的 MC02 `sample.yaml` 配置变体，并以 `samples/motor/dji_position_control` 对 `rm_typec` 进行交叉编译冒烟检查。
+- **测试覆盖守门**：`Unit tests` 执行 Twister 后将 `tests/**/testcase.yaml` 中登记的测试场景与 JSON 报告对照；缺失场景或零测试用例均判为失败。
+- **首次启动注意**：若对应镜像标签不存在，需要由可信分支首次打包并发布到 GHCR，首次 CI 因此可能比日常运行慢。来自外部 fork 的 PR 不允许通过修改 Dockerfile 上传新的镜像；需要先由仓库维护者发布该标签。
+- **排障**：构建日志直接查看失败分片对应的 Actions job；Twister JSON/XML 和诊断文件作为 artifact 保留。镜像构建失败先检查 GHCR 包权限、SDK 下载或 `west.yml` 的依赖 revision。
+
+6 分片加缓存的目标是显著降低编译墙钟时间，但具体速度取决于 GitHub 并行 runner 配额、缓存命中率和第三方镜像拉取速度；**不能保证固定缩短到某个分钟数**。单元测试与固件编译仍不能替代实体硬件验证。
+
 ## 预构建的 Zephyr native_sim 容器
 
 `Unit tests` 使用 GHCR `ghcr.io/shm-white/skywalker-zephyr-native-ci:<hash>`，标签取自 `west.yml` 与 `.github/ci/zephyr-native.Dockerfile` 的内容。镜像内预装固定 Zephyr/West/modules、Python/Twister 依赖和宿主 GCC/CMake。镜像存在时仅拉取镜像、checkout 当前 PR 源码和运行测试，不再在每次 CI 中 `apt install`、`pip install`、`west update`。
@@ -48,3 +65,8 @@ Actions 会在 Workflow Summary 输出逐套通过数和算法耗时，上传 Tw
 **注意**：容器中预构建的 Zephyr 工程使用一个仅含 `west.yml` 的 manifest self 占位目录，因此 Twister 必须用 `-x=ZEPHYR_EXTRA_MODULES=<checkout>/skywalker_code` 显式加载当前 PR 的 Zephyr 模块，否则 Kconfig 会找不到自定义 `SKYWALKER_*` 符号。
 
 容器 job 的模块路径必须读取容器环境变量 `$GITHUB_WORKSPACE`，不要直接使用 Actions 在宿主机展开的 `${{ github.workspace }}`（宿主 `/home/runner/work` 与容器 `/__w` 不相同）。
+
+`tests/sentry_control` 运行舵轮实际控制与硬件适配代码，覆盖参考候选轮位/符号/单位、
+最终角联锁、cos³、速度环重置、旋转连续输出、命令过期及真实 CanBus/Motor 故障恢复。
+I/O 通过测试私有访问和最小 CAN 设备替身注入，不增加生产代码旁路。上车验收见
+[哨兵参考移植](../docs/dev/哨兵参考工程移植验收.md)。
