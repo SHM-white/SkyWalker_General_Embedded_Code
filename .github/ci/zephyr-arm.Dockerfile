@@ -11,7 +11,7 @@ ENV ZEPHYR_BASE=/opt/skywalker-zephyr/zephyr
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates git build-essential cmake ninja-build ccache \
       device-tree-compiler gperf python3 python3-venv python3-dev \
-      pkg-config file xz-utils curl \
+      pkg-config file xz-utils curl wget \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/venv \
     && python -m pip install --no-cache-dir 'west==1.5.0'
