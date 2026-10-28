@@ -47,3 +47,8 @@ inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Log;
 [diagnostics_config.hpp](../../../include/robotics/vehicle/diagnostics_config.hpp) 当前候选标识为硬件 `mc02-installed-20261025-candidate`、标定 `vehicle-20261025-unverified`；协议固定 v4。启动身份还包含应用、板角色和源码版本，便于区分本地未提交修改。配置修改后重建所有受影响阶段和最终应用；已烧录固件及旧通过记录不会自动更新。
 
 中央确认标志当前保留连接、IMU 安装、发射约束为 true，功率模型为 false。它们是当前代码配置，不能代替现场核对。阶段工程只应使能其明确负责的机构；新最终云台暂不启动发射/视觉，新最终底盘使用低电流手动机械策略，功率实测与受约束执行仍需单独接入。
+
+可选 IMU 航向与坐标补偿由 `motion_profile.hpp` 配置，默认 Body 坐标、补偿关闭、大 Yaw
+航向锁定关闭。两个应用支持独立 0x0405 IMU 消息，BMI088 及 DM-IMU-L1 复用已有驱动。
+双板前向参考确认、MIT 模式和新增 PI 都须实车验收后启用，见
+[IMU 验收说明](../../../docs/dev/哨兵IMU航向控制验收.md)。

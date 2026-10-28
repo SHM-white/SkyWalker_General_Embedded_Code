@@ -134,3 +134,10 @@ const auto rx = endpoint.snapshot();
 - [interboard_codec.cpp](../../lib/communication/interboard_codec.cpp)
 
 [全部接口参考](README.md) · [文档同步清单](../maintenance.md)
+
+### IMU 航向快照
+
+`InterBoardEndpoint::submitGimbalImuYaw`（仅云台生产）与 `Snapshot::gimbal_imu`
+传递 `GimbalImuYaw` 值副本，复用现有短锁、批量发送、会话及解析路径。
+`InterBoardCodec::encode/decodeGimbalImuYaw` 使用 SkyWalker 0x0405/40 字节扩展；
+不是参考工程的 0x0404/32 字节。格式和重启规则见 [v4 协议](../protocols/interboard-v4.md)。
