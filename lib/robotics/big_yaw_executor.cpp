@@ -3,7 +3,7 @@
 #include <cmath>
 namespace skywalker::robotics {
 BigYawExecutor::BigYawExecutor(motor::Motor &drive, const control::VelocityMotor::Config &motor, const Config &config)
-    : drive_(drive), axis_(drive, motor), config_(config) {
+    : drive_(drive), axis_(drive, motor), config_(config), heading_(config.heading) {
 }
 int BigYawExecutor::begin() {
     if (begin_attempted_)
@@ -15,11 +15,18 @@ int BigYawExecutor::begin() {
                             (config_.direction != 1 && config_.direction != -1) || !config_.command_timeout_ms ||
                             !config_.source_timeout_us
                         ? -EINVAL
-                        : axis_.configure();
+                        : config_.heading_lock_enabled ? heading_.validate() : axis_.configure();
+    if (!config_error_ && config_.heading_lock_enabled &&
+        (!config_.mit_mode_confirmed || !config_.heading_reference_confirmed ||
+         !(drive_.info().capabilities & motor::CommandMit) || !(drive_.info().capabilities & motor::CommandTorque) ||
+         config_.heading.torque_max_nm > drive_.info().torque_limit_nm))
+        config_error_ = -EINVAL;
     configured_ = !config_error_;
     return config_error_;
 }
 void BigYawExecutor::withdraw(WaitReason, int, bool) {
+    heading_.reset();
+    if (!config_.heading_lock_enabled) (void)axis_.reset();
     (void)drive_.disable();
     status_.ready = status_.requested = false;
 }
@@ -49,7 +56,7 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
     const auto &r = in.request;
     if (r.mode == BigYawMode::Disabled)
         return suspend(now, WaitReason::Command);
-    if (r.mode != BigYawMode::FollowCenter || !std::isfinite(r.target_rate_rad_s) ||
+    if (r.mode != (config_.heading_lock_enabled ? BigYawMode::ImuHeadingHold : BigYawMode::FollowCenter) || !std::isfinite(r.target_rate_rad_s) ||
         std::fabs(r.target_rate_rad_s) > config_.rate_abs_max_rad_s)
         return suspend(now, WaitReason::Command, -ERANGE);
     if (!in.peer_online || !in.transport_ready || !in.local_boot_id || r.receiver_boot_id != in.local_boot_id)
@@ -60,9 +67,35 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
     if (!r.permission.valid || !r.permission.enabled ||
         !forwardedFresh(r.permission.stamp, r.permission_age_ms, now_ms, config_.permission_timeout_ms))
         return suspend(now, WaitReason::Power, -EACCES);
+    if (config_.heading_lock_enabled && (!in.head.valid || in.head.receiver_boot_id != in.local_boot_id ||
+        !in.peer_boot_id || in.head.sender_boot_id != in.peer_boot_id ||
+        !forwardedFresh(in.head.stamp,in.head.source_age_ms,now_ms,50)))
+        return suspend(now,WaitReason::Reference,-ESTALE);
     status_.requested = true;
     status_.last_command_sequence = r.stamp.sequence;
     int error = drive_.enable();
+    if (config_.heading_lock_enabled) {
+        const auto view=drive_.snapshot();
+        if (!cycle || view.state!=motor::MotorState::Active || !view.feedback_fresh ||
+            !view.enabled_requested || !view.output_permitted || !(view.feedback.valid & motor::FeedbackVelocity) ||
+            !std::isfinite(view.feedback.velocity_rad_s)) {
+            heading_.reset();
+            (void)drive_.invalidateComputedEffort();
+            status_.ready=false;
+            return publish(now,RunState::Recovering,!cycle ? WaitReason::Cycle : WaitReason::Feedback,error);
+        }
+        if (heading_enable_generation_!=view.enable_generation) {
+            heading_.reset(); heading_enable_generation_=view.enable_generation;
+        }
+        float torque=0;
+        const int calculated=heading_.step(in.head,r.target_rate_rad_s,dt,now_ms,torque);
+        if (calculated<0) return suspend(now,WaitReason::Reference,calculated);
+        // Torque at the joint -> motor shaft via external ratio and sign once.
+        const int staged=drive_.setTorque(torque*config_.direction/config_.motor_to_joint_ratio,view.enable_generation);
+        if (staged<0) return suspend(now,WaitReason::Drive,staged);
+        status_.ready=true;
+        return publish(now,RunState::Active,WaitReason::None,error);
+    }
     const int ret = axis_.update(r.target_rate_rad_s * config_.motor_to_joint_ratio * config_.direction, dt);
     if (!error)
         error = ret;
