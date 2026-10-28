@@ -1,5 +1,10 @@
 # 单元测试与 CI 验证
 
+`tests/heading` 验证可选 IMU 软件零位、坐标变换、航向 PI 与 BigYawExecutor 的 MIT/权限路径；
+`tests/execution/src/imu_heading.cpp` 运行真实 codec/link/双 Endpoint，验证 0x0405 黄金字节、
+错误帧、旧会话拒绝、源年龄不刷新及双板重启重新绑定。见
+[航向控制验收](../docs/dev/哨兵IMU航向控制验收.md)。
+
 本仓库的 **Zephyr Twister + native_sim/native/64** 是唯一要求运行的单元测试环境。PR 和 Push 更新测试或生产源码时由 GitHub Actions 自动执行；不依赖开发者安装 Zephyr SDK 或连接实体主控板。
 
 | 测试入口 | 覆盖范围 |
@@ -43,8 +48,3 @@ Actions 会在 Workflow Summary 输出逐套通过数和算法耗时，上传 Tw
 **注意**：容器中预构建的 Zephyr 工程使用一个仅含 `west.yml` 的 manifest self 占位目录，因此 Twister 必须用 `-x=ZEPHYR_EXTRA_MODULES=<checkout>/skywalker_code` 显式加载当前 PR 的 Zephyr 模块，否则 Kconfig 会找不到自定义 `SKYWALKER_*` 符号。
 
 容器 job 的模块路径必须读取容器环境变量 `$GITHUB_WORKSPACE`，不要直接使用 Actions 在宿主机展开的 `${{ github.workspace }}`（宿主 `/home/runner/work` 与容器 `/__w` 不相同）。
-
-`tests/heading` 验证可选 IMU 软件零位、坐标变换、航向 PI 与 BigYawExecutor 的 MIT/权限路径；
-`tests/execution/src/imu_heading.cpp` 运行真实 codec/link/双 Endpoint，验证 0x0405 黄金字节、
-错误帧、旧会话拒绝、源年龄不刷新及双板重启重新绑定。见
-[航向控制验收](../docs/dev/哨兵IMU航向控制验收.md)。

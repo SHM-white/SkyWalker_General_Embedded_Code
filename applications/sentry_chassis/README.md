@@ -1,5 +1,9 @@
 # 哨兵底盘应用
 
+可选的 `ChassisMotionAdapter` 在运动学前执行坐标转换、旋转预测和降速，复用 BMI088。
+BigYawExecutor 可选择头部 IMU 世界航向 P/角速度 PI → MIT 力矩；默认关闭新模式并保持原跟随路径。
+参数及双板启动、断流/重启规则见 [IMU 航向验收](../../docs/dev/哨兵IMU航向控制验收.md)。
+
 固定的手动板间底盘执行入口。`src/main.cpp` 自行装配八个舵轮电机、CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw、UART 板间端点及两个执行器，每个控制周期由一个执行线程各提交一次物理 CAN。无公共整车 `run()`、角色宏或场景宏。
 
 ```sh
@@ -15,7 +19,3 @@ west build -b dm_mc02/stm32h723xx applications/sentry_chassis -d ../build/applic
 诊断用共享 `diagnostic-uart` 和 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 的唯一输出选择，日志/VOFA 都通过 DAPLink。初始化失败不退出，持续报告步骤、阻塞原因和数据年龄。共享通道顺序与布局版本见 [上车入口说明](../../samples/bringup/README.md)。本应用 `target` / `feedback` 分别为大 Yaw 请求/实测关节 rad/s，`valid` 为大 Yaw 测量有效性，`enabled` 为底盘或大 Yaw 有执行输出，`age_ms` 为行走命令年龄；不替代逐轮调试入口。
 
 尚未进行实板验证；每个方向、停止时限和机构组合结论需现场单独记录。
-
-可选的 `ChassisMotionAdapter` 在运动学前执行坐标转换、旋转预测和降速，复用 BMI088。
-BigYawExecutor 可选择头部 IMU 世界航向 P/角速度 PI → MIT 力矩；默认关闭新模式并保持原跟随路径。
-参数及双板启动、断流/重启规则见 [IMU 航向验收](../../docs/dev/哨兵IMU航向控制验收.md)。
