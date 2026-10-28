@@ -2,8 +2,12 @@ name: Unit tests
 
 on:
   push:
+    branches: [main, dev]
     paths:
       - 'tests/**'
+      - 'applications/**'
+      - 'samples/**'
+      - 'config/**'
       - 'include/**'
       - 'lib/**'
       - 'drivers/**'
@@ -16,9 +20,13 @@ on:
       - '.github/workflows/unit-tests.yml'
       - '.github/ci/zephyr-native.Dockerfile'
       - '.github/ci/link-prebuilt-workspace.sh'
+      - '.github/ci/zephyr-arm.Dockerfile'
   pull_request:
     paths:
       - 'tests/**'
+      - 'applications/**'
+      - 'samples/**'
+      - 'config/**'
       - 'include/**'
       - 'lib/**'
       - 'drivers/**'
@@ -31,11 +39,11 @@ on:
       - '.github/workflows/unit-tests.yml'
       - '.github/ci/zephyr-native.Dockerfile'
       - '.github/ci/link-prebuilt-workspace.sh'
+      - '.github/ci/zephyr-arm.Dockerfile'
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: unit-tests-${{ github.ref }}
@@ -45,6 +53,9 @@ jobs:
   prepare-image:
     name: Resolve prebuilt Zephyr CI image
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image: ${{ steps.image.outputs.image }}
     steps:
@@ -130,6 +141,40 @@ jobs:
             --inline-logs \
             --jobs 2 \
             -O build/unit-tests
+
+      # Twister can exit successfully without executing any cases when discovery
+      # or platform filtering is wrong; do not report such a run as green.
+      - name: Verify all registered native tests ran
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import yaml
+
+          declared = set()
+          for path in Path('skywalker_code/tests').rglob('testcase.yaml'):
+              entries = yaml.safe_load(path.read_text()).get('tests', {})
+              declared.update(entries)
+          if not declared:
+              raise SystemExit('No test manifests were discovered')
+
+          report = Path('build/unit-tests/twister.json')
+          if not report.is_file():
+              raise SystemExit('Twister did not generate its JSON report')
+          suites = json.loads(report.read_text()).get('testsuites', [])
+          executed = [suite for suite in suites if suite.get('testcases')]
+          # Names contain the scenario ID, optionally with a suite/path prefix.
+          reported = [str(suite.get('name', '')) for suite in executed]
+          missing = sorted(name for name in declared
+                           if not any(name in candidate for candidate in reported))
+          if missing:
+              raise SystemExit('Registered tests missing from Twister run: ' + ', '.join(missing))
+          total = sum(len(suite['testcases']) for suite in executed)
+          if not total:
+              raise SystemExit('Zero native testcases were executed')
+          print(f'Validated {len(declared)} test scenarios and {total} testcases')
+          PY
 
       - name: Summarize results and timings
         if: always()
