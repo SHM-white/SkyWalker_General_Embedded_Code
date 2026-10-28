@@ -1,6 +1,7 @@
 #pragma once
 #include <robotics/execution/big_yaw_executor.hpp>
 #include <robotics/vehicle/calibration.hpp>
+#include <robotics/vehicle/motion_profile.hpp>
 namespace skywalker::robotics::vehicle {
 inline motor::dm::Config bigYawHardware() {
     // TODO(hardware): confirm MIT mode and PMAX/VMAX/TMAX stored in the drive.
@@ -39,6 +40,10 @@ inline control::VelocityMotor::Config bigYawMotorConfig() {
 }
 inline BigYawExecutor::Config bigYawExecutionConfig() {
     BigYawExecutor::Config c{};
+    c.heading_lock_enabled = big_yaw_heading_lock_enabled;
+    c.mit_mode_confirmed = big_yaw_mit_mode_confirmed;
+    c.heading_reference_confirmed = startup_heading_alignment_confirmed;
+    c.heading.torque_max_nm = big_yaw.effort_limit;
     c.rate_abs_max_rad_s = big_yaw.velocity_limit_rad_s;
     c.motor_to_joint_ratio = big_yaw.gear_ratio;
     c.direction = big_yaw.direction;

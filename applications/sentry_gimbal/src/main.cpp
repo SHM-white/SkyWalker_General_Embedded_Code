@@ -10,6 +10,7 @@
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
+#include <robotics/vehicle/motion_profile.hpp>
 #include <zephyr/drivers/regulator.h>
 #include "../../../samples/robotics/common/operator_controls.hpp"
 #include "../../../samples/robotics/common/rc_controls.hpp"
@@ -52,6 +53,7 @@ int main() {
     static GimbalExecutor gimbal(yaw, pitch, group,
                                  installed::yawMotorConfig(), installed::yawAxisConfig(),
                                  installed::pitchMotorConfig(), installed::pitchAxisConfig(), installed::gimbalExecutionConfig());
+    static ImuHeadingReference head_heading;
     static InertialGimbalAdapter inertial(installed::manualInertialConfig());
     static YawCenteringController centering(installed::manualCenteringConfig());
     int command_error = commands.registerSource(remote_source);
@@ -98,6 +100,7 @@ int main() {
         commands.setOperatorGate(operator_state.run_allowed, operator_state.clear_event_id);
         (void)commands.snapshot(frame);
         const auto head_frame = head.snapshot();
+        const auto heading=head_heading.update(head_frame,!operator_state.run_allowed,now_us);
         InertialGimbalInputs adaptation{};
         adaptation.command = frame.decision.command.gimbal;
         if (!operator_state.run_allowed)
@@ -148,12 +151,41 @@ int main() {
                 request.mode = BigYawMode::FollowCenter;
                 request.target_rate_rad_s = installed::big_yaw_wire_direction * centered.velocity_rad_s;
             }
+            if (installed::big_yaw_heading_lock_enabled) {
+                request.mode=BigYawMode::Disabled;
+                request.source_sequence=operator_state.remote.stamp.sequence;
+                request.source_age_ms=request.command_age_ms=age(operator_state.remote.stamp,now_ms);
+                if (operator_state.fresh && operator_state.run_allowed && heading.valid &&
+                    installed::startup_heading_alignment_confirmed && !operator_state.clear_estop) {
+                    request.mode=BigYawMode::ImuHeadingHold;
+                    float rate=std::clamp(float(operator_state.remote.analog.wheel)/660.f,-1.f,1.f);
+                    request.target_rate_rad_s=std::fabs(rate)<.05f ? 0 : rate;
+                }
+            }
+            const auto session=endpoint.snapshot();
+            if (session.online) {
+                GimbalImuYaw sample{};
+                sample.valid=heading.valid;
+                sample.yaw_rad=heading.yaw_rad; sample.yaw_rate_rad_s=heading.rate_rad_s;
+                sample.zero_generation=heading.generation;
+                sample.sample_sequence=static_cast<std::uint32_t>(heading.stamp.sequence);
+                // Ceiling age: transporting sub-ms samples must not make them younger.
+                sample.source_age_ms=heading.stamp.valid && now_us>=heading.stamp.time_us
+                    ? static_cast<std::uint32_t>(std::min<std::uint64_t>((now_us-heading.stamp.time_us+999)/1000,UINT32_MAX)) : UINT32_MAX;
+                sample.receiver_boot_id=session.peer.sender_boot_id;
+                sample.stamp={now_ms,request_sequence+1,true};
+                endpoint.submitGimbalImuYaw(sample);
+            }
             // Stop remains newly produced even when IMU/motor initialization failed.
             request.stamp = {now_ms, ++request_sequence, true};
             endpoint.submitBigYaw(request);
             auto wheel_command = frame.decision.command.chassis;
             if (!operator_state.run_allowed)
                 wheel_command.mode = ChassisMode::Disabled;
+            if (installed::big_yaw_heading_lock_enabled && wheel_command.mode!=ChassisMode::Disabled) {
+                // Optional profile assigns the wheel to big Yaw; fixed spin is separate.
+                wheel_command.wz_rad_s=operator_state.remote.right_switch==RcSwitch::Down ? .5f : 0;
+            }
             endpoint.submit(wheel_command);
         }
         if (yaw_started) {

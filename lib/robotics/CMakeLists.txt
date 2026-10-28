@@ -19,3 +19,8 @@ zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_SHOOTER shooter_executor.
 if(CONFIG_SKYWALKER_ROBOTICS_SWERVE AND CONFIG_SKYWALKER_DRIVER_MOTOR)
     zephyr_library_sources(chassis_executor.cpp)
 endif()
+
+if(CONFIG_SKYWALKER_ROBOTICS_SWERVE OR CONFIG_SKYWALKER_ROBOTICS_INERTIAL_GIMBAL)
+    zephyr_library_sources(imu_heading.cpp)
+endif()
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_ROBOTICS_BIG_YAW imu_heading_lock.cpp)
