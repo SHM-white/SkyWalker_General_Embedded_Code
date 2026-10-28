@@ -166,7 +166,7 @@ ZTEST(swerve_module, test_valid_feedback_initializes_before_closed_loop_effort) 
     zassert_true(out.steer_output_valid && out.drive_output_valid);
     zassert_within(out.optimized_angle_rad, 0.5f, 1e-6f);
     zassert_within(out.steer_continuous_target_rad, 0.5f, 1e-5f);
-    zassert_within(out.drive_target_rad_s, 20 * std::pow(std::cos(0.3f), 3), 1e-5f);
+    zassert_within(out.drive_target_rad_s, 20 * std::pow(std::cos(0.3f), 3.0f), 1e-5f);
     zassert_equal(out.steer_effort, 0);
     zassert_equal(out.drive_effort, 0);
     f.steer_feedback_stamp_ms = 2;
@@ -187,7 +187,7 @@ ZTEST(swerve_module, test_flip_preserves_wheel_velocity_vector) {
     zassert_true(out.flipped);
     zassert_within(out.optimized_angle_rad, -pi / 4, 1e-6f);
     zassert_within(out.optimized_wheel_velocity_m_s, -2, 1e-6f);
-    zassert_within(out.drive_target_rad_s, -20 * std::pow(std::cos(pi/4), 3), 1e-5f);
+    zassert_within(out.drive_target_rad_s, -20 * std::pow(std::cos(pi/4), 3.0f), 1e-5f);
     expect_vector({out.optimized_angle_rad, out.optimized_wheel_velocity_m_s},
                   -std::sqrt(2.0f), std::sqrt(2.0f));
 }

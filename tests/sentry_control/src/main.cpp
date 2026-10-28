@@ -56,12 +56,12 @@ ZTEST(sentry, test_candidate_mapping_and_real_motor_sign_units) {
         motor::Motor s(motor::dji::gm6020({.id=sc.id, .encoder_zero_ticks=sc.encoder_zero_ticks,
                                           .current_mode_confirmed=true}));
         zassert_ok(s.acceptDjiFeedback({.encoder=sc.encoder_zero_ticks}, 1));
-        zassert_within(s.snapshot().feedback.absolute_position_rad, 0, 1e-6);
+        zassert_within(s.snapshot().feedback.absolute_position_rad, 0, 1e-6f);
         zassert_ok(s.acceptDjiFeedback({.encoder=static_cast<std::uint16_t>((zeros[i]+1024)%8192), .speed_rpm=60}, 2));
-        zassert_within(sc.direction * s.snapshot().feedback.absolute_position_rad, -pi/4, 1e-5);
+        zassert_within(sc.direction * s.snapshot().feedback.absolute_position_rad, -pi/4, 1e-5f);
         motor::Motor d(motor::dji::m3508({.id=wc.id,.gear_ratio=wc.gear_ratio}));
         zassert_ok(d.acceptDjiFeedback({.encoder=0,.speed_rpm=60}, 1));
-        zassert_within(d.snapshot().feedback.velocity_rad_s, 2*pi/wc.gear_ratio, 1e-6);
+        zassert_within(d.snapshot().feedback.velocity_rad_s, 2*pi/wc.gear_ratio, 1e-6f);
     }
     motor::Motor s0(vehicle::steerHardware(0)),s1(vehicle::steerHardware(1)),s2(vehicle::steerHardware(2)),s3(vehicle::steerHardware(3));
     motor::Motor d0(vehicle::wheelHardware(0)),d1(vehicle::wheelHardware(1)),d2(vehicle::wheelHardware(2)),d3(vehicle::wheelHardware(3));
@@ -79,11 +79,11 @@ ZTEST(sentry, test_candidate_mapping_and_real_motor_sign_units) {
         m->snapshot_.feedback.velocity_rad_s = .3f;
     }
     ChassisFeedback f{}; zassert_ok(hw.read(f));
-    for (auto &m : f.module) { zassert_within(m.steer_absolute_rad,-.2f,1e-6); zassert_within(m.drive_velocity_rad_s,-.3f,1e-6); }
+    for (auto &m : f.module) { zassert_within(m.steer_absolute_rad,-.2f,1e-6f); zassert_within(m.drive_velocity_rad_s,-.3f,1e-6f); }
     for (auto &m : o.module) { m.steer_output_valid=m.drive_output_valid=true; m.steer_effort=.1f; m.drive_effort=.2f; }
     zassert_ok(hw.stage(o,1));
-    zassert_within(s0.copyStaged().command.primary,-.1f,1e-6);
-    zassert_within(d0.copyStaged().command.primary,-.2f,1e-6);
+    zassert_within(s0.copyStaged().command.primary,-.1f,1e-6f);
+    zassert_within(d0.copyStaged().command.primary,-.2f,1e-6f);
 }
 ZTEST(sentry, test_final_angle_interlock_hysteresis_and_pid_recovery) {
     SwerveChassis c(config()); auto f=feedback(); ChassisOutput o{};
@@ -114,9 +114,9 @@ ZTEST(sentry, test_cosine_reverse_flip_hysteresis_zero_and_invalid) {
     for(float a : {0.f,.3f,pi/3,pi/2,1.6f,pi, -pi}) {
         zassert_ok(m.reset(f));
         zassert_ok(m.step({a,.5f},f,.002f,o));
-        const float expected=std::pow(std::max(std::cos(o.alignment_error_rad),0.f),3);
-        zassert_within(o.cosine_scale,expected,1e-6);
-        zassert_within(o.drive_target_rad_s,o.optimized_wheel_velocity_m_s/.1f*expected,1e-5);
+        const float expected=std::pow(std::max(std::cos(o.alignment_error_rad),0.f),3.0f);
+        zassert_within(o.cosine_scale,expected,1e-6f);
+        zassert_within(o.drive_target_rad_s,o.optimized_wheel_velocity_m_s/.1f*expected,1e-5f);
     }
     zassert_true(o.flipped); zassert_true(o.drive_target_rad_s<0);
     zassert_ok(m.step({pi/2+.02f,.5f},f,.002f,o)); zassert_true(o.flipped);
