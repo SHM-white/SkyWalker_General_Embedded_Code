@@ -96,7 +96,7 @@ int main() {
             !rx.local_boot_id || rx.control.receiver_boot_id != rx.local_boot_id)
             input.command.mode = ChassisMode::Disabled;
         const auto body_sample=body_heading.update(need_body ? body.snapshot() : imu::Snapshot{},!authority.run_allowed,now_us);
-        input.command=motion.update(input.command,body_sample,rx.gimbal_imu,rx.local_boot_id,!authority.run_allowed,now_ms);
+        input.command=motion.update(input.command,body_sample,rx.gimbal_imu,rx.local_boot_id,!authority.run_allowed,now_ms,rx.peer);
         input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
                                input.command.stamp.valid};
         input.transport_ready = steer_error == 0 && drive_error == 0 && chassis_error == 0 &&

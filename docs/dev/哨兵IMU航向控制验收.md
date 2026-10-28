@@ -31,7 +31,10 @@ BigYawExecutor 独立执行大 Yaw 的授权、时效、反馈及 MIT 输出管�
 后，各自记录软件零位。复用现有安装变换与 core::euler；yaw rate 由已变换到机构坐标的陀螺率
 按 Euler 运动关系换算，接近俯仰奇异位置时拒绝航向数据。没有向 IMU 写校准/保存/零位命令。
 
-Gimbal 平移只有在未使能时取得两颗 IMU 的有效零位并绑定 Boot ID/代次后才允许。
+World/Gimbal 平移只有在未使能时取得两颗 IMU 的有效零位并绑定 Boot ID/代次后才允许。
+首次配对还比较心跳发送方 uptime 和本地 uptime，默认启动偏差不超过 1000ms；
+底盘单独重启不能把旧头部原点自动配成新的底盘原点。超出窗口应共同摆正并重启，
+窗口由 startup_max_skew_ms 配置，不能用扩大窗口绕过单板重启保护。
 短暂丢流不改变零位：有效数据恢复后沿原基准继续；云台单板重启、零位代次改变、
 底盘参考变化或长于 500ms 的采样断流会锁住平移，需要重新摆正、停机并共同重启。
 World/Gimbal 依赖的 IMU 失效时平移归零，原有受限旋转命令仍可执行；没有自动猜测或切换坐标系。
@@ -74,8 +77,8 @@ CAN/RS485 DM-IMU-L1 驱动未重写。当前最终应用复用已有 CAN 配置�
 
 ## 软件验证记录
 
-固定 west.yml 的 Zephyr 6085aadeb337 / SDK 1.0.1；全部 10 个原生 testcase 工程共 143 项测试通过，
-其中新增 4 项航向/执行器测试及 3 项 codec/link/双端通信测试。测试执行真实控制代码，
+固定 west.yml 的 Zephyr 6085aadeb337 / SDK 1.0.1；全部 10 个原生 testcase 工程共 144 项测试通过，
+其中新增 5 项航向/执行器测试及 3 项 codec/link/双端通信测试。测试执行真实控制代码，
 覆盖 ±π、多圈、滚轮回中、PI 限幅、源/目标重启、旧样本、CRC、长度/保留位、超龄与授权撤销。
 `applications/sentry_chassis` 和 `applications/sentry_gimbal` 的 MC02 构建均通过。
 本地 Twister 因 AF_UNIX 受限无法启动 multiprocessing Manager，采用逐工程 west build +

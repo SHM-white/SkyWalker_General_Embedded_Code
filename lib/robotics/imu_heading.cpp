@@ -48,8 +48,13 @@ LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool disarmed, 
     out.stamp.time_us=std::min(v.orientation.stamp.time_us,v.gyro_rad_s.stamp.time_us);
     return out;
 }
+bool startupSessionsMatch(const BoardHeartbeat &peer,std::uint64_t now,std::uint32_t skew) {
+    if (!skew || !peer.sender_boot_id || !isFresh(peer.stamp,now,100)) return false;
+    const std::uint64_t peer_uptime=std::uint64_t(peer.sender_uptime_ms)+(now-peer.stamp.timestamp_ms);
+    return (now>peer_uptime ? now-peer_uptime : peer_uptime-now)<=skew;
+}
 int ChassisMotionAdapter::validate() const {
-    return config_.frame > Frame::Gimbal || !std::isfinite(config_.heading_prediction_s) ||
+    return config_.frame > Frame::Gimbal || !config_.startup_max_skew_ms || !std::isfinite(config_.heading_prediction_s) ||
         config_.heading_prediction_s < 0 || config_.heading_prediction_s > .05f ||
         !std::isfinite(config_.spin_forward_scale) || config_.spin_forward_scale<0 || config_.spin_forward_scale>1 ||
         !std::isfinite(config_.spin_lateral_scale) || config_.spin_lateral_scale<0 || config_.spin_lateral_scale>1 ||
@@ -57,7 +62,7 @@ int ChassisMotionAdapter::validate() const {
         !std::isfinite(config_.max_wz_rad_s) || config_.max_wz_rad_s<=0 ? -EINVAL : 0;
 }
 ChassisCommand ChassisMotionAdapter::update(const ChassisCommand &cmd, const LocalHeading &body,
-    const GimbalImuYaw &head, std::uint64_t local_boot, bool disarmed, std::uint64_t now) {
+    const GimbalImuYaw &head, std::uint64_t local_boot, bool disarmed, std::uint64_t now,const BoardHeartbeat &peer) {
     auto out=cmd;
     translation_ready_=false;
     if (validate()<0 || !std::isfinite(cmd.vx_m_s) || !std::isfinite(cmd.vy_m_s) || !std::isfinite(cmd.wz_rad_s)) {
@@ -71,14 +76,15 @@ ChassisCommand ChassisMotionAdapter::update(const ChassisCommand &cmd, const Loc
     if (paired_ && ((head.sender_boot_id && head.sender_boot_id!=peer_boot_) || local_boot!=local_boot_ ||
         (head.zero_generation && head.zero_generation!=head_generation_) ||
         (body.generation && body.generation!=body_generation_))) blocked_=true;
-    if (!paired_ && !blocked_ && disarmed && bf && hf && config_.startup_alignment_confirmed) {
+    if (!paired_ && !blocked_ && disarmed && bf && hf && config_.startup_alignment_confirmed &&
+        peer.sender_boot_id==head.sender_boot_id && startupSessionsMatch(peer,now,config_.startup_max_skew_ms)) {
         paired_=true; peer_boot_=head.sender_boot_id; local_boot_=local_boot;
         head_generation_=head.zero_generation; body_generation_=body.generation;
     }
     const bool rotating=std::fabs(cmd.wz_rad_s)>1e-4f;
     if (config_.frame != Frame::Body) {
-        translation_ready_=bf && !blocked_ && config_.startup_alignment_confirmed &&
-            (config_.frame==Frame::World || (paired_ && hf));
+        translation_ready_=bf && paired_ && !blocked_ && config_.startup_alignment_confirmed &&
+            (config_.frame==Frame::World || hf);
         if (!translation_ready_) out.vx_m_s=out.vy_m_s=0; // Rotation remains a separate, bounded command.
         else {
             const float age=float(now-head.stamp.timestamp_ms+head.source_age_ms)*.001f;

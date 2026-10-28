@@ -22,6 +22,9 @@ private:
     unsigned stationary_samples_ = 0;
     bool initialized_ = false, blocked_ = false, have_reference_ = false;
 };
+// Compare boot-relative uptimes before pairing a new chassis zero with a peer.
+// This rejects a chassis-only restart that has lost its previous peer binding.
+bool startupSessionsMatch(const BoardHeartbeat &, std::uint64_t now_ms, std::uint32_t max_skew_ms);
 class ChassisMotionAdapter {
 public:
     enum class Frame { Body, World, Gimbal };
@@ -29,6 +32,7 @@ public:
         Frame frame = Frame::Body;
         bool compensation_enabled = false;
         bool startup_alignment_confirmed = false;
+        std::uint32_t startup_max_skew_ms = 1000;
         float heading_prediction_s = .007f;
         float spin_forward_scale = .3f, spin_lateral_scale = .4f;
         float yaw_rate_feedback_kp = 0; // Unmeasured: leave disabled.
@@ -37,7 +41,7 @@ public:
     explicit ChassisMotionAdapter(const Config &c) : config_(c) {}
     int validate() const;
     ChassisCommand update(const ChassisCommand &, const LocalHeading &, const GimbalImuYaw &,
-                          std::uint64_t local_boot, bool disarmed, std::uint64_t now_ms);
+                          std::uint64_t local_boot, bool disarmed, std::uint64_t now_ms, const BoardHeartbeat &peer = {});
     bool translationReady() const { return translation_ready_; }
 private:
     Config config_;

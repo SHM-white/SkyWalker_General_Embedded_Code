@@ -19,6 +19,7 @@ GimbalImuYaw head(std::uint64_t now=100) {
     return {.valid=true,.yaw_rad=0,.yaw_rate_rad_s=0,.source_age_ms=0,.sample_sequence=1,
             .zero_generation=1,.receiver_boot_id=22,.sender_boot_id=11,.stamp={now,1,true}};
 }
+BoardHeartbeat peer(std::uint64_t now=100) { return {.role=BoardRole::GimbalController,.sender_uptime_ms=static_cast<std::uint32_t>(now),.sender_boot_id=11,.stamp={now,1,true}}; }
 LocalHeading body(std::uint64_t now=100) { return {0,0,{now*1000,1,true},1,true}; }
 imu::Snapshot imuSample(std::uint64_t seq, std::uint64_t now,float yaw=0) {
     imu::Snapshot s{}; s.state=imu::State::Running; s.fresh_mask=imu::Orientation|imu::Gyro;
@@ -43,18 +44,29 @@ ZTEST(heading, test_frames_prediction_mixed_motion_and_fail_closed) {
     c.startup_alignment_confirmed=true; c.compensation_enabled=true;
     ChassisMotionAdapter a(c); auto b=body(); auto h=head(); h.yaw_rad=pi/2;
     ChassisCommand cmd{.mode=ChassisMode::BodyVelocity,.vx_m_s=1,.wz_rad_s=.8f};
-    auto o=a.update(cmd,b,h,22,true,100); zassert_true(a.translationReady());
+    auto o=a.update(cmd,b,h,22,true,100,peer()); zassert_true(a.translationReady());
     zassert_within(o.vx_m_s,0,1e-6f); zassert_within(o.vy_m_s,.3f,1e-6f);
-    b.rate_rad_s=2; o=a.update(cmd,b,h,22,false,100);
+    b.rate_rad_s=2; o=a.update(cmd,b,h,22,false,100,peer());
     zassert_within(o.vx_m_s,.3f*std::sin(.014f),1e-6f);
-    h.valid=false; o=a.update(cmd,b,h,22,false,100); zassert_equal(o.vx_m_s,0); zassert_equal(o.vy_m_s,0); zassert_equal(o.wz_rad_s,.8f);
-    h.valid=true; o=a.update(cmd,b,h,22,false,100); zassert_true(a.translationReady());
-    h.sender_boot_id=33; o=a.update(cmd,b,h,22,true,100); zassert_false(a.translationReady());
-    h.sender_boot_id=11; o=a.update(cmd,b,h,22,true,100); zassert_false(a.translationReady());
+    h.valid=false; o=a.update(cmd,b,h,22,false,100,peer()); zassert_equal(o.vx_m_s,0); zassert_equal(o.vy_m_s,0); zassert_equal(o.wz_rad_s,.8f);
+    h.valid=true; o=a.update(cmd,b,h,22,false,100,peer()); zassert_true(a.translationReady());
+    h.sender_boot_id=33; o=a.update(cmd,b,h,22,true,100,peer()); zassert_false(a.translationReady());
+    h.sender_boot_id=11; o=a.update(cmd,b,h,22,true,100,peer()); zassert_false(a.translationReady());
     c.frame=ChassisMotionAdapter::Frame::World; ChassisMotionAdapter world(c); b.yaw_rad=pi/2;b.rate_rad_s=0;
-    o=world.update(cmd,b,{},22,true,100); zassert_within(o.vy_m_s,-.3f,1e-6f);
+    o=world.update(cmd,b,head(),22,true,100,peer()); zassert_within(o.vy_m_s,-.3f,1e-6f);
     c.frame=ChassisMotionAdapter::Frame::Body;c.compensation_enabled=false;ChassisMotionAdapter plain(c);
     o=plain.update(cmd,{}, {},0,false,100);zassert_equal(o.vx_m_s,1);zassert_equal(o.wz_rad_s,.8f);
+}
+ZTEST(heading, test_chassis_only_restart_cannot_pair_old_head_origin) {
+    auto hb=peer(100);hb.sender_uptime_ms=10100;
+    zassert_false(startupSessionsMatch(hb,100,1000));
+    ChassisMotionAdapter::Config c{};c.frame=ChassisMotionAdapter::Frame::Gimbal;c.startup_alignment_confirmed=true;
+    ChassisMotionAdapter restarted(c);
+    const ChassisCommand cmd{.mode=ChassisMode::BodyVelocity,.vx_m_s=1};
+    const auto o=restarted.update(cmd,body(),head(),22,true,100,hb);
+    zassert_false(restarted.translationReady());zassert_equal(o.vx_m_s,0);
+    hb=peer(100);zassert_true(startupSessionsMatch(hb,100,1000));
+    hb.stamp.timestamp_ms=101;zassert_false(startupSessionsMatch(hb,100,1000));
 }
 ZTEST(heading, test_world_heading_crossing_release_saturation_and_continuous_rotation) {
     ImuHeadingLock lock({}); auto h=head(); float torque=123;
