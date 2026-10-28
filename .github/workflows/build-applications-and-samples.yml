@@ -182,7 +182,8 @@ jobs:
                 -b dm_mc02/stm32h723xx \
                 -d "build/ci/$build_name" \
                 "$project" \
-                -- -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code" \
+                   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
                    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache; then
               echo "PASS: $relative"
             else
@@ -267,7 +268,8 @@ jobs:
           set -euo pipefail
           west build -p always -b rm_typec \
             -d build/ci/rm_typec_dji_position \
-            skywalker_code/samples/motor/dji_position_control
+            skywalker_code/samples/motor/dji_position_control \
+            -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code"
 
       - name: Upload hardware build reports
         if: always()
