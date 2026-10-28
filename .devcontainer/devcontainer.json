@@ -1,6 +1,6 @@
 {
   "name": "SkyWalker · Zephyr ARM (C/C++ 1.17.4)",
-  "image": "ghcr.io/shm-white/skywalker_general_embedded_code-dev:env-ea290af743b88ad3c0c2",
+  "image": "ghcr.io/shm-white/skywalker_general_embedded_code-dev:env-df9f605694e6072c82fb",
   "runArgs": [
     "--platform=linux/amd64"
   ],

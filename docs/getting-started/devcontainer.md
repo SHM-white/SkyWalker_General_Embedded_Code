@@ -60,7 +60,7 @@ west build -p always -b dm_mc02/stm32h723xx -d build/sentry_gimbal applications/
 
 ## 发布与维护
 
-首次加入配置以及后续修改 `.devcontainer/` 或 `west.yml` 时，push 会触发 **Publish development container**，用仓库 `GITHUB_TOKEN` 推送 GHCR，无需保存个人令牌。PR 事件只构建，不登录或推送；源码编译由项目原有流程负责。
+首次加入配置以及后续修改 `.devcontainer/` 或 `west.yml` 时，push 会触发 **Publish development container**，用仓库 `GITHUB_TOKEN` 推送 GHCR，无需保存个人令牌。SDK 下载通过 BuildKit 临时 secret 使用 Actions token，避免共享 runner 的匿名 API 限流，凭据不写入镜像。PR 事件只构建，不登录或推送；源码编译由项目原有流程负责。
 
 1. 修改 Dockerfile 或 `west.yml` 后执行 `bash .devcontainer/image-tag.sh`。
 2. 将 `.devcontainer/devcontainer.json` 的 `image` 标签改为输出的 `env-…`，与配方一起提交；workflow 会检查是否一致。
@@ -78,3 +78,5 @@ docker build --platform linux/amd64 -f .devcontainer/Dockerfile -t "$image" .
 构建后执行 **Dev Containers: Reopen in Container**，即可使用本地同名镜像。
 
 参考：[VS Code Dev Containers](https://code.visualstudio.com/docs/devcontainers/containers)、[Zephyr SDK](https://docs.zephyrproject.org/latest/develop/toolchains/zephyr_sdk.html)、[GHCR 权限与拉取](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
+
+本地构建若遇到 GitHub API 匿名限流，可在当前 shell 提供 `GH_TOKEN`，并给上述 `docker build` 加 `--secret id=github_token,env=GH_TOKEN`；不要用 build-arg 或 ENV 保存令牌。

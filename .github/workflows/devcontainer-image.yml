@@ -59,6 +59,8 @@ jobs:
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.image.outputs.image }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha,scope=skywalker-devcontainer
           cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=skywalker-devcontainer' || '' }}
       - name: Record pull command

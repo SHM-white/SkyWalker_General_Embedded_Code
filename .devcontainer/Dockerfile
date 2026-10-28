@@ -24,13 +24,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && python -m pip install --no-cache-dir 'west==1.5.0' 'cmake==3.31.6'
 WORKDIR /opt/skywalker
 COPY west.yml skywalker_code/west.yml
-RUN west init -l skywalker_code \
+RUN --mount=type=secret,id=github_token west init -l skywalker_code \
     && west update --narrow -o=--depth=1 \
     && python -m pip install --no-cache-dir \
          -r zephyr/scripts/requirements-base.txt \
          -r zephyr/scripts/requirements-build-test.txt \
          -r zephyr/scripts/requirements-run-test.txt \
-    && west sdk install --version "$(cat zephyr/SDK_VERSION)" \
+    && sdk_auth=() \
+    && if [[ -s /run/secrets/github_token ]]; then \
+         sdk_auth=(--personal-access-token "$(cat /run/secrets/github_token)"); fi \
+    && west sdk install "${sdk_auth[@]}" --version "$(cat zephyr/SDK_VERSION)" \
          --install-dir /opt/zephyr-sdk --gnu-toolchains arm-zephyr-eabi \
     && cp skywalker_code/west.yml /opt/skywalker-image-west.yml \
     && west manifest --freeze > /opt/skywalker-image-west-frozen.yml \
