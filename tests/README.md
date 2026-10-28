@@ -43,3 +43,8 @@ Actions 会在 Workflow Summary 输出逐套通过数和算法耗时，上传 Tw
 **注意**：容器中预构建的 Zephyr 工程使用一个仅含 `west.yml` 的 manifest self 占位目录，因此 Twister 必须用 `-x=ZEPHYR_EXTRA_MODULES=<checkout>/skywalker_code` 显式加载当前 PR 的 Zephyr 模块，否则 Kconfig 会找不到自定义 `SKYWALKER_*` 符号。
 
 容器 job 的模块路径必须读取容器环境变量 `$GITHUB_WORKSPACE`，不要直接使用 Actions 在宿主机展开的 `${{ github.workspace }}`（宿主 `/home/runner/work` 与容器 `/__w` 不相同）。
+
+`tests/sentry_control` 运行舵轮实际控制与硬件适配代码，覆盖参考候选轮位/符号/单位、
+最终角联锁、cos³、速度环重置、旋转连续输出、命令过期及真实 CanBus/Motor 故障恢复。
+I/O 通过测试私有访问和最小 CAN 设备替身注入，不增加生产代码旁路。上车验收见
+[哨兵参考移植](../docs/dev/哨兵参考工程移植验收.md)。
