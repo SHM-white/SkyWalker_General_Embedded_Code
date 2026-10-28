@@ -166,7 +166,7 @@ ZTEST(swerve_module, test_valid_feedback_initializes_before_closed_loop_effort) 
     zassert_true(out.steer_output_valid && out.drive_output_valid);
     zassert_within(out.optimized_angle_rad, 0.5f, 1e-6f);
     zassert_within(out.steer_continuous_target_rad, 0.5f, 1e-5f);
-    zassert_within(out.drive_target_rad_s, 20, 1e-5f);
+    zassert_within(out.drive_target_rad_s, 20 * std::pow(std::cos(0.3f), 3), 1e-5f);
     zassert_equal(out.steer_effort, 0);
     zassert_equal(out.drive_effort, 0);
     f.steer_feedback_stamp_ms = 2;
@@ -187,7 +187,7 @@ ZTEST(swerve_module, test_flip_preserves_wheel_velocity_vector) {
     zassert_true(out.flipped);
     zassert_within(out.optimized_angle_rad, -pi / 4, 1e-6f);
     zassert_within(out.optimized_wheel_velocity_m_s, -2, 1e-6f);
-    zassert_within(out.drive_target_rad_s, -20, 1e-5f);
+    zassert_within(out.drive_target_rad_s, -20 * std::pow(std::cos(pi/4), 3), 1e-5f);
     expect_vector({out.optimized_angle_rad, out.optimized_wheel_velocity_m_s},
                   -std::sqrt(2.0f), std::sqrt(2.0f));
 }
@@ -232,6 +232,8 @@ ZTEST(swerve_chassis, test_four_wheel_targets_and_safe_initial_cycle) {
         feedback.module[i].steer_enable_generation = 1;
         feedback.module[i].drive_enable_generation = 1;
         feedback.module[i].drive_velocity_rad_s = float(i + 1);
+        constexpr float angles[] = {1.1071487f, 0.5880026f, 0, 0};
+        feedback.module[i].steer_absolute_rad = angles[i];
     }
     zassert_ok(chassis.validate());
     zassert_ok(chassis.reset(feedback));
@@ -243,11 +245,12 @@ ZTEST(swerve_chassis, test_four_wheel_targets_and_safe_initial_cycle) {
         expect_vector(out.target[i], vx[i], vy[i]);
         expect_vector({out.module[i].optimized_angle_rad, out.module[i].optimized_wheel_velocity_m_s},vx[i],vy[i]);
         zassert_within(out.module[i].drive_target_rad_s,
-                       std::hypot(vx[i],vy[i])/config.modules[i].wheel_radius_m, 1e-4f);
+                       0, 1e-4f);
         zassert_equal(out.module[i].drive_effort, 0);
         zassert_true(out.module[i].steer_output_valid && out.module[i].drive_output_valid);
     }
     for (auto &f : feedback.module) ++f.steer_feedback_stamp_ms;
+    zassert_ok(chassis.step(cmd, feedback, 0.005f, out));
     zassert_ok(chassis.step(cmd, feedback, 0.005f, out));
     zassert_true(out.module[0].drive_effort > 0);
     zassert_ok(chassis.step({},feedback,0.005f,out));
