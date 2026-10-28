@@ -2,6 +2,7 @@ name: Build applications and samples
 
 on:
   push:
+    branches: [main, dev]
     paths:
       - 'applications/**'
       - 'samples/**'
