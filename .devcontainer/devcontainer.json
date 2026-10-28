@@ -1,0 +1,39 @@
+{
+  "name": "SkyWalker · Zephyr ARM (C/C++ 1.17.4)",
+  "image": "ghcr.io/shm-white/skywalker_general_embedded_code-dev:env-ea290af743b88ad3c0c2",
+  "runArgs": [
+    "--platform=linux/amd64"
+  ],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/opt/skywalker/skywalker_code,type=bind",
+  "workspaceFolder": "/opt/skywalker/skywalker_code",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "containerEnv": {
+    "ZEPHYR_EXTRA_MODULES": "/opt/skywalker/skywalker_code"
+  },
+  "postCreateCommand": "bash .devcontainer/check-environment.sh",
+  "postAttachCommand": "bash .devcontainer/pin-cpptools.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools@1.17.4",
+        "marus25.cortex-debug"
+      ],
+      "settings": {
+        "C_Cpp.default.compilerPath": "/opt/zephyr-sdk/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-g++",
+        "C_Cpp.default.compileCommands": "${workspaceFolder}/build/control/compile_commands.json",
+        "C_Cpp.intelliSenseCacheSize": 512,
+        "C_Cpp.workspaceParsingPriority": "low",
+        "files.watcherExclude": {
+          "**/build/**": true,
+          "**/build-*/**": true
+        },
+        "search.exclude": {
+          "**/build/**": true,
+          "**/build-*/**": true
+        },
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
