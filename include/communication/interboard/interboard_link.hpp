@@ -20,8 +20,10 @@ public:
         operator_control_ = {};
         big_yaw_request_ = {};
         big_yaw_feedback_ = {};
+        gimbal_imu_ = {};
     }
     bool peerOnline(std::uint64_t now_ms, std::uint32_t timeout_ms = 200) const;
+    int latestGimbalImuYaw(robotics::GimbalImuYaw &) const;
     int latestHeartbeat(robotics::BoardHeartbeat &) const;
     int latestChassisControl(robotics::RemoteChassisControl &) const;
     int latestChassisConstraint(robotics::ChassisConstraint &) const;
@@ -48,6 +50,9 @@ private:
     robotics::OperatorControl operator_control_{};
     robotics::BigYawRequest big_yaw_request_{};
     robotics::BigYawFeedback big_yaw_feedback_{};
+    robotics::GimbalImuYaw gimbal_imu_{};
+    std::array<std::uint64_t, 8> retired_boots_{};
+    std::size_t retired_count_ = 0; // Full history fails closed until local reboot.
     std::uint32_t rejected_ = 0;
 };
 }

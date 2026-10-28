@@ -24,6 +24,7 @@ public:
         robotics::OperatorControl operator_control{};
         robotics::BigYawRequest big_yaw_request{};
         robotics::BigYawFeedback big_yaw_feedback{};
+        robotics::GimbalImuYaw gimbal_imu{};
         bool operator_control_valid = false;
         std::uint64_t local_boot_id = 0;
         bool online = false;
@@ -44,6 +45,7 @@ public:
     [[nodiscard]] int submitOperatorControl(const robotics::OperatorControl &);
     void setReferee(const robotics::RefereeState &);
     void setStatus(const robotics::RunStatus &);
+    void submitGimbalImuYaw(const robotics::GimbalImuYaw &);
     void submitBigYaw(const robotics::BigYawRequest &);
     void setBigYawFeedback(const robotics::BigYawFeedback &);
     Snapshot snapshot() const;
@@ -57,6 +59,7 @@ private:
         robotics::OperatorControl operator_control{};
         robotics::BigYawRequest big_yaw_request{};
         robotics::BigYawFeedback big_yaw_feedback{};
+        robotics::GimbalImuYaw gimbal_imu{};
     };
     Config config_;
     InterBoardTransport &transport_;
