@@ -4,6 +4,8 @@
 
 ## 1. 准备环境
 
+推荐使用 [VS Code 预构建开发容器](devcontainer.md)：新设备直接拉取已安装 SDK 和 west 依赖的镜像，C/C++ 扩展固定 `1.17.4`。下文保留宿主机手动安装方式。
+
 需要：
 
 - Zephyr 所需的 Python、CMake、Ninja、设备树工具和 west。
@@ -21,7 +23,7 @@ self:
 如果还没有工作区，可以：
 
 ```bash
-west init -m https://github.com/NUAAwyx/SkyWalker_General_Embedded_Code.git skywalker_ws
+west init -m https://github.com/SHM-white/SkyWalker_General_Embedded_Code.git skywalker_ws
 cd skywalker_ws
 west update
 ```

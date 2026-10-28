@@ -21,6 +21,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 | 要做什么                   | 从这里开始                                                                                                          |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 换设备 / VS Code 开发容器 | [预构建开发容器](docs/getting-started/devcontainer.md)：拉取 SDK/west 环境，C/C++ 固定 1.17.4 |
 | 第一次配置、构建和烧录     | [快速开始](docs/getting-started/quickstart.md) → [样例索引](docs/getting-started/samples.md)                                              |
 | 理解工程分层和硬件         | [架构与构建](docs/getting-started/architecture.md) → [板级支持](docs/getting-started/boards.md)                                                |
 | 调电机与控制环             | [DJI](docs/modules/drivers/motor-dji.md) / [达妙](docs/modules/drivers/motor-dm.md) → [电机工作链路](docs/guides/motor-workflow.md) |

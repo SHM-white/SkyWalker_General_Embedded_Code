@@ -8,6 +8,7 @@
 
 | 目标 | 阅读路线 |
 |---|---|
+| 换设备 / VS Code 容器 | [预构建开发容器](getting-started/devcontainer.md)：SDK/west 预初始化，C/C++ 固定 1.17.4 |
 | 首次构建和烧录 | [快速开始](getting-started/quickstart.md) → [板级支持](getting-started/boards.md) → [样例索引](getting-started/samples.md) |
 | 当前实车逐模块上车 | [独立上车入口表](../samples/bringup/README.md) → [共享实车配置](../config/vehicle/installed/README.md) → [诊断与观测](guides/debugging.md) |
 | 对接另一套底盘 / 云台 | [板间 v4 字节与物理量契约](protocols/interboard-v4.md) → [无输出板间观察](../samples/bringup/gimbal_link_observe/README.md) |
