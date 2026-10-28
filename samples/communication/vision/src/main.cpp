@@ -33,8 +33,10 @@ void telemetry(void *, void *, void *) {
                                 float(s.resets),
                                 float(s.dropped),
                                 float(static_cast<unsigned>(s.state))};
-        static_assert(sizeof(values) / sizeof(float) == VOFA_MAX_FLOATS);
-        const int r = vofa_send(&vofa, values, VOFA_MAX_FLOATS);
+        // The protocol permits frames shorter than the transport's max capacity.
+        constexpr size_t channel_count = sizeof(values) / sizeof(values[0]);
+        static_assert(channel_count <= VOFA_MAX_FLOATS);
+        const int r = vofa_send(&vofa, values, static_cast<uint8_t>(channel_count));
         if (r != last_send) {
             if (r < 0)
                 LOG_WRN("VOFA send=%d", r);
