@@ -12,6 +12,7 @@ public:
         float steer_target_rate_rad_s = 4;
         float flip_enter_error_rad = 1.6580628f, flip_exit_error_rad = 1.4835299f;
         IdleBehavior idle_behavior = IdleBehavior::Hold;
+        bool cosine_compensation = true;
     };
     explicit SwerveModule(const Config &config) : config_(config) {
     }
@@ -19,6 +20,9 @@ public:
     int reset(const ModuleFeedback &);
     // One writer. Feedback loss invalidates only the affected axis's output.
     int step(const ModuleTarget &, const ModuleFeedback &, float dt_s, ModuleOutput &out);
+    // Chassis prepares ALL steering targets before granting any drive output.
+    int prepare(const ModuleTarget &, const ModuleFeedback &, float dt_s, ModuleOutput &out);
+    int finishDrive(const ModuleFeedback &, float dt_s, bool permitted, ModuleOutput &out);
 
 private:
     int steer(const ModuleFeedback &, float dt_s, ModuleOutput &out);
