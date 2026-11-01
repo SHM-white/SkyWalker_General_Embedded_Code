@@ -1,4 +1,5 @@
 #include <cerrno>
+#include <algorithm>
 #include <communication/interboard/interboard_link.hpp>
 namespace skywalker::communication {
 using namespace robotics;
@@ -16,6 +17,13 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
             ++rejected_;
             return;
         }
+        if (heartbeat_.stamp.valid && hb.sender_boot_id != heartbeat_.sender_boot_id) {
+            if (retired_count_==retired_boots_.size() ||
+                std::find(retired_boots_.begin(),retired_boots_.end(),hb.sender_boot_id)!=retired_boots_.end()) {
+                ++rejected_; return;
+            }
+            retired_boots_[retired_count_++]=heartbeat_.sender_boot_id;
+        }
         if (!heartbeat_.stamp.valid || hb.sender_boot_id != heartbeat_.sender_boot_id) {
             sequences_ = {};
             control_ = {};
@@ -24,6 +32,7 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
             operator_control_ = {};
             big_yaw_request_ = {};
             big_yaw_feedback_ = {};
+            gimbal_imu_ = {};
         }
     }
     else if (!heartbeat_.stamp.valid) {
@@ -78,6 +87,22 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
             big_yaw_request_.target_rate_rad_s = 0;
             big_yaw_request_.permission.enabled = false;
         }
+        break;
+    }
+    case MessageId::GimbalImuYaw: {
+        GimbalImuYaw t{};
+        ret = InterBoardCodec::decodeGimbalImuYaw(m,p,n,t);
+        if (!ret && t.sender_boot_id != heartbeat_.sender_boot_id)
+            ret = -ESTALE;
+        if (!ret && gimbal_imu_.stamp.valid && t.zero_generation != gimbal_imu_.zero_generation &&
+            !sequenceAfter(t.zero_generation,gimbal_imu_.zero_generation)) ret=-ESTALE;
+        if (!ret && gimbal_imu_.stamp.valid && t.zero_generation == gimbal_imu_.zero_generation &&
+            !sequenceAfter(t.sample_sequence,gimbal_imu_.sample_sequence)) {
+            // Equal samples cannot renew freshness or re-enable an invalid sample.
+            if (!t.valid) gimbal_imu_.valid = false;
+            if (t.sample_sequence != gimbal_imu_.sample_sequence) ret = -ESTALE;
+        }
+        else if (!ret) gimbal_imu_ = t;
         break;
     }
     case MessageId::BigYawFeedback:
@@ -154,6 +179,14 @@ int InterBoardLink::latestBigYawFeedback(BigYawFeedback &out) const {
     if (!big_yaw_feedback_.stamp.valid)
         return -EAGAIN;
     out = big_yaw_feedback_;
+    return 0;
+}
+}
+
+namespace skywalker::communication {
+int InterBoardLink::latestGimbalImuYaw(robotics::GimbalImuYaw &out) const {
+    if (!gimbal_imu_.stamp.valid) return -EAGAIN;
+    out=gimbal_imu_;
     return 0;
 }
 }

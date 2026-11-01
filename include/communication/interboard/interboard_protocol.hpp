@@ -11,7 +11,8 @@ enum class MessageId : std::uint16_t {
     ChassisFeedback = 0x0103,
     OperatorControl = 0x0301,
     BigYawRequest = 0x0402,
-    BigYawFeedback = 0x0403
+    BigYawFeedback = 0x0403,
+    GimbalImuYaw = 0x0405
 };
 inline constexpr std::uint8_t kInterBoardProtocolVersion = 4;
 constexpr std::size_t kMaxPayload = 128, kMaxFrame = 142;
@@ -29,5 +30,5 @@ struct InterBoardFrame {
 };
 std::uint16_t interboardCrc16(const std::uint8_t *data, std::size_t size);
 int messageIndex(MessageId id);
-constexpr std::size_t kMessageCount = 7;
+constexpr std::size_t kMessageCount = 8;
 }

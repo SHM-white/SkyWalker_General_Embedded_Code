@@ -28,6 +28,8 @@ int messageIndex(MessageId id) {
         return 5;
     case MessageId::BigYawFeedback:
         return 6;
+    case MessageId::GimbalImuYaw:
+        return 7;
     default:
         return -1;
     }

@@ -50,7 +50,7 @@
 
 `YawCenteringController::update(const YawCenteringInputs &, now_us)` 使用已标定小 Yaw 中心、关节角及其采样时间、原始来源、head_stable 与 permission_valid，生成限速/斜坡后的大 Yaw 角速度。中心与编码器零点分开标定。库 Config 默认死区 0.05 rad、迟滞 0.025 rad、kp=0.5、最大 0.3 rad/s、加速度 0.4 rad/s²。最终云台 `manualCenteringConfig()` 的上限为 0.6 rad/s、加速度 0.8 rad/s²；独立双 Yaw 上车入口使用 `bringup::big_yaw_rate_rad_s=0.1 rad/s`，与其配套 `chassis_big_yaw` 接收上限一致。`reset()` 清外环历史。
 
-`BigYawExecutor` 注入独立 Motor、VelocityMotor::Config 与自身 Config；`begin()` 配置，`update(const BigYawExecutionInputs &, now_us)` 消费请求，`suspend(...)` 撤销输入，`feedback()` 返回 BigYawFeedback 值副本。它只控制连续旋转速度，不需要绝对机械零点，不从八电机轮控状态取得许可。
+`BigYawExecutor` 注入独立 Motor、VelocityMotor::Config 与自身 Config；`begin()` 配置，`update(const BigYawExecutionInputs &, now_us)` 消费请求，`suspend(...)` 撤销输入，`feedback()` 返回 BigYawFeedback 值副本。默认控制连续旋转速度，不需要绝对机械零点，不从八电机轮控状态取得许可。可选 heading_lock 后端消费独立头部 IMU，以世界航向 P/实测角速度 PI 产生 MIT 力矩；只有 MIT 模式和参考已确认才允许配置，不自动回退。详见 [航向验收](../../dev/哨兵IMU航向控制验收.md)。
 
 v4 的 BigYawRequest 保留 receiver_boot_id、source_sequence 和来源/命令/权限年龄。resume_generation 已删除；库不以电机 ready/armed 作为发送授权。独立双 Yaw 上车入口额外要求真实反馈新鲜才发非零速度，缺测量时最多发已授权零速 FollowCenter。真实板重启、链路或输入过期仍使请求失效；当前应用的操作授权发布器在曾上线的对端掉线或 boot 改变时撤销本地 RC 解锁，需要重新归中解锁。BigYawFeedback 保留真实状态生产年龄与实际速度 valid，未获得有效测量时不得把目标速度作为反馈。速度单位、接口轴到关节轴换算与线上方向适配见[协议 v4 契约](../../protocols/interboard-v4.md)。
 

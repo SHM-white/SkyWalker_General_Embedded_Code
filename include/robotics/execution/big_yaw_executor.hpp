@@ -1,5 +1,6 @@
 #pragma once
 #include <control/velocity_motor.hpp>
+#include <robotics/execution/imu_heading_lock.hpp>
 #include <core/measurement.hpp>
 #include <robotics/execution/run_status.hpp>
 #include <robotics/command/command_source.hpp>
@@ -8,6 +9,8 @@
 namespace skywalker::robotics {
 struct BigYawExecutionInputs {
     BigYawRequest request{};
+    GimbalImuYaw head{};
+    std::uint64_t peer_boot_id = 0;
     std::uint64_t local_boot_id = 0;
     bool peer_online = false;
     bool transport_ready = false;
@@ -24,6 +27,9 @@ public:
         core::TimeUs source_timeout_us = 100000;
         std::uint32_t permission_timeout_ms = 300;
         core::TimeUs max_cycle_us = 20000;
+        // Fixed at startup. No automatic fallback between world/relative feedback.
+        bool heading_lock_enabled = false, mit_mode_confirmed = false, heading_reference_confirmed = false;
+        ImuHeadingLock::Config heading{};
         float rate_abs_max_rad_s = 1;
         float motor_to_joint_ratio = 1, direction = 1;
     };
@@ -42,6 +48,8 @@ private:
     motor::Motor &drive_;
     control::VelocityMotor axis_;
     const Config config_;
+    ImuHeadingLock heading_;
+    std::uint64_t heading_enable_generation_ = 0;
     RunStatus status_{};
     core::TimeUs previous_us_ = 0;
     std::uint32_t production_sequence_ = 0;

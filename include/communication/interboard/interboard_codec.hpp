@@ -4,6 +4,8 @@ namespace skywalker::communication {
 class InterBoardCodec {
 public:
     // Encoders return COMPLETE frame bytes; decoders consume payloads and return 0/-errno.
+    static int encodeGimbalImuYaw(const robotics::GimbalImuYaw &, std::uint32_t, std::uint8_t *, std::size_t);
+    static int decodeGimbalImuYaw(const FrameMeta &, const std::uint8_t *, std::size_t, robotics::GimbalImuYaw &);
     static int encodeHeartbeat(const robotics::BoardHeartbeat &, std::uint32_t sequence, std::uint8_t *, std::size_t);
     static int encodeChassisControl(const robotics::RemoteChassisControl &, std::uint32_t sequence, std::uint8_t *,
                                     std::size_t);
