@@ -164,8 +164,14 @@ int main() {
                              : UINT32_MAX;
         const auto peer = endpoint.snapshot();
         const auto &feedback = peer.big_yaw_feedback;
+        // The reference peer publishes BigYawFeedback at 100 ms intervals.
+        // A 50 ms timeout would repeatedly invalidate feedback and reset the
+        // world-history window, preventing meaningful delayed follow.
+        const auto peer_feedback_timeout_ms =
+            vehicle::reference_chassis_legacy_v4_compat ? 250U : 50U;
         const bool peer_feedback_valid = peer.online && feedback.valid &&
-                                         forwardedFresh(feedback.stamp, feedback.production_age_ms, ms, 50) &&
+                                         forwardedFresh(feedback.stamp, feedback.production_age_ms, ms,
+                                                        peer_feedback_timeout_ms) &&
                                          std::isfinite(feedback.actual_rate_rad_s) &&
                                          std::fabs(feedback.actual_rate_rad_s) <= vehicle::big_yaw.velocity_limit_rad_s;
         if (peer_feedback_valid != peer_feedback_was_valid) {
