@@ -17,7 +17,7 @@ UART5 接 DR16，CAN1 接小 Yaw，CAN2 接 Pitch（单 Yaw 入口不注册 CAN2
 
 这是测试控制策略而非已经实车验收的参数。前提是板载 BMI088 确实装在**大 Yaw 随动体**上、编码器正方向与 BMI088 世界 Yaw 正方向一致，并测量 `yaw_center_rad` 对应小 Yaw 与大 Yaw 的真正物理 0°；当前标定中心还是限位中点候选，不能拿编码器零位或中点自动当作物理对正。方向错误会造成正反馈，应先悬空、低速验证。
 
-参考底盘依然由其自身处理底盘陀螺仪角速度补偿。板间头部姿态扩展仍发送板载 BMI088 航向，另外补发零速 `BodyVelocity` 的 `ChassisControl`，只用于放行参考底盘的 `RobotBigYawControl()`。头部惯性无效、板载航向过期、关节反馈过期、对端实测速度无效或撤权时，非零跟随请求立即停止；对端未反馈前仍允许已授权零速使能请求。原生底盘模式继续使用原有机械关节回中，暂不改变线上语义。
+参考底盘依然由其自身处理底盘陀螺仪角速度补偿。板间头部姿态扩展仍发送板载 BMI088 航向，另外补发零速 `BodyVelocity` 的 `ChassisControl`，只用于放行参考底盘的 `RobotBigYawControl()`。头部惯性无效、板载航向过期、关节反馈过期、对端实测速度无效或撤权时，非零跟随请求立即停止；对端未反馈前仍允许已授权零速使能请求。参考底盘的 BigYawFeedback 固定每 100 ms 上报一次，因此兼容模式接收过期门限使用 250 ms（与其电机内部 100 ms 实际反馈保护相互独立）；本仓库原生模式仍用 50 ms。原生底盘模式继续使用原有机械关节回中，暂不改变线上语义。
 
 仅修改 `include/robotics/vehicle/diagnostics_config.hpp` 中 `diagnostic_output` 后重建、烧录，即可选择日志或 VOFA。JustFloat 布局版本 1 共 19 通道：layout、seq低16位、seq高16位、uptime低16位、uptime高16位、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低16位、dropped高16位、extra0、extra1。`age_ms=UINT32_MAX` 表示缺少有效时间戳；始终结合 valid/原因码判断，不能将保留的历史反馈当作实时零速。target/feedback 为线上大 Yaw 关节速度 rad/s；feedback 无效时为 NaN，valid=false；effort 为本地小 Yaw 电流 A；age_ms 为接收时携带的远端生产年龄，判断还叠加本地接收后年龄；detail 为原有机械回中 WaitReason；**参考底盘兼容模式**下 extra0 为滑动平均目标相对大 Yaw 世界航向的误差 rad，extra1 为平均世界目标航向 rad；**本仓库原生底盘模式**下 extra0 仍是关节中心误差 rad，extra1 为头部 yaw rad。
 
