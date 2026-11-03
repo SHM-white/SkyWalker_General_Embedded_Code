@@ -10,8 +10,9 @@ inline constexpr bool reference_chassis_imu_heading_confirmed = false;
 inline constexpr bool reference_chassis_native_velocity_confirmed = false;
 // 未改动的参考底盘固件只接受它私有的 0x0404/32B 航向帧和 BigYawRequest mode=1，
 // 且它的自稳后端把 mode=1 的 target_rate 当作“头部世界角速度”。
-// 打开后：额外发送 0x0404，并把 mode=1 的 target 直接填操作员期望的世界角速度，
-// 不再用小 Yaw 回中控制器的关节速度冒充。
+// 打开后：额外发送 0x0404；mode=1 的 target 是世界角速度意图。
+// 整车手控入口仍可发送操作员转速；双 Yaw 上车入口使用过去 2.5s
+// 小 Yaw 世界航向均值的误差速度。不得混用机械关节相对速度。
 inline constexpr bool reference_chassis_legacy_v4_compat = true;
 // 线上发送 BigYawMode::ImuHeadingHold 的唯一决策点。
 // mode=1 仍只表示大 Yaw 关节相对速度；mode=2 才表示头部世界角速度。

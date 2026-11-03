@@ -13,6 +13,7 @@
 #include <robotics/vehicle/calibration.hpp>
 #include <robotics/vehicle/reference_chassis_link_profile.hpp>
 #include <robotics/chassis/imu_heading.hpp>
+#include <robotics/gimbal/world_yaw_window_follow.hpp>
 #include <control/attitude_ekf.hpp>
 #include <drivers/imu/bmi088_imu.hpp>
 #include <zephyr/drivers/regulator.h>
@@ -65,6 +66,9 @@ YawCenteringController::Config centeringConfig() {
     return c;
 }
 YawCenteringController centering(centeringConfig());
+// World-frame averaging is only sent to the reference chassis gyro backend.
+// Static storage avoids placing the bounded history buffer on Zephyr main stack.
+WorldYawWindowFollower world_follower;
 void communicationTask(void *, void *, void *) {
     for (;;) {
         endpoint.poll(k_uptime_get());
@@ -160,12 +164,20 @@ int main() {
                              : UINT32_MAX;
         const auto peer = endpoint.snapshot();
         const auto &feedback = peer.big_yaw_feedback;
+        // The reference peer publishes BigYawFeedback at 100 ms intervals.
+        // A 50 ms timeout would repeatedly invalidate feedback and reset the
+        // world-history window, preventing meaningful delayed follow.
+        const auto peer_feedback_timeout_ms =
+            vehicle::reference_chassis_legacy_v4_compat ? 250U : 50U;
         const bool peer_feedback_valid = peer.online && feedback.valid &&
-                                         forwardedFresh(feedback.stamp, feedback.production_age_ms, ms, 50) &&
+                                         forwardedFresh(feedback.stamp, feedback.production_age_ms, ms,
+                                                        peer_feedback_timeout_ms) &&
                                          std::isfinite(feedback.actual_rate_rad_s) &&
                                          std::fabs(feedback.actual_rate_rad_s) <= vehicle::big_yaw.velocity_limit_rad_s;
-        if (peer_feedback_valid != peer_feedback_was_valid)
+        if (peer_feedback_valid != peer_feedback_was_valid) {
             centering.reset();
+            world_follower.reset();
+        }
         peer_feedback_was_valid = peer_feedback_valid;
         YawCenteringInputs follow{};
         follow.joint_yaw_rad = ys.feedback.position_rad;
@@ -176,12 +188,34 @@ int main() {
         follow.permission_valid = vehicle::connections_confirmed && vehicle::imu_mounting_confirmed && op.run_allowed &&
                                   !op.clear_estop;
         const auto centered = centering.update(follow, now);
+        // The onboard BMI088 measures big-Yaw/carrier heading in the world.
+        // Adding the calibrated small-Yaw joint offset gives head world heading.
+        // Both terms share the same yaw sign and IMU zero, unlike combining the
+        // independently initialized onboard and head IMU Euler angles.
+        const bool joint_valid = ys.feedback_fresh && input.yaw.position_reference_valid &&
+                                 bool(ys.feedback.valid & motor::FeedbackPosition);
+        // The world-window history must also run while the operator is moving
+        // the head. Inertial stabilization_valid additionally requires small
+        // tracking errors and would repeatedly discard the history in motion.
+        const bool inertial_running = inertial.yaw_output_valid && inertial.pitch_output_valid &&
+                                      run.state == RunState::Active;
+        const bool world_ready = vehicle::reference_chassis_legacy_v4_compat &&
+                                 follow.enabled && inertial_running && follow.permission_valid &&
+                                 joint_valid && heading.valid &&
+                                 core::fresh(heading.stamp, now, 20000) && peer_feedback_valid;
+        const auto world_center = world_follower.update(
+            heading.yaw_rad,
+            vehicle::small_yaw.direction * (ys.feedback.position_rad - vehicle::yaw_center_rad),
+            now, world_ready);
         BigYawRequest big_request{};
         if (vehicle::reference_chassis_legacy_v4_compat) {
-            // 未改动的参考底盘用 mode=1 表示头部世界角速度，它自己完成航向保持；
-            // 这里只给授权和零目标，不能把关节回中速度当作世界角速度发过去。
-            big_request.mode = peer.online && follow.permission_valid ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-            big_request.target_rate_rad_s = 0;
+            // This peer interprets mode=1 as world angular-rate intent and
+            // compensates chassis gyro itself; never apply big_yaw_wire_direction.
+            // A valid zero request may be needed to enable the peer and obtain
+            // feedback, but stale feedback/heading must not command motion.
+            big_request.mode = peer.online && follow.permission_valid && heading.valid
+                                   ? BigYawMode::FollowCenter : BigYawMode::Disabled;
+            big_request.target_rate_rad_s = world_center.valid ? world_center.world_rate_rad_s : 0;
             big_request.stamp = {ms, ++big_sequence, true};
         }
         else {
@@ -245,7 +279,8 @@ int main() {
         diagnostics.status(
             {.reason = reason,
              .valid = imu_fresh && ys.feedback_fresh && ps.feedback_fresh && peer_feedback_valid,
-             .enabled = centered.enabled && peer_feedback_valid,
+             .enabled = (vehicle::reference_chassis_legacy_v4_compat ? world_center.valid : centered.enabled) &&
+                        peer_feedback_valid,
              .target = big_request.target_rate_rad_s,
              .feedback = peer_feedback_valid ? feedback.actual_rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
              .age_ms = feedback.valid ? feedback.production_age_ms : UINT32_MAX,
@@ -258,8 +293,10 @@ int main() {
                       : yaw_error    ? yaw_error
                       : pitch_error  ? pitch_error
                                      : run.error,
-             .extra0 = centered.center_error_rad,
-             .extra1 = inertial.head_yaw_rad});
+             .extra0 = vehicle::reference_chassis_legacy_v4_compat ? world_center.error_rad
+                                                                        : centered.center_error_rad,
+             .extra1 = vehicle::reference_chassis_legacy_v4_compat ? world_center.target_world_yaw_rad
+                                                                        : inertial.head_yaw_rad});
         k_sleep(K_USEC(vehicle::gimbal_period_us));
     }
 }
