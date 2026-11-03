@@ -10,6 +10,7 @@
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
+#include <robotics/gimbal/world_yaw_window_follow.hpp>
 #include <robotics/vehicle/motion_profile.hpp>
 #include <zephyr/drivers/regulator.h>
 #include "../../../samples/robotics/common/operator_controls.hpp"
@@ -55,7 +56,7 @@ int main() {
                                  installed::gimbalExecutionConfig());
     static ImuHeadingReference head_heading;
     static InertialGimbalAdapter inertial(installed::manualInertialConfig());
-    static YawCenteringController centering(installed::manualCenteringConfig());
+    static WorldYawWindowFollower world_follower;
     int command_error = commands.registerSource(remote_source);
     if (command_error == 0)
         command_error = commands.start();
@@ -126,20 +127,21 @@ int main() {
         input.transport_ready = setup_ready;
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
-        YawCenteringInputs follow{};
-        follow.joint_yaw_rad = adaptation.yaw.feedback.position_rad;
-        follow.joint_stamp = {adaptation.yaw.feedback.timestamp_ms * 1000, adaptation.yaw.feedback.timestamp_ms,
-                              adaptation.yaw.feedback_fresh && adaptation.yaw.position_reference_valid &&
-                                  bool(adaptation.yaw.feedback.valid & motor::FeedbackPosition)};
-        follow.source_stamp = adaptation.source_stamp;
-        follow.enabled = operator_state.run_allowed && input.command.mode != GimbalMode::Disabled;
-        follow.head_stable = adapted.yaw_output_valid && adapted.pitch_output_valid && status.state == RunState::Active;
         const OutputPermission movement_permission{operator_state.fresh,
                                                    operator_state.run_allowed && installed::connections_confirmed,
                                                    operator_state.remote.stamp};
-        follow.permission_valid = movement_permission.valid && movement_permission.enabled &&
-                                  isFresh(movement_permission.stamp, now_ms, 300);
-        const auto centered = centering.update(follow, now_us);
+        const bool joint_valid = adaptation.yaw.feedback_fresh && adaptation.yaw.position_reference_valid &&
+                                 bool(adaptation.yaw.feedback.valid & motor::FeedbackPosition);
+        const bool following = movement_permission.valid && movement_permission.enabled &&
+                               heading.valid && joint_valid && adapted.yaw_output_valid &&
+                               adapted.pitch_output_valid && status.state == RunState::Active;
+        // Reference v4 mode=1 carries world rate, not the joint-relative centering rate.
+        // The recent head-world yaw mean lets big Yaw follow small Yaw without
+        // fighting a normal manual aiming motion.
+        const float joint_offset = installed::small_yaw.direction *
+                                   (adaptation.yaw.feedback.position_rad - installed::yaw_center_rad);
+        const auto world_follow = world_follower.update(
+            heading.yaw_rad - joint_offset, joint_offset, now_us, following);
         if (now_ms >= next_send_ms) {
             next_send_ms = now_ms + 10;
             BigYawRequest request{};
@@ -153,10 +155,11 @@ int main() {
             request.target_rate_rad_s = 0;
             request.source_sequence = operator_state.remote.stamp.sequence;
             request.source_age_ms = request.command_age_ms = age(operator_state.remote.stamp, now_ms);
-            if (operator_state.fresh && operator_state.run_allowed && heading.valid) {
+            if (operator_state.fresh && operator_state.run_allowed && heading.valid && world_follow.valid) {
                 request.mode = BigYawMode::FollowCenter;
-                const float rate = std::clamp(float(operator_state.remote.analog.wheel) / 660.f, -1.f, 1.f);
-                request.target_rate_rad_s = std::fabs(rate) < .05f ? 0 : rate;
+                const float wheel = std::clamp(float(operator_state.remote.analog.wheel) / 660.f, -1.f, 1.f);
+                const float user_rate = std::fabs(wheel) < .05f ? 0 : wheel;
+                request.target_rate_rad_s = std::clamp(world_follow.world_rate_rad_s + user_rate, -1.0f, 1.0f);
             }
             const auto session = endpoint.snapshot();
             if (session.online) {
