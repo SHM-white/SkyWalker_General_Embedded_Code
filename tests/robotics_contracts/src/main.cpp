@@ -2,6 +2,7 @@
 #include <cmath>
 #include <limits>
 #include <robotics/gimbal/yaw_centering.hpp>
+#include <robotics/gimbal/world_yaw_window_follow.hpp>
 #include <robotics/execution/run_status.hpp>
 #include <zephyr/ztest.h>
 
@@ -126,4 +127,59 @@ ZTEST(robotics_contracts, test_feedback_state_mapping_does_not_grant_stale_autho
     status.reason=WaitReason::Power;
     zassert_equal(wireFeedback(status).active_reasons,PowerBudgetStale);
 }
+
+ZTEST(robotics_contracts, test_world_yaw_window_tracks_past_head_world_angle_and_centers_static) {
+    WorldYawWindowFollower follower;
+    WorldYawWindowFollower::Output out{};
+    for (std::uint64_t t = 100000; t < 1100000; t += 5000)
+        out = follower.update(0.0f, 0.30f, t, true);
+    zassert_true(out.valid);
+    zassert_true(out.error_rad > .28f);
+    zassert_true(out.world_rate_rad_s > .20f);
+    zassert_true(out.world_rate_rad_s <= .35f);
+
+    // Big Yaw catches the world-fixed head. The small joint reaches its center.
+    for (std::uint64_t t = 1100000; t < 4600000; t += 5000)
+        out = follower.update(0.30f, 0.0f, t, true);
+    zassert_true(out.valid);
+    zassert_within(out.error_rad, 0, .01f);
+    zassert_within(out.world_rate_rad_s, 0, .03f);
+}
+
+ZTEST(robotics_contracts, test_world_yaw_window_is_mean_not_instant_joint_offset) {
+    WorldYawWindowFollower follower;
+    WorldYawWindowFollower::Output out{};
+    for (std::uint64_t t = 100000; t < 1100000; t += 5000)
+        out = follower.update(0, 0, t, true);
+    for (std::uint64_t t = 1100000; t < 2100000; t += 5000)
+        out = follower.update(0, 1, t, true);
+    zassert_true(out.valid);
+    zassert_within(out.target_world_yaw_rad, .50f, .06f);
+    // A carrier rotation is compensated by an opposite joint offset:
+    // the head stays world-fixed and the history target does not jump.
+    for (std::uint64_t t = 2100000; t < 5000000; t += 5000)
+        out = follower.update(.50f, .50f, t, true);
+    zassert_true(out.valid);
+    zassert_within(out.target_world_yaw_rad, 1.0f, .015f);
+}
+
+ZTEST(robotics_contracts, test_world_yaw_window_wraps_pi_and_revokes_immediately) {
+    WorldYawWindowFollower follower;
+    WorldYawWindowFollower::Output out{};
+    for (std::uint64_t t = 100000; t < 700000; t += 5000)
+        out = follower.update(3.10f, .20f, t, true);
+    zassert_true(out.valid);
+    zassert_within(out.error_rad, .20f, .01f);
+    zassert_true(out.target_world_yaw_rad < -2.9f);
+    out = follower.update(3.10f, .20f, 710000, false);
+    zassert_false(out.valid);
+    zassert_equal(out.world_rate_rad_s, 0);
+    // Recovery must not replay the old turn or velocity ramp.
+    out = follower.update(3.10f, -.20f, 715000, true);
+    zassert_true(out.valid);
+    zassert_equal(out.world_rate_rad_s, 0);
+    out = follower.update(NAN, 0, 720000, true);
+    zassert_false(out.valid);
+}
+
 ZTEST_SUITE(robotics_contracts,nullptr,nullptr,nullptr,nullptr,nullptr);
