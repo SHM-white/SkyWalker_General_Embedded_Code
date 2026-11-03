@@ -12,7 +12,10 @@ enum class MessageId : std::uint16_t {
     OperatorControl = 0x0301,
     BigYawRequest = 0x0402,
     BigYawFeedback = 0x0403,
-    GimbalImuYaw = 0x0405
+    GimbalImuYaw = 0x0405,
+    // 参考底盘（JJL0612/sentry_onlychassis）私有扩展：32 字节，无发送方 Boot ID。
+    // 只在本工程主动兼容该底盘时发送，线上语义以 docs/protocols/interboard-v4.md 为准。
+    GimbalImuYawLegacy = 0x0404
 };
 inline constexpr std::uint8_t kInterBoardProtocolVersion = 4;
 constexpr std::size_t kMaxPayload = 128, kMaxFrame = 142;
@@ -30,5 +33,5 @@ struct InterBoardFrame {
 };
 std::uint16_t interboardCrc16(const std::uint8_t *data, std::size_t size);
 int messageIndex(MessageId id);
-constexpr std::size_t kMessageCount = 8;
+constexpr std::size_t kMessageCount = 9;
 }

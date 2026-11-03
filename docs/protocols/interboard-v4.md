@@ -398,3 +398,28 @@ Link 在本地运行期保留最多 8 个已退役的 peer Boot ID，拒绝已�
 
 参考底盘在实现 0x0405 40 字节解码、0x0301 会话绑定与授权门控、以及禁止把 mode=1
 解释为世界角速度之前，上表确认位必须保持 false。心跳在线不等于运行授权。
+
+### 未改动参考底盘的向下兼容帧 0x0404
+
+`reference_chassis_legacy_v4_compat = true`（默认）时，云台在 0x0405 之外**额外**发送
+参考底盘私有的 **0x0404 / 32 字节**航向样本，双方都按自己的契约解析：
+
+| 偏移 | 类型 | 字段 |
+|---:|---|---|
+| 0 | u8 | `valid`（0/1） |
+| 1–3 | 3 B | 保留，必须为 0 |
+| 4 | f32 LE | `yaw_rad`，相对软件启动零位 |
+| 8 | f32 LE | `yaw_rate_rad_s` |
+| 12 | u32 LE | `source_age_ms` |
+| 16 | u32 LE | `sample_sequence` |
+| 20 | u32 LE | `zero_generation` |
+| 24 | u64 LE | `receiver_boot_id`（对端本次启动编号） |
+
+该帧没有发送方 Boot ID，接收侧只能用当前心跳会话绑定身份。同代次只接受更新的
+`sample_sequence`，`valid=0` 立即撤销，源年龄超过 50 ms 视为失效。
+
+兼容模式同时改变 0x0402 的语义：**只发 mode=1**，且 `target_rate_rad_s` 填操作员期望的
+**头部世界角速度**，因为参考底盘的陀螺自稳后端就是这样使用它的。这条路径下不能复用
+小 Yaw 回中控制器的关节速度，否则头部会按该速度持续偏转。等底盘升级到 0x0405 + mode=2
+后，把 `reference_chassis_legacy_v4_compat` 置 false 并打开两个确认位即可切回标准语义；
+两者由 `reference_chassis_imu_heading_authorized` 的编译期条件保证互斥。

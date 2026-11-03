@@ -335,4 +335,45 @@ int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::ui
     const int ret=decodeGimbalImuYaw({BoardRole::GimbalController,MessageId::GimbalImuYaw,seq,0},p,sizeof(p),check);
     return ret < 0 ? ret : frame(BoardRole::GimbalController,MessageId::GimbalImuYaw,seq,p,sizeof(p),out,cap);
 }
+// 0x0404：参考底盘私有布局。没有发送方 Boot ID，接收方只能按心跳会话绑定身份。
+// 保留字段必须为 0；valid 时要求零位代次非零且源年龄不超过 50 ms。
+int InterBoardCodec::decodeGimbalImuYawLegacy(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
+                                              robotics::GimbalImuYaw &out) {
+    if (!p || n != 32 || !header(m, MessageId::GimbalImuYawLegacy, BoardRole::GimbalController) ||
+        p[0] > 1 || p[1] || p[2] || p[3])
+        return -EINVAL;
+    robotics::GimbalImuYaw t{};
+    t.valid = p[0];
+    t.yaw_rad = wire::loadFloatLe(p + 4);
+    t.yaw_rate_rad_s = wire::loadFloatLe(p + 8);
+    t.source_age_ms = wire::loadLe32(p + 12);
+    t.sample_sequence = wire::loadLe32(p + 16);
+    t.zero_generation = wire::loadLe32(p + 20);
+    t.receiver_boot_id = (std::uint64_t)wire::loadLe32(p + 24) |
+                         ((std::uint64_t)wire::loadLe32(p + 28) << 32);
+    if (!std::isfinite(t.yaw_rad) || std::fabs(t.yaw_rad) > 3.142f ||
+        !std::isfinite(t.yaw_rate_rad_s) || std::fabs(t.yaw_rate_rad_s) > 35 ||
+        !t.receiver_boot_id || (t.valid && (!t.zero_generation || t.source_age_ms > 50)))
+        return -EINVAL;
+    t.stamp = {m.local_receive_ms, m.frame_sequence, true};
+    out = t;
+    return 0;
+}
+int InterBoardCodec::encodeGimbalImuYawLegacy(const robotics::GimbalImuYaw &t, std::uint32_t seq,
+                                              std::uint8_t *out, std::size_t cap) {
+    std::uint8_t p[32]{};
+    p[0] = t.valid;
+    wire::storeFloatLe(p + 4, t.yaw_rad);
+    wire::storeFloatLe(p + 8, t.yaw_rate_rad_s);
+    wire::storeLe32(p + 12, t.source_age_ms);
+    wire::storeLe32(p + 16, t.sample_sequence);
+    wire::storeLe32(p + 20, t.zero_generation);
+    wire::storeLe32(p + 24, static_cast<std::uint32_t>(t.receiver_boot_id & 0xffffffffULL));
+    wire::storeLe32(p + 28, static_cast<std::uint32_t>(t.receiver_boot_id >> 32));
+    robotics::GimbalImuYaw check{};
+    const int ret = decodeGimbalImuYawLegacy(
+        {BoardRole::GimbalController, MessageId::GimbalImuYawLegacy, seq, 0}, p, sizeof(p), check);
+    return ret < 0 ? ret
+                   : frame(BoardRole::GimbalController, MessageId::GimbalImuYawLegacy, seq, p, sizeof(p), out, cap);
+}
 }

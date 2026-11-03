@@ -28,7 +28,7 @@ struct MotorCalibration {
 // TODO(calibration): ID/mode, current-mode firmware, output-shaft units and signs.
 inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
 inline constexpr MotorCalibration pitch{1, 0x00, 1, 1, 10.0f, 10, 0};
-inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 0.5f, 1, 0};
+inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 10.0f, 10, 0};
 inline constexpr std::array<MotorCalibration, 2> friction{{
     {1, 0, 19, -1, 2, 60, 0},
     {2, 0, 19, 1, 2, 60, 0},

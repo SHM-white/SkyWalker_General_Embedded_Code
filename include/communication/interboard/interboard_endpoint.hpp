@@ -15,6 +15,9 @@ public:
         std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100;
         std::uint32_t tx_timeout_ms = 60;
         std::uint32_t status_timeout_ms = 100;
+        // 兼容参考底盘：在 0x0405 之外再发一份它私有的 0x0404/32B 航向样本。
+        // 只是额外的向下兼容帧，不改变 0x0405 的内容或本工程的对端契约。
+        bool legacy_gimbal_imu = false;
     };
     struct Snapshot {
         robotics::BoardHeartbeat peer{};

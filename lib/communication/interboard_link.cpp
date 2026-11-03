@@ -105,6 +105,23 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
         else if (!ret) gimbal_imu_ = t;
         break;
     }
+    case MessageId::GimbalImuYawLegacy: {
+        GimbalImuYaw t{};
+        ret = InterBoardCodec::decodeGimbalImuYawLegacy(m, p, n, t);
+        // 0x0404 不带发送方身份，只能用当前心跳会话绑定。
+        if (!ret)
+            t.sender_boot_id = heartbeat_.sender_boot_id;
+        if (!ret && gimbal_imu_.stamp.valid && t.zero_generation != gimbal_imu_.zero_generation &&
+            !sequenceAfter(t.zero_generation, gimbal_imu_.zero_generation))
+            ret = -ESTALE;
+        if (!ret && gimbal_imu_.stamp.valid && t.zero_generation == gimbal_imu_.zero_generation &&
+            !sequenceAfter(t.sample_sequence, gimbal_imu_.sample_sequence)) {
+            if (!t.valid) gimbal_imu_.valid = false;
+            if (t.sample_sequence != gimbal_imu_.sample_sequence) ret = -ESTALE;
+        }
+        else if (!ret) gimbal_imu_ = t;
+        break;
+    }
     case MessageId::BigYawFeedback:
         ret = InterBoardCodec::decodeBigYawFeedback(m, p, n, big_yaw_feedback_);
         break;

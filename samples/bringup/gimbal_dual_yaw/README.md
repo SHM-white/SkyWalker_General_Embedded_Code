@@ -9,7 +9,9 @@ west flash -d ../build/bringup/gimbal_dual_yaw
 
 UART5 接 DR16，CAN1 接小 Yaw，CAN2 接 Pitch（单 Yaw 入口不注册 CAN2 电机），CAN3 专供头部 IMU；诊断使用共享 `diagnostic-uart`（当前候选为 UART7 115200，DAPLink 实物接线仍需确认）。USART10 460800 板间线连接独立 `chassis_big_yaw` 工程；不发送底盘平移目标，也不启动本地大 Yaw 电机。
 
-将双拨杆置 Down、摇杆和拨轮归中保持至少 500 ms，再把左拨杆推到 Middle，右拨杆保持 Down。右杆 X 请求 Yaw，右杆 Y 请求 Pitch；左拨杆 Down 或遥控过期立即撤销授权。上电不会自动动作。本地惯性关节速度限制为 Yaw 1.0 rad/s、Pitch 0.8 rad/s；回中速度上限使用共享上车策略 `bringup::big_yaw_rate_rad_s=0.1 rad/s`，与独立大 Yaw 接收入口一致；最终整车回中上限由独立整车策略保留。大 Yaw 线上方向保留 v4 当前适配的 -1 符号，仅真实反馈新鲜时发送非零回中目标；无实测反馈时最多发送已授权零速 FollowCenter 请求。对端掉线或重启撤销本地授权，需要重新归中解锁。
+将双拨杆置 Down、摇杆和拨轮归中保持至少 500 ms，再把左拨杆推到 Middle，右拨杆保持 Down。右杆 X 请求 Yaw，右杆 Y 请求 Pitch；左拨杆 Down 或遥控过期立即撤销授权。上电不会自动动作。本地惯性关节速度限制为 Yaw 1.0 rad/s、Pitch 0.8 rad/s；回中速度上限使用共享上车策略 `bringup::big_yaw_rate_rad_s`，与独立大 Yaw 接收入口一致；最终整车回中上限由独立整车策略保留。大 Yaw 线上方向保留 v4 当前适配的 -1 符号，仅真实反馈新鲜时发送非零回中目标；无实测反馈时最多发送已授权零速 FollowCenter 请求。对端掉线或重启撤销本地授权，需要重新归中解锁。
+
+对参考底盘（`JJL0612/sentry_onlychassis`）另有两处差异，由 `reference_chassis_link_profile.hpp` 统一切换：其一，航向样本改由**板载 BMI088**（`accel0`/`gyro0` + `QuaternionEkf`，安装变换 `carrier_reference`/`carrier_sensor_to_body`）产生，小 Yaw 的惯性控制仍用 CAN3 头部 DM IMU；其二，它的自稳后端把 `mode=1` 的 `target_rate` 当作**头部世界角速度**，所以兼容模式下只发零目标，让底盘自己做航向保持，不再把小 Yaw 回中的关节速度当世界角速度发过去。同时补发零速 `BodyVelocity` 的 `ChassisControl`，只用于放行底盘的 `RobotBigYawControl()`。
 
 仅修改 `include/robotics/vehicle/diagnostics_config.hpp` 中 `diagnostic_output` 后重建、烧录，即可选择日志或 VOFA。JustFloat 布局版本 1 共 19 通道：layout、seq低16位、seq高16位、uptime低16位、uptime高16位、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低16位、dropped高16位、extra0、extra1。`age_ms=UINT32_MAX` 表示缺少有效时间戳；始终结合 valid/原因码判断，不能将保留的历史反馈当作实时零速。target/feedback 为线上大 Yaw 关节速度 rad/s；feedback 无效时为 NaN，valid=false；effort 为本地小 Yaw 电流 A；age_ms 为接收时携带的远端生产年龄，判断还叠加本地接收后年龄；detail 为回中 WaitReason；extra0 为小 Yaw 中心偏差 rad，extra1 为头部 yaw rad。
 

@@ -8,9 +8,15 @@ inline constexpr bool reference_chassis_link_enabled = true;
 inline constexpr bool reference_chassis_imu_heading_confirmed = false;
 // 对端大 Yaw 处于原生速度模式，mode=2 的目标角速度语义已逐项核对。
 inline constexpr bool reference_chassis_native_velocity_confirmed = false;
+// 未改动的参考底盘固件只接受它私有的 0x0404/32B 航向帧和 BigYawRequest mode=1，
+// 且它的自稳后端把 mode=1 的 target_rate 当作“头部世界角速度”。
+// 打开后：额外发送 0x0404，并把 mode=1 的 target 直接填操作员期望的世界角速度，
+// 不再用小 Yaw 回中控制器的关节速度冒充。
+inline constexpr bool reference_chassis_legacy_v4_compat = true;
 // 线上发送 BigYawMode::ImuHeadingHold 的唯一决策点。
 // mode=1 仍只表示大 Yaw 关节相对速度；mode=2 才表示头部世界角速度。
+// 兼容模式与 mode=2 互斥：对端不可能同时只认 mode=1 又支持 mode=2。
 inline constexpr bool reference_chassis_imu_heading_authorized =
-    reference_chassis_link_enabled && reference_chassis_imu_heading_confirmed &&
-    reference_chassis_native_velocity_confirmed;
+    reference_chassis_link_enabled && !reference_chassis_legacy_v4_compat &&
+    reference_chassis_imu_heading_confirmed && reference_chassis_native_velocity_confirmed;
 } // namespace skywalker::robotics::vehicle
