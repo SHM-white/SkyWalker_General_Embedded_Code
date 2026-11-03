@@ -19,7 +19,10 @@
 namespace {
 using namespace skywalker::robotics::vehicle;
 const device *const diagnostic_uart = DEVICE_DT_GET(DT_ALIAS(diagnostic_uart));
-struct Packet { std::uint16_t size = 0; std::uint8_t data[192]{}; };
+struct Packet {
+    std::uint16_t size = 0;
+    std::uint8_t data[192]{};
+};
 K_MSGQ_DEFINE(diagnostic_queue, sizeof(Packet), 16, 4);
 atomic_t dropped_packets = 0;
 int output_error = -EAGAIN;
@@ -80,13 +83,12 @@ void outputTask(void *, void *, void *) {
 }
 K_THREAD_DEFINE(diagnostic_worker, 2048, outputTask, nullptr, nullptr, nullptr, 12, 0, 0);
 
-template<typename... Args> void textLine(const char *format, Args... args) {
+template <typename... Args> void textLine(const char *format, Args... args) {
     if constexpr (diagnostic_output == DiagnosticOutput::Log) {
         char line[192];
         const int length = snprintk(line, sizeof(line), format, args...);
         if (length > 0)
-            enqueue(reinterpret_cast<const std::uint8_t *>(line),
-                    std::min<std::size_t>(length, sizeof(line) - 1));
+            enqueue(reinterpret_cast<const std::uint8_t *>(line), std::min<std::size_t>(length, sizeof(line) - 1));
     }
 }
 } // namespace
@@ -95,13 +97,12 @@ namespace skywalker::robotics::vehicle {
 int Diagnostics::start(const char *application, const char *role, const char *limits) {
     application_ = application;
     textLine("app=%s role=%s source=%s protocol=4\n", application, role, SKYWALKER_SOURCE_VERSION);
-    textLine("hardware=%s calibration=%s uart=%s baud=%u\n", hardware_revision,
-             calibration_revision, diagnostic_uart->name, diagnostic_baudrate);
+    textLine("hardware=%s calibration=%s uart=%s baud=%u\n", hardware_revision, calibration_revision,
+             diagnostic_uart->name, diagnostic_baudrate);
     textLine("resources: diagnostic=UART7/PE8-TX,PE7-RX; remote=UART5/PD2; see installed overlays\n");
     textLine("limits=%s\n", limits);
     event("diagnostic", output_error);
-    status({.reason = output_error ? DiagnosticReason::InitFailed : DiagnosticReason::Boot,
-            .error = output_error});
+    status({.reason = output_error ? DiagnosticReason::InitFailed : DiagnosticReason::Boot, .error = output_error});
     return output_error;
 }
 void Diagnostics::event(const char *step, int result) {
@@ -113,9 +114,8 @@ void Diagnostics::status(const DiagnosticStatus &sample) {
     const auto now = static_cast<std::uint64_t>(k_uptime_get());
     const bool changed = sample.reason != last_reason_;
     if (changed) {
-        textLine("%s t=%u reason=%u previous=%u duration_ms=%u seq=%u\n", application_,
-                 std::uint32_t(now), unsigned(sample.reason), unsigned(last_reason_),
-                 std::uint32_t(now - transition_ms_), sequence_);
+        textLine("%s t=%u reason=%u previous=%u duration_ms=%u seq=%u\n", application_, std::uint32_t(now),
+                 unsigned(sample.reason), unsigned(last_reason_), std::uint32_t(now - transition_ms_), sequence_);
         last_reason_ = sample.reason;
         transition_ms_ = now;
     }
@@ -126,15 +126,25 @@ void Diagnostics::status(const DiagnosticStatus &sample) {
     const auto dropped = static_cast<std::uint32_t>(atomic_get(&dropped_packets));
     if constexpr (diagnostic_output == DiagnosticOutput::Vofa) {
         const auto time = static_cast<std::uint32_t>(now);
-        const float values[] = {
-            1, float(sequence_ & 0xffff), float(sequence_ >> 16),
-            float(time & 0xffff), float(time >> 16), float(unsigned(sample.reason)),
-            float(sample.valid), float(sample.enabled), sample.target,
-            sample.valid ? sample.feedback : std::numeric_limits<float>::quiet_NaN(),
-            sample.age_ms == UINT32_MAX ? -1.0f : float(sample.age_ms),
-            sample.dt_us, sample.effort, sample.detail,
-            float(sample.error ? sample.error : first_error_),
-            float(dropped & 0xffff), float(dropped >> 16), sample.extra0, sample.extra1};
+        const float values[] = {1,
+                                float(sequence_ & 0xffff),
+                                float(sequence_ >> 16),
+                                float(time & 0xffff),
+                                float(time >> 16),
+                                float(unsigned(sample.reason)),
+                                float(sample.valid),
+                                float(sample.enabled),
+                                sample.target,
+                                sample.valid ? sample.feedback : std::numeric_limits<float>::quiet_NaN(),
+                                sample.age_ms == UINT32_MAX ? -1.0f : float(sample.age_ms),
+                                sample.dt_us,
+                                sample.effort,
+                                sample.detail,
+                                float(sample.error ? sample.error : first_error_),
+                                float(dropped & 0xffff),
+                                float(dropped >> 16),
+                                sample.extra0,
+                                sample.extra1};
         std::uint8_t bytes[sizeof(values) + 4];
         static_assert(sizeof(float) == 4);
         for (unsigned i = 0; i < ARRAY_SIZE(values); ++i) {
@@ -147,13 +157,12 @@ void Diagnostics::status(const DiagnosticStatus &sample) {
     }
     else if (changed || now >= next_log_ms_) {
         next_log_ms_ = now + 1000;
-        textLine("%s t=%u seq=%u reason=%u valid=%u enabled=%u age_ms=%u error=%d dropped=%u\n",
-                 application_, std::uint32_t(now), sequence_, unsigned(sample.reason), sample.valid,
-                 sample.enabled, sample.age_ms, sample.error ? sample.error : first_error_, dropped);
-        textLine("target=%f feedback=%f effort=%f dt_us=%f detail=%f extra=%f,%f\n",
-                 double(sample.target), sample.valid ? double(sample.feedback) : double(NAN),
-                 double(sample.effort), double(sample.dt_us), double(sample.detail),
-                 double(sample.extra0), double(sample.extra1));
+        textLine("%s t=%u seq=%u reason=%u valid=%u enabled=%u age_ms=%u error=%d dropped=%u\n", application_,
+                 std::uint32_t(now), sequence_, unsigned(sample.reason), sample.valid, sample.enabled, sample.age_ms,
+                 sample.error ? sample.error : first_error_, dropped);
+        textLine("target=%f feedback=%f effort=%f dt_us=%f detail=%f extra=%f,%f\n", double(sample.target),
+                 sample.valid ? double(sample.feedback) : double(NAN), double(sample.effort), double(sample.dt_us),
+                 double(sample.detail), double(sample.extra0), double(sample.extra1));
     }
 }
 } // namespace skywalker::robotics::vehicle

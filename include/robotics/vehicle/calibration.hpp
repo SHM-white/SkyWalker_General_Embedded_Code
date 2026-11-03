@@ -26,8 +26,8 @@ struct MotorCalibration {
 };
 
 // TODO(calibration): ID/mode, current-mode firmware, output-shaft units and signs.
-inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 1.5f, 4, 5670};
-inline constexpr MotorCalibration pitch{1, 0x00, 1, 1, 1.0f, 5, 0};
+inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
+inline constexpr MotorCalibration pitch{1, 0x00, 1, 1, 10.0f, 10, 0};
 inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 0.5f, 1, 0};
 inline constexpr std::array<MotorCalibration, 2> friction{{
     {1, 0, 19, -1, 2, 60, 0},
@@ -74,13 +74,16 @@ inline constexpr std::array<MotorCalibration, 4> reference_steer = [] {
 }();
 inline constexpr std::array<MotorCalibration, 4> reference_wheel = [] {
     auto c = legacy_wheel;
-    for (auto &m : c) m.direction = -1;
+    for (auto &m : c)
+        m.direction = -1;
     return c;
 }();
 inline constexpr auto steer = swerve_calibration_set == SwerveCalibrationSet::Reference20261028Candidate
-                                  ? reference_steer : legacy_steer;
+                                  ? reference_steer
+                                  : legacy_steer;
 inline constexpr auto wheel = swerve_calibration_set == SwerveCalibrationSet::Reference20261028Candidate
-                                  ? reference_wheel : legacy_wheel;
+                                  ? reference_wheel
+                                  : legacy_wheel;
 // J4310 bus IDs are also unverified; MIT backend remains unchanged.
 inline constexpr MotorCalibration reference_big_yaw{6, 0x11, 1, -1, 0.5f, 1, 0};
 inline constexpr float steer_position_kp = 40, steer_velocity_kp = 0.20f;
@@ -97,7 +100,7 @@ inline constexpr float yaw_max_rad = (yaw_high_ticks - small_yaw.encoder_zero_ti
 // TODO(calibration): measure this independently; encoder zero is not joint center.
 inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
 // 调参：Pitch 驱动坐标的软件限位，rad；沿用现值，须与实测机械端点确认后再修改。
-inline constexpr float pitch_min_rad = 2.50f, pitch_max_rad = 3.50f;
+inline constexpr float pitch_min_rad = 2.60f, pitch_max_rad = 3.40f;
 // TODO(measure): these are existing geometry placeholders, not validated by
 // the reference's empirical radius=0.01 / reduction=1 speed conversion.
 // wheel_gear_ratio must include any transmission between the rotor and wheel.
