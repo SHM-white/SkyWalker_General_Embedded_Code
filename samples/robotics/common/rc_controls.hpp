@@ -30,9 +30,6 @@ struct RcControlState {
     bool run_allowed = false;       // 手动运动授权，与 manual_active 同步
     bool spin_requested = false;    // 右 Down：小陀螺（仅手动档）
     std::uint64_t start_event_id = 0;
-    bool clear_estop = false;
-    std::uint32_t clear_event_id = 0;
-    robotics::MessageStamp clear_stamp{};
     bool keyboard_mouse_selected = false;
     bool friction_requested = false;
     bool continuous_requested = false;
@@ -48,7 +45,6 @@ public:
         bool keyboard_mouse_selectable = false; // 右 Middle 在手动档选择键鼠。
         std::uint32_t input_timeout_ms = 100; // ms，须与接收和命令层失联期限协调。
         std::uint32_t neutral_arm_ms = 500; // ms，安全档归中保持时间，防止上电直接运行。
-        std::uint32_t clear_hold_ms = 1000; // ms，安全档清故障手势保持时间。
     };
     RcControlAdapter() = default;
     explicit RcControlAdapter(Config config) : config_(config) {
@@ -81,18 +77,18 @@ public:
         state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
         state_.keyboard_mouse_selected = false;
         neutral_timing_ = neutral_ready_ = safe_baseline_ = false;
-        clear_timing_ = false;
+        armed_ = false;
+        right_neutral_seen_ = false;
+        mouse_release_seen_ = false;
     }
 
     const RcControlState &update(const robotics::RemoteState &remote, std::uint64_t now_ms) {
         using robotics::RcSwitch;
         state_.remote = remote;
-        state_.clear_estop = false;
         state_.fresh = remote.online && robotics::isFresh(remote.stamp, now_ms, config_.input_timeout_ms) &&
                        remote.left_switch != RcSwitch::Unknown && remote.right_switch != RcSwitch::Unknown;
         if (!state_.fresh) {
             withdraw();
-            state_.clear_stamp = {};
             previous_left_ = previous_right_ = RcSwitch::Unknown;
             return state_;
         }
@@ -121,7 +117,8 @@ public:
             state_.manual_active = state_.navigation_active = false;
             state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
             state_.keyboard_mouse_selected = false;
-            if (neutral && right == RcSwitch::Down) {
+            // Right Middle is the neutral position (Down=spin, Up=shoot).
+            if (neutral && right == RcSwitch::Middle) {
                 if (!neutral_timing_) {
                     neutral_since_ = input_ms;
                     neutral_timing_ = true;
@@ -132,46 +129,43 @@ public:
             else {
                 neutral_timing_ = neutral_ready_ = false;
             }
-            if (neutral && right == RcSwitch::Up && safe_baseline_) {
-                if (!clear_timing_) {
-                    clear_since_ = input_ms;
-                    clear_timing_ = true;
-                }
-                if (input_ms >= clear_since_ && input_ms - clear_since_ >= config_.clear_hold_ms &&
-                    state_.clear_event_id != std::numeric_limits<std::uint32_t>::max()) {
-                    ++state_.clear_event_id;
-                    state_.clear_stamp = remote.stamp;
-                    state_.clear_estop = true;
-                    safe_baseline_ = neutral_ready_ = neutral_timing_ = clear_timing_ = false;
-                }
-            }
-            else
-                clear_timing_ = false;
+            // No independent clear-estop gesture: left Down stops.
         }
         else {
             // 安全档归中基线成立后，左 Down→Middle 只建立解锁；手动档在左 Up。
             if (left == RcSwitch::Middle && previous_left_ == RcSwitch::Down && neutral_ready_ && neutral &&
-                right == RcSwitch::Down && state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
+                right == RcSwitch::Middle && state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
                 ++state_.start_event_id;
                 armed_ = true;
             }
-            neutral_timing_ = neutral_ready_ = safe_baseline_ = clear_timing_ = false;
+            neutral_timing_ = neutral_ready_ = safe_baseline_ = false;
             // 视觉执行样例保留 Middle=手动、Up=Auto；其余样例只有左 Up 是手动档。
             const bool manual = armed_ && (config_.allow_auto ? left != RcSwitch::Down : left == RcSwitch::Up);
             state_.manual_active = manual;
             state_.navigation_active = armed_ && !config_.allow_auto && left == RcSwitch::Middle;
             state_.run_allowed = manual;
             state_.mode = !armed_ ? RcMode::Safe : manual ? RcMode::Manual : RcMode::Navigation;
+            // An already-selected Down/Up must never start spinning/firing on unlock.
+            // Require a neutral frame *in manual mode* before accepting right-switch actions.
+            if (!manual) {
+                right_neutral_seen_ = false;
+                mouse_release_seen_ = false;
+            } else if (right == RcSwitch::Middle) {
+                right_neutral_seen_ = true;
+            }
             state_.keyboard_mouse_selected = manual && config_.keyboard_mouse_selectable &&
                                              right == RcSwitch::Middle;
-            state_.spin_requested = manual && right == RcSwitch::Down;
+            if (state_.keyboard_mouse_selected && !remote.mouse.left && !remote.mouse.right)
+                mouse_release_seen_ = true;
+            if (!state_.keyboard_mouse_selected)
+                mouse_release_seen_ = false;
+            state_.spin_requested = manual && right_neutral_seen_ && right == RcSwitch::Down;
             state_.friction_requested = manual &&
-                                        (state_.keyboard_mouse_selected ? remote.mouse.right
-                                                                        : right == RcSwitch::Up);
-            // RC 发射拨杆直接请求同一射频的连发，不生产与键鼠编号冲突的单发事件。
-            // 键鼠连发手势只由命令线程管理，不在此处再次判断左键或点击间隔。
+                                        (state_.keyboard_mouse_selected
+                                             ? mouse_release_seen_ && remote.mouse.right
+                                             : right_neutral_seen_ && right == RcSwitch::Up);
             state_.continuous_requested = manual && !state_.keyboard_mouse_selected &&
-                                          right == RcSwitch::Up;
+                                          right_neutral_seen_ && right == RcSwitch::Up;
         }
         state_.armed = armed_;
         previous_left_ = left;
@@ -191,10 +185,11 @@ private:
     robotics::RcSwitch previous_left_ = robotics::RcSwitch::Unknown;
     robotics::RcSwitch previous_right_ = robotics::RcSwitch::Unknown;
     std::uint32_t last_sequence_ = 0;
-    std::uint64_t neutral_since_ = 0, clear_since_ = 0, last_input_ms_ = 0;
+    std::uint64_t neutral_since_ = 0, last_input_ms_ = 0;
     bool have_sequence_ = false, neutral_timing_ = false, neutral_ready_ = false;
-    bool safe_baseline_ = false, clear_timing_ = false, have_input_time_ = false;
+    bool safe_baseline_ = false, have_input_time_ = false;
     bool armed_ = false;
+    bool right_neutral_seen_ = false, mouse_release_seen_ = false;
 };
 
 } // namespace skywalker::samples::control
