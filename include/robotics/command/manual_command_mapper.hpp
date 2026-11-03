@@ -1,7 +1,8 @@
 #pragma once
 #include <robotics/messages/remote.hpp>
 namespace skywalker::robotics {
-// ShooterSelectable 专用于台架：左 Down=Safe、Middle=RC、Up=键鼠；保留其他配置的 Auto 含义。
+// ShooterSelectable 专用于台架：左 Down=Safe、左 Middle/Up=Manual，右 Middle=键鼠；
+// 左 Middle 的导航档由 RcControlAdapter 的运动授权门控。其他配置保留 Auto 含义。
 enum class RemoteInputProfile : std::uint8_t { PhysicalRemote, KeyboardMouseSelectable, ShooterSelectable };
 class ManualCommandMapper {
 public:
@@ -14,6 +15,8 @@ public:
         float mouse_yaw_rate_per_unit = 0.002f, mouse_pitch_rate_per_unit = 0.0016f;
         float channel_range = 660;
         RemoteInputProfile input_profile = RemoteInputProfile::KeyboardMouseSelectable;
+        // 视觉执行样例（allow_auto）把左 Up 保留给自动；其余样例左 Up 为手动档。
+        bool auto_on_up = false;
     };
     explicit ManualCommandMapper(const Config &config) : config_(config) {
     }

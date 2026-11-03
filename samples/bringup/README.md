@@ -31,7 +31,7 @@ west flash -d ../build/bringup/gimbal_yaw_encoder
 
 每工程一个固定build目录，不叠加EXTRA_CONF_FILE。先对照[共享资源](../../config/vehicle/installed/README.md)确认DAPLink实际串口：当前代码基线采用UART7/PE8-TX→DAPLink RX、共地，115200 8N1；云台板间USART10，底盘板间USART1，460800 8N1。该接线未经过本次现场核对。UART7是诊断唯一所有者，视觉需先分配其他资源。
 
-输入授权：真实遥控双拨Down，摇杆/拨轮归中保持500ms，再把左拨切Middle；左Down停止。遥控过期或双板对端离线/重启后重新解锁。先观察、再小幅动作；不使用永久有效授权，不上电自动运行轨迹。正常小幅动作、撤销输入、断流、恢复，双板再加单板重启与执行状态停更，由现场操作并记录结果。
+输入授权：真实遥控双拨Down，摇杆/拨轮归中保持500ms，先把左拨切Middle建立解锁，再拨左 Up 手动运行；左Down停止。遥控过期或双板对端离线/重启后重新解锁。先观察、再小幅动作；不使用永久有效授权，不上电自动运行轨迹。正常小幅动作、撤销输入、断流、恢复，双板再加单板重启与执行状态停更，由现场操作并记录结果。
 
 仅修改 `include/robotics/vehicle/diagnostics_config.hpp` 的 `diagnostic_output`，重编译烧录切换Log/Vofa。UART无console/shell/banner/默认串口后台；LOG和printk统一进自定义后台，Vofa固件丢弃文本，整次运行保持纯JustFloat。两模式用固定16包队列及低优先级输出线程，拥塞丢观测包并计数，控制线程不等串口。故障可能导致波形停流，主机保存时间及原始数据；切换固件不保留先前RAM事件。远端只提供协议已有字段，没有远端内部PID转发。
 

@@ -121,8 +121,8 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
     const int setup = hardware.start(with_gimbal);
     printk("shared DJI CAN yaw/friction/dial; setup=%d; unloaded_feed=%d\n", setup, unloaded_feed);
     printk(
-        "left Down=Safe; neutral Down/Down 500ms then Middle=arm RC; Up=keyboard/mouse; RC right Middle=spin Up=continuous\n");
-    printk("mouse: hold right=spin, left click=single, rapid gap<500ms/hold>=250ms=continuous; rate=%.2f Hz\n",
+        "left Down=Safe; neutral Down/Down 500ms then Middle=arm, Up=manual RC; right Middle=keyboard/mouse; right Up=continuous, right Down=spin\n");
+    printk("mouse: hold right=friction, left click=single, rapid gap<500ms/hold>=250ms=continuous; rate=%.2f Hz\n",
            double(policy.requested_fire_rate_hz));
     CommandSnapshot frame{};
     ShooterCommand local_request{};

@@ -172,7 +172,7 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
            unsigned(calibration::steer[2].id), unsigned(calibration::steer[3].id),
            unsigned(calibration::wheel[0].id), unsigned(calibration::wheel[1].id),
            unsigned(calibration::wheel[2].id), unsigned(calibration::wheel[3].id), topology_error, config_error);
-    printk("RC safe+center 0.5s then left Middle; left stick xy, wheel yaw; console is telemetry only\n");
+    printk("RC safe+center 0.5s then left Middle, Up=manual; left stick xy, right Down spin; console is telemetry only\n");
     for (;;) {
         const auto now_us = core::monotonicTimeUs();
         const auto now_ms = now_us / 1000;
@@ -186,7 +186,7 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
             inputs.command.source = ControlSource::Remote;
             inputs.command.vx_m_s = input::RcControlAdapter::normalize(rc.remote.analog.left_y) * .1f;
             inputs.command.vy_m_s = -input::RcControlAdapter::normalize(rc.remote.analog.left_x) * .1f;
-            inputs.command.wz_rad_s = input::RcControlAdapter::normalize(rc.remote.analog.wheel) * .2f;
+            inputs.command.wz_rad_s = rc.spin_requested ? .2f : 0;
             inputs.command.stamp = rc.remote.stamp;
             inputs.source_stamp = {rc.remote.stamp.timestamp_ms * 1000, rc.remote.stamp.sequence, true};
         }

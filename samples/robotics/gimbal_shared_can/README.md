@@ -4,13 +4,13 @@ CAN1 统一连接小 Yaw GM6020、两个摩擦轮 M3508 和拨盘 M2006，Pitch 
 
 ## 操作
 
-先左 Down、右 Down，双摇杆与拨轮归中保持 500 ms，再拨左 Middle 解锁。左 Down 撤销运行；失联后重新解锁。清故障沿用安全档归中后右 Up 保持 1 秒的手势，清除后重新解锁。console 仅输出日志。
+先左 Down、右 Down，双摇杆与拨轮归中保持 500 ms，再拨左 Middle 建立解锁、拨左 Up 手动运行。左 Down 撤销运行；失联后重新解锁。清故障沿用安全档归中后右 Up 保持 1 秒的手势，清除后重新解锁。console 仅输出日志。
 
 | 已解锁后的输入 | 行为 |
 | --- | --- |
-| 左 Middle | 物理 RC 控制云台/发射 |
-| RC 右 Down / Middle / Up | 停摩擦 / 预热 / 直接请求连发 |
-| 左 Up | 切换 DR16/DBUS 透传键鼠，两档均为手动控制 |
+| 左 Up | 物理 RC 控制云台/发射 |
+| RC 右 Down / Middle / Up | 小陀螺请求 / 不请求机构 / 请求摩擦与连发 |
+| 右 Middle（手动档） | 切换 DR16/DBUS 透传键鼠 |
 | 鼠标移动 | 控制 Yaw/Pitch，与右键开摩擦独立 |
 | 按住右键 / 松开右键 | 请求开启摩擦 / 关闭摩擦并撤销供弹 |
 | 左键普通点击 | 立即请求一发，不等待下一次点击 |
@@ -55,15 +55,15 @@ west flash -d build/big_yaw_interboard_chassis
 | 底盘板 CAN3 | 当前中央 `chassis_can.hpp` 中的大 Yaw 总线，1 Mbps |
 | 云台板 USB / 两板 USART10 | VOFA / console 日志，互不占用 USART1 |
 
-大 Yaw 电机 ID、方向、减速比和速度/力矩限幅沿用 `calibration.hpp` 与 `big_yaw_profile.hpp`。确认双方 `online=1`，按原流程双 Down 归中 500 ms、左 Middle 解锁：
+大 Yaw 电机 ID、方向、减速比和速度/力矩限幅沿用 `calibration.hpp` 与 `big_yaw_profile.hpp`。确认双方 `online=1`，按原流程双 Down 归中 500 ms、左 Middle 建立解锁、左 Up 手动运行：
 
-- 左 Middle：右摇杆控制小 Yaw/Pitch，右拨杆控制摩擦与连发，**拨轮控制大 Yaw ±0.1 rad/s**。
-- 左 Up：鼠标控制小 Yaw/Pitch、鼠标按键控制摩擦与发射，**大 Yaw 仍由物理遥控拨轮控制**；不是鼠标滚轮。
-- 拨轮归中请求大 Yaw 零速度；左 Down 停止全部机构，重新启动按原解锁手势。
+- 左 Up：右摇杆控制小 Yaw/Pitch，右 Up 请求摩擦与连发，右 Down 请求大 Yaw +0.1 rad/s 小陀螺；右 Middle 不请求机构。
+- 右 Middle：切换到键鼠透传，鼠标控制小 Yaw/Pitch、鼠标按键控制摩擦与发射；右 Down 仍请求大 Yaw 小陀螺。
+- 拨轮默认无动作；松开右 Down 后请求大 Yaw 零速度；左 Down 停止全部机构，重新启动按原解锁手势。
 
 大 Yaw 速度幅值位于 `../common/manual_big_yaw_link.hpp` 的 `manual_rate_max_rad_s`。新日志行 `bigYaw` 显示 `online/run/source/target/actual/ready/valid/link/rejected`；`valid=0` 时不得把 `actual` 当作有效反馈。原 19 通道 USB VOFA 布局保持不变。
 
-大 Yaw 有独立的遥控解锁状态：板间断线或底盘板重启时仅撤销大 Yaw 解锁，本地云台与发射继续服从原有有效遥控。链路恢复后重新双 Down 归中再左 Middle，才能恢复大 Yaw；电机/CAN 单独恢复不撤销遥控解锁。沿用 100 ms 原始输入/板间请求有效期，重复发送不会刷新旧输入时间。诊断暂停输入或执行时也撤销大 Yaw 请求。
+大 Yaw 有独立的遥控解锁状态：板间断线或底盘板重启时仅撤销大 Yaw 解锁，本地云台与发射继续服从原有有效遥控。链路恢复后重新双 Down 归中、左 Middle 建立、左 Up 运行，才能恢复大 Yaw；电机/CAN 单独恢复不撤销遥控解锁。沿用 100 ms 原始输入/板间请求有效期，重复发送不会刷新旧输入时间。诊断暂停输入或执行时也撤销大 Yaw 请求。
 
 本组合只增加手动速度控制，不进行 IMU 稳定、自瞄或双 Yaw 自动回中。编译不代表实机验收，实际方向、线束转动空间和停止延迟仍需现场确认。
 

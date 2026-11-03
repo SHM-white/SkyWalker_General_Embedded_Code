@@ -9,7 +9,7 @@ west flash -d ../build/bringup/gimbal_joint_pair
 
 UART5 接 DR16，CAN1 接小 Yaw，CAN2 接 Pitch（单 Yaw 入口不注册 CAN2 电机），CAN3 专供头部 IMU；诊断使用共享 `diagnostic-uart`（当前候选为 UART7 115200，DAPLink 实物接线仍需确认）。本阶段不启动头部 IMU，也不启动板间链路。
 
-将双拨杆置 Down、摇杆和拨轮归中保持至少 500 ms，再把左拨杆推到 Middle，右拨杆保持 Down。右杆 X 请求 Yaw，右杆 Y 请求 Pitch；左拨杆 Down 或遥控过期立即撤销授权。上电不会自动动作。命令层限制为 Yaw 1.0 rad/s、Pitch 0.8 rad/s；轴限位、PID 和电流/力矩上限保持共享标定值。
+将双拨杆置 Down、摇杆和拨轮归中保持至少 500 ms，再把左拨杆推到 Middle 建立解锁，最后拨左 Up 开始手动，右拨杆保持 Down 直到解锁完成。右杆 X 请求 Yaw，右杆 Y 请求 Pitch；左拨杆 Down 或遥控过期立即撤销授权。上电不会自动动作。命令层限制为 Yaw 1.0 rad/s、Pitch 0.8 rad/s；轴限位、PID 和电流/力矩上限保持共享标定值。
 
 仅修改 `include/robotics/vehicle/diagnostics_config.hpp` 中 `diagnostic_output` 后重建、烧录，即可选择日志或 VOFA。JustFloat 布局版本 1 共 19 通道：layout、seq低16位、seq高16位、uptime低16位、uptime高16位、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低16位、dropped高16位、extra0、extra1。`age_ms=UINT32_MAX` 表示缺少有效时间戳；始终结合 valid/原因码判断，不能将保留的历史反馈当作实时零速。本入口 target/feedback 是小 Yaw 关节角 rad；effort 为 Yaw 电流 A；detail 为执行器 WaitReason；extra0/extra1 为 Pitch 目标/反馈角 rad。
 

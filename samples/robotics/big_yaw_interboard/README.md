@@ -2,7 +2,7 @@
 
 云台板接收 DR16 拨轮，经 USART1 板间协议 v4 发送速度请求；底盘板使用现有 `BigYawExecutor` 驱动真实大 Yaw，并回传实际速度和执行状态。两端均不启动 IMU。云台板不驱动小 Yaw/Pitch，底盘板不启动四舵轮。此入口用于手动速度调试，不执行双 Yaw 自动回中或惯性稳定。
 
-若需同时控制小 Yaw/Pitch、摩擦轮和拨盘，云台板改烧 [gimbal_shared_can + big_yaw.conf](../gimbal_shared_can/README.md)，底盘板仍使用本文的 `chassis.conf`。该组合在遥控和键鼠模式下均用物理拨轮控制大 Yaw。
+若需同时控制小 Yaw/Pitch、摩擦轮和拨盘，云台板改烧 [gimbal_shared_can + big_yaw.conf](../gimbal_shared_can/README.md)，底盘板仍使用本文的 `chassis.conf`。该组合在遥控和键鼠模式下均用物理右拨杆 Down 请求大 Yaw 小陀螺。
 
 ## 接线
 
@@ -40,8 +40,8 @@ west flash -d build/big_yaw_interboard_chassis
 
 1. 确认电机 ID、MIT 参数、方向和实际 CAN 接线与中央配置一致，给大 Yaw 转动及线束留出空间。
 2. 双板上电，双方日志应出现 `online=1`，底盘初始化 `setup=0`。DR16 只接云台板。
-3. 遥控双拨杆 Down，摇杆和拨轮全部归中保持 500 ms，再拨左 Middle 解锁。
-4. 拨轮控制正负 **0.1 rad/s**（约 5.7°/s），归中请求零速度；左 Down 停止，左 Up 禁用。右拨杆没有速度或发射功能。
+3. 遥控双拨杆 Down，摇杆和拨轮全部归中保持 500 ms，先把左拨 Middle 建立解锁，再拨左 Up 手动运行；右 Down 请求 +0.1 rad/s 大 Yaw 小陀螺。
+4. 手动档右 Down 请求 **+0.1 rad/s**（约 5.7°/s），松开请求零速度；左 Down 停止，左 Middle 为导航档。拨轮默认无动作。
 5. 云台日志观察 `rc/run/target` 和 `peerActual/peerReady/peerValid`；底盘观察 `operator/run/target/actual/ready/valid/state/reason/error/commit`。`online=1` 只证明通信在线，`valid=0` 时速度数值不能作为真实反馈使用。
 
 速度幅值在 `src/main.cpp` 的 `manual_rate_max_rad_s`，单位为输出关节 rad/s；电机侧继续受中央速度和力矩限幅约束。
@@ -50,6 +50,6 @@ west flash -d build/big_yaw_interboard_chassis
 
 沿用 100 ms 原始遥控输入有效期和板间输入有效期；重发不会刷新旧命令年龄。遥控失联、管理授权失效、板间请求过期或断线都会撤销大 Yaw 输出。通信线程独立运行，电机掉线或未就绪不阻止速度请求与心跳发送。
 
-检测到板间断线或对端重启后，云台撤销本地解锁，需要重新双 Down 归中 500 ms 后左 Middle。单独电机/CAN 恢复不会要求重新遥控解锁，在输入和链路仍有效时执行最新目标。保留公共遥控清除事件手势：安全档归中建立基线后右 Up 保持 1 秒，再重新解锁；旧事件不绑定到重启后的新板会话。
+检测到板间断线或对端重启后，云台撤销本地解锁，需要重新双 Down 归中 500 ms 后左 Middle 建立、左 Up 运行。单独电机/CAN 恢复不会要求重新遥控解锁，在输入和链路仍有效时执行最新目标。保留公共遥控清除事件手势：安全档归中建立基线后右 Up 保持 1 秒，再重新解锁；旧事件不绑定到重启后的新板会话。
 
 本样例使用显式手动台架许可，不依赖裁判权限，也不向轮控发送运动命令。`FollowCenter` 仅复用当前协议的速度请求模式，本入口不调用回中算法。真实速度、方向、失联停止延迟与实机恢复仍需上板验证。

@@ -35,8 +35,8 @@ inline void update(const control::RcControlState &local, bool emergency, bool pa
     request = {};
     // v4 calls its velocity request FollowCenter; no centering or IMU runs here.
     request.mode = run ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-    request.target_rate_rad_s = run ? manual_rate_max_rad_s *
-        control::RcControlAdapter::normalize(rc.remote.analog.wheel) : 0;
+    // 拨轮不再控制大 Yaw；手动档右 Down 请求固定小陀螺速率。
+    request.target_rate_rad_s = run && rc.spin_requested ? manual_rate_max_rad_s : 0;
     request.source_sequence = rc.remote.stamp.sequence;
     request.stamp = rc.remote.stamp;
     request.receiver_boot_id = peer.peer.sender_boot_id;

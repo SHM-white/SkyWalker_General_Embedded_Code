@@ -2,7 +2,7 @@
 
 仅观察命令，不创建电机。使用摇杆、双三档开关和拨轮，不依赖终端指令或键鼠。
 
-先左 Down、右 Down，双摇杆和拨轮归中保持 500 ms，再拨左 Middle 解锁。左 Down 立即撤销输出；左 Up 在本台架禁用。遥控断流 100 ms 后输出 Disabled，重连必须重新完成安全档解锁。
+先左 Down、右 Down，双摇杆和拨轮归中保持 500 ms，再拨左 Middle 建立解锁、拨左 Up 手动运行。左 Down 立即撤销输出；左 Middle 为导航档，本台架无导航源时保持停机。遥控断流 100 ms 后输出 Disabled，重连必须重新完成安全档解锁。
 
 ```sh
 west build -b dm_mc02/stm32h723xx samples/robotics/command_safety -d build/command-insurance

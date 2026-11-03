@@ -42,6 +42,7 @@ private:
     MouseShooterGesture mouse_gesture_;
     MouseFireIntent mouse_fire_{};
     int validateConfig() const;
+    ManualCommandMapper::Config mapperConfig() const;
     std::uint32_t sequence_ = 0;
     OperatorMode previous_mode_ = OperatorMode::Safe;
     core::TimeUs auto_entry_us_ = 0, last_step_us_ = 0, override_quiet_since_us_ = 0;

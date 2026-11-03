@@ -52,7 +52,7 @@ int main() {
     const int vofa_error = vofa_init(&vofa, uart);
     LOG_INF("GM6020 ID%u %s; M3508 ID%u %s; independent automatic recovery", unsigned(steer_config.id),
             bench::steer_can->name, unsigned(drive_config.id), bench::drive_can->name);
-    LOG_INF("RC both Down + centered 500ms then left Middle. Left Down stops. No alignment gate.");
+    LOG_INF("RC both Down + centered 500ms then left Middle, Up=manual. Left Down stops. No alignment gate.");
     input::RcControlAdapter adapter;
     input::SampleDiagnostics diagnostics;
     communication::RemoteReceiver::Snapshot remote_snapshot{};

@@ -88,7 +88,12 @@ ZTEST(command_manager, test_manual_mapper_analytic_values) {
     constexpr float half = 0.47f / 0.97f;
     near(intent.chassis_vx_norm, half);
     near(intent.chassis_vy_norm, -1);
+    // 拨轮不再映射底盘 wz；右拨杆 Down 才请求小陀螺。
+    near(intent.chassis_wz_norm, 0);
+    remote.right_switch = RcSwitch::Down;
+    zassert_ok(mapper.map(remote, intent));
     near(intent.chassis_wz_norm, 1);
+    remote.right_switch = RcSwitch::Middle;
     near(intent.gimbal_yaw_rate_norm, -half);
     near(intent.gimbal_pitch_rate_norm, -1);
     zassert_equal(intent.mode, OperatorMode::Manual);

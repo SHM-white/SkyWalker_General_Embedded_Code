@@ -47,13 +47,16 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     if (r.left_switch == RcSwitch::Unknown || r.right_switch == RcSwitch::Unknown)
         return -EINVAL;
     const bool shooter_selectable = config_.input_profile == RemoteInputProfile::ShooterSelectable;
+    // 统一键位：左 Up 为手动档；只有视觉执行样例（auto_on_up）保留 Up=Auto。
     n.mode = shooter_selectable ? (r.left_switch == RcSwitch::Down ? OperatorMode::Safe : OperatorMode::Manual)
+             : r.left_switch == RcSwitch::Down   ? OperatorMode::Safe
              : r.left_switch == RcSwitch::Middle ? OperatorMode::Manual
-             : r.left_switch == RcSwitch::Up   ? OperatorMode::Auto
-                                               : OperatorMode::Safe;
+             : config_.auto_on_up                ? OperatorMode::Auto
+                                                 : OperatorMode::Manual;
     const bool physical = config_.input_profile == RemoteInputProfile::PhysicalRemote;
+    // 台架右 Middle 选择键鼠；旧键鼠配置仍使用右 Up，避免与物理遥控的发射拨杆抢同一位置。
     n.source = shooter_selectable
-                   ? (r.left_switch == RcSwitch::Up ? ControlSource::KeyboardMouse : ControlSource::Remote)
+                   ? (r.right_switch == RcSwitch::Middle ? ControlSource::KeyboardMouse : ControlSource::Remote)
                    : (!physical && r.right_switch == RcSwitch::Up ? ControlSource::KeyboardMouse
                                                                  : ControlSource::Remote);
     auto norm = [&](float x) {
@@ -65,13 +68,12 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     if (n.source == ControlSource::Remote) {
         n.chassis_vx_norm = norm(r.analog.left_y);
         n.chassis_vy_norm = -norm(r.analog.left_x);
-        n.chassis_wz_norm = norm(r.analog.wheel);
+        // 拨轮不再映射底盘或大 Yaw；右 Down 在手动档请求固定小陀螺。
+        n.chassis_wz_norm = n.mode == OperatorMode::Manual && r.right_switch == RcSwitch::Down ? 1.0f : 0.0f;
         n.gimbal_yaw_rate_norm = -norm(r.analog.right_x);
         n.gimbal_pitch_rate_norm = norm(r.analog.right_y);
-        if (physical || shooter_selectable) {
-            n.friction_requested = r.right_switch != RcSwitch::Down;
-            n.fire_requested = r.right_switch == RcSwitch::Up;
-        }
+        n.friction_requested = r.right_switch == RcSwitch::Up;
+        n.fire_requested = r.right_switch == RcSwitch::Up;
     }
     else {
         auto key = [&](unsigned bit) { return (r.keyboard.bits >> bit) & 1u; };
@@ -106,9 +108,15 @@ void CommandArbiter::withdrawMouseShooter() {
     mouse_gesture_.withdraw();
     mouse_fire_ = {};
 }
+ManualCommandMapper::Config CommandArbiter::mapperConfig() const {
+    auto c = config_.mapper;
+    // 视觉执行样例保留左 Up=自动；其余样例由适配层把左 Up 作为手动档。
+    c.auto_on_up = c.auto_on_up || config_.allow_auto;
+    return c;
+}
 int CommandArbiter::observeRemoteFrame(const RemoteState &remote, bool run_allowed, std::uint64_t now_ms) {
     OperatorIntent mapped{};
-    const int ret = ManualCommandMapper(config_.mapper).map(remote, mapped);
+    const int ret = ManualCommandMapper(mapperConfig()).map(remote, mapped);
     if (ret < 0) {
         withdrawMouseShooter();
         return ret;
@@ -211,7 +219,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     if (!in.run_allowed)
         return disable(OperatorGateDenied, 0);
     OperatorIntent i{};
-    if (ManualCommandMapper(config_.mapper).map(in.remote, i) < 0)
+    if (ManualCommandMapper(mapperConfig()).map(in.remote, i) < 0)
         return disable(InvalidInputs, -EINVAL);
     const auto &robot = in.referee.robot;
     const auto cr = config_.require_referee_for_motion

@@ -98,7 +98,7 @@ DM 的 C++ 模式、Master ID、PMAX/VMAX/TMAX 必须和电机实际设置一致
 | [samples/robotics/inertial_gimbal](../../samples/robotics/inertial_gimbal/README.md) | 头部 IMU → 惯性适配 → 机械双轴，锁 Pitch/释放 Pitch 配置 | 是，当前使用 CAN3 头 IMU；安装待实板核对 |
 | [samples/robotics/gimbal_shared_can](../../samples/robotics/gimbal_shared_can/README.md) | 小云台、双摩擦轮、拨盘；`big_yaw.conf` 增加无 IMU 板间大 Yaw 手控 | 是，无弹空载，沿用中央接线确认 |
 | [samples/robotics/big_yaw](../../samples/robotics/big_yaw/README.md) | 大 Yaw 独立 MIT 软件速度环，连续旋转 | 是，参数与实板状态见各 README |
-| [samples/robotics/big_yaw_interboard](../../samples/robotics/big_yaw_interboard/README.md) | 无 IMU：云台板 DR16 拨轮经板间通信控制底盘板真实大 Yaw | 是，双角色，沿用中央接线确认 |
+| [samples/robotics/big_yaw_interboard](../../samples/robotics/big_yaw_interboard/README.md) | 无 IMU：云台板 DR16 右拨杆 Down 经板间通信控制底盘板真实大 Yaw | 是，双角色，沿用中央接线确认 |
 | [samples/robotics/dual_yaw_centering](../../samples/robotics/dual_yaw_centering/README.md) | 双板头部惯性保持、中心外环与大 Yaw 内环 | 是，历史双角色入口；优先新固定工程 |
 | [samples/robotics/four_swerve](../../samples/robotics/four_swerve/README.md) | 四舵四驱、完整 SwerveChassis、双 CAN 统一提交 | 是，参数与实板状态见各 README |
 | [samples/robotics/chassis_power](../../samples/robotics/chassis_power/README.md) | 裁判预算、真实功率测量合同和八电机执行器 | 是，完整功率标定默认关闭 |

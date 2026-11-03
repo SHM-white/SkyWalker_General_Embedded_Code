@@ -29,7 +29,7 @@ west build -b dm_mc02/stm32h723xx samples/robotics/inertial_gimbal -d ../build/l
 
 ## 控制与操作
 
-先完成单轴机械方向、零点、限位和头部IMU安装参考确认。双Down、摇杆和拨轮归中保持至少500ms，再拨左Middle启动；左Down或原始输入过期撤销运行授权。更完整的物理操作见 [统一遥控操作](../common/REMOTE_CONTROL.md)。释放Pitch前支撑其重力负载。
+先完成单轴机械方向、零点、限位和头部IMU安装参考确认。双Down、摇杆和拨轮归中保持至少500ms，先拨左Middle建立解锁、再拨左Up启动；左Down或原始输入过期撤销运行授权。更完整的物理操作见 [统一遥控操作](../common/REMOTE_CONTROL.md)。释放Pitch前支撑其重力负载。
 
 惯性目标在电机恢复期间保留。适配器逐轴报告yaw_output_valid/pitch_output_valid，执行器分别推进有效轴；缺少本轴机械测量或头部数学参考时等待相应计算，恢复后重置本轴控制历史，不建立恢复授权代次。本入口的惯性控制策略与新的独立阶段策略分别配置，不能仅凭共用硬件参数认定输出上限和全部门控相同。
 

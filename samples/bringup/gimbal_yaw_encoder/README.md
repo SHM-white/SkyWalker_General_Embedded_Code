@@ -1,6 +1,6 @@
 # gimbal_yaw_encoder
 
-只在CAN1注册yaw一台电机、一个机械闭环；另一轴、头部IMU和底盘不参与。只接实际RC，双拨Down且摇杆归中500ms，再将左拨Middle解锁；左Down或遥控断流立即撤销目标。Pitch需机械支撑后低幅操作。
+只在CAN1注册yaw一台电机、一个机械闭环；另一轴、头部IMU和底盘不参与。只接实际RC，双拨Down且摇杆归中500ms，先将左拨Middle建立解锁、再拨左Up运行；左Down或遥控断流立即撤销目标。Pitch需机械支撑后低幅操作。
 
 固定使用 [实车配置](../../../config/vehicle/installed/README.md)。独立入口只启动本阶段对象；UART7/PE8 TX 接 DAPLink RX，共地，115200 8N1，现场接线尚需确认。
 

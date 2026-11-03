@@ -112,7 +112,7 @@ int main() {
         LOG_ERR("remote start failed: %d", ret);
         return ret;
     }
-    LOG_INF("RC both Down + centered 500ms, then left Middle; wheel +/-0.1 rad/s; left Down stops");
+    LOG_INF("RC both Down + centered 500ms, then left Middle, Up=manual; right Down spin 0.1 rad/s; left Down stops");
     samples::control::RcControlAdapter controls;
     samples::control::OperatorControlPublisher operator_controls;
     communication::RemoteReceiver::Snapshot remote_cache{};
@@ -132,8 +132,7 @@ int main() {
         // FollowCenter is the existing v4 velocity-request wire mode; this
         // entry generates manual velocity and does not run a centering loop.
         request.mode = run ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-        request.target_rate_rad_s = run ? manual_rate_max_rad_s *
-            samples::control::RcControlAdapter::normalize(rc.remote.analog.wheel) : 0;
+        request.target_rate_rad_s = run && rc.spin_requested ? manual_rate_max_rad_s : 0;
         request.source_sequence = rc.remote.stamp.sequence;
         request.stamp = rc.remote.stamp;
         request.receiver_boot_id = rx.peer.sender_boot_id;

@@ -147,10 +147,10 @@ west flash -d ../build/bringup/gimbal_yaw_encoder
 
 若使用 VS Code 的 Zephyr IDE 任务，构建产物在 `samples/bringup/gimbal_yaw_encoder/build/dm_mc02/stm32h723xx`，与当前已烧录目录一致。
 
-上电与解锁顺序（不变）：
+上电与解锁顺序：
 
 1. 双拨杆 Down，摇杆/拨轮归中保持 ≥ 500 ms。
-2. 左拨杆切 Middle 解锁；右杆 X 控制 Yaw 速率。
+2. 左拨杆先切 Middle 建立解锁，再拨左 Up 手动运行；右杆 X 控制 Yaw 速率。
 3. 左拨杆 Down 立即撤销；遥控过期（100 ms）同样撤销。
 4. 先小幅、再满杆；每次只验证一组参数。
 

@@ -18,7 +18,7 @@
 
 | 配置 | 功能 |
 | --- | --- |
-| 默认 | 物理遥控与机械双轴，左Up禁用 |
+| 默认 | 物理遥控与机械双轴，左 Up 手动运行 |
 | referee.conf | 裁判云台输出权限 |
 | vision_observe.conf | 视觉观测，手动执行 |
 | vision_execute.conf | 旧RS485头部IMU路径上的视觉与惯性坐标转换，尚未迁移到CAN实车基线 |

@@ -41,7 +41,7 @@ int main() {
             ret = axis.begin();
         started = ret == 0;
     }
-    LOG_INF("RC safe+center 0.5s then left Middle; wheel +/-0.1 rad/s; confirmed=%d setup=%d",
+    LOG_INF("RC safe+center 0.5s then left Middle, Up=manual; right Down spin 0.1 rad/s; confirmed=%d setup=%d",
             vehicle::connections_confirmed, ret);
     communication::RemoteReceiver::Snapshot snapshot{};
     input::RcControlAdapter adapter;
@@ -59,7 +59,7 @@ int main() {
         if (!diagnostic.input_paused && rc.fresh &&
             (!request.stamp.valid || sequenceAfter(rc.remote.stamp.sequence, request.stamp.sequence))) {
             request.mode = rc.run_allowed ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-            request.target_rate_rad_s = .1f * input::RcControlAdapter::normalize(rc.remote.analog.wheel);
+            request.target_rate_rad_s = rc.spin_requested ? .1f : 0;
             request.stamp = rc.remote.stamp;
             request.source_sequence = rc.remote.stamp.sequence;
             request.receiver_boot_id = 1;

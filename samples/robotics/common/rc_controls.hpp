@@ -16,10 +16,19 @@ inline communication::RemoteReceiver::Config receiverConfig() {
     return config;
 }
 
+// 统一键位：左 Down=安全、Middle=导航、Up=手动；右 Down=小陀螺、
+// Middle=不请求机构（键鼠样例选择键鼠）、Up=摩擦轮与拨弹。
+enum class RcMode : std::uint8_t { Safe, Navigation, Manual };
+
 struct RcControlState {
     robotics::RemoteState remote{};
     bool fresh = false;
-    bool run_allowed = false;
+    RcMode mode = RcMode::Safe;
+    bool armed = false;             // 安全档归中基线后由左 Down→Middle 建立
+    bool navigation_active = false; // 已解锁且左 Middle；无导航源的样例保持停机
+    bool manual_active = false;     // 已解锁且左 Up
+    bool run_allowed = false;       // 手动运动授权，与 manual_active 同步
+    bool spin_requested = false;    // 右 Down：小陀螺（仅手动档）
     std::uint64_t start_event_id = 0;
     bool clear_estop = false;
     std::uint32_t clear_event_id = 0;
@@ -34,8 +43,9 @@ struct RcControlState {
 class RcControlAdapter {
 public:
     struct Config {
+        // 视觉执行样例保留原三档：左 Middle=手动、左 Up=自动；其余样例左 Up=手动。
         bool allow_auto = false;
-        bool keyboard_mouse_selectable = false; // 仅发射样例将左 Up 分配给键鼠，其他样例保留 Auto。
+        bool keyboard_mouse_selectable = false; // 右 Middle 在手动档选择键鼠。
         std::uint32_t input_timeout_ms = 100; // ms，须与接收和命令层失联期限协调。
         std::uint32_t neutral_arm_ms = 500; // ms，安全档归中保持时间，防止上电直接运行。
         std::uint32_t clear_hold_ms = 1000; // ms，安全档清故障手势保持时间。
@@ -65,8 +75,10 @@ public:
     // Withdraw only for user stop/emergency or an expired real input/link.
     // Motor and CAN execution states never withdraw this input intent.
     void withdraw() {
+        state_.armed = state_.navigation_active = state_.manual_active = false;
         state_.run_allowed = false;
-        state_.friction_requested = state_.continuous_requested = false;
+        state_.mode = RcMode::Safe;
+        state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
         state_.keyboard_mouse_selected = false;
         neutral_timing_ = neutral_ready_ = safe_baseline_ = false;
         clear_timing_ = false;
@@ -104,8 +116,11 @@ public:
         if (left == RcSwitch::Down) {
             if (previous_left_ != RcSwitch::Down || state_.run_allowed)
                 withdraw();
+            state_.mode = RcMode::Safe;
             state_.run_allowed = false;
-            state_.friction_requested = state_.continuous_requested = false;
+            state_.manual_active = state_.navigation_active = false;
+            state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
+            state_.keyboard_mouse_selected = false;
             if (neutral && right == RcSwitch::Down) {
                 if (!neutral_timing_) {
                     neutral_since_ = input_ms;
@@ -134,24 +149,31 @@ public:
                 clear_timing_ = false;
         }
         else {
+            // 安全档归中基线成立后，左 Down→Middle 只建立解锁；手动档在左 Up。
             if (left == RcSwitch::Middle && previous_left_ == RcSwitch::Down && neutral_ready_ && neutral &&
                 right == RcSwitch::Down && state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
                 ++state_.start_event_id;
-                state_.run_allowed = true;
+                armed_ = true;
             }
             neutral_timing_ = neutral_ready_ = safe_baseline_ = clear_timing_ = false;
-            if (left == RcSwitch::Up && !config_.allow_auto && !config_.keyboard_mouse_selectable)
-                withdraw();
-            state_.keyboard_mouse_selected = state_.run_allowed && config_.keyboard_mouse_selectable &&
-                                             left == RcSwitch::Up;
-            state_.friction_requested = state_.run_allowed &&
+            // 视觉执行样例保留 Middle=手动、Up=Auto；其余样例只有左 Up 是手动档。
+            const bool manual = armed_ && (config_.allow_auto ? left != RcSwitch::Down : left == RcSwitch::Up);
+            state_.manual_active = manual;
+            state_.navigation_active = armed_ && !config_.allow_auto && left == RcSwitch::Middle;
+            state_.run_allowed = manual;
+            state_.mode = !armed_ ? RcMode::Safe : manual ? RcMode::Manual : RcMode::Navigation;
+            state_.keyboard_mouse_selected = manual && config_.keyboard_mouse_selectable &&
+                                             right == RcSwitch::Middle;
+            state_.spin_requested = manual && right == RcSwitch::Down;
+            state_.friction_requested = manual &&
                                         (state_.keyboard_mouse_selected ? remote.mouse.right
-                                                                        : right != RcSwitch::Down);
+                                                                        : right == RcSwitch::Up);
             // RC 发射拨杆直接请求同一射频的连发，不生产与键鼠编号冲突的单发事件。
             // 键鼠连发手势只由命令线程管理，不在此处再次判断左键或点击间隔。
-            state_.continuous_requested = state_.run_allowed && !state_.keyboard_mouse_selected &&
+            state_.continuous_requested = manual && !state_.keyboard_mouse_selected &&
                                           right == RcSwitch::Up;
         }
+        state_.armed = armed_;
         previous_left_ = left;
         previous_right_ = right;
         return state_;
@@ -172,6 +194,7 @@ private:
     std::uint64_t neutral_since_ = 0, clear_since_ = 0, last_input_ms_ = 0;
     bool have_sequence_ = false, neutral_timing_ = false, neutral_ready_ = false;
     bool safe_baseline_ = false, clear_timing_ = false, have_input_time_ = false;
+    bool armed_ = false;
 };
 
 } // namespace skywalker::samples::control

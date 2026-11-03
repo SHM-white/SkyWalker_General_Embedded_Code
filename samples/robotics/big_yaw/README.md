@@ -2,7 +2,7 @@
 
 使用中央 `chassis_can.hpp` 分配的独立 CAN2；硬件型号、MIT参数、方向、减速比和限幅来自 `include/robotics/vehicle/calibration.hpp`。完成接线与标定后启用 `connections_confirmed`。速度控制不要求绝对位置参考。
 
-遥控使用MC02 remote-uart / UART5、100000 baud、8E1、RX DMA。双Down且全部通道归中500ms，再左Middle启动；左Down停止，左Up禁用。拨轮请求正负0.1rad/s。输入失联按100ms原始年龄停止，重复快照不会续期。
+遥控使用MC02 remote-uart / UART5、100000 baud、8E1、RX DMA。双Down且全部通道归中500ms，先把左拨Middle建立解锁，再拨左Up手动运行；左Down停止。手动档右 Down 请求 +0.1rad/s 小陀螺，拨轮默认无动作。输入失联按100ms原始年龄停止，重复快照不会续期。
 
 启动后持续提交最新速度；离线、协议握手或CAN恢复不撤销遥控意图。底层自动清错与重新使能，恢复后执行最新值，不需要手动清驱动故障。急停解除事件只影响用户急停。日志分别显示requested、实际run/wait、目标、实际反馈、控制与提交错误。
 
