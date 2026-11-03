@@ -5,16 +5,19 @@
 namespace skywalker::robotics::vehicle {
 inline motor::dm::Config bigYawHardware() {
     // TODO(hardware): confirm MIT mode and PMAX/VMAX/TMAX stored in the drive.
-    return motor::dm::j4310Mit({.id = big_yaw.id,
-                                .master_id = big_yaw.master_id,
-                                .position_max_rad = 12.5f,
-                                .velocity_max_rad_s = 30,
-                                .torque_max_nm = 10,
-                                .torque_limit_nm = big_yaw.effort_limit,
-                                .timing = {.feedback_timeout_ms = 50,
-                                           .command_timeout_ms = 20,
-                                           .enable_timeout_ms = 3000,
-                                           .retry_interval_ms = 100}});
+    const auto &cal = big_yaw_native_velocity_profile_confirmed ? reference_big_yaw : big_yaw;
+    const motor::dm::J4310Options options{.id = cal.id,
+                                           .master_id = cal.master_id,
+                                           .position_max_rad = 12.5f,
+                                           .velocity_max_rad_s = 30,
+                                           .torque_max_nm = 10,
+                                           .torque_limit_nm = cal.effort_limit,
+                                           .timing = {.feedback_timeout_ms = 50,
+                                                      .command_timeout_ms = 20,
+                                                      .enable_timeout_ms = 3000,
+                                                      .retry_interval_ms = 100}};
+    return big_yaw_native_velocity_profile_confirmed ? motor::dm::j4310Velocity(options)
+                                                     : motor::dm::j4310Mit(options);
 }
 inline control::VelocityMotor::Config bigYawMotorConfig() {
     control::VelocityMotor::Config c{};
@@ -41,12 +44,15 @@ inline control::VelocityMotor::Config bigYawMotorConfig() {
 inline BigYawExecutor::Config bigYawExecutionConfig() {
     BigYawExecutor::Config c{};
     c.heading_lock_enabled = big_yaw_heading_lock_enabled;
+    c.native_velocity_mode_confirmed = big_yaw_native_velocity_profile_confirmed;
+    c.native_velocity_acceleration_rad_s2 = 4.0f;
     c.mit_mode_confirmed = big_yaw_mit_mode_confirmed;
     c.heading_reference_confirmed = startup_heading_alignment_confirmed;
     c.heading.torque_max_nm = big_yaw.effort_limit;
-    c.rate_abs_max_rad_s = big_yaw.velocity_limit_rad_s;
-    c.motor_to_joint_ratio = big_yaw.gear_ratio;
-    c.direction = big_yaw.direction;
+    const auto &cal = big_yaw_native_velocity_profile_confirmed ? reference_big_yaw : big_yaw;
+    c.rate_abs_max_rad_s = cal.velocity_limit_rad_s;
+    c.motor_to_joint_ratio = cal.gear_ratio;
+    c.direction = cal.direction;
     return c;
 }
 } // namespace skywalker::robotics::vehicle

@@ -29,6 +29,11 @@ public:
         core::TimeUs max_cycle_us = 20000;
         // Fixed at startup. No automatic fallback between world/relative feedback.
         bool heading_lock_enabled = false, mit_mode_confirmed = false, heading_reference_confirmed = false;
+        // Opt-in only: the J4310 must be independently confirmed in native
+        // velocity mode (hardware CTRL_MODE=3), not MIT mode.
+        bool native_velocity_mode_confirmed = false;
+        // Maximum change of the *motor-shaft* velocity request per second.
+        float native_velocity_acceleration_rad_s2 = 4.0f;
         ImuHeadingLock::Config heading{};
         float rate_abs_max_rad_s = 1;
         float motor_to_joint_ratio = 1, direction = 1;
@@ -50,6 +55,8 @@ private:
     const Config config_;
     ImuHeadingLock heading_;
     std::uint64_t heading_enable_generation_ = 0;
+    std::uint64_t native_enable_generation_ = 0;
+    float native_last_rate_rad_s_ = 0;
     RunStatus status_{};
     core::TimeUs previous_us_ = 0;
     std::uint32_t production_sequence_ = 0;

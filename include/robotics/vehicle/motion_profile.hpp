@@ -5,6 +5,11 @@ namespace skywalker::robotics::vehicle {
 inline constexpr bool startup_heading_alignment_confirmed = false;
 inline constexpr bool big_yaw_heading_lock_enabled = false;
 inline constexpr bool big_yaw_mit_mode_confirmed = false;
+// Confirm actual CTRL_MODE=3, CAN ID / feedback ID and motor direction on the
+// installed hardware before enabling. This selects a DIFFERENT motor backend.
+inline constexpr bool big_yaw_native_velocity_profile_confirmed = false;
+static_assert(!(big_yaw_native_velocity_profile_confirmed && big_yaw_heading_lock_enabled),
+              "Native velocity and MIT heading torque cannot control the same motor");
 inline ChassisMotionAdapter::Config chassisMotionConfig() {
     ChassisMotionAdapter::Config c{};
     c.frame=ChassisMotionAdapter::Frame::Body;
