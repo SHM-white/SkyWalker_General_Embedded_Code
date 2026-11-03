@@ -89,13 +89,13 @@ struct BigYawFeedback {
     // Produced by the execution owner; RX decoding stores local receive time.
     MessageStamp stamp{};
 };
-// SkyWalker extension 0x0405 (40 bytes). 0x0404/32 remains reference-project-only.
-// yaw is relative to a software startup zero, not geographic north.
+// Reference v4 0x0404 (32-byte payload). Yaw is relative to software startup zero.
+// Sender Boot ID is derived from the accepted heartbeat session by the receiver.
 struct GimbalImuYaw {
     bool valid = false;
     float yaw_rad = 0, yaw_rate_rad_s = 0;
     std::uint32_t source_age_ms = UINT32_MAX, sample_sequence = 0, zero_generation = 0;
-    std::uint64_t receiver_boot_id = 0, sender_boot_id = 0;
+    std::uint64_t receiver_boot_id = 0, sender_boot_id = 0; // sender is NOT on 0x0404 wire
     MessageStamp stamp{}; // TX production / RX arrival. Source age is never refreshed on retry.
 };
 inline bool forwardedFresh(const MessageStamp &s, std::uint32_t age_ms, std::uint64_t now_ms,

@@ -324,45 +324,10 @@ int InterBoardCodec::decodeBigYawFeedback(const FrameMeta &m, const std::uint8_t
 }
 
 namespace skywalker::communication {
+// Reference 0x0404 is the sole on-wire IMU heading message.
 int InterBoardCodec::decodeGimbalImuYaw(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
-                                       robotics::GimbalImuYaw &out) {
-    if (!p || n != 40 || !header(m, MessageId::GimbalImuYaw, BoardRole::GimbalController) ||
-        p[0] > 1 || p[1] || p[2] || p[3])
-        return -EINVAL;
-    robotics::GimbalImuYaw t{};
-    t.valid = p[0];
-    t.yaw_rad = wire::loadFloatLe(p+4);
-    t.yaw_rate_rad_s = wire::loadFloatLe(p+8);
-    t.source_age_ms = wire::loadLe32(p+12);
-    t.sample_sequence = wire::loadLe32(p+16);
-    t.zero_generation = wire::loadLe32(p+20);
-    t.receiver_boot_id = wire::loadLe64(p+24);
-    t.sender_boot_id = wire::loadLe64(p+32);
-    if (!std::isfinite(t.yaw_rad) || std::fabs(t.yaw_rad) > 3.141593f ||
-        !std::isfinite(t.yaw_rate_rad_s) || std::fabs(t.yaw_rate_rad_s) > 100 ||
-        !t.sender_boot_id || !t.receiver_boot_id || (t.valid && (!t.zero_generation || t.source_age_ms > 50)))
-        return -EINVAL;
-    t.stamp = {m.local_receive_ms, m.frame_sequence, true};
-    out = t;
-    return 0;
-}
-int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::uint32_t seq,
-                                       std::uint8_t *out, std::size_t cap) {
-    std::uint8_t p[40]{};
-    p[0]=t.valid;
-    wire::storeFloatLe(p+4,t.yaw_rad); wire::storeFloatLe(p+8,t.yaw_rate_rad_s);
-    wire::storeLe32(p+12,t.source_age_ms); wire::storeLe32(p+16,t.sample_sequence);
-    wire::storeLe32(p+20,t.zero_generation); wire::storeLe64(p+24,t.receiver_boot_id);
-    wire::storeLe64(p+32,t.sender_boot_id);
-    robotics::GimbalImuYaw check{};
-    const int ret=decodeGimbalImuYaw({BoardRole::GimbalController,MessageId::GimbalImuYaw,seq,0},p,sizeof(p),check);
-    return ret < 0 ? ret : frame(BoardRole::GimbalController,MessageId::GimbalImuYaw,seq,p,sizeof(p),out,cap);
-}
-// 0x0404：参考底盘私有布局。没有发送方 Boot ID，接收方只能按心跳会话绑定身份。
-// 保留字段必须为 0；valid 时要求零位代次非零且源年龄不超过 50 ms。
-int InterBoardCodec::decodeGimbalImuYawLegacy(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
                                               robotics::GimbalImuYaw &out) {
-    if (!p || n != 32 || !header(m, MessageId::GimbalImuYawLegacy, BoardRole::GimbalController) ||
+    if (!p || n != 32 || !header(m, MessageId::GimbalImuYaw, BoardRole::GimbalController) ||
         p[0] > 1 || p[1] || p[2] || p[3])
         return -EINVAL;
     robotics::GimbalImuYaw t{};
@@ -382,7 +347,7 @@ int InterBoardCodec::decodeGimbalImuYawLegacy(const FrameMeta &m, const std::uin
     out = t;
     return 0;
 }
-int InterBoardCodec::encodeGimbalImuYawLegacy(const robotics::GimbalImuYaw &t, std::uint32_t seq,
+int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::uint32_t seq,
                                               std::uint8_t *out, std::size_t cap) {
     std::uint8_t p[32]{};
     p[0] = t.valid;
@@ -394,9 +359,9 @@ int InterBoardCodec::encodeGimbalImuYawLegacy(const robotics::GimbalImuYaw &t, s
     wire::storeLe32(p + 24, static_cast<std::uint32_t>(t.receiver_boot_id & 0xffffffffULL));
     wire::storeLe32(p + 28, static_cast<std::uint32_t>(t.receiver_boot_id >> 32));
     robotics::GimbalImuYaw check{};
-    const int ret = decodeGimbalImuYawLegacy(
-        {BoardRole::GimbalController, MessageId::GimbalImuYawLegacy, seq, 0}, p, sizeof(p), check);
+    const int ret = decodeGimbalImuYaw(
+        {BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, 0}, p, sizeof(p), check);
     return ret < 0 ? ret
-                   : frame(BoardRole::GimbalController, MessageId::GimbalImuYawLegacy, seq, p, sizeof(p), out, cap);
+                   : frame(BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, p, sizeof(p), out, cap);
 }
 }

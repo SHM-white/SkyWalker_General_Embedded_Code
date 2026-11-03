@@ -178,7 +178,7 @@ ZTEST(protocol_interboard, test_reference_v4_0404_heading_payload) {
     value.valid = true; value.yaw_rad = 0.5f; value.yaw_rate_rad_s = -0.25f;
     value.source_age_ms = 5; value.sample_sequence = 17;
     value.zero_generation = 3; value.receiver_boot_id = 0x1122334455667788ULL;
-    const int n = InterBoardCodec::encodeGimbalImuYawLegacy(value, 4, bytes.data(), bytes.size());
+    const int n = InterBoardCodec::encodeGimbalImuYaw(value, 4, bytes.data(), bytes.size());
     zassert_equal(n, 46); // Reference's 0x0404 is 32B payload (not 0x0405/40B).
     zassert_equal(bytes[2], 4);
     zassert_equal(bytes[3], 1);
@@ -192,9 +192,9 @@ ZTEST(protocol_interboard, test_reference_v4_0404_heading_payload) {
     zassert_equal(wire::loadLe32(bytes.data()+12+20), 3u);
     zassert_equal(wire::loadLe64(bytes.data()+12+24), value.receiver_boot_id);
     zassert_equal(wire::loadLe16(bytes.data()+n-2), interboardCrc16(bytes.data(), n-2));
-    FrameMeta meta{BoardRole::GimbalController, MessageId::GimbalImuYawLegacy, 4, 123};
+    FrameMeta meta{BoardRole::GimbalController, MessageId::GimbalImuYaw, 4, 123};
     GimbalImuYaw decoded{};
-    zassert_ok(InterBoardCodec::decodeGimbalImuYawLegacy(meta, bytes.data()+12, 32, decoded));
+    zassert_ok(InterBoardCodec::decodeGimbalImuYaw(meta, bytes.data()+12, 32, decoded));
     zassert_true(decoded.valid);
     zassert_within(decoded.yaw_rad, .5f, 1e-6f);
     zassert_within(decoded.yaw_rate_rad_s, -.25f, 1e-6f);

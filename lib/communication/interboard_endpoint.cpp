@@ -232,12 +232,12 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
             });
             if (next.online &&
                 outgoing.gimbal_imu.receiver_boot_id == peer_boot_)
-                append(MessageId::GimbalImuYawLegacy, [&](auto seq, auto *bytes, auto cap) {
+                append(MessageId::GimbalImuYaw, [&](auto seq, auto *bytes, auto cap) {
                     auto sample = outgoing.gimbal_imu;
                     sample.source_age_ms = addAge(sample.source_age_ms, age(sample.stamp, now));
                     if (!forwardedFresh(sample.stamp, outgoing.gimbal_imu.source_age_ms, now, 50))
                         sample.valid = false;
-                    return InterBoardCodec::encodeGimbalImuYawLegacy(sample, seq, bytes, cap);
+                    return InterBoardCodec::encodeGimbalImuYaw(sample, seq, bytes, cap);
                 });
             append(MessageId::ChassisConstraint, [&](auto seq, auto *bytes, auto cap) {
                 ChassisConstraint constraint{};

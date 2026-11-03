@@ -30,8 +30,6 @@ int messageIndex(MessageId id) {
         return 6;
     case MessageId::GimbalImuYaw:
         return 7;
-    case MessageId::GimbalImuYawLegacy:
-        return 8;
     default:
         return -1;
     }
