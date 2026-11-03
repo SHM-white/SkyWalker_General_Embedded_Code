@@ -12,6 +12,7 @@
 #include <drivers/motor/can_bus.hpp>
 #undef private
 #include <robotics/vehicle/chassis_profile.hpp>
+#include <robotics/execution/big_yaw_executor.hpp>
 using namespace skywalker;
 using namespace skywalker::robotics;
 namespace {
@@ -196,5 +197,96 @@ ZTEST(sentry, test_chassis_executor_command_expiry_withdraws_motor_group) {
     const auto stopped=e.update(in,1200000);
     zassert_equal(stopped.state,RunState::Disabled);zassert_equal(stopped.reason,WaitReason::Command);
     for(auto *m:motors)zassert_false(m->snapshot().enabled_requested);
+}
+
+namespace {
+motor::dm::Config testBigYawMotor(bool native) {
+    const motor::dm::J4310Options options{.id = 6, .master_id = 0x11, .position_max_rad = 12.5f,
+                                          .velocity_max_rad_s = 30, .torque_max_nm = 10,
+                                          .torque_limit_nm = 0.5f};
+    return native ? motor::dm::j4310Velocity(options) : motor::dm::j4310Mit(options);
+}
+BigYawExecutionInputs freshBigYawInput(std::uint64_t now_ms) {
+    BigYawExecutionInputs in{};
+    in.local_boot_id = 17;
+    in.peer_boot_id = 19;
+    in.peer_online = in.transport_ready = true;
+    in.request.receiver_boot_id = in.local_boot_id;
+    in.request.mode = BigYawMode::FollowCenter;
+    in.request.target_rate_rad_s = 0.8f;
+    in.request.stamp = {now_ms, 1, true};
+    in.request.permission = {true, true, {now_ms, 1, true}};
+    return in;
+}
+}
+
+ZTEST(sentry, test_native_big_yaw_requires_matching_motor_mode_and_confirmation) {
+    BigYawExecutor::Config c{};
+    c.native_velocity_mode_confirmed = true;
+    c.rate_abs_max_rad_s = 1.0f;
+    motor::Motor mit(testBigYawMotor(false));
+    BigYawExecutor wrong_backend(mit, {}, c);
+    zassert_equal(wrong_backend.begin(), -EINVAL);
+    c.heading_lock_enabled = true;
+    motor::Motor native(testBigYawMotor(true));
+    BigYawExecutor conflicting_backend(native, {}, c);
+    zassert_equal(conflicting_backend.begin(), -EINVAL);
+    c.heading_lock_enabled = false;
+    c.native_velocity_acceleration_rad_s2 = 0;
+    BigYawExecutor invalid_slew(native, {}, c);
+    zassert_equal(invalid_slew.begin(), -EINVAL);
+}
+
+ZTEST(sentry, test_native_big_yaw_slew_expiry_and_recovery) {
+    motor::Motor drive(testBigYawMotor(true));
+    BigYawExecutor::Config c{};
+    c.native_velocity_mode_confirmed = true;
+    c.native_velocity_acceleration_rad_s2 = 10.0f;
+    c.motor_to_joint_ratio = 2.0f;
+    c.direction = -1.0f;
+    c.rate_abs_max_rad_s = 1.0f;
+    BigYawExecutor executor(drive, {}, c);
+    zassert_ok(executor.begin());
+    auto in = freshBigYawInput(1000);
+    // Seed cycle timing; first cycle may never stage a motor command.
+    zassert_false(executor.update(in, 1000000).ready);
+    drive.markStarted();
+    zassert_ok(drive.enable());
+    auto &view = drive.snapshot_;
+    const auto now = k_uptime_get();
+    view.feedback.timestamp_ms = now > 0 ? static_cast<std::uint64_t>(now) : 1U;
+    view.feedback.valid = motor::FeedbackVelocity;
+    view.feedback.velocity_rad_s = 0;
+    view.state = motor::MotorState::Active;
+    view.output_permitted = true;
+    view.enable_generation = 4;
+    in.request.stamp.timestamp_ms = 1002;
+    in.request.permission.stamp.timestamp_ms = 1002;
+    zassert_true(executor.update(in, 1002000).ready);
+    const auto initial = drive.copyStaged();
+    zassert_true(initial.valid);
+    zassert_equal(initial.command.kind, motor::CommandKind::Velocity);
+    // 10 motor rad/s² * 2 ms = 0.02; mounting sign is applied once.
+    zassert_within(initial.command.primary, -0.02f, 1e-6f);
+    // Loss of feedback revokes the staged velocity, not merely the telemetry.
+    view.feedback.timestamp_ms = 0;
+    in.request.stamp.timestamp_ms = 1004;
+    in.request.permission.stamp.timestamp_ms = 1004;
+    zassert_false(executor.update(in, 1004000).ready);
+    zassert_false(drive.copyStaged().valid);
+    zassert_false(drive.snapshot().enabled_requested);
+    // A fresh drive generation cannot inherit an old slew target.
+    zassert_ok(drive.enable());
+    view.feedback.timestamp_ms = now > 0 ? static_cast<std::uint64_t>(now) : 1U;
+    view.state = motor::MotorState::Active;
+    view.output_permitted = true;
+    view.enable_generation = 5;
+    in.request.stamp.timestamp_ms = 1006;
+    in.request.permission.stamp.timestamp_ms = 1006;
+    zassert_true(executor.update(in, 1006000).ready);
+    zassert_within(drive.copyStaged().command.primary, -0.02f, 1e-6f);
+    in.request.permission.enabled = false;
+    zassert_false(executor.update(in, 1008000).ready);
+    zassert_false(drive.copyStaged().valid);
 }
 ZTEST_SUITE(sentry,nullptr,nullptr,nullptr,nullptr,nullptr);

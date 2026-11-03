@@ -1,4 +1,5 @@
 #include <robotics/execution/big_yaw_executor.hpp>
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 namespace skywalker::robotics {
@@ -15,7 +16,14 @@ int BigYawExecutor::begin() {
                             (config_.direction != 1 && config_.direction != -1) || !config_.command_timeout_ms ||
                             !config_.source_timeout_us
                         ? -EINVAL
-                        : config_.heading_lock_enabled ? heading_.validate() : axis_.configure();
+                        : config_.native_velocity_mode_confirmed ? 0
+                                                                  : (config_.heading_lock_enabled ? heading_.validate()
+                                                                                                  : axis_.configure());
+    if (!config_error_ && config_.native_velocity_mode_confirmed &&
+        (config_.heading_lock_enabled || !(drive_.info().capabilities & motor::CommandVelocity) ||
+         !std::isfinite(config_.native_velocity_acceleration_rad_s2) ||
+         config_.native_velocity_acceleration_rad_s2 <= 0))
+        config_error_ = -EINVAL;
     if (!config_error_ && config_.heading_lock_enabled &&
         (!config_.mit_mode_confirmed || !config_.heading_reference_confirmed ||
          !(drive_.info().capabilities & motor::CommandMit) || !(drive_.info().capabilities & motor::CommandTorque) ||
@@ -26,7 +34,9 @@ int BigYawExecutor::begin() {
 }
 void BigYawExecutor::withdraw(WaitReason, int, bool) {
     heading_.reset();
-    if (!config_.heading_lock_enabled) (void)axis_.reset();
+    native_last_rate_rad_s_ = 0;
+    native_enable_generation_ = 0;
+    if (!config_.heading_lock_enabled && !config_.native_velocity_mode_confirmed) (void)axis_.reset();
     (void)drive_.disable();
     status_.ready = status_.requested = false;
 }
@@ -95,6 +105,43 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
         if (staged<0) return suspend(now,WaitReason::Drive,staged);
         status_.ready=true;
         return publish(now,RunState::Active,WaitReason::None,error);
+    }
+    if (config_.native_velocity_mode_confirmed) {
+        // A missed execution cycle is a hard recovery boundary, not an
+        // opportunity to repeat a previously staged velocity command.
+        if (!cycle)
+            return suspend(now, WaitReason::Cycle);
+        if (error < 0)
+            return suspend(now, WaitReason::Drive, error);
+        const auto view = drive_.snapshot();
+        const bool feedback_ready = view.state == motor::MotorState::Active && view.enabled_requested &&
+                                    view.output_permitted && view.feedback_fresh &&
+                                    (view.feedback.valid & motor::FeedbackVelocity) &&
+                                    std::isfinite(view.feedback.velocity_rad_s);
+        if (!feedback_ready) {
+            native_last_rate_rad_s_ = 0;
+            native_enable_generation_ = 0;
+            // An active motor losing its prerequisites must discard its staged
+            // velocity immediately; an in-progress enable may keep waiting.
+            if (view.state == motor::MotorState::Active)
+                return suspend(now, WaitReason::Feedback, -ESTALE);
+            status_.ready = false;
+            return publish(now, RunState::Recovering, WaitReason::Feedback, error);
+        }
+        if (native_enable_generation_ != view.enable_generation) {
+            native_enable_generation_ = view.enable_generation;
+            native_last_rate_rad_s_ = 0;
+        }
+        const float target = r.target_rate_rad_s * config_.motor_to_joint_ratio * config_.direction;
+        const float max_change = config_.native_velocity_acceleration_rad_s2 * dt;
+        const float staged_rate = native_last_rate_rad_s_ +
+                                  std::clamp(target - native_last_rate_rad_s_, -max_change, max_change);
+        const int staged = drive_.setVelocity(staged_rate);
+        if (staged < 0)
+            return suspend(now, WaitReason::Drive, staged);
+        native_last_rate_rad_s_ = staged_rate;
+        status_.ready = true;
+        return publish(now, RunState::Active, WaitReason::None);
     }
     const int ret = axis_.update(r.target_rate_rad_s * config_.motor_to_joint_ratio * config_.direction, dt);
     if (!error)
