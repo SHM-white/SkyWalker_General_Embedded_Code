@@ -11,7 +11,6 @@
 #include <robotics/vehicle/manual_profile.hpp>
 #include <robotics/vehicle/bringup_policy.hpp>
 #include <robotics/vehicle/calibration.hpp>
-#include <robotics/vehicle/reference_chassis_link_profile.hpp>
 #include <robotics/chassis/imu_heading.hpp>
 #include <robotics/gimbal/world_yaw_window_follow.hpp>
 #include <control/attitude_ekf.hpp>
@@ -25,6 +24,8 @@
 using namespace skywalker;
 using namespace skywalker::robotics;
 namespace {
+// This bring-up firmware targets the fixed reference-v4 peer contract.
+inline constexpr bool reference_v4_peer = true;
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
                                      samples::control::receiverConfig());
@@ -57,9 +58,7 @@ InertialGimbalAdapter::Config inertialConfig() {
 InertialGimbalAdapter adapter(inertialConfig());
 communication::AsyncUart::DmaBuffers link_dma __nocache;
 communication::UartInterBoardTransport transport(DEVICE_DT_GET(DT_ALIAS(interboard_uart)), link_dma);
-communication::InterBoardEndpoint endpoint(transport,
-                                           {.role = BoardRole::GimbalController,
-                                            .legacy_gimbal_imu = vehicle::reference_chassis_legacy_v4_compat});
+communication::InterBoardEndpoint endpoint(transport, {.role = BoardRole::GimbalController});
 YawCenteringController::Config centeringConfig() {
     auto c = vehicle::manualCenteringConfig();
     c.max_rate_rad_s = vehicle::bringup::big_yaw_rate_rad_s;
@@ -168,7 +167,7 @@ int main() {
         // A 50 ms timeout would repeatedly invalidate feedback and reset the
         // world-history window, preventing meaningful delayed follow.
         const auto peer_feedback_timeout_ms =
-            vehicle::reference_chassis_legacy_v4_compat ? 250U : 50U;
+            reference_v4_peer ? 250U : 50U;
         const bool peer_feedback_valid = peer.online && feedback.valid &&
                                          forwardedFresh(feedback.stamp, feedback.production_age_ms, ms,
                                                         peer_feedback_timeout_ms) &&
@@ -199,7 +198,7 @@ int main() {
         // tracking errors and would repeatedly discard the history in motion.
         const bool inertial_running = inertial.yaw_output_valid && inertial.pitch_output_valid &&
                                       run.state == RunState::Active;
-        const bool world_ready = vehicle::reference_chassis_legacy_v4_compat &&
+        const bool world_ready = reference_v4_peer &&
                                  follow.enabled && inertial_running && follow.permission_valid &&
                                  joint_valid && heading.valid &&
                                  core::fresh(heading.stamp, now, 20000) && peer_feedback_valid;
@@ -208,7 +207,7 @@ int main() {
             vehicle::small_yaw.direction * (ys.feedback.position_rad - vehicle::yaw_center_rad),
             now, world_ready);
         BigYawRequest big_request{};
-        if (vehicle::reference_chassis_legacy_v4_compat) {
+        if (reference_v4_peer) {
             // This peer interprets mode=1 as world angular-rate intent and
             // compensates chassis gyro itself; never apply big_yaw_wire_direction.
             // A valid zero request may be needed to enable the peer and obtain
@@ -259,7 +258,7 @@ int main() {
         }
         // 参考底盘的 RobotBigYawControl() 只在底盘控制源被授权时执行；零速 BodyVelocity 只放行通道。
         // 只在对端确实是参考底盘时发送，避免影响本仓库底盘的控制源选择。
-        if (vehicle::reference_chassis_link_enabled) {
+        if (reference_v4_peer) {
             ChassisCommand chassis{};
             chassis.mode = peer.online && follow.permission_valid ? ChassisMode::BodyVelocity : ChassisMode::Disabled;
             chassis.source = ControlSource::Remote;
@@ -279,7 +278,7 @@ int main() {
         diagnostics.status(
             {.reason = reason,
              .valid = imu_fresh && ys.feedback_fresh && ps.feedback_fresh && peer_feedback_valid,
-             .enabled = (vehicle::reference_chassis_legacy_v4_compat ? world_center.valid : centered.enabled) &&
+             .enabled = (reference_v4_peer ? world_center.valid : centered.enabled) &&
                         peer_feedback_valid,
              .target = big_request.target_rate_rad_s,
              .feedback = peer_feedback_valid ? feedback.actual_rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
@@ -293,9 +292,9 @@ int main() {
                       : yaw_error    ? yaw_error
                       : pitch_error  ? pitch_error
                                      : run.error,
-             .extra0 = vehicle::reference_chassis_legacy_v4_compat ? world_center.error_rad
+             .extra0 = reference_v4_peer ? world_center.error_rad
                                                                         : centered.center_error_rad,
-             .extra1 = vehicle::reference_chassis_legacy_v4_compat ? world_center.target_world_yaw_rad
+             .extra1 = reference_v4_peer ? world_center.target_world_yaw_rad
                                                                         : inertial.head_yaw_rad});
         k_sleep(K_USEC(vehicle::gimbal_period_us));
     }
