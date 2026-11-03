@@ -188,8 +188,13 @@ int main() {
         // independently initialized onboard and head IMU Euler angles.
         const bool joint_valid = ys.feedback_fresh && input.yaw.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
+        // The world-window history must also run while the operator is moving
+        // the head. Inertial stabilization_valid additionally requires small
+        // tracking errors and would repeatedly discard the history in motion.
+        const bool inertial_running = inertial.yaw_output_valid && inertial.pitch_output_valid &&
+                                      run.state == RunState::Active;
         const bool world_ready = vehicle::reference_chassis_legacy_v4_compat &&
-                                 follow.enabled && follow.head_stable && follow.permission_valid &&
+                                 follow.enabled && inertial_running && follow.permission_valid &&
                                  joint_valid && heading.valid &&
                                  core::fresh(heading.stamp, now, 20000) && peer_feedback_valid;
         const auto world_center = world_follower.update(
