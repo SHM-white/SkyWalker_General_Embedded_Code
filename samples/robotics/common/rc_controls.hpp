@@ -4,17 +4,22 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <robotics/messages/remote.hpp>
+#if defined(CONFIG_SKYWALKER_REMOTE_RECEIVER)
 #include <communication/remote/remote_receiver.hpp>
+#endif
 #include <robotics/messages/remote.hpp>
 
 namespace skywalker::samples::control {
 
+#if defined(CONFIG_SKYWALKER_REMOTE_RECEIVER)
 inline communication::RemoteReceiver::Config receiverConfig() {
     communication::RemoteReceiver::Config config{};
     config.decoder.decode_wheel = true;
     config.remote.offline_timeout_ms = 100; // 输入失联期限，ms；连点窗口不能延长此期限。
     return config;
 }
+#endif
 
 // 统一键位：左 Down=安全、Middle=导航、Up=手动；右 Down=小陀螺、
 // Middle=不请求机构（键鼠样例选择键鼠）、Up=摩擦轮与拨弹。

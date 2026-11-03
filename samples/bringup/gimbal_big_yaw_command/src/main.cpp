@@ -23,7 +23,7 @@ communication::AsyncUart::DmaBuffers link_dma __nocache;
 communication::ConfiguredInterBoardTransport transport({.kind = communication::InterBoardTransportKind::Uart,
                                                         .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
                                                        &link_dma);
-communication::InterBoardEndpoint endpoint(transport, {.role = BoardRole::GimbalController, .legacy_gimbal_imu = true});
+communication::InterBoardEndpoint endpoint(transport, {.role = BoardRole::GimbalController});
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
                                      samples::control::receiverConfig());

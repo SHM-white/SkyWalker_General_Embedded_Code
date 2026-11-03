@@ -263,7 +263,7 @@ int InterBoardCodec::encodeBigYawRequest(const BigYawRequest &t, std::uint32_t s
     return ret < 0 ? ret : frame(BoardRole::GimbalController, MessageId::BigYawRequest, seq, p, sizeof(p), out, cap);
 }
 int InterBoardCodec::decodeBigYawRequest(const FrameMeta &m, const std::uint8_t *p, std::size_t n, BigYawRequest &out) {
-    if (!p || n != 36 || !header(m, MessageId::BigYawRequest, BoardRole::GimbalController) || p[0] > 2 || p[1] > 1 ||
+    if (!p || n != 36 || !header(m, MessageId::BigYawRequest, BoardRole::GimbalController) || p[0] > 1 || p[1] > 1 ||
         p[2] > 1 || p[3])
         return -EINVAL;
     BigYawRequest t{};
