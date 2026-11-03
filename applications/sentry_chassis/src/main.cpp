@@ -11,7 +11,6 @@
 #include <robotics/vehicle/chassis_profile.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <zephyr/drivers/regulator.h>
-#include "../../../samples/robotics/common/operator_controls.hpp"
 
 namespace {
 using namespace skywalker;
@@ -75,7 +74,6 @@ int main() {
     diagnostics.event("chassis", chassis_error);
     diagnostics.event("body_imu",body_error);
     diagnostics.event("motor_rail", power_error);
-    samples::control::OperatorControlConsumer operator_controls;
     std::uint64_t peer_boot = 0;
     int previous_big_commit_error = 0;
     std::int64_t deadline = k_uptime_ticks();
@@ -84,7 +82,6 @@ int main() {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         endpoint.poll(now_ms);
         const auto rx = endpoint.snapshot();
-        const auto authority = operator_controls.update(rx, now_ms);
         if (rx.peer.stamp.valid && peer_boot != rx.peer.sender_boot_id) {
             peer_boot = rx.peer.sender_boot_id;
             (void)chassis.suspend(now_us, WaitReason::Reference, -ESTALE);
@@ -92,32 +89,26 @@ int main() {
         }
         ChassisExecutionInputs input{};
         input.command = rx.control.command;
-        if (rx.control.global_action != SafetyAction::Active || !authority.run_allowed ||
+        if (rx.control.global_action != SafetyAction::Active || !rx.online ||
             !rx.local_boot_id || rx.control.receiver_boot_id != rx.local_boot_id)
             input.command.mode = ChassisMode::Disabled;
-        const auto body_sample=body_heading.update(need_body ? body.snapshot() : imu::Snapshot{},!authority.run_allowed,now_us);
-        input.command=motion.update(input.command,body_sample,rx.gimbal_imu,rx.local_boot_id,!authority.run_allowed,now_ms,rx.peer);
+        const auto body_sample=body_heading.update(need_body ? body.snapshot() : imu::Snapshot{},input.command.mode==ChassisMode::Disabled,now_us);
+        input.command=motion.update(input.command,body_sample,rx.gimbal_imu,rx.local_boot_id,input.command.mode==ChassisMode::Disabled,now_ms,rx.peer);
         input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
                                input.command.stamp.valid};
         input.transport_ready = steer_error == 0 && drive_error == 0 && chassis_error == 0 &&
                                  power_error == 0 && rx.online;
-        input.emergency_stop = authority.emergency_stop;
-        input.clear_estop = authority.clear_estop;
         // This fixed manual entry uses the real peer RC authority and bounded
         // current profiles; measured-power/referee execution is a later stage.
         auto status = chassis_error == 0 ? chassis.update(input, now_us)
                                         : chassis.suspend(now_us, WaitReason::Configuration, chassis_error, true);
         BigYawExecutionInputs big_input{};
         big_input.request = rx.big_yaw_request;
-        if (!authority.run_allowed)
-            big_input.request.mode = BigYawMode::Disabled;
         big_input.head=rx.gimbal_imu;
         big_input.peer_boot_id=rx.peer.sender_boot_id;
         big_input.local_boot_id = rx.local_boot_id;
         big_input.peer_online = rx.online;
         big_input.transport_ready = big_error == 0 && power_error == 0 && rx.online;
-        big_input.emergency_stop = authority.emergency_stop;
-        big_input.clear_estop = authority.clear_estop;
         const auto big_status = big_error == 0 ? big_axis.update(big_input, now_us)
                                                : big_axis.suspend(now_us, WaitReason::Configuration, big_error, true);
         // One writer publishes each of the three physical buses once per cycle.
@@ -144,8 +135,6 @@ int main() {
         const auto reason = chassis_error || big_error || power_error
                                 ? installed::DiagnosticReason::InitFailed
                             : !rx.online ? installed::DiagnosticReason::PeerStale
-                            : !rx.operator_control_valid ? installed::DiagnosticReason::Permission
-                            : !authority.run_allowed ? installed::DiagnosticReason::Disarmed
                             : status.reason == WaitReason::Feedback || big_status.reason == WaitReason::Feedback
                                 ? installed::DiagnosticReason::FeedbackStale
                             : status.state == RunState::Active || big_status.state == RunState::Active

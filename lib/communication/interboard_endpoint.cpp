@@ -153,12 +153,6 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
         next.big_yaw_feedback.ready = false;
         next.big_yaw_feedback.armed = false;
     }
-    if (config_.role == BoardRole::ChassisController &&
-        (!next.operator_control_valid || !op.run_allowed || op.emergency_stop)) {
-        next.control.command.mode = ChassisMode::Disabled;
-        next.control.global_action = SafetyAction::Disable;
-        next.big_yaw_request.mode = BigYawMode::Disabled;
-    }
     if (transport_ready && now >= next_tx_ms_ && !transport_.txBusy()) {
         std::uint8_t batch[InterBoardTransport::kTxCapacity]{};
         std::size_t used = 0;
@@ -200,27 +194,6 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
             return InterBoardCodec::encodeHeartbeat(heartbeat, seq, bytes, cap);
         });
         if (config_.role == BoardRole::GimbalController) {
-            if (next.online)
-                append(MessageId::OperatorControl, [&](auto seq, auto *bytes, auto cap) {
-                    auto control = outgoing.operator_control;
-                    const auto elapsed = age(control.stamp, now);
-                    control.source_age_ms = addAge(control.source_age_ms, elapsed);
-                    control.clear_event_age_ms = addAge(control.clear_event_age_ms, elapsed);
-                    control.sender_boot_id = boot_id_;
-                    // A stale or differently bound value can only send a stop.
-                    // Never rebind a clear request to a newly booted receiver.
-                    if (control.receiver_boot_id != peer_boot_ || control.source_age_ms > config_.command_timeout_ms) {
-                        control.run_allowed = false;
-                        control.clear_event_id = 0;
-                        control.source_age_ms = UINT32_MAX;
-                        control.receiver_boot_id = peer_boot_;
-                    }
-                    if (control.clear_event_age_ms > config_.command_timeout_ms)
-                        control.clear_event_id = 0;
-                    if (!control.clear_event_id)
-                        control.clear_event_age_ms = UINT32_MAX;
-                    return InterBoardCodec::encodeOperatorControl(control, seq, bytes, cap);
-                });
             if (next.online && isFresh(outgoing.command.stamp, now, config_.command_timeout_ms) &&
                 (outgoing.command.mode == ChassisMode::Disabled || !have_baseline_ ||
                  sequenceAfter(outgoing.command.stamp.sequence, baseline_sequence_)))
@@ -235,11 +208,6 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 });
             append(MessageId::BigYawRequest, [&](auto seq, auto *bytes, auto cap) {
                 auto request = outgoing.big_yaw_request;
-                const auto &authority = outgoing.operator_control;
-                const bool authorized = next.online && authority.run_allowed && !authority.emergency_stop &&
-                                        authority.receiver_boot_id == peer_boot_ &&
-                                        forwardedFresh(authority.stamp, authority.source_age_ms, now,
-                                                       config_.command_timeout_ms);
                 const bool current = forwardedFresh(request.stamp, request.source_age_ms, now,
                                                     config_.command_timeout_ms) &&
                                      forwardedFresh(request.stamp, request.command_age_ms, now,
@@ -251,7 +219,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 request.command_age_ms = addAge(request.command_age_ms, elapsed);
                 request.permission_age_ms = age(request.permission.stamp, now);
                 request.receiver_boot_id = peer_boot_;
-                if (!authorized || !current || (request.mode != BigYawMode::FollowCenter && request.mode != BigYawMode::ImuHeadingHold) ||
+                if (!next.online || !current || request.mode != BigYawMode::FollowCenter ||
                     !request.permission.valid || !request.permission.enabled ||
                     !std::isfinite(request.target_rate_rad_s)) {
                     request.mode = BigYawMode::Disabled;
@@ -262,16 +230,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 // heartbeat or a live producer. Never renew producer stamps/ages.
                 return InterBoardCodec::encodeBigYawRequest(request, seq, bytes, cap);
             });
-            if (next.online && outgoing.gimbal_imu.receiver_boot_id == peer_boot_)
-                append(MessageId::GimbalImuYaw, [&](auto seq, auto *bytes, auto cap) {
-                    auto sample = outgoing.gimbal_imu;
-                    sample.sender_boot_id = boot_id_;
-                    sample.source_age_ms = addAge(sample.source_age_ms,age(sample.stamp,now));
-                    if (!forwardedFresh(sample.stamp,outgoing.gimbal_imu.source_age_ms,now,50))
-                        sample.valid = false;
-                    return InterBoardCodec::encodeGimbalImuYaw(sample,seq,bytes,cap);
-                });
-            if (config_.legacy_gimbal_imu && next.online &&
+            if (next.online &&
                 outgoing.gimbal_imu.receiver_boot_id == peer_boot_)
                 append(MessageId::GimbalImuYawLegacy, [&](auto seq, auto *bytes, auto cap) {
                     auto sample = outgoing.gimbal_imu;
