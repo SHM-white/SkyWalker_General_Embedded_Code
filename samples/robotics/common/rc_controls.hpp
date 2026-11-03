@@ -30,6 +30,10 @@ struct RcControlState {
     bool run_allowed = false;       // 手动运动授权，与 manual_active 同步
     bool spin_requested = false;    // 右 Down：小陀螺（仅手动档）
     std::uint64_t start_event_id = 0;
+    // Dormant compatibility fields for bench examples; no RC clear gesture is produced.
+    bool clear_estop = false;
+    std::uint32_t clear_event_id = 0;
+    robotics::MessageStamp clear_stamp{};
     bool keyboard_mouse_selected = false;
     bool friction_requested = false;
     bool continuous_requested = false;

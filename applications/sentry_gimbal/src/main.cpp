@@ -184,7 +184,7 @@ int main() {
                 wheel_command.mode = ChassisMode::Disabled;
             if (wheel_command.mode != ChassisMode::Disabled) {
                 // Optional profile assigns the wheel to big Yaw; fixed spin is separate.
-                wheel_command.wz_rad_s = operator_state.remote.right_switch == RcSwitch::Down ? .5f : 0;
+                wheel_command.wz_rad_s = operator_state.spin_requested ? .5f : 0;
             }
             endpoint.submit(wheel_command);
         }

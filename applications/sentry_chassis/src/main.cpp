@@ -6,6 +6,7 @@
 #include <drivers/imu/bmi088_imu.hpp>
 #include <drivers/imu/imu_receiver.hpp>
 #include <robotics/vehicle/motion_profile.hpp>
+#include <robotics/chassis/reference_v4_motion.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <robotics/vehicle/big_yaw_profile.hpp>
 #include <robotics/vehicle/chassis_profile.hpp>
@@ -50,7 +51,8 @@ int main() {
     static ImuHeadingReference body_heading;
     static ChassisMotionAdapter motion(installed::chassisMotionConfig());
     const auto motion_config=installed::chassisMotionConfig();
-    const bool need_body=motion_config.frame!=ChassisMotionAdapter::Frame::Body || motion_config.compensation_enabled;
+    // Reference mode=1 requires BMI088 body yaw-rate compensation.
+    const bool need_body = true;
     const int body_error=need_body ? body.start() : 0;
     static BigYawExecutor big_axis(big_drive, installed::bigYawMotorConfig(), installed::bigYawExecutionConfig());
     int steer_error = installed::connections_confirmed ? steer_bus.attach(s0, s1, s2, s3) : -ENODEV;
@@ -92,7 +94,17 @@ int main() {
         if (rx.control.global_action != SafetyAction::Active || !rx.online ||
             !rx.local_boot_id || rx.control.receiver_boot_id != rx.local_boot_id)
             input.command.mode = ChassisMode::Disabled;
-        const auto body_sample=body_heading.update(need_body ? body.snapshot() : imu::Snapshot{},input.command.mode==ChassisMode::Disabled,now_us);
+        const auto body_snapshot = body.snapshot();
+        const auto body_sample = body_heading.update(body_snapshot, input.command.mode==ChassisMode::Disabled, now_us);
+        // Unlike our old Body-frame v4 implementation, the reference sends
+        // gimbal-relative translation. The absolute encoder zero is fixed.
+        const auto yaw_feedback = big_drive.snapshot();
+        const bool encoder_valid = yaw_feedback.feedback_fresh &&
+            (yaw_feedback.feedback.valid & motor::FeedbackPosition) &&
+            isFresh({yaw_feedback.feedback.timestamp_ms, 1, true}, now_ms, 100);
+        input.command = referenceV4ChassisToBody(input.command, encoder_valid,
+            yaw_feedback.feedback.position_rad, installed::reference_big_yaw_forward_zero_rad,
+            installed::reference_big_yaw.direction, installed::reference_big_yaw.gear_ratio);
         input.command=motion.update(input.command,body_sample,rx.gimbal_imu,rx.local_boot_id,input.command.mode==ChassisMode::Disabled,now_ms,rx.peer);
         input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
                                input.command.stamp.valid};
@@ -104,6 +116,23 @@ int main() {
                                         : chassis.suspend(now_us, WaitReason::Configuration, chassis_error, true);
         BigYawExecutionInputs big_input{};
         big_input.request = rx.big_yaw_request;
+        // The same left-switch control must stop both the wheels and big Yaw.
+        if (input.command.mode == ChassisMode::Disabled)
+            big_input.request.mode = BigYawMode::Disabled;
+        if (big_input.request.mode == BigYawMode::FollowCenter &&
+            !installed::big_yaw_heading_lock_enabled) {
+            // Local velocity backend accepts *joint-relative* speed; decode the
+            // reference's world-rate request using two real gyro observations.
+            const bool body_gyro_valid = body_snapshot.state == imu::State::Running &&
+                core::fresh(body_snapshot.sample.gyro_rad_s.stamp, now_us, 50000) &&
+                core::finite(body_snapshot.sample.gyro_rad_s.value);
+            if (!body_gyro_valid || !rx.gimbal_imu.valid)
+                big_input.request.mode = BigYawMode::Disabled;
+            else
+                big_input.request.target_rate_rad_s = referenceV4WorldToJointRate(
+                    big_input.request.target_rate_rad_s,
+                    body_snapshot.sample.gyro_rad_s.value.z, rx.gimbal_imu.yaw_rate_rad_s);
+        }
         big_input.head=rx.gimbal_imu;
         big_input.peer_boot_id=rx.peer.sender_boot_id;
         big_input.local_boot_id = rx.local_boot_id;

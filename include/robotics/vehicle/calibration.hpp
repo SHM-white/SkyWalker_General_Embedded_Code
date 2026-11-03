@@ -86,6 +86,9 @@ inline constexpr auto wheel = swerve_calibration_set == SwerveCalibrationSet::Re
                                   : legacy_wheel;
 // J4310 bus IDs are also unverified; MIT backend remains unchanged.
 inline constexpr MotorCalibration reference_big_yaw{6, 0x11, 1, -1, 0.5f, 1, 0};
+// Calibrated encoder forward zero in the reference firmware, 2026-10-28.
+// Confirm that the installed J4310 and CAN identity match before motor operation.
+inline constexpr float reference_big_yaw_forward_zero_rad = -1.132792f;
 inline constexpr float steer_position_kp = 40, steer_velocity_kp = 0.20f;
 // A/(motor-shaft rad/s); swerve_profile converts once to wheel-shaft units.
 inline constexpr float drive_rotor_velocity_kp = 0.0515502929687f;
