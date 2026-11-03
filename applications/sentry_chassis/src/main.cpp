@@ -50,7 +50,6 @@ int main() {
     static imu::ImuReceiver body(body_source,{.poll_interval_us=500,.priority=5});
     static ImuHeadingReference body_heading;
     static ChassisMotionAdapter motion(installed::chassisMotionConfig());
-    const auto motion_config=installed::chassisMotionConfig();
     // Reference mode=1 requires BMI088 body yaw-rate compensation.
     const bool need_body = true;
     const int body_error=need_body ? body.start() : 0;

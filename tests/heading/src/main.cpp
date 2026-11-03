@@ -87,7 +87,7 @@ ZTEST(heading, test_big_yaw_executor_mit_authority_timeout_and_recovery) {
     BigYawExecutor e(drive,motor_cfg,c);zassert_ok(e.begin());
     drive.markStarted();
     BigYawExecutionInputs in{};in.peer_online=in.transport_ready=true;in.local_boot_id=22;in.peer_boot_id=11;in.head=head();
-    in.request.mode=BigYawMode::ImuHeadingHold;in.request.receiver_boot_id=22;in.request.target_rate_rad_s=.5f;
+    in.request.mode=BigYawMode::FollowCenter;in.request.receiver_boot_id=22;in.request.target_rate_rad_s=.5f;
     in.request.source_age_ms=in.request.command_age_ms=0;in.request.stamp={100,1,true};in.request.permission={true,true,{100,1,true}};
     e.update(in,100000);
     drive.snapshot_.state=motor::MotorState::Active;drive.snapshot_.feedback.timestamp_ms=static_cast<std::uint64_t>(k_uptime_get());

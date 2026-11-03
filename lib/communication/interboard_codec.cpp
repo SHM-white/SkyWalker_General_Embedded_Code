@@ -29,6 +29,29 @@ int frame(BoardRole role, MessageId id, std::uint32_t seq, const std::uint8_t *p
 bool header(const FrameMeta &m, MessageId id, BoardRole role) {
     return m.message_id == id && m.sender_role == role && m.version == kInterBoardProtocolVersion;
 }
+// v4's on-wire mechanism state is the reference firmware's
+// Waiting/Starting/Running/Stopping/Fault/Disabled, not Motor::ExecutionState.
+std::uint8_t referenceExecutionState(ExecutionState state) {
+    switch (state) {
+    case ExecutionState::Waiting: return 0;      // Waiting
+    case ExecutionState::Recovering: return 1;   // Starting
+    case ExecutionState::Ready: return 1;        // Starting, ready is separately indicated
+    case ExecutionState::Active: return 2;       // Running
+    case ExecutionState::EStopLatched: return 4; // Fault
+    case ExecutionState::ConfigBlocked: return 4;// Fault
+    }
+    return 4;
+}
+ExecutionState localExecutionState(std::uint8_t value) {
+    switch (value) {
+    case 0: return ExecutionState::Waiting;
+    case 1: return ExecutionState::Recovering;
+    case 2: return ExecutionState::Active;
+    case 3: return ExecutionState::Recovering;
+    case 4: return ExecutionState::ConfigBlocked;
+    default: return ExecutionState::Waiting; // reference Disabled=5
+    }
+}
 }
 int InterBoardCodec::decodeHeartbeat(const FrameMeta &m, const std::uint8_t *p, std::size_t n, BoardHeartbeat &out) {
     if (!p || n != 20 || m.version != kInterBoardProtocolVersion || m.message_id != MessageId::Heartbeat ||
@@ -147,7 +170,7 @@ int InterBoardCodec::decodeChassisFeedback(const FrameMeta &m, const std::uint8_
         p[2] > 1 || p[3] > 1 || (loadLe32(p + 12) & ~3u))
         return -EINVAL;
     ChassisFeedbackSummary t{};
-    t.execution_state = static_cast<ExecutionState>(p[0]);
+    t.execution_state = localExecutionState(p[0]);
     t.safety_state = static_cast<SafetyState>(p[1]);
     t.ready = p[2];
     t.armed = p[3];
@@ -168,7 +191,7 @@ int InterBoardCodec::decodeChassisFeedback(const FrameMeta &m, const std::uint8_
 int InterBoardCodec::encodeChassisFeedback(const ChassisFeedbackSummary &t, std::uint32_t seq, std::uint8_t *out,
                                            std::size_t cap) {
     std::uint8_t p[32]{};
-    p[0] = static_cast<std::uint8_t>(t.execution_state);
+    p[0] = referenceExecutionState(t.execution_state);
     p[1] = static_cast<std::uint8_t>(t.safety_state);
     p[2] = t.ready;
     p[3] = t.armed;
@@ -263,7 +286,7 @@ int InterBoardCodec::decodeBigYawRequest(const FrameMeta &m, const std::uint8_t 
 int InterBoardCodec::encodeBigYawFeedback(const BigYawFeedback &t, std::uint32_t seq, std::uint8_t *out,
                                           std::size_t cap) {
     std::uint8_t p[24]{};
-    p[0] = static_cast<std::uint8_t>(t.execution_state);
+    p[0] = referenceExecutionState(t.execution_state);
     p[1] = t.ready;
     p[2] = t.armed;
     p[3] = t.valid;
@@ -283,7 +306,7 @@ int InterBoardCodec::decodeBigYawFeedback(const FrameMeta &m, const std::uint8_t
         p[2] > 1 || p[3] > 1)
         return -EINVAL;
     BigYawFeedback t{};
-    t.execution_state = static_cast<ExecutionState>(p[0]);
+    t.execution_state = localExecutionState(p[0]);
     t.ready = p[1];
     t.armed = p[2];
     t.valid = p[3];
