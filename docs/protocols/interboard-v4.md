@@ -369,3 +369,32 @@ Link 在本地运行期保留最多 8 个已退役的 peer Boot ID，拒绝已�
 0/1 保持 Disabled/FollowCenter 含义。mode=2 的 target_rate 是操作员世界角速度，
 只有选择航向锁定后端并确认 MIT/参考系的执行器可接收。旧固件遇到 mode=2 会拒绝。
 航向、指令、授权独立计龄，IMU 数据不赋予运动权限。
+
+## 参考底盘部署配置（2026-11-03）
+
+与 `JJL0612/sentry_onlychassis` 联调时，云台侧的**唯一发送真值来源**是
+`include/robotics/vehicle/reference_chassis_link_profile.hpp`：
+
+| 常量 | 默认 | 含义 |
+| --- | --- | --- |
+| `reference_chassis_link_enabled` | true | 本次部署的对端是参考底盘 |
+| `reference_chassis_imu_heading_confirmed` | false | 对端已实现 0x0405/40 B、0x0301 授权门控并真正执行 |
+| `reference_chassis_native_velocity_confirmed` | false | 对端大 Yaw 处于原生速度模式，方向、零位和速率已实机核对 |
+| `reference_chassis_imu_heading_authorized` | 派生 | 前三项全真才允许发送 `ImuHeadingHold` |
+
+两个能力确认位默认关闭：先完成无电机输出的协议收发，再逐项置 true。发送 mode=2
+还要求 `startup_heading_alignment_confirmed`、头部 IMU 有效、遥控授权有效且非急停；
+任一条件不满足时保持 `Disabled + 0`，不得降级成未经确认的 mode=1。
+`motion_profile.hpp` 的 `big_yaw_heading_lock_enabled` 只选择本仓库本地 MIT 执行后端，
+不再参与线上模式决策；不要为同一线上行为维护第二个可独立开启的开关。
+
+双方必须使用同一份模式语义：
+
+| mode | 名称 | `target_rate_rad_s` 含义 | 接收方要求 |
+| ---: | --- | --- | --- |
+| 0 | Disabled | 恒 0，撤销大 Yaw 运动 | 无条件立即停止 |
+| 1 | FollowCenter | 大 Yaw 关节相对速度 rad/s | 旧编码器/串级后端；不得当作世界航向速度 |
+| 2 | ImuHeadingHold | 期望头部对世界角速度 rad/s | 原生速度/航向后端 + 有效头部 IMU + 新鲜授权 |
+
+参考底盘在实现 0x0405 40 字节解码、0x0301 会话绑定与授权门控、以及禁止把 mode=1
+解释为世界角速度之前，上表确认位必须保持 false。心跳在线不等于运行授权。

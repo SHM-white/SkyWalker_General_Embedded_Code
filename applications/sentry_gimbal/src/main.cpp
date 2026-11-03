@@ -11,6 +11,7 @@
 #include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
 #include <robotics/vehicle/motion_profile.hpp>
+#include <robotics/vehicle/reference_chassis_link_profile.hpp>
 #include <zephyr/drivers/regulator.h>
 #include "../../../samples/robotics/common/operator_controls.hpp"
 #include "../../../samples/robotics/common/rc_controls.hpp"
@@ -36,12 +37,12 @@ std::uint32_t age(const core::Stamp &stamp, core::TimeUs now_us) {
 int main() {
     static installed::Diagnostics diagnostics;
     diagnostics.start("sentry_gimbal", "gimbal", "yaw=1rad/s; pitch=0.8rad/s; vx,vy=0.3m/s; wz=0.5rad/s");
-    static communication::ConfiguredInterBoardTransport transport(
-        {.kind = communication::InterBoardTransportKind::Uart,
-         .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))}, &link_dma);
+    static communication::ConfiguredInterBoardTransport transport({.kind = communication::InterBoardTransportKind::Uart,
+                                                                   .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
+                                                                  &link_dma);
     static communication::InterBoardEndpoint endpoint(transport, {BoardRole::GimbalController});
     static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
-                                                 samples::control::receiverConfig());
+                                                samples::control::receiverConfig());
     static RemoteSource remote_source(remote);
     static CommandManager commands(installed::manualCommandConfig());
     static imu::DmImuCanSource head_source(installed::headSensorConfig());
@@ -50,9 +51,9 @@ int main() {
     static motor::CanBus yaw_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
     static motor::CanBus pitch_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
     static motor::Group group(yaw, pitch);
-    static GimbalExecutor gimbal(yaw, pitch, group,
-                                 installed::yawMotorConfig(), installed::yawAxisConfig(),
-                                 installed::pitchMotorConfig(), installed::pitchAxisConfig(), installed::gimbalExecutionConfig());
+    static GimbalExecutor gimbal(yaw, pitch, group, installed::yawMotorConfig(), installed::yawAxisConfig(),
+                                 installed::pitchMotorConfig(), installed::pitchAxisConfig(),
+                                 installed::gimbalExecutionConfig());
     static ImuHeadingReference head_heading;
     static InertialGimbalAdapter inertial(installed::manualInertialConfig());
     static YawCenteringController centering(installed::manualCenteringConfig());
@@ -68,16 +69,16 @@ int main() {
         pitch_error = pitch_bus.start();
     const bool yaw_started = yaw_error == 0, pitch_started = pitch_error == 0;
     const int control_error = yaw_started && pitch_started ? gimbal.begin() : -ENODEV;
-    const int power_error = installed::connections_confirmed
-                                ? regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1))) : -ENODEV;
+    const int power_error = installed::connections_confirmed ? regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)))
+                                                             : -ENODEV;
     diagnostics.event("command", command_error);
     diagnostics.event("head_imu", head_error);
     diagnostics.event("yaw_bus", yaw_error);
     diagnostics.event("pitch_bus", pitch_error);
     diagnostics.event("gimbal", control_error);
     diagnostics.event("motor_rail", power_error);
-    const bool setup_ready = command_error == 0 && head_error == 0 && yaw_error == 0 &&
-                             pitch_error == 0 && control_error == 0 && power_error == 0;
+    const bool setup_ready = command_error == 0 && head_error == 0 && yaw_error == 0 && pitch_error == 0 &&
+                             control_error == 0 && power_error == 0;
     samples::control::RcControlAdapter controls;
     samples::control::OperatorControlPublisher operator_publisher;
     communication::RemoteReceiver::Snapshot remote_frame{};
@@ -91,16 +92,15 @@ int main() {
         endpoint.poll(now_ms);
         (void)remote.snapshot(remote_frame);
         auto operator_state = controls.update(remote_frame.remote, now_ms);
-        if (operator_publisher.publish(endpoint, operator_state.run_allowed, false,
-                                       operator_state.remote.stamp, operator_state.clear_event_id,
-                                       operator_state.clear_stamp, now_ms)) {
+        if (operator_publisher.publish(endpoint, operator_state.run_allowed, false, operator_state.remote.stamp,
+                                       operator_state.clear_event_id, operator_state.clear_stamp, now_ms)) {
             controls.withdraw();
             operator_state.run_allowed = false;
         }
         commands.setOperatorGate(operator_state.run_allowed, operator_state.clear_event_id);
         (void)commands.snapshot(frame);
         const auto head_frame = head.snapshot();
-        const auto heading=head_heading.update(head_frame,!operator_state.run_allowed,now_us);
+        const auto heading = head_heading.update(head_frame, !operator_state.run_allowed, now_us);
         InertialGimbalInputs adaptation{};
         adaptation.command = frame.decision.command.gimbal;
         if (!operator_state.run_allowed)
@@ -123,18 +123,16 @@ int main() {
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
         YawCenteringInputs follow{};
         follow.joint_yaw_rad = adaptation.yaw.feedback.position_rad;
-        follow.joint_stamp = {adaptation.yaw.feedback.timestamp_ms * 1000,
-                              adaptation.yaw.feedback.timestamp_ms,
+        follow.joint_stamp = {adaptation.yaw.feedback.timestamp_ms * 1000, adaptation.yaw.feedback.timestamp_ms,
                               adaptation.yaw.feedback_fresh && adaptation.yaw.position_reference_valid &&
                                   bool(adaptation.yaw.feedback.valid & motor::FeedbackPosition)};
         follow.source_stamp = adaptation.source_stamp;
         follow.enabled = operator_state.run_allowed && input.command.mode != GimbalMode::Disabled &&
                          !operator_state.clear_estop;
-        follow.head_stable = adapted.yaw_output_valid && adapted.pitch_output_valid &&
-                             status.state == RunState::Active;
-        const OutputPermission movement_permission{
-            operator_state.fresh, operator_state.run_allowed && installed::connections_confirmed,
-            operator_state.remote.stamp};
+        follow.head_stable = adapted.yaw_output_valid && adapted.pitch_output_valid && status.state == RunState::Active;
+        const OutputPermission movement_permission{operator_state.fresh,
+                                                   operator_state.run_allowed && installed::connections_confirmed,
+                                                   operator_state.remote.stamp};
         follow.permission_valid = movement_permission.valid && movement_permission.enabled &&
                                   isFresh(movement_permission.stamp, now_ms, 300);
         const auto centered = centering.update(follow, now_us);
@@ -151,29 +149,37 @@ int main() {
                 request.mode = BigYawMode::FollowCenter;
                 request.target_rate_rad_s = installed::big_yaw_wire_direction * centered.velocity_rad_s;
             }
-            if (installed::big_yaw_heading_lock_enabled) {
-                request.mode=BigYawMode::Disabled;
-                request.source_sequence=operator_state.remote.stamp.sequence;
-                request.source_age_ms=request.command_age_ms=age(operator_state.remote.stamp,now_ms);
+            if (installed::reference_chassis_imu_heading_authorized) {
+                // 对端确认后才能发 mode=2；本板 MIT 后端是否启用不再决定线上模式。
+                // 任何一项前置条件不满足都保持 Disabled+0，不得降级为未经确认的 mode=1。
+                request.mode = BigYawMode::Disabled;
+                request.target_rate_rad_s = 0;
+                request.source_sequence = operator_state.remote.stamp.sequence;
+                request.source_age_ms = request.command_age_ms = age(operator_state.remote.stamp, now_ms);
                 if (operator_state.fresh && operator_state.run_allowed && heading.valid &&
                     installed::startup_heading_alignment_confirmed && !operator_state.clear_estop) {
-                    request.mode=BigYawMode::ImuHeadingHold;
-                    float rate=std::clamp(float(operator_state.remote.analog.wheel)/660.f,-1.f,1.f);
-                    request.target_rate_rad_s=std::fabs(rate)<.05f ? 0 : rate;
+                    request.mode = BigYawMode::ImuHeadingHold;
+                    // mode=2 的 target 是操作员希望的头部世界角速度，不是小 Yaw 居中的关节速度。
+                    float rate = std::clamp(float(operator_state.remote.analog.wheel) / 660.f, -1.f, 1.f);
+                    request.target_rate_rad_s = std::fabs(rate) < .05f ? 0 : rate;
                 }
             }
-            const auto session=endpoint.snapshot();
+            const auto session = endpoint.snapshot();
             if (session.online) {
                 GimbalImuYaw sample{};
-                sample.valid=heading.valid;
-                sample.yaw_rad=heading.yaw_rad; sample.yaw_rate_rad_s=heading.rate_rad_s;
-                sample.zero_generation=heading.generation;
-                sample.sample_sequence=static_cast<std::uint32_t>(heading.stamp.sequence);
+                sample.valid = heading.valid;
+                sample.yaw_rad = heading.yaw_rad;
+                sample.yaw_rate_rad_s = heading.rate_rad_s;
+                sample.zero_generation = heading.generation;
+                sample.sample_sequence = static_cast<std::uint32_t>(heading.stamp.sequence);
                 // Ceiling age: transporting sub-ms samples must not make them younger.
-                sample.source_age_ms=heading.stamp.valid && now_us>=heading.stamp.time_us
-                    ? static_cast<std::uint32_t>(std::min<std::uint64_t>((now_us-heading.stamp.time_us+999)/1000,UINT32_MAX)) : UINT32_MAX;
-                sample.receiver_boot_id=session.peer.sender_boot_id;
-                sample.stamp={now_ms,request_sequence+1,true};
+                sample.source_age_ms = heading.stamp.valid && now_us >= heading.stamp.time_us
+                                           ? static_cast<std::uint32_t>(
+                                                 std::min<std::uint64_t>((now_us - heading.stamp.time_us + 999) / 1000,
+                                                                         UINT32_MAX))
+                                           : UINT32_MAX;
+                sample.receiver_boot_id = session.peer.sender_boot_id;
+                sample.stamp = {now_ms, request_sequence + 1, true};
                 endpoint.submitGimbalImuYaw(sample);
             }
             // Stop remains newly produced even when IMU/motor initialization failed.
@@ -182,9 +188,9 @@ int main() {
             auto wheel_command = frame.decision.command.chassis;
             if (!operator_state.run_allowed)
                 wheel_command.mode = ChassisMode::Disabled;
-            if (installed::big_yaw_heading_lock_enabled && wheel_command.mode!=ChassisMode::Disabled) {
+            if (installed::reference_chassis_imu_heading_authorized && wheel_command.mode != ChassisMode::Disabled) {
                 // Optional profile assigns the wheel to big Yaw; fixed spin is separate.
-                wheel_command.wz_rad_s=operator_state.remote.right_switch==RcSwitch::Down ? .5f : 0;
+                wheel_command.wz_rad_s = operator_state.remote.right_switch == RcSwitch::Down ? .5f : 0;
             }
             endpoint.submit(wheel_command);
         }
@@ -200,15 +206,15 @@ int main() {
         }
         endpoint.setStatus(status);
         const bool imu_fresh = core::fresh(head_frame.sample.orientation.stamp, now_us, 20000);
-        auto reason = !setup_ready ? installed::DiagnosticReason::InitFailed
-                    : !operator_state.fresh ? installed::DiagnosticReason::RemoteStale
-                    : !operator_state.run_allowed ? installed::DiagnosticReason::Disarmed
-                    : !installed::imu_mounting_confirmed ? installed::DiagnosticReason::Configuration
-                    : !imu_fresh ? installed::DiagnosticReason::ImuStale
-                    : !adaptation.yaw.feedback_fresh || !adaptation.pitch.feedback_fresh
-                        ? installed::DiagnosticReason::FeedbackStale
-                    : status.state == RunState::Active ? installed::DiagnosticReason::Ready
-                                                      : installed::DiagnosticReason::CommandStale;
+        auto reason = !setup_ready                         ? installed::DiagnosticReason::InitFailed
+                      : !operator_state.fresh              ? installed::DiagnosticReason::RemoteStale
+                      : !operator_state.run_allowed        ? installed::DiagnosticReason::Disarmed
+                      : !installed::imu_mounting_confirmed ? installed::DiagnosticReason::Configuration
+                      : !imu_fresh                         ? installed::DiagnosticReason::ImuStale
+                      : !adaptation.yaw.feedback_fresh || !adaptation.pitch.feedback_fresh
+                          ? installed::DiagnosticReason::FeedbackStale
+                      : status.state == RunState::Active ? installed::DiagnosticReason::Ready
+                                                         : installed::DiagnosticReason::CommandStale;
         diagnostics.status({.reason = reason,
                             .valid = adaptation.yaw.feedback_fresh,
                             .enabled = status.state == RunState::Active,

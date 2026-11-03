@@ -47,6 +47,11 @@ Body 输入不依赖绝对参考。头部 IMU 没有独立 Boot ID，短于保�
 默认均为 false。只有同时明确确认后才启用。原 FollowCenter/VelocityMotor 路径保留且默认使用。
 选择新后端后不自动退回旧路径；失效要停机清历史。
 
+云台与参考底盘联调时，发送 `BigYawMode::ImuHeadingHold` 的唯一开关是
+`reference_chassis_link_profile.hpp` 的 `reference_chassis_link_enabled`、
+`reference_chassis_imu_heading_confirmed`、`reference_chassis_native_velocity_confirmed`，
+默认关闭；`big_yaw_heading_lock_enabled` 只选择本地 MIT 执行后端，不再决定线上模式。
+
 滚轮积分目标世界 yaw，滚轮回中时锁定当前实测 yaw；误差取 ±π 最短分支并限 ±π/2，
 外层 P 生成世界角速度目标，内层使用实测 IMU yaw rate PI 生成**关节力矩 N·m**，
 经安装方向和外部传动比变换一次，再通过 Motor::setTorque（带 enable generation）进入 MIT。

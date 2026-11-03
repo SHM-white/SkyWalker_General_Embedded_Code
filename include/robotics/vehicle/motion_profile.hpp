@@ -3,6 +3,9 @@
 namespace skywalker::robotics::vehicle {
 // Bench-only opt-ins. Confirm common forward startup pose and both IMU mounting transforms.
 inline constexpr bool startup_heading_alignment_confirmed = false;
+// 只选择本仓库本地大 Yaw 执行器（MIT 力矩后端）。它不再是线上模式开关：
+// 发送 BigYawMode::ImuHeadingHold 的唯一真值来源见 reference_chassis_link_profile.hpp，
+// 不要在这里增加第二个可独立开启的联动开关。
 inline constexpr bool big_yaw_heading_lock_enabled = false;
 inline constexpr bool big_yaw_mit_mode_confirmed = false;
 // Confirm actual CTRL_MODE=3, CAN ID / feedback ID and motor direction on the
