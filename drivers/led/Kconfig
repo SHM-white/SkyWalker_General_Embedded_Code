@@ -1,0 +1,18 @@
+config SKYWALKER_STATUS_LED
+    bool "Non-blocking status LED pattern player"
+    depends on CPP && LED_STRIP && MULTITHREADING
+    help
+        Play static WS2812 color/time patterns from a low-priority worker.
+        Boards without an enabled led-strip alias use a no-op C++ facade.
+
+config SKYWALKER_STATUS_LED_STACK_SIZE
+    int "Status LED worker stack size"
+    depends on SKYWALKER_STATUS_LED
+    default 2048
+    range 1024 8192
+
+config SKYWALKER_STATUS_LED_PRIORITY
+    int "Status LED preemptible thread priority (larger means lower priority)"
+    depends on SKYWALKER_STATUS_LED
+    default 12
+    range 0 15

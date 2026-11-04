@@ -3,3 +3,4 @@
 # Skywalker drivers — add subdirectories as drivers are created
 add_subdirectory_ifdef(CONFIG_SKYWALKER_IMU imu)
 add_subdirectory_ifdef(CONFIG_SKYWALKER_DRIVER_MOTOR motor)
+add_subdirectory_ifdef(CONFIG_SKYWALKER_STATUS_LED led)

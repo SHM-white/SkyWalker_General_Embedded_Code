@@ -9,6 +9,8 @@
 #include <robotics/command/receiver_sources.hpp>
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
+#include <robotics/vehicle/led_status.hpp>
+#include <drivers/led/status_led.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
 #include <robotics/gimbal/world_yaw_window_follow.hpp>
 #include <robotics/vehicle/motion_profile.hpp>
@@ -37,6 +39,11 @@ std::uint32_t age(const core::Stamp &stamp, core::TimeUs now_us) {
 int main() {
     static installed::Diagnostics diagnostics;
     diagnostics.start("sentry_gimbal", "gimbal", "yaw=1rad/s; pitch=0.8rad/s; vx,vy=0.3m/s; wz=0.5rad/s");
+    static led::StatusLed status_led;
+    const int status_led_error = status_led.start();
+    if constexpr (led::StatusLed::available)
+        diagnostics.event("status_led", status_led_error);
+    (void)status_led.setStatus(led::LedStatus::Initializing);
     static communication::ConfiguredInterBoardTransport transport({.kind = communication::InterBoardTransportKind::Uart,
                                                                    .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
                                                                   &link_dma);
@@ -212,6 +219,8 @@ int main() {
                           ? installed::DiagnosticReason::FeedbackStale
                       : status.state == RunState::Active ? installed::DiagnosticReason::Ready
                                                          : installed::DiagnosticReason::CommandStale;
+        (void)status_led.setStatus(installed::statusLedFor(reason, status.state == RunState::Active,
+                                                            false, status.error));
         diagnostics.status({.reason = reason,
                             .valid = adaptation.yaw.feedback_fresh,
                             .enabled = status.state == RunState::Active,

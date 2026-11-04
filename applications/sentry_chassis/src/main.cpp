@@ -11,6 +11,8 @@
 #include <robotics/vehicle/big_yaw_profile.hpp>
 #include <robotics/vehicle/chassis_profile.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
+#include <robotics/vehicle/led_status.hpp>
+#include <drivers/led/status_led.hpp>
 #include <zephyr/drivers/regulator.h>
 
 namespace {
@@ -28,6 +30,11 @@ std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
 int main() {
     static installed::Diagnostics diagnostics;
     diagnostics.start("sentry_chassis", "chassis", "steer=0.8A; drive=0.5A; big-yaw=1rad/s");
+    static led::StatusLed status_led;
+    const int status_led_error = status_led.start();
+    if constexpr (led::StatusLed::available)
+        diagnostics.event("status_led", status_led_error);
+    (void)status_led.setStatus(led::LedStatus::Initializing);
     static communication::ConfiguredInterBoardTransport transport(
         {.kind = communication::InterBoardTransportKind::Uart,
          .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))}, &link_dma);
@@ -167,6 +174,10 @@ int main() {
                                 ? installed::DiagnosticReason::FeedbackStale
                             : status.state == RunState::Active || big_status.state == RunState::Active
                                 ? installed::DiagnosticReason::Ready : installed::DiagnosticReason::CommandStale;
+        const int execution_error = status.error < 0 ? status.error : big_status.error;
+        (void)status_led.setStatus(installed::statusLedFor(
+            reason, status.state == RunState::Active || big_status.state == RunState::Active,
+            false, execution_error));
         diagnostics.status({.reason = reason,
                             .valid = feedback.valid,
                             .enabled = status.state == RunState::Active || big_status.state == RunState::Active,
