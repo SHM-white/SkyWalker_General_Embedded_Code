@@ -224,7 +224,7 @@ jobs:
           retention-days: 7
 
   variants:
-    name: MC02 staged configs and RM Type-C smoke
+    name: MC02 staged hardware configurations
     needs: prepare-image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -262,15 +262,6 @@ jobs:
             --inline-logs --jobs 2 \
             -O build/staged-hardware-variants
 
-      - name: Build alternate board smoke test
-        if: success()
-        run: |
-          set -euo pipefail
-          west build -p always -b rm_typec \
-            -d build/ci/rm_typec_dji_position \
-            skywalker_code/samples/motor/dji_position_control \
-            -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code"
-
       - name: Upload hardware build reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -282,3 +273,47 @@ jobs:
             build/staged-hardware-variants/**/*.log
           if-no-files-found: warn
           retention-days: 14
+
+  rm-typec-smoke:
+    name: RM Type-C motor and USB CDC smoke
+    needs: prepare-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: ${{ needs.prepare-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user 0
+    env:
+      ZEPHYR_BASE: /opt/skywalker-zephyr/zephyr
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: skywalker_code
+
+      - name: Link prebuilt Zephyr modules
+        run: bash skywalker_code/.github/ci/link-prebuilt-workspace.sh
+
+      - name: Build RM Type-C motor smoke
+        run: |
+          set -euo pipefail
+          west build -p always -b rm_typec \
+            -d build/ci/rm_typec_dji_position \
+            skywalker_code/samples/motor/dji_position_control \
+            -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code"
+
+      - name: Build RM Type-C USB CDC ACM smoke
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          west build -p always -b rm_typec \
+            -d build/ci/rm_typec_usb_cdc \
+            "$ZEPHYR_BASE/samples/subsys/usb/cdc_acm" \
+            -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code"

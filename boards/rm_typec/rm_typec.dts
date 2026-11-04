@@ -92,6 +92,10 @@
         die-temp0 = &die_temp;
         usart1 = &usart6;
         usart2 = &usart1;
+        /* Logical UART fallbacks for code shared with MC02; not extra ports. */
+        uart1 = &usart1;
+        uart2 = &cdc_acm_uart0;
+        usb-cdc-uart = &cdc_acm_uart0;
         telemetry-uart = &usart6;
         remote-uart = &usart3;
         can1 = &can1;
@@ -188,6 +192,7 @@
 zephyr_udc0: &usbotg_fs {
     pinctrl-0 = <&usb_otg_fs_dm_pa11 &usb_otg_fs_dp_pa12>;
     pinctrl-names = "default";
+    maximum-speed = "full-speed";
     status = "okay";
 
     cdc_acm_uart0: cdc_acm_uart0 {

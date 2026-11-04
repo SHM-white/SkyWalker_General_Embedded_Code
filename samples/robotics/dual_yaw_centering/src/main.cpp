@@ -41,7 +41,9 @@ communication::InterBoardEndpoint::Config endpointConfig() {
     return communication::InterBoardEndpoint::Config{role};
 }
 communication::InterBoardEndpoint endpoint(transport, endpointConfig());
-atomic_t execution_paused = 0, input_paused = 0, status_paused = 0, estop = 0, clear_requested = 0;
+#if !defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
+atomic_t input_paused = 0;
+#endif
 void commTask(void *, void *, void *) {
     for (;;) {
         endpoint.poll(k_uptime_get());
