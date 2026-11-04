@@ -19,14 +19,13 @@ void fillManualMotion(const OperatorIntent &i, const CommandArbiter::Config &c, 
     out.chassis.wz_rad_s = scale(i.chassis_wz_norm, c.max_chassis_wz_rad_s);
     out.gimbal.mode = GimbalMode::Rate;
     out.gimbal.source = i.source;
-    out.gimbal.yaw_rate_rad_s = i.mouse_rate_mapping
-                                  ? std::clamp(i.mouse_yaw_rate_rad_s, -c.max_gimbal_yaw_rate_rad_s,
-                                               c.max_gimbal_yaw_rate_rad_s)
-                                  : scale(i.gimbal_yaw_rate_norm, c.max_gimbal_yaw_rate_rad_s);
+    out.gimbal.yaw_rate_rad_s = i.mouse_rate_mapping ? std::clamp(i.mouse_yaw_rate_rad_s, -c.max_gimbal_yaw_rate_rad_s,
+                                                                  c.max_gimbal_yaw_rate_rad_s)
+                                                     : scale(i.gimbal_yaw_rate_norm, c.max_gimbal_yaw_rate_rad_s);
     out.gimbal.pitch_rate_rad_s = i.mouse_rate_mapping
-                                    ? std::clamp(i.mouse_pitch_rate_rad_s, -c.max_gimbal_pitch_rate_rad_s,
-                                                 c.max_gimbal_pitch_rate_rad_s)
-                                    : scale(i.gimbal_pitch_rate_norm, c.max_gimbal_pitch_rate_rad_s);
+                                      ? std::clamp(i.mouse_pitch_rate_rad_s, -c.max_gimbal_pitch_rate_rad_s,
+                                                   c.max_gimbal_pitch_rate_rad_s)
+                                      : scale(i.gimbal_pitch_rate_norm, c.max_gimbal_pitch_rate_rad_s);
 }
 }
 int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
@@ -58,7 +57,7 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     n.source = shooter_selectable
                    ? (r.right_switch == RcSwitch::Middle ? ControlSource::KeyboardMouse : ControlSource::Remote)
                    : (!physical && r.right_switch == RcSwitch::Up ? ControlSource::KeyboardMouse
-                                                                 : ControlSource::Remote);
+                                                                  : ControlSource::Remote);
     auto norm = [&](float x) {
         x = std::clamp(x / config_.channel_range, -1.0f, 1.0f);
         return std::fabs(x) <= config_.analog_deadband
@@ -347,8 +346,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         n.command.shooter = {};
     if (n.command.gimbal.source != ControlSource::Vision)
         n.selected_vision = {};
-    if ((n.command.shooter.mode == ShooterMode::FireContinuous ||
-         n.command.shooter.mode == ShooterMode::FireSingle) &&
+    if ((n.command.shooter.mode == ShooterMode::FireContinuous || n.command.shooter.mode == ShooterMode::FireSingle) &&
         (n.command.gimbal.mode == GimbalMode::Hold || n.command.gimbal.mode == GimbalMode::Disabled)) {
         n.command.shooter.mode = ShooterMode::Ready;
         n.command.shooter.source = i.source;

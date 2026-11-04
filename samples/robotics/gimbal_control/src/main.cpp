@@ -109,11 +109,13 @@ void gimbalTask(void *, void *, void *) {
         const bool requested = fresh && !estop_latched && operator_state.run_allowed &&
                                remote.left_switch == RcSwitch::Middle;
         const float yaw_rate = requested ? board_config::yaw_direction *
-            samples::control::RcControlAdapter::normalize(remote.analog.right_x) *
-            board_config::yaw.max_rate_rad_s : 0.0f;
+                                               samples::control::RcControlAdapter::normalize(remote.analog.right_x) *
+                                               board_config::yaw.max_rate_rad_s
+                                         : 0.0f;
         const float pitch_rate = requested ? board_config::pitch_direction *
-            samples::control::RcControlAdapter::normalize(remote.analog.right_y) *
-            board_config::pitch.max_rate_rad_s : 0.0f;
+                                                 samples::control::RcControlAdapter::normalize(remote.analog.right_y) *
+                                                 board_config::pitch.max_rate_rad_s
+                                           : 0.0f;
         if (!requested) {
             gimbal.disable();
             enable_error = yaw_error = pitch_error = 0;
@@ -175,13 +177,12 @@ void gimbalTask(void *, void *, void *) {
             if (now >= next_status) {
                 next_status = now + 1000;
                 LOG_INF("VOFA seq=%u send=%d run=%d; fresh(y,p)=%d,%d ref=%d,%d output=%d,%d issue=%d,%d",
-                        telemetry_sequence, vofa_ret < 0 ? vofa_ret : last_send_error, requested,
-                        ys.feedback_fresh, ps.feedback_fresh, ys.position_reference_valid,
-                        ps.position_reference_valid, yaw_output, pitch_output,
-                        requested ? static_cast<int>(yt.issue) : -1,
+                        telemetry_sequence, vofa_ret < 0 ? vofa_ret : last_send_error, requested, ys.feedback_fresh,
+                        ps.feedback_fresh, ys.position_reference_valid, ps.position_reference_valid, yaw_output,
+                        pitch_output, requested ? static_cast<int>(yt.issue) : -1,
                         requested ? static_cast<int>(pt.issue) : -1);
-                LOG_INF("enable=%d update(y,p)=%d,%d commit=%d,%d", enable_error,
-                        yaw_error, pitch_error, yaw_commit, pitch_commit);
+                LOG_INF("enable=%d update(y,p)=%d,%d commit=%d,%d", enable_error, yaw_error, pitch_error, yaw_commit,
+                        pitch_commit);
             }
         }
         k_sleep(K_MSEC(5));

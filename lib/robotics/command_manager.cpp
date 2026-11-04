@@ -19,8 +19,7 @@ bool matches(SourceRole role, const SourceValue &value) {
 }
 CommandManager::CommandManager(const Config &config)
     : arbiter_(config), require_permissions_(config.require_referee_for_motion),
-      permission_timeout_ms_(config.permission_timeout_ms),
-      require_external_gate_(config.require_external_run_gate) {
+      permission_timeout_ms_(config.permission_timeout_ms), require_external_gate_(config.require_external_run_gate) {
 }
 void CommandManager::setOperatorGate(bool allowed, std::uint32_t session) {
     if (k_is_in_isr())
@@ -204,9 +203,8 @@ void CommandManager::run() {
             next.observed.run_allowed = gate.allowed && !safe_gate_latched;
         }
         const auto permission_available = [&](const OutputPermission &permission) {
-            return !require_permissions_ ||
-                   (permission.valid && permission.enabled &&
-                    isFresh(permission.stamp, now_ms, permission_timeout_ms_));
+            return !require_permissions_ || (permission.valid && permission.enabled &&
+                                             isFresh(permission.stamp, now_ms, permission_timeout_ms_));
         };
         const bool output_allowed = permission_available(next.observed.referee.robot.shooter_output) &&
                                     permission_available(next.observed.referee.robot.gimbal_output);

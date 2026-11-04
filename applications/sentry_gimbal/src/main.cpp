@@ -104,9 +104,10 @@ int main() {
         static bool was_peer_online = false;
         const auto peer_state = endpoint.snapshot();
         const bool peer_revoked = (was_peer_online && !peer_state.online) ||
-            (last_peer_boot && peer_state.peer.sender_boot_id &&
-             last_peer_boot != peer_state.peer.sender_boot_id);
-        if (peer_state.peer.sender_boot_id) last_peer_boot = peer_state.peer.sender_boot_id;
+                                  (last_peer_boot && peer_state.peer.sender_boot_id &&
+                                   last_peer_boot != peer_state.peer.sender_boot_id);
+        if (peer_state.peer.sender_boot_id)
+            last_peer_boot = peer_state.peer.sender_boot_id;
         was_peer_online = peer_state.online;
         if (peer_revoked) {
             controls.withdraw();
@@ -139,16 +140,16 @@ int main() {
                                                    operator_state.remote.stamp};
         const bool joint_valid = adaptation.yaw.feedback_fresh && adaptation.yaw.position_reference_valid &&
                                  bool(adaptation.yaw.feedback.valid & motor::FeedbackPosition);
-        const bool following = movement_permission.valid && movement_permission.enabled &&
-                               heading.valid && joint_valid && adapted.yaw_output_valid &&
-                               adapted.pitch_output_valid && status.state == RunState::Active;
+        const bool following = movement_permission.valid && movement_permission.enabled && heading.valid &&
+                               joint_valid && adapted.yaw_output_valid && adapted.pitch_output_valid &&
+                               status.state == RunState::Active;
         // Reference v4 mode=1 carries world rate, not the joint-relative centering rate.
         // The recent head-world yaw mean lets big Yaw follow small Yaw without
         // fighting a normal manual aiming motion.
         const float joint_offset = installed::small_yaw.direction *
                                    (adaptation.yaw.feedback.position_rad - installed::yaw_center_rad);
-        const auto world_follow = world_follower.update(
-            heading.yaw_rad - joint_offset, joint_offset, now_us, following);
+        const auto world_follow = world_follower.update(heading.yaw_rad - joint_offset, joint_offset, now_us,
+                                                        following);
         if (now_ms >= next_send_ms) {
             next_send_ms = now_ms + 10;
             BigYawRequest request{};
@@ -219,8 +220,8 @@ int main() {
                           ? installed::DiagnosticReason::FeedbackStale
                       : status.state == RunState::Active ? installed::DiagnosticReason::Ready
                                                          : installed::DiagnosticReason::CommandStale;
-        (void)status_led.setStatus(installed::statusLedFor(reason, status.state == RunState::Active,
-                                                            false, status.error));
+        (void)status_led.setStatus(
+            installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
         diagnostics.status({.reason = reason,
                             .valid = adaptation.yaw.feedback_fresh,
                             .enabled = status.state == RunState::Active,

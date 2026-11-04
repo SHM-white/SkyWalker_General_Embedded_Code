@@ -166,8 +166,7 @@ int main() {
         // The reference peer publishes BigYawFeedback at 100 ms intervals.
         // A 50 ms timeout would repeatedly invalidate feedback and reset the
         // world-history window, preventing meaningful delayed follow.
-        const auto peer_feedback_timeout_ms =
-            reference_v4_peer ? 250U : 50U;
+        const auto peer_feedback_timeout_ms = reference_v4_peer ? 250U : 50U;
         const bool peer_feedback_valid = peer.online && feedback.valid &&
                                          forwardedFresh(feedback.stamp, feedback.production_age_ms, ms,
                                                         peer_feedback_timeout_ms) &&
@@ -198,22 +197,21 @@ int main() {
         // tracking errors and would repeatedly discard the history in motion.
         const bool inertial_running = inertial.yaw_output_valid && inertial.pitch_output_valid &&
                                       run.state == RunState::Active;
-        const bool world_ready = reference_v4_peer &&
-                                 follow.enabled && inertial_running && follow.permission_valid &&
-                                 joint_valid && heading.valid &&
-                                 core::fresh(heading.stamp, now, 20000) && peer_feedback_valid;
-        const auto world_center = world_follower.update(
-            heading.yaw_rad,
-            vehicle::small_yaw.direction * (ys.feedback.position_rad - vehicle::yaw_center_rad),
-            now, world_ready);
+        const bool world_ready = reference_v4_peer && follow.enabled && inertial_running && follow.permission_valid &&
+                                 joint_valid && heading.valid && core::fresh(heading.stamp, now, 20000) &&
+                                 peer_feedback_valid;
+        const auto world_center = world_follower.update(heading.yaw_rad,
+                                                        vehicle::small_yaw.direction *
+                                                            (ys.feedback.position_rad - vehicle::yaw_center_rad),
+                                                        now, world_ready);
         BigYawRequest big_request{};
         if (reference_v4_peer) {
             // This peer interprets mode=1 as world angular-rate intent and
             // compensates chassis gyro itself; never apply big_yaw_wire_direction.
             // A valid zero request may be needed to enable the peer and obtain
             // feedback, but stale feedback/heading must not command motion.
-            big_request.mode = peer.online && follow.permission_valid && heading.valid
-                                   ? BigYawMode::FollowCenter : BigYawMode::Disabled;
+            big_request.mode = peer.online && follow.permission_valid && heading.valid ? BigYawMode::FollowCenter
+                                                                                       : BigYawMode::Disabled;
             big_request.target_rate_rad_s = world_center.valid ? world_center.world_rate_rad_s : 0;
             big_request.stamp = {ms, ++big_sequence, true};
         }
@@ -278,8 +276,7 @@ int main() {
         diagnostics.status(
             {.reason = reason,
              .valid = imu_fresh && ys.feedback_fresh && ps.feedback_fresh && peer_feedback_valid,
-             .enabled = (reference_v4_peer ? world_center.valid : centered.enabled) &&
-                        peer_feedback_valid,
+             .enabled = (reference_v4_peer ? world_center.valid : centered.enabled) && peer_feedback_valid,
              .target = big_request.target_rate_rad_s,
              .feedback = peer_feedback_valid ? feedback.actual_rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
              .age_ms = feedback.valid ? feedback.production_age_ms : UINT32_MAX,
@@ -292,10 +289,8 @@ int main() {
                       : yaw_error    ? yaw_error
                       : pitch_error  ? pitch_error
                                      : run.error,
-             .extra0 = reference_v4_peer ? world_center.error_rad
-                                                                        : centered.center_error_rad,
-             .extra1 = reference_v4_peer ? world_center.target_world_yaw_rad
-                                                                        : inertial.head_yaw_rad});
+             .extra0 = reference_v4_peer ? world_center.error_rad : centered.center_error_rad,
+             .extra1 = reference_v4_peer ? world_center.target_world_yaw_rad : inertial.head_yaw_rad});
         k_sleep(K_USEC(vehicle::gimbal_period_us));
     }
 }

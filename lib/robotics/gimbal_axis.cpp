@@ -91,7 +91,7 @@ int GimbalAxis::seed(const motor::MotorSnapshot &snapshot) {
     if (ret < 0)
         return ret;
     target_angle_rad_ = config_.topology == AxisTopology::Continuous ? double(snapshot.feedback.absolute_position_rad)
-                                                                  : double(snapshot.feedback.position_rad);
+                                                                     : double(snapshot.feedback.position_rad);
     observed_enable_generation_ = snapshot.enable_generation;
     observed_reference_generation_ = snapshot.reference_generation;
     initialized_ = true;
@@ -145,9 +145,8 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
     target_status_ = {};
     target_status_.feedback_healthy = true;
     target_status_.last_dt_s = dt;
-    target_status_.measured_rad = config_.topology == AxisTopology::Continuous
-                                     ? snapshot.feedback.absolute_position_rad
-                                     : snapshot.feedback.position_rad;
+    target_status_.measured_rad = config_.topology == AxisTopology::Continuous ? snapshot.feedback.absolute_position_rad
+                                                                               : snapshot.feedback.position_rad;
     const bool hold = action == SafetyAction::Hold || command.mode == GimbalMode::Hold;
     const bool was_hold = previous_action_ == SafetyAction::Hold || previous_mode_ == GimbalMode::Hold;
     // Do not integrate across a recovery interval. The current input starts on
@@ -171,8 +170,8 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
             if (command.rate_rad_s == 0 && !config_.hold_on_zero_rate)
                 (void)seed(snapshot);
             target_status_.requested_rate_rad_s = command.rate_rad_s;
-            target_status_.limited_rate_rad_s =
-                std::clamp(command.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s);
+            target_status_.limited_rate_rad_s = std::clamp(command.rate_rad_s, -config_.max_rate_rad_s,
+                                                           config_.max_rate_rad_s);
             target_status_.rate_limited = target_status_.limited_rate_rad_s != command.rate_rad_s;
             delta = target_status_.limited_rate_rad_s * integration_dt;
         }
@@ -201,8 +200,7 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
             // reference validity and mechanical range. Do not apply this to an
             // inertial AbsoluteAngle target or to a wrapped continuous axis.
             const auto before_lead = target_angle_rad_;
-            target_angle_rad_ = std::clamp(before_lead,
-                                           target_status_.measured_rad - double(config_.max_lead_rad),
+            target_angle_rad_ = std::clamp(before_lead, target_status_.measured_rad - double(config_.max_lead_rad),
                                            target_status_.measured_rad + double(config_.max_lead_rad));
             target_status_.lead_limited = target_angle_rad_ != before_lead;
             target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad),

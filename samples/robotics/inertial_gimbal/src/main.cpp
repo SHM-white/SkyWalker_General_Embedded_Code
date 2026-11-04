@@ -64,8 +64,8 @@ void telemetryTask(void *, void *, void *) {
         (void)observation.snapshot(seen);
         const auto now_us = core::monotonicTimeUs();
         const bool head_valid = seen.head_stamp.valid && now_us >= seen.head_stamp.time_us;
-        const auto head_age_ms = head_valid ? (now_us - seen.head_stamp.time_us) / 1000 :
-                                             std::numeric_limits<std::uint32_t>::max();
+        const auto head_age_ms = head_valid ? (now_us - seen.head_stamp.time_us) / 1000
+                                            : std::numeric_limits<std::uint32_t>::max();
         const bool fresh = head_valid && head_age_ms < board_config::command_timeout_ms;
         const bool active = seen.execution.state == RunState::Active;
         const auto reason = seen.startup_error || seen.execution.state == RunState::Blocked
@@ -91,7 +91,8 @@ void telemetryTask(void *, void *, void *) {
 K_THREAD_DEFINE(telemetry_thread, 4096, telemetryTask, nullptr, nullptr, nullptr, 7, K_FP_REGS, 0);
 
 int main() {
-    vehicle_diagnostics.start("inertial_gimbal", "gimbal", "yaw<=4rad/s,pitch<=5rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
+    vehicle_diagnostics.start("inertial_gimbal", "gimbal",
+                              "yaw<=4rad/s,pitch<=5rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
     int ret = head.start();
     vehicle_diagnostics.event("head.start", ret);
     if (ret == 0)

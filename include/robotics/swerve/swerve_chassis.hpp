@@ -12,7 +12,7 @@ public:
     };
     explicit SwerveChassis(const Config &c)
         : config_(c), kinematics_(c.kinematics), modules_{SwerveModule(c.modules[0]), SwerveModule(c.modules[1]),
-                                              SwerveModule(c.modules[2]), SwerveModule(c.modules[3])} {
+                                                          SwerveModule(c.modules[2]), SwerveModule(c.modules[3])} {
     }
     int validate() const;
     int reset(const ChassisFeedback &);

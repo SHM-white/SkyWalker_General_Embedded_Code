@@ -7,7 +7,8 @@
 
 namespace skywalker::led {
 
-StatusLed::StatusLed() : device_(DEVICE_DT_GET(DT_ALIAS(led_strip))) {}
+StatusLed::StatusLed() : device_(DEVICE_DT_GET(DT_ALIAS(led_strip))) {
+}
 
 int StatusLed::start() {
     if (!device_is_ready(device_) || led_strip_length(device_) < 1)
@@ -16,9 +17,8 @@ int StatusLed::start() {
         return -EALREADY;
 
     k_sem_init(&changed_, 0, 1);
-    k_thread_create(&thread_, stack_, K_KERNEL_STACK_SIZEOF(stack_), entry,
-                    this, nullptr, nullptr, CONFIG_SKYWALKER_STATUS_LED_PRIORITY,
-                    0, K_NO_WAIT);
+    k_thread_create(&thread_, stack_, K_KERNEL_STACK_SIZEOF(stack_), entry, this, nullptr, nullptr,
+                    CONFIG_SKYWALKER_STATUS_LED_PRIORITY, 0, K_NO_WAIT);
     (void)setStatus(LedStatus::Boot);
     return 0;
 }

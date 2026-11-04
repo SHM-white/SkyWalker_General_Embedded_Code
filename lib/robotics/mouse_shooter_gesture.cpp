@@ -38,8 +38,8 @@ void MouseShooterGesture::output(std::uint64_t now, MouseFireIntent &out) {
     out.click_event_id = pending_event_;
     out.click_stamp = click_stamp_;
 }
-int MouseShooterGesture::update(const RemoteState &r, bool selected, bool allowed,
-                               std::uint64_t now, MouseFireIntent &out) {
+int MouseShooterGesture::update(const RemoteState &r, bool selected, bool allowed, std::uint64_t now,
+                                MouseFireIntent &out) {
     out = {};
     if (configError() < 0) {
         withdraw();
@@ -52,8 +52,7 @@ int MouseShooterGesture::update(const RemoteState &r, bool selected, bool allowe
     const bool duplicate = last_frame_.valid && r.stamp.sequence == last_frame_.sequence &&
                            r.stamp.timestamp_ms == last_frame_.timestamp_ms;
     if (last_frame_.valid && !duplicate &&
-        (!sequenceAfter(r.stamp.sequence, last_frame_.sequence) ||
-         r.stamp.timestamp_ms < last_frame_.timestamp_ms)) {
+        (!sequenceAfter(r.stamp.sequence, last_frame_.sequence) || r.stamp.timestamp_ms < last_frame_.timestamp_ms)) {
         withdraw();
         // 接收会话重建也必须先释放；记录边界帧避免一直拒绝新会话的后续帧。
         last_frame_ = r.stamp;
@@ -112,8 +111,7 @@ int MouseShooterGesture::update(const RemoteState &r, bool selected, bool allowe
             kind_ = MouseFeedKind::ClickSingle;
         }
     }
-    if (r.mouse.left && have_press_ && input_time >= press_ms_ &&
-        input_time - press_ms_ >= config_.hold_to_auto_ms) {
+    if (r.mouse.left && have_press_ && input_time >= press_ms_ && input_time - press_ms_ >= config_.hold_to_auto_ms) {
         kind_ = MouseFeedKind::HeldContinuous;
         pending_event_ = 0;
         click_stamp_ = {};

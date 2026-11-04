@@ -11,24 +11,24 @@ using namespace skywalker::communication;
 std::array<std::uint8_t, 22> robotFrame() {
     std::array<std::uint8_t, 22> bytes{};
     bytes[0] = 0xa5;
-    wire::storeLe16(bytes.data()+1, 13);
+    wire::storeLe16(bytes.data() + 1, 13);
     bytes[3] = 4;
     bytes[4] = refereeCrc8(bytes.data(), 4);
-    wire::storeLe16(bytes.data()+5, 0x0201);
+    wire::storeLe16(bytes.data() + 5, 0x0201);
     bytes[7] = 9; // robot_id
-    wire::storeLe16(bytes.data()+7+10, 120);
-    bytes[7+12] = 0x05; // gimbal + shooter, chassis denied
-    wire::storeLe16(bytes.data()+20, refereeCrc16(bytes.data(), 20));
+    wire::storeLe16(bytes.data() + 7 + 10, 120);
+    bytes[7 + 12] = 0x05; // gimbal + shooter, chassis denied
+    wire::storeLe16(bytes.data() + 20, refereeCrc16(bytes.data(), 20));
     return bytes;
 }
 std::array<std::uint8_t, 23> powerFrame() {
     std::array<std::uint8_t, 23> bytes{};
     bytes[0] = 0xa5;
-    wire::storeLe16(bytes.data()+1, 14);
+    wire::storeLe16(bytes.data() + 1, 14);
     bytes[4] = refereeCrc8(bytes.data(), 4);
-    wire::storeLe16(bytes.data()+5, 0x0202);
-    wire::storeLe16(bytes.data()+7+8, 42);
-    wire::storeLe16(bytes.data()+21, refereeCrc16(bytes.data(), 21));
+    wire::storeLe16(bytes.data() + 5, 0x0202);
+    wire::storeLe16(bytes.data() + 7 + 8, 42);
+    wire::storeLe16(bytes.data() + 21, refereeCrc16(bytes.data(), 21));
     return bytes;
 }
 }
@@ -38,7 +38,7 @@ ZTEST(protocol_referee, test_valid_robot_state_decodes_exact_permissions_and_pow
     auto robot = robotFrame();
     zassert_ok(parser.consume(robot.data(), 4, 30));
     zassert_false(parser.state().stamp.valid);
-    zassert_ok(parser.consume(robot.data()+4, robot.size()-4, 31));
+    zassert_ok(parser.consume(robot.data() + 4, robot.size() - 4, 31));
     const auto &state = parser.state();
     zassert_true(state.online);
     zassert_equal(state.robot.robot_id, 9u);

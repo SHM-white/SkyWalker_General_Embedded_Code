@@ -60,9 +60,9 @@ int main() {
             setup_error = axis.begin();
     }
     const bool started = setup_error == 0;
-    LOG_INF("motor bus=%s id=%u master=%u confirmed=%d setup=%d",
-            samples::chassis::big_yaw_can->name, unsigned(vehicle::big_yaw.id),
-            unsigned(vehicle::big_yaw.master_id), vehicle::connections_confirmed, setup_error);
+    LOG_INF("motor bus=%s id=%u master=%u confirmed=%d setup=%d", samples::chassis::big_yaw_can->name,
+            unsigned(vehicle::big_yaw.id), unsigned(vehicle::big_yaw.master_id), vehicle::connections_confirmed,
+            setup_error);
     samples::control::OperatorControlConsumer operator_controls;
     std::uint64_t next_log_ms = 0;
     int commit_error = 0;
@@ -94,12 +94,12 @@ int main() {
             next_log_ms = ms + 200;
             const auto state = axis.status();
             const auto feedback = axis.feedback();
-            LOG_INF("online=%d operator=%d run=%d source=%u target=%f actual=%f ready=%d valid=%d state=%u reason=%u error=%d commit=%d link=%d rejected=%u",
-                    rx.online, rx.operator_control_valid, controls.run_allowed,
-                    input.request.source_sequence, double(input.request.target_rate_rad_s),
-                    double(feedback.actual_rate_rad_s), feedback.ready, feedback.valid,
-                    unsigned(state.state), unsigned(state.reason), state.error, commit_error,
-                    rx.error, rx.rejected_frames);
+            LOG_INF(
+                "online=%d operator=%d run=%d source=%u target=%f actual=%f ready=%d valid=%d state=%u reason=%u error=%d commit=%d link=%d rejected=%u",
+                rx.online, rx.operator_control_valid, controls.run_allowed, input.request.source_sequence,
+                double(input.request.target_rate_rad_s), double(feedback.actual_rate_rad_s), feedback.ready,
+                feedback.valid, unsigned(state.state), unsigned(state.reason), state.error, commit_error, rx.error,
+                rx.rejected_frames);
         }
         k_sleep(K_MSEC(5));
     }
@@ -123,8 +123,8 @@ int main() {
         const auto &rc = controls.update(remote_cache.remote, ms);
         // A link loss or peer reboot withdraws the RC gate before this cycle's
         // velocity is generated. Motor recovery alone never withdraws intent.
-        if (operator_controls.publish(endpoint, rc.run_allowed, false, rc.remote.stamp,
-                                      rc.clear_event_id, rc.clear_stamp, ms))
+        if (operator_controls.publish(endpoint, rc.run_allowed, false, rc.remote.stamp, rc.clear_event_id,
+                                      rc.clear_stamp, ms))
             controls.withdraw();
         const auto rx = endpoint.snapshot();
         const bool run = rc.fresh && rc.run_allowed && rx.online;
@@ -144,10 +144,10 @@ int main() {
         if (ms >= next_log_ms) {
             next_log_ms = ms + 200;
             const auto &feedback = rx.big_yaw_feedback;
-            LOG_INF("online=%d rc=%d run=%d source=%u target=%f peerActual=%f peerReady=%d peerValid=%d link=%d rejected=%u",
-                    rx.online, rc.fresh, run, request.source_sequence,
-                    double(request.target_rate_rad_s), double(feedback.actual_rate_rad_s),
-                    feedback.ready, feedback.valid, rx.error, rx.rejected_frames);
+            LOG_INF(
+                "online=%d rc=%d run=%d source=%u target=%f peerActual=%f peerReady=%d peerValid=%d link=%d rejected=%u",
+                rx.online, rc.fresh, run, request.source_sequence, double(request.target_rate_rad_s),
+                double(feedback.actual_rate_rad_s), feedback.ready, feedback.valid, rx.error, rx.rejected_frames);
         }
         k_sleep(K_MSEC(5));
     }

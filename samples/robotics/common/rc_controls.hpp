@@ -52,8 +52,8 @@ public:
         // 视觉执行样例保留原三档：左 Middle=手动、左 Up=自动；其余样例左 Up=手动。
         bool allow_auto = false;
         bool keyboard_mouse_selectable = false; // 右 Middle 在手动档选择键鼠。
-        std::uint32_t input_timeout_ms = 100; // ms，须与接收和命令层失联期限协调。
-        std::uint32_t neutral_arm_ms = 500; // ms，安全档归中保持时间，防止上电直接运行。
+        std::uint32_t input_timeout_ms = 100;   // ms，须与接收和命令层失联期限协调。
+        std::uint32_t neutral_arm_ms = 500;     // ms，安全档归中保持时间，防止上电直接运行。
     };
     RcControlAdapter() = default;
     explicit RcControlAdapter(Config config) : config_(config) {
@@ -159,22 +159,21 @@ public:
             if (!manual) {
                 right_neutral_seen_ = false;
                 mouse_release_seen_ = false;
-            } else if (right == RcSwitch::Middle) {
+            }
+            else if (right == RcSwitch::Middle) {
                 right_neutral_seen_ = true;
             }
-            state_.keyboard_mouse_selected = manual && config_.keyboard_mouse_selectable &&
-                                             right == RcSwitch::Middle;
+            state_.keyboard_mouse_selected = manual && config_.keyboard_mouse_selectable && right == RcSwitch::Middle;
             if (state_.keyboard_mouse_selected && !remote.mouse.left && !remote.mouse.right)
                 mouse_release_seen_ = true;
             if (!state_.keyboard_mouse_selected)
                 mouse_release_seen_ = false;
             state_.spin_requested = manual && right_neutral_seen_ && right == RcSwitch::Down;
             state_.friction_requested = manual &&
-                                        (state_.keyboard_mouse_selected
-                                             ? mouse_release_seen_ && remote.mouse.right
-                                             : right_neutral_seen_ && right == RcSwitch::Up);
-            state_.continuous_requested = manual && !state_.keyboard_mouse_selected &&
-                                          right_neutral_seen_ && right == RcSwitch::Up;
+                                        (state_.keyboard_mouse_selected ? mouse_release_seen_ && remote.mouse.right
+                                                                        : right_neutral_seen_ && right == RcSwitch::Up);
+            state_.continuous_requested = manual && !state_.keyboard_mouse_selected && right_neutral_seen_ &&
+                                          right == RcSwitch::Up;
         }
         state_.armed = armed_;
         previous_left_ = left;

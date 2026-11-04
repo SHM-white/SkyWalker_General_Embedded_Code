@@ -148,8 +148,8 @@ int DmImuRs485Source::service() {
     }
     return response_error_ ? response_error_ : updated ? 0 : -EAGAIN;
 }
-int DmImuRs485Source::acceptDmRs485(std::uint8_t rid, std::uint8_t code, const Update &u,
-                                   core::TimeUs first_rx_us, core::TimeUs last_rx_us) {
+int DmImuRs485Source::acceptDmRs485(std::uint8_t rid, std::uint8_t code, const Update &u, core::TimeUs first_rx_us,
+                                    core::TimeUs last_rx_us) {
     // Queue timestamps have millisecond precision. No transaction sequence exists on the wire.
     if (phase_ != Phase::AwaitReply || rid != rid_ || first_rx_us < (request_us_ / 1000) * 1000 ||
         last_rx_us > response_deadline_us_)

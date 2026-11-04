@@ -149,7 +149,6 @@ ZTEST(swerve_kinematics, test_benchmark_solve) {
     zassert_within(out[1].wheel_velocity_m_s, 2, 1e-6f);
 }
 
-
 ZTEST(swerve_module, test_valid_feedback_initializes_before_closed_loop_effort) {
     SwerveModule module(moduleConfig());
     ModuleFeedback f{};
@@ -187,9 +186,8 @@ ZTEST(swerve_module, test_flip_preserves_wheel_velocity_vector) {
     zassert_true(out.flipped);
     zassert_within(out.optimized_angle_rad, -pi / 4, 1e-6f);
     zassert_within(out.optimized_wheel_velocity_m_s, -2, 1e-6f);
-    zassert_within(out.drive_target_rad_s, -20 * std::pow(std::cos(pi/4), 3.0f), 1e-5f);
-    expect_vector({out.optimized_angle_rad, out.optimized_wheel_velocity_m_s},
-                  -std::sqrt(2.0f), std::sqrt(2.0f));
+    zassert_within(out.drive_target_rad_s, -20 * std::pow(std::cos(pi / 4), 3.0f), 1e-5f);
+    expect_vector({out.optimized_angle_rad, out.optimized_wheel_velocity_m_s}, -std::sqrt(2.0f), std::sqrt(2.0f));
 }
 
 ZTEST(swerve_module, test_feedback_invalid_or_generation_changes_suppress_effort) {
@@ -238,22 +236,22 @@ ZTEST(swerve_chassis, test_four_wheel_targets_and_safe_initial_cycle) {
     zassert_ok(chassis.validate());
     zassert_ok(chassis.reset(feedback));
     ChassisOutput out{};
-    const ChassisCommand cmd{.mode=ChassisMode::BodyVelocity,.vx_m_s=2,.vy_m_s=1,.wz_rad_s=2};
+    const ChassisCommand cmd{.mode = ChassisMode::BodyVelocity, .vx_m_s = 2, .vy_m_s = 1, .wz_rad_s = 2};
     zassert_ok(chassis.step(cmd, feedback, 0.005f, out));
-    constexpr float vx[] = {1,3,1,3}, vy[] = {2,2,0,0};
+    constexpr float vx[] = {1, 3, 1, 3}, vy[] = {2, 2, 0, 0};
     for (unsigned i = 0; i < 4; ++i) {
         expect_vector(out.target[i], vx[i], vy[i]);
-        expect_vector({out.module[i].optimized_angle_rad, out.module[i].optimized_wheel_velocity_m_s},vx[i],vy[i]);
-        zassert_within(out.module[i].drive_target_rad_s,
-                       0, 1e-4f);
+        expect_vector({out.module[i].optimized_angle_rad, out.module[i].optimized_wheel_velocity_m_s}, vx[i], vy[i]);
+        zassert_within(out.module[i].drive_target_rad_s, 0, 1e-4f);
         zassert_equal(out.module[i].drive_effort, 0);
         zassert_true(out.module[i].steer_output_valid && out.module[i].drive_output_valid);
     }
-    for (auto &f : feedback.module) ++f.steer_feedback_stamp_ms;
+    for (auto &f : feedback.module)
+        ++f.steer_feedback_stamp_ms;
     zassert_ok(chassis.step(cmd, feedback, 0.005f, out));
     zassert_ok(chassis.step(cmd, feedback, 0.005f, out));
     zassert_true(out.module[0].drive_effort > 0);
-    zassert_ok(chassis.step({},feedback,0.005f,out));
+    zassert_ok(chassis.step({}, feedback, 0.005f, out));
     for (auto &m : out.module) {
         zassert_true(m.coasting);
         zassert_equal(m.drive_target_rad_s, 0);
@@ -269,8 +267,7 @@ ZTEST(swerve_chassis, test_invalid_module_speed_fails_closed) {
     zassert_ok(chassis.reset(feedback));
     ChassisOutput out{};
     out.module[3].drive_effort = 73;
-    zassert_equal(chassis.step({.mode=ChassisMode::BodyVelocity, .vx_m_s=1},
-                              feedback,0.005f,out), -ERANGE);
+    zassert_equal(chassis.step({.mode = ChassisMode::BodyVelocity, .vx_m_s = 1}, feedback, 0.005f, out), -ERANGE);
     zassert_equal(out.module[3].drive_effort, 0);
 }
 ZTEST(chassis_power, test_recovery_limit_buffer_and_immediate_reduction) {

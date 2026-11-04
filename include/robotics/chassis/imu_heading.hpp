@@ -14,6 +14,7 @@ struct LocalHeading {
 class ImuHeadingReference {
 public:
     LocalHeading update(const imu::Snapshot &, bool disarmed, core::TimeUs now);
+
 private:
     core::OrientationReference reference_{};
     std::uint64_t last_sequence_ = 0;
@@ -38,11 +39,15 @@ public:
         float yaw_rate_feedback_kp = 0; // Unmeasured: leave disabled.
         float max_wz_rad_s = 1;
     };
-    explicit ChassisMotionAdapter(const Config &c) : config_(c) {}
+    explicit ChassisMotionAdapter(const Config &c) : config_(c) {
+    }
     int validate() const;
-    ChassisCommand update(const ChassisCommand &, const LocalHeading &, const GimbalImuYaw &,
-                          std::uint64_t local_boot, bool disarmed, std::uint64_t now_ms, const BoardHeartbeat &peer = {});
-    bool translationReady() const { return translation_ready_; }
+    ChassisCommand update(const ChassisCommand &, const LocalHeading &, const GimbalImuYaw &, std::uint64_t local_boot,
+                          bool disarmed, std::uint64_t now_ms, const BoardHeartbeat &peer = {});
+    bool translationReady() const {
+        return translation_ready_;
+    }
+
 private:
     Config config_;
     bool paired_ = false, blocked_ = false, translation_ready_ = false;

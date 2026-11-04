@@ -21,18 +21,22 @@ inline const device *remote_uart = nullptr;
 #endif
 inline const device *yaw_can = DEVICE_DT_GET(DT_NODELABEL(can1));
 inline const device *pitch_can = DEVICE_DT_GET(DT_NODELABEL(can2));
-using calibration::yawHardware;
 using calibration::pitchHardware;
-using calibration::yawMotorConfig;
 using calibration::pitchMotorConfig;
+using calibration::yawHardware;
+using calibration::yawMotorConfig;
 inline constexpr auto yaw = calibration::yawAxisConfig();
 inline constexpr auto pitch = calibration::pitchAxisConfig();
 inline constexpr float yaw_command_sign = calibration::small_yaw.direction;
 inline constexpr float pitch_command_sign = calibration::pitch.direction;
 
 // Connect physical estop/reset inputs here. RC disable remains recoverable.
-inline bool emergencyStopRequested() { return false; }
-inline bool takeEmergencyResetRequest() { return false; }
+inline bool emergencyStopRequested() {
+    return false;
+}
+inline bool takeEmergencyResetRequest() {
+    return false;
+}
 
 inline const auto command_policy = calibration::gimbalCommandConfig();
 inline const auto execution_policy = calibration::gimbalExecutionConfig();

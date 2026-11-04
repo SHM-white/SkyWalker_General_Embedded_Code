@@ -222,7 +222,7 @@ inline imu::DmImuCanSource::Config headConfig() {
     c.feedback_id = CONFIG_SKYWALKER_IMU_DM_CAN_FEEDBACK_ID;
     c.slave_id = CONFIG_SKYWALKER_IMU_DM_CAN_SLAVE_ID;
     c.mode = IS_ENABLED(CONFIG_SKYWALKER_IMU_DM_CAN_PASSIVE) ? imu::DmImuCanSource::Mode::RequestReply
-                                                         : imu::DmImuCanSource::Mode::ActiveReport;
+                                                             : imu::DmImuCanSource::Mode::ActiveReport;
     c.reference = calibration::head_reference;
     c.sensor_to_body = calibration::head_sensor_to_body;
     return c;
@@ -460,14 +460,14 @@ inline void telemetryTask(void *, void *, void *) {
             printk("execution_stack_unused=%u linkRejected=%u linkError=%d\n", unsigned(execution_stack_unused),
                    rx.rejected_frames, rx.error);
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
-            printk("followReady=%d peerRateValid=%d centerReason=%u linkFrames=%u\n",
-                   fresh && observation.follow_ready, fresh && observation.peer_rate_valid,
-                   unsigned(observation.centering_reason), rx.parser_stats.valid_frames);
+            printk("followReady=%d peerRateValid=%d centerReason=%u linkFrames=%u\n", fresh && observation.follow_ready,
+                   fresh && observation.peer_rate_valid, unsigned(observation.centering_reason),
+                   rx.parser_stats.valid_frames);
 #if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
             control::RcControlState operator_state{};
             (void)operator_states.snapshot(operator_state);
-            printk("rcFresh=%d allowed=%d left=%u right=%u wheel=%d centered=%d armReady=%d neutralMs=%u\n", operator_state.fresh,
-                   operator_state.run_allowed, unsigned(operator_state.remote.left_switch),
+            printk("rcFresh=%d allowed=%d left=%u right=%u wheel=%d centered=%d armReady=%d neutralMs=%u\n",
+                   operator_state.fresh, operator_state.run_allowed, unsigned(operator_state.remote.left_switch),
                    unsigned(operator_state.remote.right_switch), int(operator_state.remote.analog.wheel),
                    observation.rc_centered, observation.rc_arm_ready, observation.rc_neutral_ms);
 #endif
@@ -667,8 +667,8 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
         command_error = commands.start();
     const int topology_error = hardware.start(true, IS_ENABLED(CONFIG_VEHICLE_SHOOTING));
     const int power_error = calibration::connections_confirmed ? enableMotorPower() : -ENODEV;
-    printk("gimbal command=%d head=%d topology=%d rail=%d shooting=%d\n", command_error, head_error,
-           topology_error, power_error, IS_ENABLED(CONFIG_VEHICLE_SHOOTING));
+    printk("gimbal command=%d head=%d topology=%d rail=%d shooting=%d\n", command_error, head_error, topology_error,
+           power_error, IS_ENABLED(CONFIG_VEHICLE_SHOOTING));
     printk("gimbal reference=%s link=%s console=%s\n",
            IS_ENABLED(CONFIG_VEHICLE_ENCODER_ONLY) ? "encoders" : "head IMU",
            DEVICE_DT_GET(DT_ALIAS(interboard_uart))->name, DEVICE_DT_GET(DT_CHOSEN(zephyr_console))->name);
@@ -746,11 +746,11 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             if (inertial_input.command.mode == GimbalMode::Rate) {
                 const float carrier_rate = peer_rate_valid ? kBigYawWireDirection * peer.actual_rate_rad_s : 0;
                 gimbal_input.command.yaw_rate_rad_s = calibration::small_yaw.direction *
-                                                     (inertial_input.command.yaw_rate_rad_s - carrier_rate);
+                                                      (inertial_input.command.yaw_rate_rad_s - carrier_rate);
                 gimbal_input.command.pitch_rate_rad_s = IS_ENABLED(CONFIG_VEHICLE_LOCK_PITCH)
-                                                           ? 0
-                                                           : calibration::pitch.direction *
-                                                                 inertial_input.command.pitch_rate_rad_s;
+                                                            ? 0
+                                                            : calibration::pitch.direction *
+                                                                  inertial_input.command.pitch_rate_rad_s;
             }
             else
                 gimbal_input.command.mode = GimbalMode::Disabled;
@@ -804,8 +804,7 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
             follow.joint_yaw_rad = inertial_input.yaw.feedback.position_rad;
             follow.joint_stamp = {inertial_input.yaw.feedback.timestamp_ms * 1000,
                                   inertial_input.yaw.feedback.timestamp_ms,
-                                  inertial_input.yaw.feedback_fresh &&
-                                      inertial_input.yaw.position_reference_valid &&
+                                  inertial_input.yaw.feedback_fresh && inertial_input.yaw.position_reference_valid &&
                                       (inertial_input.yaw.feedback.valid & motor::FeedbackPosition)};
             follow.source_stamp = inertial_input.source_stamp;
             follow.enabled = gimbal_input.command.mode != GimbalMode::Disabled && run_allowed && !emergency && !clear;

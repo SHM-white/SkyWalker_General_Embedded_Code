@@ -5,7 +5,7 @@
 
 // C-board and other boards without an enabled led-strip alias use a no-op
 // implementation. Neither DEVICE_DT_GET nor led_strip symbols are evaluated.
-#if defined(CONFIG_SKYWALKER_STATUS_LED) && DT_NODE_EXISTS(DT_ALIAS(led_strip)) && \
+#if defined(CONFIG_SKYWALKER_STATUS_LED) && DT_NODE_EXISTS(DT_ALIAS(led_strip)) &&                                     \
     DT_NODE_HAS_STATUS(DT_ALIAS(led_strip), okay)
 #define SKYWALKER_STATUS_LED_AVAILABLE 1
 #else
@@ -38,7 +38,9 @@ public:
     int play(const LedPattern &pattern, bool restart = false);
     int setStatus(LedStatus status, bool restart = false);
     int setColor(Color color);
-    int off() { return setColor({}); }
+    int off() {
+        return setColor({});
+    }
     int lastError() const;
 
 private:
@@ -72,12 +74,24 @@ private:
 class StatusLed {
 public:
     static constexpr bool available = false;
-    int start() { return 0; }
-    int play(const LedPattern &, bool = false) { return 0; }
-    int setStatus(LedStatus, bool = false) { return 0; }
-    int setColor(Color) { return 0; }
-    int off() { return 0; }
-    int lastError() const { return 0; }
+    int start() {
+        return 0;
+    }
+    int play(const LedPattern &, bool = false) {
+        return 0;
+    }
+    int setStatus(LedStatus, bool = false) {
+        return 0;
+    }
+    int setColor(Color) {
+        return 0;
+    }
+    int off() {
+        return 0;
+    }
+    int lastError() const {
+        return 0;
+    }
 };
 
 #endif

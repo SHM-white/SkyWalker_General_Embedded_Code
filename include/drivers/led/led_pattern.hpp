@@ -29,8 +29,8 @@ struct LedPattern {
     bool repeat = false;
 
     template <std::size_t N>
-    constexpr LedPattern(const LedStep (&items)[N], bool looping)
-        : steps(items), count(N), repeat(looping) {}
+    constexpr LedPattern(const LedStep (&items)[N], bool looping) : steps(items), count(N), repeat(looping) {
+    }
 };
 
 enum class LedStatus : std::uint8_t {

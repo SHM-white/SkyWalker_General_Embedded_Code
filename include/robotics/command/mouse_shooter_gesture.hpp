@@ -26,8 +26,8 @@ public:
     }
     [[nodiscard]] int configError() const;
     // now_ms 检查年龄/超时；按下间隔和长按只使用新原始帧的时间戳。
-    int update(const RemoteState &, bool keyboard_mouse_selected, bool run_allowed,
-               std::uint64_t now_ms, MouseFireIntent &out);
+    int update(const RemoteState &, bool keyboard_mouse_selected, bool run_allowed, std::uint64_t now_ms,
+               MouseFireIntent &out);
     // 保留全局事件编号和已消费帧身份；恢复后必须先收到左键释放。
     void withdraw();
 

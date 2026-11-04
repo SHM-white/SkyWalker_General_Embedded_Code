@@ -34,7 +34,8 @@ public:
     };
 
     WorldYawWindowFollower() = default;
-    explicit WorldYawWindowFollower(const Config &config) : config_(config) {}
+    explicit WorldYawWindowFollower(const Config &config) : config_(config) {
+    }
 
     void reset() {
         oldest_ = count_ = 0;
@@ -42,15 +43,12 @@ public:
         previous_us_ = last_sample_us_ = 0;
     }
 
-    Output update(float carrier_world_rad, float joint_offset_rad,
-                  std::uint64_t now_us, bool allowed) {
+    Output update(float carrier_world_rad, float joint_offset_rad, std::uint64_t now_us, bool allowed) {
         Output result{};
         if (!allowed || !std::isfinite(carrier_world_rad) || !std::isfinite(joint_offset_rad) ||
-            config_.window_us == 0 || config_.sample_period_us == 0 ||
-            !(config_.kp_rad_s_per_rad > 0) || !(config_.max_rate_rad_s > 0) ||
-            !(config_.acceleration_rad_s2 > 0) ||
-            (previous_us_ && (now_us <= previous_us_ ||
-                              now_us - previous_us_ > config_.max_update_gap_us))) {
+            config_.window_us == 0 || config_.sample_period_us == 0 || !(config_.kp_rad_s_per_rad > 0) ||
+            !(config_.max_rate_rad_s > 0) || !(config_.acceleration_rad_s2 > 0) ||
+            (previous_us_ && (now_us <= previous_us_ || now_us - previous_us_ > config_.max_update_gap_us))) {
             reset();
             return result;
         }
@@ -58,7 +56,8 @@ public:
         previous_us_ = now_us;
         const float head_world_rad = carrier_world_rad + joint_offset_rad;
         if (!count_ || now_us - last_sample_us_ >= config_.sample_period_us) {
-            if (count_ == samples_.size()) removeOldest();
+            if (count_ == samples_.size())
+                removeOldest();
             const auto tail = (oldest_ + count_) % samples_.size();
             const float s = std::sin(head_world_rad), c = std::cos(head_world_rad);
             samples_[tail] = {now_us, s, c};
@@ -78,8 +77,8 @@ public:
         const float error = std::remainder(target - carrier_world_rad, 6.2831853071795864769f);
         const float wanted = std::fabs(error) <= config_.deadband_rad
                                  ? 0.0f
-                                 : std::clamp(config_.kp_rad_s_per_rad * error,
-                                              -config_.max_rate_rad_s, config_.max_rate_rad_s);
+                                 : std::clamp(config_.kp_rad_s_per_rad * error, -config_.max_rate_rad_s,
+                                              config_.max_rate_rad_s);
         const float step = config_.acceleration_rad_s2 * dt;
         rate_ += std::clamp(wanted - rate_, -step, step);
         result.valid = true;

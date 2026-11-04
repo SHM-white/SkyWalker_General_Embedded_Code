@@ -10,9 +10,8 @@ namespace {
 using namespace skywalker;
 std::array<std::uint8_t, 18> frame(int ch0 = 1024, int ch1 = 1024, int ch2 = 1024, int ch3 = 1024) {
     std::array<std::uint8_t, 18> bytes{};
-    const std::uint64_t packed = std::uint64_t(ch0) | (std::uint64_t(ch1) << 11) |
-        (std::uint64_t(ch2) << 22) | (std::uint64_t(ch3) << 33) |
-        (std::uint64_t(3) << 44) | (std::uint64_t(3) << 46);
+    const std::uint64_t packed = std::uint64_t(ch0) | (std::uint64_t(ch1) << 11) | (std::uint64_t(ch2) << 22) |
+                                 (std::uint64_t(ch3) << 33) | (std::uint64_t(3) << 44) | (std::uint64_t(3) << 46);
     for (unsigned i = 0; i != 6; ++i)
         bytes[i] = static_cast<std::uint8_t>(packed >> (8 * i));
     communication::wire::storeLe16(bytes.data() + 16, 1024);
@@ -50,7 +49,7 @@ ZTEST(protocol_remote, test_failed_decode_does_not_mutate_publication) {
     zassert_equal(decoder.decodeFrame(good.data(), good.size(), 8, out), -EBADMSG);
     zassert_equal(out.stamp.sequence, previous.sequence);
     zassert_equal(decoder.decodeFrame(nullptr, good.size(), 8, out), -EINVAL);
-    zassert_equal(decoder.decodeFrame(good.data(), good.size()-1, 8, out), -EINVAL);
+    zassert_equal(decoder.decodeFrame(good.data(), good.size() - 1, 8, out), -EINVAL);
     zassert_equal(decoder.invalidFrameCount(), 3u);
     zassert_ok(decoder.reset());
     zassert_equal(decoder.invalidFrameCount(), 0u);
@@ -59,13 +58,13 @@ ZTEST(protocol_remote, test_failed_decode_does_not_mutate_publication) {
 
 ZTEST(protocol_remote, test_stream_fragmentation_and_expiry_without_refreshing_stamp) {
     using namespace skywalker;
-    communication::RemoteService service({}, {.offline_timeout_ms=100, .assembly_gap_ms=10});
+    communication::RemoteService service({}, {.offline_timeout_ms = 100, .assembly_gap_ms = 10});
     auto good = frame();
     robotics::RemoteState value{};
     zassert_equal(service.snapshot(100, value), -EAGAIN);
     zassert_ok(service.processBytes(good.data(), 7, 100));
     zassert_equal(service.snapshot(100, value), -EAGAIN);
-    zassert_ok(service.processBytes(good.data()+7, good.size()-7, 101));
+    zassert_ok(service.processBytes(good.data() + 7, good.size() - 7, 101));
     zassert_ok(service.snapshot(101, value));
     zassert_equal(value.stamp.timestamp_ms, 101u);
     zassert_equal(value.stamp.sequence, 1u);
@@ -79,11 +78,11 @@ ZTEST(protocol_remote, test_stream_fragmentation_and_expiry_without_refreshing_s
 
 ZTEST(protocol_remote, test_partial_frame_gap_does_not_publish_ghost_input) {
     using namespace skywalker;
-    communication::RemoteService service({}, {.offline_timeout_ms=100, .assembly_gap_ms=5});
+    communication::RemoteService service({}, {.offline_timeout_ms = 100, .assembly_gap_ms = 5});
     const auto good = frame();
     robotics::RemoteState value{};
     zassert_ok(service.processBytes(good.data(), 12, 10));
-    zassert_ok(service.processBytes(good.data()+12, 6, 20));
+    zassert_ok(service.processBytes(good.data() + 12, 6, 20));
     zassert_equal(service.snapshot(20, value), -EAGAIN);
     service.discardPartial();
     zassert_ok(service.processBytes(good.data(), good.size(), 30));

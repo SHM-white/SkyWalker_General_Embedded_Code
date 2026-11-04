@@ -47,7 +47,8 @@ void InterBoardEndpoint::setStatus(const RunStatus &status) {
     k_spin_unlock(&lock_, key);
 }
 void InterBoardEndpoint::submitGimbalImuYaw(const GimbalImuYaw &sample) {
-    if (config_.role != BoardRole::GimbalController) return;
+    if (config_.role != BoardRole::GimbalController)
+        return;
     const auto key = k_spin_lock(&lock_);
     outgoing_.gimbal_imu = sample;
     k_spin_unlock(&lock_, key);
@@ -135,7 +136,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
     }
     if (!transport_ready || !next.online || next.gimbal_imu.receiver_boot_id != boot_id_ ||
         next.gimbal_imu.sender_boot_id != next.peer.sender_boot_id ||
-        !forwardedFresh(next.gimbal_imu.stamp,next.gimbal_imu.source_age_ms,now,50))
+        !forwardedFresh(next.gimbal_imu.stamp, next.gimbal_imu.source_age_ms, now, 50))
         next.gimbal_imu.valid = false;
     const auto &op = next.operator_control;
     next.operator_control_valid = next.online && op.sender_boot_id == next.peer.sender_boot_id &&
@@ -219,9 +220,8 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 request.command_age_ms = addAge(request.command_age_ms, elapsed);
                 request.permission_age_ms = age(request.permission.stamp, now);
                 request.receiver_boot_id = peer_boot_;
-                if (!next.online || !current || request.mode != BigYawMode::FollowCenter ||
-                    !request.permission.valid || !request.permission.enabled ||
-                    !std::isfinite(request.target_rate_rad_s)) {
+                if (!next.online || !current || request.mode != BigYawMode::FollowCenter || !request.permission.valid ||
+                    !request.permission.enabled || !std::isfinite(request.target_rate_rad_s)) {
                     request.mode = BigYawMode::Disabled;
                     request.target_rate_rad_s = 0;
                     request.permission.enabled = false;
@@ -230,8 +230,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 // heartbeat or a live producer. Never renew producer stamps/ages.
                 return InterBoardCodec::encodeBigYawRequest(request, seq, bytes, cap);
             });
-            if (next.online &&
-                outgoing.gimbal_imu.receiver_boot_id == peer_boot_)
+            if (next.online && outgoing.gimbal_imu.receiver_boot_id == peer_boot_)
                 append(MessageId::GimbalImuYaw, [&](auto seq, auto *bytes, auto cap) {
                     auto sample = outgoing.gimbal_imu;
                     sample.source_age_ms = addAge(sample.source_age_ms, age(sample.stamp, now));

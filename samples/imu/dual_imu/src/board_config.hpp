@@ -34,15 +34,15 @@ inline constexpr skywalker::imu::Bmi088Imu::Config onboard{.reference = chassis_
                                                                                  : calibration::carrier_sensor_to_body,
                                                            .freshness = {20000, 20000, 20000, 200000}};
 #if defined(CONFIG_SKYWALKER_IMU_DM_CAN)
-inline const skywalker::imu::DmImuCanSource::Config external{
-    .can = DEVICE_DT_GET(DT_ALIAS(imu_can)),
-    .feedback_id = CONFIG_SKYWALKER_IMU_DM_CAN_FEEDBACK_ID,
-    .slave_id = CONFIG_SKYWALKER_IMU_DM_CAN_SLAVE_ID,
-    .mode = IS_ENABLED(CONFIG_SKYWALKER_IMU_DM_CAN_PASSIVE)
-                ? skywalker::imu::DmImuCanSource::Mode::RequestReply
-                : skywalker::imu::DmImuCanSource::Mode::ActiveReport,
-    .reference = calibration::head_reference,
-    .sensor_to_body = calibration::head_sensor_to_body};
+inline const skywalker::imu::DmImuCanSource::Config
+    external{.can = DEVICE_DT_GET(DT_ALIAS(imu_can)),
+             .feedback_id = CONFIG_SKYWALKER_IMU_DM_CAN_FEEDBACK_ID,
+             .slave_id = CONFIG_SKYWALKER_IMU_DM_CAN_SLAVE_ID,
+             .mode = IS_ENABLED(CONFIG_SKYWALKER_IMU_DM_CAN_PASSIVE)
+                         ? skywalker::imu::DmImuCanSource::Mode::RequestReply
+                         : skywalker::imu::DmImuCanSource::Mode::ActiveReport,
+             .reference = calibration::head_reference,
+             .sensor_to_body = calibration::head_sensor_to_body};
 #else
 inline constexpr skywalker::imu::DmImuRs485Source::Config external{.protocol = {1, 20000},
                                                                    .reference = calibration::head_reference,

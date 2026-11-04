@@ -239,10 +239,10 @@ int main() {
         if (input.command.mode == GimbalMode::Rate) {
             const float carrier_rate = peer_rate_valid ? peer.actual_rate_rad_s : 0;
             gimbal_input.command.yaw_rate_rad_s = vehicle::small_yaw.direction *
-                                                 (input.command.yaw_rate_rad_s - carrier_rate);
+                                                  (input.command.yaw_rate_rad_s - carrier_rate);
             gimbal_input.command.pitch_rate_rad_s = IS_ENABLED(CONFIG_INERTIAL_GIMBAL_LOCK_PITCH)
-                                                       ? 0
-                                                       : vehicle::pitch.direction * input.command.pitch_rate_rad_s;
+                                                        ? 0
+                                                        : vehicle::pitch.direction * input.command.pitch_rate_rad_s;
         }
         else
             gimbal_input.command.mode = GimbalMode::Disabled;
@@ -318,9 +318,8 @@ int main() {
         if (ms >= next_log) {
             next_log = ms + 200;
             LOG_INF("rcFresh=%d centered=%d armReady=%d allowed=%d mode=%u started=%d init=%d reason=%u error=%d",
-                    operator_state.fresh, controls.controlsCentered(), controls.armReady(),
-                    operator_state.run_allowed, unsigned(gimbal_input.command.mode), started, ret,
-                    unsigned(run.reason), run.error);
+                    operator_state.fresh, controls.controlsCentered(), controls.armReady(), operator_state.run_allowed,
+                    unsigned(gimbal_input.command.mode), started, ret, unsigned(run.reason), run.error);
             LOG_INF("followReady=%d centerError=%f request=%f peerRate=%f online=%d ready=%d localRun=%u commit=%d/%d",
                     follow.head_stable, double(centered.center_error_rad), double(centered.velocity_rad_s),
                     double(rx.big_yaw_feedback.actual_rate_rad_s), rx.online, rx.big_yaw_feedback.ready,

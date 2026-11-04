@@ -497,39 +497,40 @@ ZTEST(command_manager, test_algorithm_timings) {
     near(automatic.out.command.shooter.fire_rate_hz, 5);
 }
 
-
 ZTEST(command_manager, test_rc_rearm_neutral_and_preselected_spin_fire_blocked) {
     using skywalker::samples::control::RcControlAdapter;
     RcControlAdapter rc;
     RemoteState r{};
-    r.online=true;r.left_switch=RcSwitch::Down;r.right_switch=RcSwitch::Middle;
-    auto update=[&](std::uint32_t seq, std::uint64_t ms) {
-        r.stamp={ms,seq,true};
-        return rc.update(r,ms);
+    r.online = true;
+    r.left_switch = RcSwitch::Down;
+    r.right_switch = RcSwitch::Middle;
+    auto update = [&](std::uint32_t seq, std::uint64_t ms) {
+        r.stamp = {ms, seq, true};
+        return rc.update(r, ms);
     };
-    zassert_false(update(1,1000).run_allowed);
-    zassert_false(update(2,1500).run_allowed);
-    r.left_switch=RcSwitch::Middle;
-    zassert_true(update(3,1501).armed);
-    r.right_switch=RcSwitch::Up; // preselect shooting while in Navigation
-    zassert_false(update(4,1502).friction_requested);
-    r.left_switch=RcSwitch::Up;
-    auto state=update(5,1503);
+    zassert_false(update(1, 1000).run_allowed);
+    zassert_false(update(2, 1500).run_allowed);
+    r.left_switch = RcSwitch::Middle;
+    zassert_true(update(3, 1501).armed);
+    r.right_switch = RcSwitch::Up; // preselect shooting while in Navigation
+    zassert_false(update(4, 1502).friction_requested);
+    r.left_switch = RcSwitch::Up;
+    auto state = update(5, 1503);
     zassert_true(state.run_allowed);
     zassert_false(state.friction_requested);
     zassert_false(state.continuous_requested);
-    r.right_switch=RcSwitch::Middle;
-    zassert_false(update(6,1504).spin_requested);
-    r.right_switch=RcSwitch::Down;
-    zassert_true(update(7,1505).spin_requested);
-    r.left_switch=RcSwitch::Down;
-    zassert_false(update(8,1506).armed);
-    r.left_switch=RcSwitch::Up;
-    zassert_false(update(9,1507).run_allowed); // internal armed_ must also be clear
-    r.online=false;
-    zassert_false(update(10,1508).run_allowed);
-    r.online=true;
-    zassert_false(update(11,1509).run_allowed);
+    r.right_switch = RcSwitch::Middle;
+    zassert_false(update(6, 1504).spin_requested);
+    r.right_switch = RcSwitch::Down;
+    zassert_true(update(7, 1505).spin_requested);
+    r.left_switch = RcSwitch::Down;
+    zassert_false(update(8, 1506).armed);
+    r.left_switch = RcSwitch::Up;
+    zassert_false(update(9, 1507).run_allowed); // internal armed_ must also be clear
+    r.online = false;
+    zassert_false(update(10, 1508).run_allowed);
+    r.online = true;
+    zassert_false(update(11, 1509).run_allowed);
 }
 
 ZTEST_SUITE(command_manager, nullptr, nullptr, nullptr, nullptr, nullptr);

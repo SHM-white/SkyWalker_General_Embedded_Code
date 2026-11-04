@@ -27,8 +27,8 @@ inline void communicationTask(void *, void *, void *) {
 inline void update(const control::RcControlState &local, bool emergency, bool paused, std::uint64_t now_ms) {
     const auto &rc = controls.update(local.remote, now_ms);
     const bool allowed = local.run_allowed && rc.run_allowed && !paused && !emergency;
-    if (operator_controls.publish(endpoint, allowed, emergency, rc.remote.stamp,
-                                  rc.clear_event_id, rc.clear_stamp, now_ms))
+    if (operator_controls.publish(endpoint, allowed, emergency, rc.remote.stamp, rc.clear_event_id, rc.clear_stamp,
+                                  now_ms))
         controls.withdraw();
     const auto peer = endpoint.snapshot();
     const bool run = allowed && rc.run_allowed && rc.fresh && peer.online;
@@ -51,7 +51,7 @@ inline void printStatus() {
     const auto &feedback = peer.big_yaw_feedback;
     printk("bigYaw online=%d run=%d source=%u target=%.3f actual=%.3f ready=%d valid=%d link=%d rejected=%u\n",
            peer.online, request.mode != BigYawMode::Disabled, request.source_sequence,
-           double(request.target_rate_rad_s), double(feedback.actual_rate_rad_s),
-           feedback.ready, feedback.valid, peer.error, peer.rejected_frames);
+           double(request.target_rate_rad_s), double(feedback.actual_rate_rad_s), feedback.ready, feedback.valid,
+           peer.error, peer.rejected_frames);
 }
 } // namespace skywalker::samples::manual_big_yaw

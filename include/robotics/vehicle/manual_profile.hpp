@@ -8,7 +8,7 @@
 namespace skywalker::robotics::vehicle {
 inline constexpr std::uint32_t manual_command_timeout_ms = gimbal_command_timeout_ms;
 // Old physical joint-direction hint retained for standalone benches;
- // reference-v4 world-rate commands must NOT apply this factor.
+// reference-v4 world-rate commands must NOT apply this factor.
 inline constexpr float big_yaw_wire_direction = -1.0f;
 inline CommandManager::Config manualCommandConfig() {
     auto c = gimbalCommandConfig();

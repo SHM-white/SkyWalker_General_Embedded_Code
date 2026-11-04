@@ -27,18 +27,22 @@ inline const device *remote_uart = nullptr;
 #endif
 inline const device *yaw_can = DEVICE_DT_GET(DT_NODELABEL(can1));
 inline const device *pitch_can = DEVICE_DT_GET(DT_NODELABEL(can2));
-using calibration::yawHardware;
 using calibration::pitchHardware;
-using calibration::yawMotorConfig;
 using calibration::pitchMotorConfig;
+using calibration::yawHardware;
+using calibration::yawMotorConfig;
 inline constexpr auto yaw = calibration::yawAxisConfig();
 inline constexpr auto pitch = calibration::pitchAxisConfig();
 inline constexpr float yaw_command_sign = calibration::small_yaw.direction;
 inline constexpr float pitch_command_sign = calibration::pitch.direction;
 
 // Connect physical estop/reset inputs here. RC disable remains recoverable.
-inline bool emergencyStopRequested() { return false; }
-inline bool takeEmergencyResetRequest() { return false; }
+inline bool emergencyStopRequested() {
+    return false;
+}
+inline bool takeEmergencyResetRequest() {
+    return false;
+}
 // 调参：仅鼠标/发射台架启用的关节目标领先上限（rad）。初值约为
 // Yaw 8.6°、Pitch 5.7°，需结合目标-反馈误差及停止拖尾逐轴标定。
 // 超出上限的鼠标输入会被丢弃；过小会减弱跟踪/保持，0 表示关闭。

@@ -17,8 +17,8 @@ int DmImuCanSource::init() {
         config_.feedback_id == config_.slave_id ||
         (config_.mode != Mode::ActiveReport && config_.mode != Mode::RequestReply) ||
         (config_.attitude != Attitude::Quaternion && config_.attitude != Attitude::Euler) ||
-        !core::normalize(config_.sensor_to_body) || !config_.request_interval_us ||
-        !config_.response_timeout_us || !config_.recovery_retry_us || config_.max_retries > 3)
+        !core::normalize(config_.sensor_to_body) || !config_.request_interval_us || !config_.response_timeout_us ||
+        !config_.recovery_retry_us || config_.max_retries > 3)
         return -EINVAL;
     const int ret = state_.init(Accel | Gyro | Orientation | Temperature, config_.reference);
     if (ret < 0)
@@ -236,8 +236,8 @@ void DmImuCanSource::logStatistics(core::TimeUs now) {
         return;
     next_log_us_ = now + 1000000;
     LOG_INF("mode=%s slave=%x feedback=%x rx=%u updates=%u tx=%u replies=%u timeouts=%u invalid=%u",
-            config_.mode == Mode::ActiveReport ? "active" : "request", config_.slave_id, config_.feedback_id,
-            frames_, updates_, requests_, replies_, timeouts_, invalid_);
+            config_.mode == Mode::ActiveReport ? "active" : "request", config_.slave_id, config_.feedback_id, frames_,
+            updates_, requests_, replies_, timeouts_, invalid_);
 }
 
 int DmImuCanSource::service() {

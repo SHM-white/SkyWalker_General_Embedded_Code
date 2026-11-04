@@ -50,8 +50,7 @@ void DmImuRs485Parser::drop() {
     std::memmove(bytes_, bytes_ + 1, used_);
     std::memmove(times_, times_ + 1, used_ * sizeof(times_[0]));
 }
-int DmImuRs485Parser::consume(const std::uint8_t *p, std::size_t size, core::TimeUs rx,
-                             DmImuRs485Sink &sink) {
+int DmImuRs485Parser::consume(const std::uint8_t *p, std::size_t size, core::TimeUs rx, DmImuRs485Sink &sink) {
     if (!initialized_)
         return -EACCES;
     if (!p && size)

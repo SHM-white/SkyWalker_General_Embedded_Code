@@ -8,23 +8,23 @@ namespace skywalker::robotics::vehicle {
 inline motor::dji::Config steerHardware(std::size_t index) {
     const auto &c = steer[index];
     return motor::dji::gm6020({.id = c.id,
-                              .current_limit_a = c.effort_limit,
-                              .encoder_zero_ticks = c.encoder_zero_ticks,
-                              .current_mode_confirmed = connections_confirmed,
-                              .timing = {.feedback_timeout_ms = 20,
-                                         .command_timeout_ms = 20,
-                                         .enable_timeout_ms = 100,
-                                         .retry_interval_ms = 100}});
+                               .current_limit_a = c.effort_limit,
+                               .encoder_zero_ticks = c.encoder_zero_ticks,
+                               .current_mode_confirmed = connections_confirmed,
+                               .timing = {.feedback_timeout_ms = 20,
+                                          .command_timeout_ms = 20,
+                                          .enable_timeout_ms = 100,
+                                          .retry_interval_ms = 100}});
 }
 inline motor::dji::Config wheelHardware(std::size_t index) {
     const auto &c = wheel[index];
     return motor::dji::m3508({.id = c.id,
-                             .current_limit_a = c.effort_limit,
-                             .gear_ratio = c.gear_ratio,
-                             .timing = {.feedback_timeout_ms = 20,
-                                        .command_timeout_ms = 20,
-                                        .enable_timeout_ms = 100,
-                                        .retry_interval_ms = 100}});
+                              .current_limit_a = c.effort_limit,
+                              .gear_ratio = c.gear_ratio,
+                              .timing = {.feedback_timeout_ms = 20,
+                                         .command_timeout_ms = 20,
+                                         .enable_timeout_ms = 100,
+                                         .retry_interval_ms = 100}});
 }
 inline SwerveHardware::Config swerveHardwareConfig() {
     SwerveHardware::Config c{};

@@ -31,8 +31,8 @@ public:
 
 private:
     int acceptDm(const Update &);
-    int acceptDmRs485(std::uint8_t rid, std::uint8_t response_code, const Update &,
-                     core::TimeUs first_rx_us, core::TimeUs last_rx_us) override;
+    int acceptDmRs485(std::uint8_t rid, std::uint8_t response_code, const Update &, core::TimeUs first_rx_us,
+                      core::TimeUs last_rx_us) override;
     void finishRequest(bool retry);
     void logStatistics(core::TimeUs now);
     enum class Phase { Idle, Sending, AwaitReply };

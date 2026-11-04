@@ -31,7 +31,8 @@ GimbalExecutor gimbal(yaw, pitch, motors, vehicle::yawMotorConfig(), vehicle::ya
 } // namespace
 
 int main() {
-    diagnostics.start("gimbal_joint_pair", "gimbal", "yaw<=1rad/s,pitch<=0.8rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
+    diagnostics.start("gimbal_joint_pair", "gimbal",
+                      "yaw<=1rad/s,pitch<=0.8rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
     const int power_error = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
     diagnostics.event("motor_power", power_error);
     int source_error = commands.registerSource(source);
@@ -85,11 +86,11 @@ int main() {
         const auto age = ys.feedback_fresh && ms >= ys.feedback.timestamp_ms
                              ? std::min<std::uint64_t>(ms - ys.feedback.timestamp_ms, UINT32_MAX)
                              : UINT32_MAX;
-        const auto reason = setup_error || source_error ? vehicle::DiagnosticReason::InitFailed
-                            : !op.fresh ? vehicle::DiagnosticReason::RemoteStale
-                            : !op.run_allowed ? vehicle::DiagnosticReason::Disarmed
+        const auto reason = setup_error || source_error                ? vehicle::DiagnosticReason::InitFailed
+                            : !op.fresh                                ? vehicle::DiagnosticReason::RemoteStale
+                            : !op.run_allowed                          ? vehicle::DiagnosticReason::Disarmed
                             : !ys.feedback_fresh || !ps.feedback_fresh ? vehicle::DiagnosticReason::FeedbackStale
-                            : vehicle::DiagnosticReason::Ready;
+                                                                       : vehicle::DiagnosticReason::Ready;
         diagnostics.status({.reason = reason,
                             .valid = ys.feedback_fresh && ps.feedback_fresh,
                             .enabled = run.state == RunState::Active,
@@ -99,8 +100,11 @@ int main() {
                             .dt_us = float(dt_us),
                             .effort = gimbal.yawTelemetry().effort_command,
                             .detail = float(unsigned(run.reason)),
-                            .error = setup_error ? setup_error : source_error ? source_error :
-                                     yaw_error ? yaw_error : pitch_error ? pitch_error : run.error,
+                            .error = setup_error    ? setup_error
+                                     : source_error ? source_error
+                                     : yaw_error    ? yaw_error
+                                     : pitch_error  ? pitch_error
+                                                    : run.error,
                             .extra0 = float(gimbal.pitchTargetRad()),
                             .extra1 = ps.feedback.position_rad});
         k_sleep(K_USEC(vehicle::gimbal_period_us));

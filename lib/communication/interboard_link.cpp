@@ -18,11 +18,12 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
             return;
         }
         if (heartbeat_.stamp.valid && hb.sender_boot_id != heartbeat_.sender_boot_id) {
-            if (retired_count_==retired_boots_.size() ||
-                std::find(retired_boots_.begin(),retired_boots_.end(),hb.sender_boot_id)!=retired_boots_.end()) {
-                ++rejected_; return;
+            if (retired_count_ == retired_boots_.size() ||
+                std::find(retired_boots_.begin(), retired_boots_.end(), hb.sender_boot_id) != retired_boots_.end()) {
+                ++rejected_;
+                return;
             }
-            retired_boots_[retired_count_++]=heartbeat_.sender_boot_id;
+            retired_boots_[retired_count_++] = heartbeat_.sender_boot_id;
         }
         if (!heartbeat_.stamp.valid || hb.sender_boot_id != heartbeat_.sender_boot_id) {
             sequences_ = {};
@@ -79,8 +80,7 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
         if (ret == 0 &&
             (!big_yaw_request_.stamp.valid || sequenceAfter(r.stamp.sequence, big_yaw_request_.stamp.sequence)))
             big_yaw_request_ = r;
-        else if (ret == 0 && r.mode == BigYawMode::Disabled &&
-                 r.stamp.sequence == big_yaw_request_.stamp.sequence) {
+        else if (ret == 0 && r.mode == BigYawMode::Disabled && r.stamp.sequence == big_yaw_request_.stamp.sequence) {
             // A newer wire frame may revoke the same producer request. Do not
             // renew its age or allow an equal-sequence frame to re-enable it.
             big_yaw_request_.mode = BigYawMode::Disabled;
@@ -100,10 +100,13 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
             ret = -ESTALE;
         if (!ret && gimbal_imu_.stamp.valid && t.zero_generation == gimbal_imu_.zero_generation &&
             !sequenceAfter(t.sample_sequence, gimbal_imu_.sample_sequence)) {
-            if (!t.valid) gimbal_imu_.valid = false;
-            if (t.sample_sequence != gimbal_imu_.sample_sequence) ret = -ESTALE;
+            if (!t.valid)
+                gimbal_imu_.valid = false;
+            if (t.sample_sequence != gimbal_imu_.sample_sequence)
+                ret = -ESTALE;
         }
-        else if (!ret) gimbal_imu_ = t;
+        else if (!ret)
+            gimbal_imu_ = t;
         break;
     }
     case MessageId::BigYawFeedback:
@@ -186,8 +189,9 @@ int InterBoardLink::latestBigYawFeedback(BigYawFeedback &out) const {
 
 namespace skywalker::communication {
 int InterBoardLink::latestGimbalImuYaw(robotics::GimbalImuYaw &out) const {
-    if (!gimbal_imu_.stamp.valid) return -EAGAIN;
-    out=gimbal_imu_;
+    if (!gimbal_imu_.stamp.valid)
+        return -EAGAIN;
+    out = gimbal_imu_;
     return 0;
 }
 }

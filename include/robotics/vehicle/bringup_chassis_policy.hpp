@@ -13,8 +13,7 @@ inline constexpr std::uint32_t command_timeout_ms = 100;
 
 inline SwerveChassis::Config chassisConfig() {
     auto config = swerveConfig();
-    config.kinematics.max_wheel_velocity_m_s =
-        std::min(config.kinematics.max_wheel_velocity_m_s, chassis_speed_m_s);
+    config.kinematics.max_wheel_velocity_m_s = std::min(config.kinematics.max_wheel_velocity_m_s, chassis_speed_m_s);
     for (auto &module : config.modules) {
         auto &steer = module.steer.velocity;
         steer.effort_abs_max = std::min(steer.effort_abs_max, steer_current_a);

@@ -105,6 +105,7 @@ public:
     control::VelocityMotor::Telemetry dialVelocityTelemetry() const {
         return dial_velocity_control_.telemetry();
     }
+
 private:
     void stopFriction(WaitReason, int);
     void stopFeed(WaitReason, int);

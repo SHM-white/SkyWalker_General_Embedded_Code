@@ -39,16 +39,16 @@ int main() {
     diagnostics.event("stage_steer_limit_mA", int(stage::steer_current_a * 1000));
     diagnostics.event("stage_drive_limit_mA", int(stage::drive_current_a * 1000));
     diagnostics.event("stage_velocity_limit_mm_s", int(stage::chassis_speed_m_s * 1000));
-    static communication::ConfiguredInterBoardTransport transport(
-        {.kind = communication::InterBoardTransportKind::Uart,
-         .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))}, &link_dma);
+    static communication::ConfiguredInterBoardTransport transport({.kind = communication::InterBoardTransportKind::Uart,
+                                                                   .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
+                                                                  &link_dma);
     static communication::InterBoardEndpoint endpoint(transport, {BoardRole::ChassisController});
-    k_thread_create(&link_thread, link_stack, K_THREAD_STACK_SIZEOF(link_stack), linkTask,
-                    &endpoint, nullptr, nullptr, 6, 0, K_NO_WAIT);
+    k_thread_create(&link_thread, link_stack, K_THREAD_STACK_SIZEOF(link_stack), linkTask, &endpoint, nullptr, nullptr,
+                    6, 0, K_NO_WAIT);
     static motor::Motor s0(installed::steerHardware(0)), s1(installed::steerHardware(1)),
-                        s2(installed::steerHardware(2)), s3(installed::steerHardware(3));
+        s2(installed::steerHardware(2)), s3(installed::steerHardware(3));
     static motor::Motor d0(installed::wheelHardware(0)), d1(installed::wheelHardware(1)),
-                        d2(installed::wheelHardware(2)), d3(installed::wheelHardware(3));
+        d2(installed::wheelHardware(2)), d3(installed::wheelHardware(3));
     static motor::Group motors(s0, s1, s2, s3, d0, d1, d2, d3);
     static motor::CanBus steer_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
     static motor::CanBus drive_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
@@ -63,14 +63,16 @@ int main() {
         drive_error = drive_bus.start();
     const bool steer_started = steer_error == 0, drive_started = drive_error == 0;
     const int controller_error = chassis.begin();
-    const int power_error = installed::connections_confirmed
-                                ? regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1))) : -ENODEV;
+    const int power_error = installed::connections_confirmed ? regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)))
+                                                             : -ENODEV;
     diagnostics.event("steer_bus", steer_error);
     diagnostics.event("drive_bus", drive_error);
     diagnostics.event("chassis", controller_error);
     diagnostics.event("motor_rail", power_error);
-    const int init_error = steer_error ? steer_error : drive_error ? drive_error
-                           : controller_error ? controller_error : power_error;
+    const int init_error = steer_error        ? steer_error
+                           : drive_error      ? drive_error
+                           : controller_error ? controller_error
+                                              : power_error;
     samples::control::OperatorControlConsumer operator_controls;
     bool emergency_latched = false;
     std::uint64_t peer_boot = 0;
@@ -99,12 +101,12 @@ int main() {
             rx.control.receiver_boot_id != rx.local_boot_id)
             input.command.mode = ChassisMode::Disabled;
         input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
-                               input.command.stamp.valid};
+                              input.command.stamp.valid};
         input.transport_ready = init_error == 0 && rx.online;
         input.emergency_stop = emergency_latched;
         input.clear_estop = authority.clear_estop;
         auto status = init_error == 0 ? chassis.update(input, now_us)
-            : chassis.suspend(now_us, WaitReason::Configuration, init_error, true);
+                                      : chassis.suspend(now_us, WaitReason::Configuration, init_error, true);
         if (steer_started) {
             const int result = steer_bus.commit().error;
             if (result < 0)
@@ -126,31 +128,32 @@ int main() {
         const auto &output = chassis.output().module[index];
         const auto steer_view = hardware.motorAt(index).snapshot();
         const auto drive_view = hardware.motorAt(index + 4).snapshot();
-        const bool drive_valid = drive_view.feedback_fresh &&
-            (drive_view.feedback.valid & motor::FeedbackVelocity) && std::isfinite(drive_view.feedback.velocity_rad_s);
+        const bool drive_valid = drive_view.feedback_fresh && (drive_view.feedback.valid & motor::FeedbackVelocity) &&
+                                 std::isfinite(drive_view.feedback.velocity_rad_s);
         const bool steer_valid = steer_view.feedback_fresh &&
-            (steer_view.feedback.valid & motor::FeedbackAbsolutePosition) &&
-            std::isfinite(steer_view.feedback.absolute_position_rad);
-        const auto reason = init_error ? installed::DiagnosticReason::InitFailed
-            : !rx.online ? installed::DiagnosticReason::PeerStale
-            : !rx.operator_control_valid || emergency_latched ? installed::DiagnosticReason::Permission
-            : !authority.run_allowed ? installed::DiagnosticReason::Disarmed
-            : status.reason == WaitReason::Command ? installed::DiagnosticReason::CommandStale
-            : status.state != RunState::Active ? installed::DiagnosticReason::FeedbackStale
-                                               : installed::DiagnosticReason::Ready;
-        diagnostics.status({.reason = reason,
-                            .valid = drive_valid,
-                            .enabled = status.state == RunState::Active,
-                            .target = output.drive_target_rad_s,
-                            .feedback = installed::wheel[index].direction * drive_view.feedback.velocity_rad_s,
-                            .age_ms = age(input.command.stamp, now_ms),
-                            .dt_us = dt_us,
-                            .effort = output.drive_effort * chassis.effortScale(),
-                            .detail = float(index),
-                            .error = status.error ? status.error : rx.error,
-                            .extra0 = output.optimized_angle_rad,
-                            .extra1 = steer_valid ? installed::steer[index].direction * steer_view.feedback.absolute_position_rad
-                                                  : std::numeric_limits<float>::quiet_NaN()});
+                                 (steer_view.feedback.valid & motor::FeedbackAbsolutePosition) &&
+                                 std::isfinite(steer_view.feedback.absolute_position_rad);
+        const auto reason = init_error                                        ? installed::DiagnosticReason::InitFailed
+                            : !rx.online                                      ? installed::DiagnosticReason::PeerStale
+                            : !rx.operator_control_valid || emergency_latched ? installed::DiagnosticReason::Permission
+                            : !authority.run_allowed                          ? installed::DiagnosticReason::Disarmed
+                            : status.reason == WaitReason::Command ? installed::DiagnosticReason::CommandStale
+                            : status.state != RunState::Active     ? installed::DiagnosticReason::FeedbackStale
+                                                                   : installed::DiagnosticReason::Ready;
+        diagnostics.status(
+            {.reason = reason,
+             .valid = drive_valid,
+             .enabled = status.state == RunState::Active,
+             .target = output.drive_target_rad_s,
+             .feedback = installed::wheel[index].direction * drive_view.feedback.velocity_rad_s,
+             .age_ms = age(input.command.stamp, now_ms),
+             .dt_us = dt_us,
+             .effort = output.drive_effort * chassis.effortScale(),
+             .detail = float(index),
+             .error = status.error ? status.error : rx.error,
+             .extra0 = output.optimized_angle_rad,
+             .extra1 = steer_valid ? installed::steer[index].direction * steer_view.feedback.absolute_position_rad
+                                   : std::numeric_limits<float>::quiet_NaN()});
         deadline += period;
         const auto ticks = k_uptime_ticks();
         if (deadline <= ticks)

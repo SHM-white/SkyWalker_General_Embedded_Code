@@ -38,7 +38,8 @@ public:
     Hardware(const device *dji_can, const device *pitch_can, bool unloaded_relative = false)
         : dji_bus(dji_can), pitch_bus(pitch_can),
           gimbal(yaw, pitch, gimbal_group, board_config::yawMotorConfig(), board_config::shooterYawAxisConfig(),
-                 board_config::pitchMotorConfig(), board_config::shooterPitchAxisConfig(), board_config::execution_policy),
+                 board_config::pitchMotorConfig(), board_config::shooterPitchAxisConfig(),
+                 board_config::execution_policy),
           shooter(left, right, dial, friction_group, dial_group, vehicle::frictionMotorConfig(),
                   vehicle::dialMotorConfig(), vehicle::shooterExecutionConfig(unloaded_relative)) {
     }
@@ -48,9 +49,9 @@ public:
         if (!attached_) {
             if (!with_gimbal && !with_shooter)
                 return -EINVAL;
-            int ret = with_shooter ? (with_gimbal ? dji_bus.attach(yaw, left, right, dial)
-                                                : dji_bus.attach(left, right, dial))
-                                   : dji_bus.attach(yaw);
+            int ret = with_shooter
+                          ? (with_gimbal ? dji_bus.attach(yaw, left, right, dial) : dji_bus.attach(left, right, dial))
+                          : dji_bus.attach(yaw);
             if (ret < 0)
                 return ret;
             if (with_gimbal) {
@@ -177,7 +178,7 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                 gi.command = frame.decision.command.gimbal;
                 gi.source_stamp = sourceStamp(frame, gi.command.source);
                 const auto selected = operator_state.keyboard_mouse_selected ? ControlSource::KeyboardMouse
-                                                                            : ControlSource::Remote;
+                                                                             : ControlSource::Remote;
                 if (!operator_state.run_allowed || gi.command.source != selected)
                     gi.command.mode = GimbalMode::Disabled;
                 gi.transport_ready = setup == 0;
@@ -237,9 +238,8 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
             const bool request_valid = !exercise.execution_paused && shooter.stamp.valid &&
                                        shooter.stamp.timestamp_ms == now &&
                                        std::isfinite(shooter.dial_requested_velocity_rad_s);
-            const unsigned validity = unsigned(lv) | (unsigned(rv) << 1) | (unsigned(dp) << 2) |
-                                      (unsigned(dv) << 3) | (unsigned(dc) << 4) | (unsigned(output) << 5) |
-                                      (unsigned(request_valid) << 6);
+            const unsigned validity = unsigned(lv) | (unsigned(rv) << 1) | (unsigned(dp) << 2) | (unsigned(dv) << 3) |
+                                      (unsigned(dc) << 4) | (unsigned(output) << 5) | (unsigned(request_valid) << 6);
             telemetry_sequence = (telemetry_sequence + 1) % 1000000;
             const float shooter_channels[] = {
                 float(telemetry_sequence),
@@ -299,15 +299,21 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
                 float(raw.stamp.sequence % 1000000),
                 float(raw.stamp.timestamp_ms % 1000000), // 原始接收戳；读缓存不能刷新。
                 raw.stamp.valid && now >= raw.stamp.timestamp_ms ? float(now - raw.stamp.timestamp_ms) : -1.0f,
-                float(raw.mouse.x), float(raw.mouse.y),
+                float(raw.mouse.x),
+                float(raw.mouse.y),
                 fresh_gimbal_status ? yd.last_dt_s : 0.0f,
-                float(yd.target_rad), yp ? yaw.feedback.position_rad : 0.0f,
+                float(yd.target_rad),
+                yp ? yaw.feedback.position_rad : 0.0f,
                 yo ? yt.output.velocity.velocity_reference_rad_s : 0.0f,
-                yv ? yaw.feedback.velocity_rad_s : 0.0f, yo ? yt.effort_command : 0.0f,
-                float(pd.target_rad), pp ? pitch.feedback.position_rad : 0.0f,
+                yv ? yaw.feedback.velocity_rad_s : 0.0f,
+                yo ? yt.effort_command : 0.0f,
+                float(pd.target_rad),
+                pp ? pitch.feedback.position_rad : 0.0f,
                 po ? pt.output.velocity.velocity_reference_rad_s : 0.0f,
-                pv ? pitch.feedback.velocity_rad_s : 0.0f, po ? pt.effort_command : 0.0f,
-                float(aim_validity), float(aim_limits),
+                pv ? pitch.feedback.velocity_rad_s : 0.0f,
+                po ? pt.effort_command : 0.0f,
+                float(aim_validity),
+                float(aim_limits),
             };
             constexpr auto count = sizeof(shooter_channels) / sizeof(shooter_channels[0]);
             static_assert(sizeof(aim_channels) / sizeof(aim_channels[0]) == count);
@@ -329,13 +335,12 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
             printk(
                 "src=%u cmd=%u input=%u gesture=%u gimbal=%u friction=%u ready=%d feed=%u wait=%u active=%u/%u event=%u accepted=%u rejected=%u completed=%u reservations=%u mode=%u busy=%d jam=%d bus=%u\n",
                 frame.observed.remote.stamp.sequence, local_request.stamp.sequence, unsigned(local_request.source),
-                unsigned(frame.decision.mouse_fire.kind), unsigned(gimbal.state),
-                unsigned(shooter.friction.state), shooter.friction_ready, unsigned(shooter.feed.state),
-                unsigned(shooter.feed.reason), unsigned(shooter.friction.active_count),
-                unsigned(shooter.feed.active_count), shooter.last_event_id, shooter.last_accepted_event_id,
-                shooter.last_rejected_event_id, shooter.completed_single_events, shooter.shots,
-                unsigned(shooter.dial_mode), shooter.dial_busy,
-                shooter.jammed, unsigned(hardware.dji_bus.status().state));
+                unsigned(frame.decision.mouse_fire.kind), unsigned(gimbal.state), unsigned(shooter.friction.state),
+                shooter.friction_ready, unsigned(shooter.feed.state), unsigned(shooter.feed.reason),
+                unsigned(shooter.friction.active_count), unsigned(shooter.feed.active_count), shooter.last_event_id,
+                shooter.last_accepted_event_id, shooter.last_rejected_event_id, shooter.completed_single_events,
+                shooter.shots, unsigned(shooter.dial_mode), shooter.dial_busy, shooter.jammed,
+                unsigned(hardware.dji_bus.status().state));
         }
         k_sleep(K_MSEC(5)); // 休眠初值，ms；实际周期还包含计算/CAN，调小时观察周期超限与总线负载。
     }

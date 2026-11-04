@@ -21,10 +21,10 @@ ShooterExecutor::ShooterExecutor(motor::Motor &left, motor::Motor &right, motor:
       left_control_(left, friction_control), right_control_(right, friction_control),
       dial_control_(dial, dialPositionConfig(dial_control, config.dial_speed_rad_s), this),
       dial_velocity_control_(dial, {dial_control.loop.velocity, dial_control.effort_unit}, this), config_(config),
-      dial_velocity_limit_rad_s_(std::min(config.dial_speed_rad_s,
-                                          dial_control.loop.velocity.requested_velocity_abs_max_rad_s)),
+      dial_velocity_limit_rad_s_(
+          std::min(config.dial_speed_rad_s, dial_control.loop.velocity.requested_velocity_abs_max_rad_s)),
       dial_deceleration_rad_s2_(std::min(dial_control.loop.velocity.reference_slew.rising_rate_per_s,
-                                        dial_control.loop.velocity.reference_slew.falling_rate_per_s)) {
+                                         dial_control.loop.velocity.reference_slew.falling_rate_per_s)) {
 }
 
 int ShooterExecutor::begin() {
@@ -46,8 +46,8 @@ int ShooterExecutor::begin() {
                        config_.dial_phase_tolerance_rad < config_.dial_step_rad * 0.5f &&
                        std::isfinite(config_.heat_per_round) && config_.heat_per_round > 0 &&
                        std::isfinite(config_.max_fire_rate_hz) && config_.max_fire_rate_hz > 0 &&
-                       std::fabs(config_.friction_direction[0]) == 1 &&
-                       std::fabs(config_.friction_direction[1]) == 1 && std::fabs(config_.dial_direction) == 1 &&
+                       std::fabs(config_.friction_direction[0]) == 1 && std::fabs(config_.friction_direction[1]) == 1 &&
+                       std::fabs(config_.dial_direction) == 1 &&
                        dial_control_.reference() == control::PositionReference::DriverContinuous;
     int ret = valid ? left_control_.configure() : -EINVAL;
     if (!ret)
@@ -128,8 +128,8 @@ void ShooterExecutor::consumeEvent(const ShooterCommand &command, bool accepted)
 
 double ShooterExecutor::nextIndex(double measured_position) const {
     const double step = config_.dial_step_rad;
-    const double phase = static_cast<double>(config_.dial_direction) *
-                         (measured_position - dial_phase_origin_rad_) / step;
+    const double phase = static_cast<double>(config_.dial_direction) * (measured_position - dial_phase_origin_rad_) /
+                         step;
     const double nearest = std::round(phase);
     // A stopped phase close to an index starts the following full index.
     // Between indexes, advance only to the next forward mechanical phase.
@@ -307,8 +307,7 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
             have_heat_model_ = true;
         }
         else if (now_us > heat_updated_us_) {
-            heat_model_ = std::max(0.0f, heat_model_ - in.heat.cooling_per_s *
-                                                            float(now_us - heat_updated_us_) / 1e6f);
+            heat_model_ = std::max(0.0f, heat_model_ - in.heat.cooling_per_s * float(now_us - heat_updated_us_) / 1e6f);
         }
         // A new referee sample can raise the conservative prediction, never
         // erase unacknowledged reservations merely because its stamp is newer.
@@ -473,8 +472,8 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
         status_.dial_target_rad = dial.feedback.position_rad;
         status_.dial_position_error_rad = 0;
         status_.dial_requested_velocity_rad_s = status_.dial_mode == DialControlMode::ContinuousVelocity
-                                                   ? config_.dial_direction * continuous_speed
-                                                   : 0;
+                                                    ? config_.dial_direction * continuous_speed
+                                                    : 0;
         ret = dial_velocity_control_.update(status_.dial_requested_velocity_rad_s, dt);
         output_valid = dial_velocity_control_.telemetry().output_valid;
         if (status_.dial_mode == DialControlMode::BrakingVelocity)

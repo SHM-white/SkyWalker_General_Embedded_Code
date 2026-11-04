@@ -42,8 +42,8 @@ class DmImuRs485Sink {
 public:
     virtual ~DmImuRs485Sink() = default;
     // Return 1 for a published update, 0 for an ignored/error reply, or a negative error.
-    virtual int acceptDmRs485(std::uint8_t rid, std::uint8_t response_code, const Update &,
-                             core::TimeUs first_rx_us, core::TimeUs last_rx_us) = 0;
+    virtual int acceptDmRs485(std::uint8_t rid, std::uint8_t response_code, const Update &, core::TimeUs first_rx_us,
+                              core::TimeUs last_rx_us) = 0;
 };
 
 // Firmware 2.0.3.0, manual V1.3 appendix D: 24 bytes, no CRC field.

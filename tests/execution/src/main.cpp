@@ -11,52 +11,54 @@ using namespace skywalker::robotics;
 ZTEST(execution, test_empty_snapshot_does_not_overwrite_destination) {
     SnapshotCache<RunStatus> cache;
     RunStatus output{};
-    output.error=314;
-    zassert_equal(cache.snapshot(output),-EAGAIN);
-    zassert_equal(output.error,314);
+    output.error = 314;
+    zassert_equal(cache.snapshot(output), -EAGAIN);
+    zassert_equal(output.error, 314);
 }
 
 ZTEST(execution, test_multiple_readers_retain_original_production_stamp) {
     SnapshotCache<RunStatus> cache;
     RunStatus produced{};
-    produced.state=RunState::Active;
-    produced.ready=true;
-    produced.stamp={100,22,true};
-    produced.last_command_sequence=9;
+    produced.state = RunState::Active;
+    produced.ready = true;
+    produced.stamp = {100, 22, true};
+    produced.last_command_sequence = 9;
     zassert_ok(cache.publish(produced));
-    RunStatus a{},b{};
+    RunStatus a{}, b{};
     zassert_ok(cache.snapshot(a));
     zassert_ok(cache.snapshot(b));
-    zassert_equal(a.stamp.timestamp_ms,100u);
-    zassert_equal(b.stamp.sequence,22u);
-    zassert_true(wireFeedback(a,200,100).armed);
-    zassert_false(wireFeedback(b,201,100).armed);
-    zassert_equal(wireFeedback(b,201,100).active_reasons,FeedbackStale);
-    zassert_false(wireFeedback(b,99,100).ready);
-    produced.stamp={300,23,true};
+    zassert_equal(a.stamp.timestamp_ms, 100u);
+    zassert_equal(b.stamp.sequence, 22u);
+    zassert_true(wireFeedback(a, 200, 100).armed);
+    zassert_false(wireFeedback(b, 201, 100).armed);
+    zassert_equal(wireFeedback(b, 201, 100).active_reasons, FeedbackStale);
+    zassert_false(wireFeedback(b, 99, 100).ready);
+    produced.stamp = {300, 23, true};
     zassert_ok(cache.publish(produced));
     zassert_ok(cache.snapshot(a));
-    zassert_equal(a.stamp.sequence,23u);
-    zassert_equal(b.stamp.sequence,22u);
+    zassert_equal(a.stamp.sequence, 23u);
+    zassert_equal(b.stamp.sequence, 22u);
 }
 
 ZTEST(execution, test_wait_reasons_have_distinct_wire_reason_bits) {
-    const struct { WaitReason reason; std::uint32_t expected; } cases[]={
-        {WaitReason::Command,CommandStale},
-        {WaitReason::Transport,TransportUnavailable},
-        {WaitReason::Feedback,FeedbackStale},
-        {WaitReason::Reference,RecoveryBoundary},
-        {WaitReason::Cycle,RecoveryBoundary},
-        {WaitReason::Drive,InvalidConfiguration},
-        {WaitReason::Configuration,InvalidConfiguration},
-        {WaitReason::Power,PowerBudgetStale}};
-    for (const auto &test:cases) {
+    const struct {
+        WaitReason reason;
+        std::uint32_t expected;
+    } cases[] = {{WaitReason::Command, CommandStale},
+                 {WaitReason::Transport, TransportUnavailable},
+                 {WaitReason::Feedback, FeedbackStale},
+                 {WaitReason::Reference, RecoveryBoundary},
+                 {WaitReason::Cycle, RecoveryBoundary},
+                 {WaitReason::Drive, InvalidConfiguration},
+                 {WaitReason::Configuration, InvalidConfiguration},
+                 {WaitReason::Power, PowerBudgetStale}};
+    for (const auto &test : cases) {
         RunStatus status{};
-        status.state=RunState::Recovering;
-        status.reason=test.reason;
-        status.stamp={10,1,true};
-        auto frame=wireFeedback(status);
-        zassert_equal(frame.active_reasons,test.expected);
+        status.state = RunState::Recovering;
+        status.reason = test.reason;
+        status.stamp = {10, 1, true};
+        auto frame = wireFeedback(status);
+        zassert_equal(frame.active_reasons, test.expected);
         zassert_false(frame.armed);
     }
 }
@@ -132,9 +134,8 @@ ZTEST(execution, test_endpoint_invalid_timeouts_fail_closed_without_sends) {
     CapturingTransport transport;
     communication::InterBoardEndpoint endpoint(transport, {BoardRole::ChassisController, 0, 100, 60, 100});
     endpoint.poll(100);
-    zassert_equal(endpoint.snapshot().error,-EINVAL);
+    zassert_equal(endpoint.snapshot().error, -EINVAL);
     zassert_false(endpoint.snapshot().online);
-    zassert_equal(transport.sends,0u);
+    zassert_equal(transport.sends, 0u);
 }
 ZTEST_SUITE(execution, nullptr, nullptr, nullptr, nullptr, nullptr);
-

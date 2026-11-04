@@ -4,8 +4,17 @@
 
 namespace skywalker::robotics::vehicle {
 enum class DiagnosticReason : std::uint8_t {
-    Boot, Ready, InitFailed, RemoteStale, Disarmed, FeedbackStale, ImuStale,
-    PeerStale, Configuration, Permission, CommandStale
+    Boot,
+    Ready,
+    InitFailed,
+    RemoteStale,
+    Disarmed,
+    FeedbackStale,
+    ImuStale,
+    PeerStale,
+    Configuration,
+    Permission,
+    CommandStale
 };
 struct DiagnosticStatus {
     DiagnosticReason reason = DiagnosticReason::Boot;
@@ -23,6 +32,7 @@ public:
     int start(const char *application, const char *role, const char *limits = "see application profile");
     void event(const char *step, int result);
     void status(const DiagnosticStatus &);
+
 private:
     const char *application_ = "boot";
     std::uint32_t sequence_ = 0;

@@ -127,7 +127,8 @@ int SwerveModule::steer(const ModuleFeedback &f, float dt, ModuleOutput &out) {
         steer_history_valid_ = false;
         return ret;
     }
-    out.steer_continuous_target_rad = static_cast<float>(steer_local_position_rad_ + static_cast<double>(out.alignment_error_rad));
+    out.steer_continuous_target_rad = static_cast<float>(steer_local_position_rad_ +
+                                                         static_cast<double>(out.alignment_error_rad));
     if (!std::isfinite(out.steer_continuous_target_rad)) {
         steer_history_valid_ = false;
         return -ERANGE;
@@ -205,8 +206,8 @@ int SwerveModule::finishDrive(const ModuleFeedback &f, float dt, bool permitted,
         drive_ = {};
         out.drive_target_rad_s = out.drive_effort = 0;
         const auto &pid = config_.drive.regulator.feedback;
-        out.drive_output_valid = f.drive_valid && std::isfinite(f.drive_velocity_rad_s) &&
-                                 std::isfinite(dt) && dt >= pid.dt_min_s && dt <= pid.dt_max_s;
+        out.drive_output_valid = f.drive_valid && std::isfinite(f.drive_velocity_rad_s) && std::isfinite(dt) &&
+                                 dt >= pid.dt_min_s && dt <= pid.dt_max_s;
         return 0;
     }
     return drive(f, dt, out);

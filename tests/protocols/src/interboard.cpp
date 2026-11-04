@@ -12,7 +12,7 @@ using namespace skywalker;
 using namespace skywalker::communication;
 using namespace skywalker::robotics;
 std::array<std::uint8_t, kMaxFrame> bytes{};
-int heartbeat(std::uint32_t seq=1, std::uint64_t boot=123) {
+int heartbeat(std::uint32_t seq = 1, std::uint64_t boot = 123) {
     BoardHeartbeat hb{};
     hb.role = BoardRole::GimbalController;
     hb.sender_boot_id = boot;
@@ -33,9 +33,9 @@ ZTEST(protocol_interboard, test_fragmented_heartbeat_frame_has_exact_metadata_an
     zassert_ok(parser.consume(bytes.data(), 11, 50));
     FrameMeta meta{};
     std::uint8_t payload[kMaxPayload]{};
-    std::size_t size=0;
+    std::size_t size = 0;
     zassert_false(parser.popFrame(meta, payload, sizeof(payload), size));
-    zassert_ok(parser.consume(bytes.data()+11, n-11, 51));
+    zassert_ok(parser.consume(bytes.data() + 11, n - 11, 51));
     zassert_true(parser.popFrame(meta, payload, sizeof(payload), size));
     zassert_equal(size, 20u);
     zassert_equal(meta.frame_sequence, 77u);
@@ -53,22 +53,22 @@ ZTEST(protocol_interboard, test_crc_version_and_length_recovery) {
     using namespace skywalker::communication;
     InterBoardParser parser;
     const int n = heartbeat();
-    auto bad=bytes;
-    bad[n-1] ^= 0x20;
+    auto bad = bytes;
+    bad[n - 1] ^= 0x20;
     zassert_ok(parser.consume(bad.data(), n, 10));
     zassert_true(parser.stats().crc_errors > 0);
-    bad=bytes;
+    bad = bytes;
     bad[2]++;
     zassert_ok(parser.consume(bad.data(), n, 11));
     zassert_true(parser.stats().version_errors > 0);
-    bad=bytes;
-    wire::storeLe16(bad.data()+6, kMaxPayload+1);
+    bad = bytes;
+    wire::storeLe16(bad.data() + 6, kMaxPayload + 1);
     zassert_ok(parser.consume(bad.data(), n, 12));
     zassert_true(parser.stats().length_errors > 0);
     zassert_ok(parser.consume(bytes.data(), n, 20));
     FrameMeta meta{};
     std::uint8_t payload[kMaxPayload]{};
-    std::size_t size=0;
+    std::size_t size = 0;
     zassert_true(parser.popFrame(meta, payload, sizeof(payload), size));
     zassert_equal(parser.stats().valid_frames, 1u);
 }
@@ -76,15 +76,15 @@ ZTEST(protocol_interboard, test_crc_version_and_length_recovery) {
 ZTEST(protocol_interboard, test_queue_overflow_discards_oldest_and_reset_restarts_counters) {
     using namespace skywalker::communication;
     InterBoardParser parser;
-    for (unsigned i=1; i<=6; ++i) {
-        const int n=heartbeat(i);
+    for (unsigned i = 1; i <= 6; ++i) {
+        const int n = heartbeat(i);
         zassert_ok(parser.consume(bytes.data(), n, i));
     }
     zassert_equal(parser.stats().queue_overflows, 2u);
     FrameMeta meta{};
     std::uint8_t payload[kMaxPayload]{};
-    std::size_t size=0;
-    for (unsigned i=3; i<=6; ++i) {
+    std::size_t size = 0;
+    for (unsigned i = 3; i <= 6; ++i) {
         zassert_true(parser.popFrame(meta, payload, sizeof(payload), size));
         zassert_equal(meta.frame_sequence, i);
     }
@@ -100,18 +100,18 @@ ZTEST(protocol_interboard, test_link_rejects_control_without_session_and_replay)
     using namespace skywalker::robotics;
     InterBoardLink link(BoardRole::ChassisController);
     RemoteChassisControl control{};
-    control.command.stamp={10, 8, true};
-    control.command.mode=ChassisMode::BodyVelocity;
-    control.command.vx_m_s=1.25f;
-    control.global_action=SafetyAction::Active;
-    control.receiver_boot_id=77;
+    control.command.stamp = {10, 8, true};
+    control.command.mode = ChassisMode::BodyVelocity;
+    control.command.vx_m_s = 1.25f;
+    control.global_action = SafetyAction::Active;
+    control.receiver_boot_id = 77;
     std::array<std::uint8_t, kMaxFrame> control_frame{};
-    const int csize=InterBoardCodec::encodeChassisControl(control, 2, control_frame.data(), control_frame.size());
-    zassert_true(csize>0);
+    const int csize = InterBoardCodec::encodeChassisControl(control, 2, control_frame.data(), control_frame.size());
+    zassert_true(csize > 0);
     zassert_ok(link.processRxBytes(control_frame.data(), csize, 10));
     zassert_equal(link.rejectedFrames(), 1u);
     zassert_false(link.peerOnline(10));
-    const int hsize=heartbeat(1);
+    const int hsize = heartbeat(1);
     zassert_ok(link.processRxBytes(bytes.data(), hsize, 11));
     zassert_true(link.peerOnline(11, 100));
     zassert_ok(link.processRxBytes(control_frame.data(), csize, 12));
@@ -123,10 +123,10 @@ ZTEST(protocol_interboard, test_link_rejects_control_without_session_and_replay)
     zassert_equal(link.rejectedFrames(), 2u);
     zassert_equal(observed.stamp.timestamp_ms, 12u);
     zassert_false(link.peerOnline(112, 100));
-    const int reboot=heartbeat(2, 456);
+    const int reboot = heartbeat(2, 456);
     zassert_ok(link.processRxBytes(bytes.data(), reboot, 113));
     zassert_equal(link.latestChassisControl(observed), -EAGAIN);
-    zassert_true(link.peerOnline(113,100));
+    zassert_true(link.peerOnline(113, 100));
 }
 
 ZTEST(protocol_interboard, test_encoder_rejects_invalid_power_without_writing_output) {
@@ -135,14 +135,14 @@ ZTEST(protocol_interboard, test_encoder_rejects_invalid_power_without_writing_ou
     robotics::ChassisConstraint value{};
     std::array<std::uint8_t, kMaxFrame> output{};
     output.fill(0x7d);
-    value.power_limit_w=-1;
+    value.power_limit_w = -1;
     zassert_equal(InterBoardCodec::encodeChassisConstraint(value, 1, output.data(), output.size()), -EINVAL);
     zassert_equal(output[0], 0x7d);
-    value.power_limit_w=80;
-    value.buffer_energy_j=12;
-    const int n=InterBoardCodec::encodeChassisConstraint(value, 2, output.data(), output.size());
+    value.power_limit_w = 80;
+    value.buffer_energy_j = 12;
+    const int n = InterBoardCodec::encodeChassisConstraint(value, 2, output.data(), output.size());
     zassert_equal(n, 34);
-    zassert_equal(InterBoardCodec::encodeChassisConstraint(value, 2, output.data(), n-1), -ENOSPC);
+    zassert_equal(InterBoardCodec::encodeChassisConstraint(value, 2, output.data(), n - 1), -ENOSPC);
 }
 
 ZTEST(protocol_interboard, test_reference_v4_feedback_status_wire_numbers) {
@@ -156,15 +156,15 @@ ZTEST(protocol_interboard, test_reference_v4_feedback_status_wire_numbers) {
     zassert_equal(bytes[12], 2);
     ChassisFeedbackSummary received{};
     FrameMeta meta{BoardRole::ChassisController, MessageId::ChassisFeedback, 12, 100};
-    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, bytes.data()+12, 32, received));
+    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, bytes.data() + 12, 32, received));
     zassert_equal(received.execution_state, ExecutionState::Active);
     auto reference = bytes;
     // Reference 5=Disabled is local Waiting; reference 4=Fault is ConfigBlocked.
     reference[12] = 5;
-    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, reference.data()+12, 32, received));
+    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, reference.data() + 12, 32, received));
     zassert_equal(received.execution_state, ExecutionState::Waiting);
     reference[12] = 4;
-    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, reference.data()+12, 32, received));
+    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, reference.data() + 12, 32, received));
     zassert_equal(received.execution_state, ExecutionState::ConfigBlocked);
     BigYawFeedback yaw{};
     yaw.execution_state = ExecutionState::Active;
@@ -175,9 +175,13 @@ ZTEST(protocol_interboard, test_reference_v4_feedback_status_wire_numbers) {
 ZTEST(protocol_interboard, test_reference_v4_0404_heading_payload) {
     using namespace skywalker::robotics;
     GimbalImuYaw value{};
-    value.valid = true; value.yaw_rad = 0.5f; value.yaw_rate_rad_s = -0.25f;
-    value.source_age_ms = 5; value.sample_sequence = 17;
-    value.zero_generation = 3; value.receiver_boot_id = 0x1122334455667788ULL;
+    value.valid = true;
+    value.yaw_rad = 0.5f;
+    value.yaw_rate_rad_s = -0.25f;
+    value.source_age_ms = 5;
+    value.sample_sequence = 17;
+    value.zero_generation = 3;
+    value.receiver_boot_id = 0x1122334455667788ULL;
     const int n = InterBoardCodec::encodeGimbalImuYaw(value, 4, bytes.data(), bytes.size());
     zassert_equal(n, 46); // Reference's 0x0404 is 32B payload (not 0x0405/40B).
     zassert_equal(bytes[2], 4);
@@ -188,13 +192,13 @@ ZTEST(protocol_interboard, test_reference_v4_0404_heading_payload) {
     zassert_equal(bytes[7], 0);
     zassert_equal(bytes[12], 1);
     zassert_equal(bytes[13], 0);
-    zassert_equal(wire::loadLe32(bytes.data()+12+16), 17u);
-    zassert_equal(wire::loadLe32(bytes.data()+12+20), 3u);
-    zassert_equal(wire::loadLe64(bytes.data()+12+24), value.receiver_boot_id);
-    zassert_equal(wire::loadLe16(bytes.data()+n-2), interboardCrc16(bytes.data(), n-2));
+    zassert_equal(wire::loadLe32(bytes.data() + 12 + 16), 17u);
+    zassert_equal(wire::loadLe32(bytes.data() + 12 + 20), 3u);
+    zassert_equal(wire::loadLe64(bytes.data() + 12 + 24), value.receiver_boot_id);
+    zassert_equal(wire::loadLe16(bytes.data() + n - 2), interboardCrc16(bytes.data(), n - 2));
     FrameMeta meta{BoardRole::GimbalController, MessageId::GimbalImuYaw, 4, 123};
     GimbalImuYaw decoded{};
-    zassert_ok(InterBoardCodec::decodeGimbalImuYaw(meta, bytes.data()+12, 32, decoded));
+    zassert_ok(InterBoardCodec::decodeGimbalImuYaw(meta, bytes.data() + 12, 32, decoded));
     zassert_true(decoded.valid);
     zassert_within(decoded.yaw_rad, .5f, 1e-6f);
     zassert_within(decoded.yaw_rate_rad_s, -.25f, 1e-6f);
@@ -204,7 +208,8 @@ ZTEST(protocol_interboard, test_reference_v4_0404_heading_payload) {
 ZTEST(protocol_interboard, test_reference_v4_rejects_non_reference_yaw_mode) {
     BigYawRequest r{};
     r.mode = BigYawMode::ImuHeadingHold;
-    r.receiver_boot_id = 123; r.stamp = {100, 1, true};
+    r.receiver_boot_id = 123;
+    r.stamp = {100, 1, true};
     r.permission = {true, true, {100, 1, true}};
     // Reference codec only accepts mode 0/1; preserve that invariant.
     zassert_equal(InterBoardCodec::encodeBigYawRequest(r, 1, bytes.data(), bytes.size()), -EINVAL);

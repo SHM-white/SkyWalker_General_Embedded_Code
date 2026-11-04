@@ -41,7 +41,8 @@ InertialGimbalAdapter adapter(inertialConfig());
 } // namespace
 
 int main() {
-    diagnostics.start("gimbal_inertial_pair", "gimbal", "yaw<=1rad/s,pitch<=0.8rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
+    diagnostics.start("gimbal_inertial_pair", "gimbal",
+                      "yaw<=1rad/s,pitch<=0.8rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
     const int imu_error = head.start();
     diagnostics.event("head.start", imu_error);
     const int power_error = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
@@ -109,17 +110,18 @@ int main() {
         const int pitch_error = pitch_started ? pitch_bus.commit().error : 0;
         const auto ys = yaw.snapshot(), ps = pitch.snapshot();
         const auto age = measured_head.sample.orientation.stamp.valid &&
-                         now >= measured_head.sample.orientation.stamp.time_us
+                                 now >= measured_head.sample.orientation.stamp.time_us
                              ? std::min<std::uint64_t>((now - measured_head.sample.orientation.stamp.time_us) / 1000,
-                                                       UINT32_MAX) : UINT32_MAX;
+                                                       UINT32_MAX)
+                             : UINT32_MAX;
         const auto reason = setup_error || source_error || imu_error ? vehicle::DiagnosticReason::InitFailed
-                            : !vehicle::imu_mounting_confirmed ? vehicle::DiagnosticReason::Configuration
-                            : !op.fresh ? vehicle::DiagnosticReason::RemoteStale
-                            : !op.run_allowed ? vehicle::DiagnosticReason::Disarmed
-                            : !imu_fresh ? vehicle::DiagnosticReason::ImuStale
+                            : !vehicle::imu_mounting_confirmed       ? vehicle::DiagnosticReason::Configuration
+                            : !op.fresh                              ? vehicle::DiagnosticReason::RemoteStale
+                            : !op.run_allowed                        ? vehicle::DiagnosticReason::Disarmed
+                            : !imu_fresh                             ? vehicle::DiagnosticReason::ImuStale
                             : !inertial.yaw_output_valid || !inertial.pitch_output_valid
                                 ? vehicle::DiagnosticReason::FeedbackStale
-                            : vehicle::DiagnosticReason::Ready;
+                                : vehicle::DiagnosticReason::Ready;
         diagnostics.status({.reason = reason,
                             .valid = imu_fresh && ys.feedback_fresh && ps.feedback_fresh,
                             .enabled = run.state == RunState::Active,
@@ -129,8 +131,12 @@ int main() {
                             .dt_us = float(dt_us),
                             .effort = gimbal.yawTelemetry().effort_command,
                             .detail = float(unsigned(run.reason)),
-                            .error = setup_error ? setup_error : source_error ? source_error : imu_error ? imu_error :
-                                     yaw_error ? yaw_error : pitch_error ? pitch_error : run.error,
+                            .error = setup_error    ? setup_error
+                                     : source_error ? source_error
+                                     : imu_error    ? imu_error
+                                     : yaw_error    ? yaw_error
+                                     : pitch_error  ? pitch_error
+                                                    : run.error,
                             .extra0 = inertial.head_yaw_rad,
                             .extra1 = inertial.head_pitch_rad});
         k_sleep(K_USEC(vehicle::gimbal_period_us));

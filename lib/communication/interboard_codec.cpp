@@ -33,23 +33,35 @@ bool header(const FrameMeta &m, MessageId id, BoardRole role) {
 // Waiting/Starting/Running/Stopping/Fault/Disabled, not Motor::ExecutionState.
 std::uint8_t referenceExecutionState(ExecutionState state) {
     switch (state) {
-    case ExecutionState::Waiting: return 0;      // Waiting
-    case ExecutionState::Recovering: return 1;   // Starting
-    case ExecutionState::Ready: return 1;        // Starting, ready is separately indicated
-    case ExecutionState::Active: return 2;       // Running
-    case ExecutionState::EStopLatched: return 4; // Fault
-    case ExecutionState::ConfigBlocked: return 4;// Fault
+    case ExecutionState::Waiting:
+        return 0; // Waiting
+    case ExecutionState::Recovering:
+        return 1; // Starting
+    case ExecutionState::Ready:
+        return 1; // Starting, ready is separately indicated
+    case ExecutionState::Active:
+        return 2; // Running
+    case ExecutionState::EStopLatched:
+        return 4; // Fault
+    case ExecutionState::ConfigBlocked:
+        return 4; // Fault
     }
     return 4;
 }
 ExecutionState localExecutionState(std::uint8_t value) {
     switch (value) {
-    case 0: return ExecutionState::Waiting;
-    case 1: return ExecutionState::Recovering;
-    case 2: return ExecutionState::Active;
-    case 3: return ExecutionState::Recovering;
-    case 4: return ExecutionState::ConfigBlocked;
-    default: return ExecutionState::Waiting; // reference Disabled=5
+    case 0:
+        return ExecutionState::Waiting;
+    case 1:
+        return ExecutionState::Recovering;
+    case 2:
+        return ExecutionState::Active;
+    case 3:
+        return ExecutionState::Recovering;
+    case 4:
+        return ExecutionState::ConfigBlocked;
+    default:
+        return ExecutionState::Waiting; // reference Disabled=5
     }
 }
 }
@@ -326,9 +338,9 @@ int InterBoardCodec::decodeBigYawFeedback(const FrameMeta &m, const std::uint8_t
 namespace skywalker::communication {
 // Reference 0x0404 is the sole on-wire IMU heading message.
 int InterBoardCodec::decodeGimbalImuYaw(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
-                                              robotics::GimbalImuYaw &out) {
-    if (!p || n != 32 || !header(m, MessageId::GimbalImuYaw, BoardRole::GimbalController) ||
-        p[0] > 1 || p[1] || p[2] || p[3])
+                                        robotics::GimbalImuYaw &out) {
+    if (!p || n != 32 || !header(m, MessageId::GimbalImuYaw, BoardRole::GimbalController) || p[0] > 1 || p[1] || p[2] ||
+        p[3])
         return -EINVAL;
     robotics::GimbalImuYaw t{};
     t.valid = p[0];
@@ -337,18 +349,17 @@ int InterBoardCodec::decodeGimbalImuYaw(const FrameMeta &m, const std::uint8_t *
     t.source_age_ms = wire::loadLe32(p + 12);
     t.sample_sequence = wire::loadLe32(p + 16);
     t.zero_generation = wire::loadLe32(p + 20);
-    t.receiver_boot_id = (std::uint64_t)wire::loadLe32(p + 24) |
-                         ((std::uint64_t)wire::loadLe32(p + 28) << 32);
-    if (!std::isfinite(t.yaw_rad) || std::fabs(t.yaw_rad) > 3.142f ||
-        !std::isfinite(t.yaw_rate_rad_s) || std::fabs(t.yaw_rate_rad_s) > 35 ||
-        !t.receiver_boot_id || (t.valid && (!t.zero_generation || t.source_age_ms > 50)))
+    t.receiver_boot_id = (std::uint64_t)wire::loadLe32(p + 24) | ((std::uint64_t)wire::loadLe32(p + 28) << 32);
+    if (!std::isfinite(t.yaw_rad) || std::fabs(t.yaw_rad) > 3.142f || !std::isfinite(t.yaw_rate_rad_s) ||
+        std::fabs(t.yaw_rate_rad_s) > 35 || !t.receiver_boot_id ||
+        (t.valid && (!t.zero_generation || t.source_age_ms > 50)))
         return -EINVAL;
     t.stamp = {m.local_receive_ms, m.frame_sequence, true};
     out = t;
     return 0;
 }
-int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::uint32_t seq,
-                                              std::uint8_t *out, std::size_t cap) {
+int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::uint32_t seq, std::uint8_t *out,
+                                        std::size_t cap) {
     std::uint8_t p[32]{};
     p[0] = t.valid;
     wire::storeFloatLe(p + 4, t.yaw_rad);
@@ -359,9 +370,8 @@ int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::ui
     wire::storeLe32(p + 24, static_cast<std::uint32_t>(t.receiver_boot_id & 0xffffffffULL));
     wire::storeLe32(p + 28, static_cast<std::uint32_t>(t.receiver_boot_id >> 32));
     robotics::GimbalImuYaw check{};
-    const int ret = decodeGimbalImuYaw(
-        {BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, 0}, p, sizeof(p), check);
-    return ret < 0 ? ret
-                   : frame(BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, p, sizeof(p), out, cap);
+    const int ret = decodeGimbalImuYaw({BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, 0}, p, sizeof(p),
+                                       check);
+    return ret < 0 ? ret : frame(BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, p, sizeof(p), out, cap);
 }
 }

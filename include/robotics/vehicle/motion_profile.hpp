@@ -15,9 +15,9 @@ static_assert(!(big_yaw_native_velocity_profile_confirmed && big_yaw_heading_loc
               "Native velocity and MIT heading torque cannot control the same motor");
 inline ChassisMotionAdapter::Config chassisMotionConfig() {
     ChassisMotionAdapter::Config c{};
-    c.frame=ChassisMotionAdapter::Frame::Body;
-    c.compensation_enabled=false;
-    c.startup_alignment_confirmed=startup_heading_alignment_confirmed;
+    c.frame = ChassisMotionAdapter::Frame::Body;
+    c.compensation_enabled = false;
+    c.startup_alignment_confirmed = startup_heading_alignment_confirmed;
     return c;
 }
 }

@@ -17,10 +17,8 @@ inline constexpr Color white{16, 16, 16};
 inline constexpr LedStep off_steps[] = {{off, 1000}};
 inline constexpr LedPattern Off{off_steps, false};
 
-inline constexpr LedStep boot_steps[] = {
-    {purple, 100}, {off, 100}, {purple, 100}, {off, 100},
-    {purple, 100}, {off, 100}
-};
+inline constexpr LedStep boot_steps[] = {{purple, 100}, {off, 100},    {purple, 100},
+                                         {off, 100},    {purple, 100}, {off, 100}};
 inline constexpr LedPattern Boot{boot_steps, false};
 
 inline constexpr LedStep initializing_steps[] = {{blue, 150}, {off, 850}};
@@ -35,9 +33,7 @@ inline constexpr LedPattern Running{running_steps, true};
 inline constexpr LedStep disarmed_steps[] = {{amber, 1000}};
 inline constexpr LedPattern Disarmed{disarmed_steps, false};
 
-inline constexpr LedStep link_lost_steps[] = {
-    {amber, 120}, {off, 120}, {amber, 120}, {off, 640}
-};
+inline constexpr LedStep link_lost_steps[] = {{amber, 120}, {off, 120}, {amber, 120}, {off, 640}};
 inline constexpr LedPattern LinkLost{link_lost_steps, true};
 
 inline constexpr LedStep recovering_steps[] = {{blue, 350}, {off, 350}};
@@ -49,23 +45,31 @@ inline constexpr LedPattern Fault{fault_steps, true};
 inline constexpr LedStep estop_steps[] = {{red, 1000}};
 inline constexpr LedPattern EStop{estop_steps, false};
 
-inline constexpr LedStep hardware_test_steps[] = {
-    {red, 300}, {green, 300}, {blue, 300}, {white, 300}, {off, 300}
-};
+inline constexpr LedStep hardware_test_steps[] = {{red, 300}, {green, 300}, {blue, 300}, {white, 300}, {off, 300}};
 inline constexpr LedPattern HardwareTest{hardware_test_steps, false};
 
 inline constexpr const LedPattern &forStatus(LedStatus status) {
     switch (status) {
-    case LedStatus::Boot: return Boot;
-    case LedStatus::Initializing: return Initializing;
-    case LedStatus::Ready: return Ready;
-    case LedStatus::Running: return Running;
-    case LedStatus::Disarmed: return Disarmed;
-    case LedStatus::LinkLost: return LinkLost;
-    case LedStatus::Recovering: return Recovering;
-    case LedStatus::Fault: return Fault;
-    case LedStatus::EStop: return EStop;
-    case LedStatus::HardwareTest: return HardwareTest;
+    case LedStatus::Boot:
+        return Boot;
+    case LedStatus::Initializing:
+        return Initializing;
+    case LedStatus::Ready:
+        return Ready;
+    case LedStatus::Running:
+        return Running;
+    case LedStatus::Disarmed:
+        return Disarmed;
+    case LedStatus::LinkLost:
+        return LinkLost;
+    case LedStatus::Recovering:
+        return Recovering;
+    case LedStatus::Fault:
+        return Fault;
+    case LedStatus::EStop:
+        return EStop;
+    case LedStatus::HardwareTest:
+        return HardwareTest;
     }
     return Off;
 }

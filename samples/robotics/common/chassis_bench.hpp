@@ -168,11 +168,11 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
                                                    communication::RefereeVersion::Rm2026V1_3);
 #endif
     printk("8 motors FL/FR/RL/RR: steer IDs=%u/%u/%u/%u drive IDs=%u/%u/%u/%u; topology=%d config=%d\n",
-           unsigned(calibration::steer[0].id), unsigned(calibration::steer[1].id),
-           unsigned(calibration::steer[2].id), unsigned(calibration::steer[3].id),
-           unsigned(calibration::wheel[0].id), unsigned(calibration::wheel[1].id),
+           unsigned(calibration::steer[0].id), unsigned(calibration::steer[1].id), unsigned(calibration::steer[2].id),
+           unsigned(calibration::steer[3].id), unsigned(calibration::wheel[0].id), unsigned(calibration::wheel[1].id),
            unsigned(calibration::wheel[2].id), unsigned(calibration::wheel[3].id), topology_error, config_error);
-    printk("RC safe+center 0.5s then left Middle, Up=manual; left stick xy, right Down spin; console is telemetry only\n");
+    printk(
+        "RC safe+center 0.5s then left Middle, Up=manual; left stick xy, right Down spin; console is telemetry only\n");
     for (;;) {
         const auto now_us = core::monotonicTimeUs();
         const auto now_ms = now_us / 1000;
@@ -259,15 +259,14 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
                 const auto steer_snapshot = hardware.adapter.motorAt(i).snapshot();
                 LOG_INF(
                     "wheel=%u pos=%s steer_id=%u drive_id=%u raw_ticks=%u raw_valid=%d zero_ticks=%u steer_mrad=%d final_mrad=%d ramp_mrad=%d error_mrad=%d steer_out=%d drive_out=%d flip=%d coast=%d drive_mrad_s=%d target_mrad_s=%d current_mA=%d/%d scale_milli=%d/%d",
-                    unsigned(i), module_names[i], unsigned(calibration::steer[i].id), unsigned(calibration::wheel[i].id),
-                    unsigned(steer_snapshot.native_dji_feedback.encoder),
+                    unsigned(i), module_names[i], unsigned(calibration::steer[i].id),
+                    unsigned(calibration::wheel[i].id), unsigned(steer_snapshot.native_dji_feedback.encoder),
                     steer_snapshot.native_dji_feedback_valid && steer_snapshot.feedback_fresh,
                     unsigned(calibration::steer[i].encoder_zero_ticks),
-                    int(feedback.module[i].steer_absolute_rad * 1000),
-                    int(output.module[i].optimized_angle_rad * 1000), int(output.module[i].steer_reference_rad * 1000),
-                    int(output.module[i].alignment_error_rad * 1000), output.module[i].steer_output_valid,
-                    output.module[i].drive_output_valid, output.module[i].flipped, output.module[i].coasting,
-                    int(feedback.module[i].drive_velocity_rad_s * 1000),
+                    int(feedback.module[i].steer_absolute_rad * 1000), int(output.module[i].optimized_angle_rad * 1000),
+                    int(output.module[i].steer_reference_rad * 1000), int(output.module[i].alignment_error_rad * 1000),
+                    output.module[i].steer_output_valid, output.module[i].drive_output_valid, output.module[i].flipped,
+                    output.module[i].coasting, int(feedback.module[i].drive_velocity_rad_s * 1000),
                     int(output.module[i].drive_target_rad_s * 1000),
                     int(output.module[i].steer_effort * executor.steerEffortScale() * 1000),
                     int(output.module[i].drive_effort * executor.effortScale() * 1000),

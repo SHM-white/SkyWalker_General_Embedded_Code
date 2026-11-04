@@ -16,9 +16,9 @@ int BigYawExecutor::begin() {
                             (config_.direction != 1 && config_.direction != -1) || !config_.command_timeout_ms ||
                             !config_.source_timeout_us
                         ? -EINVAL
-                        : config_.native_velocity_mode_confirmed ? 0
-                                                                  : (config_.heading_lock_enabled ? heading_.validate()
-                                                                                                  : axis_.configure());
+                    : config_.native_velocity_mode_confirmed
+                        ? 0
+                        : (config_.heading_lock_enabled ? heading_.validate() : axis_.configure());
     if (!config_error_ && config_.native_velocity_mode_confirmed &&
         (config_.heading_lock_enabled || !(drive_.info().capabilities & motor::CommandVelocity) ||
          !std::isfinite(config_.native_velocity_acceleration_rad_s2) ||
@@ -36,7 +36,8 @@ void BigYawExecutor::withdraw(WaitReason, int, bool) {
     heading_.reset();
     native_last_rate_rad_s_ = 0;
     native_enable_generation_ = 0;
-    if (!config_.heading_lock_enabled && !config_.native_velocity_mode_confirmed) (void)axis_.reset();
+    if (!config_.heading_lock_enabled && !config_.native_velocity_mode_confirmed)
+        (void)axis_.reset();
     (void)drive_.disable();
     status_.ready = status_.requested = false;
 }
@@ -78,33 +79,37 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
         !forwardedFresh(r.permission.stamp, r.permission_age_ms, now_ms, config_.permission_timeout_ms))
         return suspend(now, WaitReason::Power, -EACCES);
     if (config_.heading_lock_enabled && (!in.head.valid || in.head.receiver_boot_id != in.local_boot_id ||
-        !in.peer_boot_id || in.head.sender_boot_id != in.peer_boot_id ||
-        !forwardedFresh(in.head.stamp,in.head.source_age_ms,now_ms,50)))
-        return suspend(now,WaitReason::Reference,-ESTALE);
+                                         !in.peer_boot_id || in.head.sender_boot_id != in.peer_boot_id ||
+                                         !forwardedFresh(in.head.stamp, in.head.source_age_ms, now_ms, 50)))
+        return suspend(now, WaitReason::Reference, -ESTALE);
     status_.requested = true;
     status_.last_command_sequence = r.stamp.sequence;
     int error = drive_.enable();
     if (config_.heading_lock_enabled) {
-        const auto view=drive_.snapshot();
-        if (!cycle || view.state!=motor::MotorState::Active || !view.feedback_fresh ||
-            !view.enabled_requested || !view.output_permitted || !(view.feedback.valid & motor::FeedbackVelocity) ||
+        const auto view = drive_.snapshot();
+        if (!cycle || view.state != motor::MotorState::Active || !view.feedback_fresh || !view.enabled_requested ||
+            !view.output_permitted || !(view.feedback.valid & motor::FeedbackVelocity) ||
             !std::isfinite(view.feedback.velocity_rad_s)) {
             heading_.reset();
             (void)drive_.invalidateComputedEffort();
-            status_.ready=false;
-            return publish(now,RunState::Recovering,!cycle ? WaitReason::Cycle : WaitReason::Feedback,error);
+            status_.ready = false;
+            return publish(now, RunState::Recovering, !cycle ? WaitReason::Cycle : WaitReason::Feedback, error);
         }
-        if (heading_enable_generation_!=view.enable_generation) {
-            heading_.reset(); heading_enable_generation_=view.enable_generation;
+        if (heading_enable_generation_ != view.enable_generation) {
+            heading_.reset();
+            heading_enable_generation_ = view.enable_generation;
         }
-        float torque=0;
-        const int calculated=heading_.step(in.head,r.target_rate_rad_s,dt,now_ms,torque);
-        if (calculated<0) return suspend(now,WaitReason::Reference,calculated);
+        float torque = 0;
+        const int calculated = heading_.step(in.head, r.target_rate_rad_s, dt, now_ms, torque);
+        if (calculated < 0)
+            return suspend(now, WaitReason::Reference, calculated);
         // Torque at the joint -> motor shaft via external ratio and sign once.
-        const int staged=drive_.setTorque(torque*config_.direction/config_.motor_to_joint_ratio,view.enable_generation);
-        if (staged<0) return suspend(now,WaitReason::Drive,staged);
-        status_.ready=true;
-        return publish(now,RunState::Active,WaitReason::None,error);
+        const int staged = drive_.setTorque(torque * config_.direction / config_.motor_to_joint_ratio,
+                                            view.enable_generation);
+        if (staged < 0)
+            return suspend(now, WaitReason::Drive, staged);
+        status_.ready = true;
+        return publish(now, RunState::Active, WaitReason::None, error);
     }
     if (config_.native_velocity_mode_confirmed) {
         // A missed execution cycle is a hard recovery boundary, not an
