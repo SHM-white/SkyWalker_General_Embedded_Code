@@ -214,7 +214,7 @@ ZTEST(command_manager, test_operator_safety_and_timeout_boundaries) {
 
     s.input.remote.left_switch = RcSwitch::Up;
     // The installed manual profile uses left Up for Manual, not Auto.
-    CommandArbiter normal_manual{};
+    CommandArbiter normal_manual(CommandArbiter::Config{});
     const auto manual_result = normal_manual.update(s.input);
     zassert_ok(manual_result.error);
     zassert_equal(manual_result.command.chassis.mode, ChassisMode::BodyVelocity);
