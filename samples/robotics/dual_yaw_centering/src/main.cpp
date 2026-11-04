@@ -41,6 +41,9 @@ communication::InterBoardEndpoint::Config endpointConfig() {
     return communication::InterBoardEndpoint::Config{role};
 }
 communication::InterBoardEndpoint endpoint(transport, endpointConfig());
+#if !defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
+atomic_t input_paused = 0;
+#endif
 void commTask(void *, void *, void *) {
     for (;;) {
         endpoint.poll(k_uptime_get());
@@ -48,7 +51,6 @@ void commTask(void *, void *, void *) {
     }
 }
 #if !defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
-atomic_t input_paused = 0;
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, samples::control::receiverConfig());
 RemoteSource original_source(remote);
