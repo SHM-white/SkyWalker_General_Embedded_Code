@@ -99,7 +99,7 @@ int Diagnostics::start(const char *application, const char *role, const char *li
     textLine("app=%s role=%s source=%s protocol=4\n", application, role, SKYWALKER_SOURCE_VERSION);
     textLine("hardware=%s calibration=%s uart=%s baud=%u\n", hardware_revision, calibration_revision,
              diagnostic_uart->name, diagnostic_baudrate);
-    textLine("resources: diagnostic=UART7/PE8-TX,PE7-RX; remote=UART5/PD2; see installed overlays\n");
+    textLine("%s", "resources: diagnostic=UART7/PE8-TX,PE7-RX; remote=UART5/PD2; see installed overlays\n");
     textLine("limits=%s\n", limits);
     event("diagnostic", output_error);
     status({.reason = output_error ? DiagnosticReason::InitFailed : DiagnosticReason::Boot, .error = output_error});

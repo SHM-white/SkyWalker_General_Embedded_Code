@@ -2,7 +2,7 @@
 
 #if SKYWALKER_STATUS_LED_AVAILABLE
 
-#include <cerrno>
+#include <errno.h>
 #include <zephyr/drivers/led_strip.h>
 
 namespace skywalker::led {
