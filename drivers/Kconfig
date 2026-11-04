@@ -1,6 +1,7 @@
 menu "Skywalker Device Drivers"
 
 rsource "imu/Kconfig"
+rsource "led/Kconfig"
 
 config SKYWALKER_DRIVER_MOTOR
     bool "Skywalker Motor Subsystem"
