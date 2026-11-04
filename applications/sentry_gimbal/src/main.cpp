@@ -10,8 +10,8 @@
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
+#include <robotics/gimbal/world_yaw_window_follow.hpp>
 #include <robotics/vehicle/motion_profile.hpp>
-#include <robotics/vehicle/reference_chassis_link_profile.hpp>
 #include <zephyr/drivers/regulator.h>
 #include "../../../samples/robotics/common/operator_controls.hpp"
 #include "../../../samples/robotics/common/rc_controls.hpp"
@@ -40,9 +40,7 @@ int main() {
     static communication::ConfiguredInterBoardTransport transport({.kind = communication::InterBoardTransportKind::Uart,
                                                                    .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
                                                                   &link_dma);
-    static communication::InterBoardEndpoint
-        endpoint(transport, {.role = BoardRole::GimbalController,
-                             .legacy_gimbal_imu = installed::reference_chassis_legacy_v4_compat});
+    static communication::InterBoardEndpoint endpoint(transport, {.role = BoardRole::GimbalController});
     static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
                                                 samples::control::receiverConfig());
     static RemoteSource remote_source(remote);
@@ -58,7 +56,7 @@ int main() {
                                  installed::gimbalExecutionConfig());
     static ImuHeadingReference head_heading;
     static InertialGimbalAdapter inertial(installed::manualInertialConfig());
-    static YawCenteringController centering(installed::manualCenteringConfig());
+    static WorldYawWindowFollower world_follower;
     int command_error = commands.registerSource(remote_source);
     if (command_error == 0)
         command_error = commands.start();
@@ -82,7 +80,6 @@ int main() {
     const bool setup_ready = command_error == 0 && head_error == 0 && yaw_error == 0 && pitch_error == 0 &&
                              control_error == 0 && power_error == 0;
     samples::control::RcControlAdapter controls;
-    samples::control::OperatorControlPublisher operator_publisher;
     communication::RemoteReceiver::Snapshot remote_frame{};
     CommandSnapshot frame{};
     std::uint64_t next_send_ms = 0;
@@ -94,12 +91,21 @@ int main() {
         endpoint.poll(now_ms);
         (void)remote.snapshot(remote_frame);
         auto operator_state = controls.update(remote_frame.remote, now_ms);
-        if (operator_publisher.publish(endpoint, operator_state.run_allowed, false, operator_state.remote.stamp,
-                                       operator_state.clear_event_id, operator_state.clear_stamp, now_ms)) {
+        // Reboot/loss of an established peer withdraws the RC baseline.
+        // No independent OperatorControl authorization or clear-estop event.
+        static std::uint64_t last_peer_boot = 0;
+        static bool was_peer_online = false;
+        const auto peer_state = endpoint.snapshot();
+        const bool peer_revoked = (was_peer_online && !peer_state.online) ||
+            (last_peer_boot && peer_state.peer.sender_boot_id &&
+             last_peer_boot != peer_state.peer.sender_boot_id);
+        if (peer_state.peer.sender_boot_id) last_peer_boot = peer_state.peer.sender_boot_id;
+        was_peer_online = peer_state.online;
+        if (peer_revoked) {
             controls.withdraw();
             operator_state.run_allowed = false;
         }
-        commands.setOperatorGate(operator_state.run_allowed, operator_state.clear_event_id);
+        commands.setOperatorGate(operator_state.run_allowed, 0);
         (void)commands.snapshot(frame);
         const auto head_frame = head.snapshot();
         const auto heading = head_heading.update(head_frame, !operator_state.run_allowed, now_us);
@@ -111,8 +117,7 @@ int main() {
         adaptation.yaw = yaw.snapshot();
         adaptation.pitch = pitch.snapshot();
         adaptation.head = head_frame;
-        adaptation.prerequisites_ready = setup_ready && installed::imu_mounting_confirmed &&
-                                         !operator_state.clear_estop;
+        adaptation.prerequisites_ready = setup_ready && installed::imu_mounting_confirmed;
         const auto adapted = inertial.update(adaptation, now_us);
         GimbalExecutionInputs input{};
         input.command = adapted.command;
@@ -120,24 +125,23 @@ int main() {
         input.yaw_output_valid = adapted.yaw_output_valid;
         input.pitch_output_valid = adapted.pitch_output_valid;
         input.transport_ready = setup_ready;
-        input.clear_estop = operator_state.clear_estop;
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
-        YawCenteringInputs follow{};
-        follow.joint_yaw_rad = adaptation.yaw.feedback.position_rad;
-        follow.joint_stamp = {adaptation.yaw.feedback.timestamp_ms * 1000, adaptation.yaw.feedback.timestamp_ms,
-                              adaptation.yaw.feedback_fresh && adaptation.yaw.position_reference_valid &&
-                                  bool(adaptation.yaw.feedback.valid & motor::FeedbackPosition)};
-        follow.source_stamp = adaptation.source_stamp;
-        follow.enabled = operator_state.run_allowed && input.command.mode != GimbalMode::Disabled &&
-                         !operator_state.clear_estop;
-        follow.head_stable = adapted.yaw_output_valid && adapted.pitch_output_valid && status.state == RunState::Active;
         const OutputPermission movement_permission{operator_state.fresh,
                                                    operator_state.run_allowed && installed::connections_confirmed,
                                                    operator_state.remote.stamp};
-        follow.permission_valid = movement_permission.valid && movement_permission.enabled &&
-                                  isFresh(movement_permission.stamp, now_ms, 300);
-        const auto centered = centering.update(follow, now_us);
+        const bool joint_valid = adaptation.yaw.feedback_fresh && adaptation.yaw.position_reference_valid &&
+                                 bool(adaptation.yaw.feedback.valid & motor::FeedbackPosition);
+        const bool following = movement_permission.valid && movement_permission.enabled &&
+                               heading.valid && joint_valid && adapted.yaw_output_valid &&
+                               adapted.pitch_output_valid && status.state == RunState::Active;
+        // Reference v4 mode=1 carries world rate, not the joint-relative centering rate.
+        // The recent head-world yaw mean lets big Yaw follow small Yaw without
+        // fighting a normal manual aiming motion.
+        const float joint_offset = installed::small_yaw.direction *
+                                   (adaptation.yaw.feedback.position_rad - installed::yaw_center_rad);
+        const auto world_follow = world_follower.update(
+            heading.yaw_rad - joint_offset, joint_offset, now_us, following);
         if (now_ms >= next_send_ms) {
             next_send_ms = now_ms + 10;
             BigYawRequest request{};
@@ -145,41 +149,17 @@ int main() {
             request.source_age_ms = age(adaptation.source_stamp, now_us);
             request.command_age_ms = age(adaptation.command.stamp, now_ms);
             request.permission = movement_permission;
-            if (centered.enabled && operator_state.run_allowed &&
-                request.source_age_ms <= installed::manual_command_timeout_ms &&
-                request.command_age_ms <= installed::manual_command_timeout_ms) {
+            // v4 mode=1: operator-desired *world* yaw rate, as in the reference chassis.
+            // The receiver closes the heading/rate loop using the 0x0404 sample.
+            request.mode = BigYawMode::Disabled;
+            request.target_rate_rad_s = 0;
+            request.source_sequence = operator_state.remote.stamp.sequence;
+            request.source_age_ms = request.command_age_ms = age(operator_state.remote.stamp, now_ms);
+            if (operator_state.fresh && operator_state.run_allowed && heading.valid && world_follow.valid) {
                 request.mode = BigYawMode::FollowCenter;
-                request.target_rate_rad_s = installed::big_yaw_wire_direction * centered.velocity_rad_s;
-            }
-            if (installed::reference_chassis_imu_heading_authorized) {
-                // 对端确认后才能发 mode=2；本板 MIT 后端是否启用不再决定线上模式。
-                // 任何一项前置条件不满足都保持 Disabled+0，不得降级为未经确认的 mode=1。
-                request.mode = BigYawMode::Disabled;
-                request.target_rate_rad_s = 0;
-                request.source_sequence = operator_state.remote.stamp.sequence;
-                request.source_age_ms = request.command_age_ms = age(operator_state.remote.stamp, now_ms);
-                if (operator_state.fresh && operator_state.run_allowed && heading.valid &&
-                    installed::startup_heading_alignment_confirmed && !operator_state.clear_estop) {
-                    request.mode = BigYawMode::ImuHeadingHold;
-                    // mode=2 的 target 是操作员希望的头部世界角速度，不是小 Yaw 居中的关节速度。
-                    float rate = std::clamp(float(operator_state.remote.analog.wheel) / 660.f, -1.f, 1.f);
-                    request.target_rate_rad_s = std::fabs(rate) < .05f ? 0 : rate;
-                }
-            }
-            else if (installed::reference_chassis_legacy_v4_compat) {
-                // 未改动的参考底盘只接受 mode=1，而且它的自稳后端把这个 target_rate
-                // 当作头部世界角速度使用，所以这里必须直接填操作员期望的世界角速度；
-                // 用小 Yaw 回中的关节速度冒充会让头部按那个速度持续偏转。
-                request.mode = BigYawMode::Disabled;
-                request.target_rate_rad_s = 0;
-                request.source_sequence = operator_state.remote.stamp.sequence;
-                request.source_age_ms = request.command_age_ms = age(operator_state.remote.stamp, now_ms);
-                if (operator_state.fresh && operator_state.run_allowed && heading.valid &&
-                    !operator_state.clear_estop) {
-                    request.mode = BigYawMode::FollowCenter;
-                    float rate = std::clamp(float(operator_state.remote.analog.wheel) / 660.f, -1.f, 1.f);
-                    request.target_rate_rad_s = std::fabs(rate) < .05f ? 0 : rate;
-                }
+                const float wheel = std::clamp(float(operator_state.remote.analog.wheel) / 660.f, -1.f, 1.f);
+                const float user_rate = std::fabs(wheel) < .05f ? 0 : wheel;
+                request.target_rate_rad_s = std::clamp(world_follow.world_rate_rad_s + user_rate, -1.0f, 1.0f);
             }
             const auto session = endpoint.snapshot();
             if (session.online) {
@@ -205,11 +185,9 @@ int main() {
             auto wheel_command = frame.decision.command.chassis;
             if (!operator_state.run_allowed)
                 wheel_command.mode = ChassisMode::Disabled;
-            if ((installed::reference_chassis_imu_heading_authorized ||
-                 installed::reference_chassis_legacy_v4_compat) &&
-                wheel_command.mode != ChassisMode::Disabled) {
+            if (wheel_command.mode != ChassisMode::Disabled) {
                 // Optional profile assigns the wheel to big Yaw; fixed spin is separate.
-                wheel_command.wz_rad_s = operator_state.remote.right_switch == RcSwitch::Down ? .5f : 0;
+                wheel_command.wz_rad_s = operator_state.spin_requested ? .5f : 0;
             }
             endpoint.submit(wheel_command);
         }

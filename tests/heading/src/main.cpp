@@ -10,6 +10,7 @@
 #include <drivers/motor/can_bus.hpp>
 #undef private
 #include <robotics/chassis/imu_heading.hpp>
+#include <robotics/chassis/reference_v4_motion.hpp>
 #include <robotics/execution/big_yaw_executor.hpp>
 using namespace skywalker;
 using namespace skywalker::robotics;
@@ -87,7 +88,7 @@ ZTEST(heading, test_big_yaw_executor_mit_authority_timeout_and_recovery) {
     BigYawExecutor e(drive,motor_cfg,c);zassert_ok(e.begin());
     drive.markStarted();
     BigYawExecutionInputs in{};in.peer_online=in.transport_ready=true;in.local_boot_id=22;in.peer_boot_id=11;in.head=head();
-    in.request.mode=BigYawMode::ImuHeadingHold;in.request.receiver_boot_id=22;in.request.target_rate_rad_s=.5f;
+    in.request.mode=BigYawMode::FollowCenter;in.request.receiver_boot_id=22;in.request.target_rate_rad_s=.5f;
     in.request.source_age_ms=in.request.command_age_ms=0;in.request.stamp={100,1,true};in.request.permission={true,true,{100,1,true}};
     e.update(in,100000);
     drive.snapshot_.state=motor::MotorState::Active;drive.snapshot_.feedback.timestamp_ms=static_cast<std::uint64_t>(k_uptime_get());
@@ -102,4 +103,27 @@ ZTEST(heading, test_big_yaw_executor_mit_authority_timeout_and_recovery) {
     in.request.permission.enabled=true;in.request.receiver_boot_id=21;zassert_equal(e.update(in,110000).reason,WaitReason::Transport);
     in.request.receiver_boot_id=22;in.request.stamp.timestamp_ms=0;zassert_equal(e.update(in,112000).reason,WaitReason::Command);
 }
+
+ZTEST(heading, test_reference_v4_gimbal_to_body_frame_and_spin_scaling) {
+    ChassisCommand c{.mode=ChassisMode::BodyVelocity,.vx_m_s=1.0f};
+    constexpr float pi = 3.14159265358979323846f;
+    // Reference installation has negative mechanical direction.
+    const float zero=-1.132792f, raw=zero-pi/2;
+    auto out=referenceV4ChassisToBody(c,true,raw,zero,-1,1);
+    zassert_within(out.vx_m_s,0,1e-5f);
+    zassert_within(out.vy_m_s,1,1e-5f);
+    c.wz_rad_s=.5f;
+    out=referenceV4ChassisToBody(c,true,raw,zero,-1,1);
+    zassert_within(out.vy_m_s,.3f,1e-5f);
+    c.vx_m_s=0; c.vy_m_s=1;
+    out=referenceV4ChassisToBody(c,true,raw,zero,-1,1);
+    zassert_within(out.vx_m_s,-.4f,1e-5f);
+    out=referenceV4ChassisToBody(c,false,raw,zero,-1,1);
+    zassert_equal(out.vx_m_s,0);
+    zassert_equal(out.vy_m_s,0);
+    zassert_equal(out.wz_rad_s,.5f);
+    zassert_within(referenceV4WorldToJointRate(0,2,0),-2,1e-5f);
+    zassert_within(referenceV4WorldToJointRate(1,0,0),1.25f,1e-5f);
+}
+
 ZTEST_SUITE(heading,nullptr,nullptr,nullptr,nullptr,nullptr);

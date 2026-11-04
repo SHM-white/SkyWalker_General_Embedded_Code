@@ -1,6 +1,7 @@
 #include <benchmark.hpp>
 #include <robotics/command/command_arbiter.hpp>
 #include <robotics/command/manual_command_mapper.hpp>
+#include "../../../samples/robotics/common/rc_controls.hpp"
 #include <zephyr/ztest.h>
 
 #include <array>
@@ -157,7 +158,8 @@ ZTEST(command_manager, test_manual_scaling_and_publication_stamps) {
     zassert_equal(s.out.command.chassis.mode, ChassisMode::BodyVelocity);
     near(s.out.command.chassis.vx_m_s, 3);
     near(s.out.command.chassis.vy_m_s, -3);
-    near(s.out.command.chassis.wz_rad_s, -6);
+    // RC wheel no longer requests chassis rotation; only right Down requests spin.
+    near(s.out.command.chassis.wz_rad_s, 0);
     near(s.out.command.gimbal.yaw_rate_rad_s, -3);
     near(s.out.command.gimbal.pitch_rate_rad_s, -2);
     zassert_equal(s.out.command.shooter.mode, ShooterMode::Disabled);
@@ -173,6 +175,11 @@ ZTEST(command_manager, test_manual_scaling_and_publication_stamps) {
     }
     s.step();
     zassert_equal(s.out.command.stamp.sequence, stamp.sequence + 1);
+    // A new physical sample with right Down produces the spin request.
+    s.input.remote.right_switch = RcSwitch::Down;
+    s.refresh();
+    s.step();
+    near(s.out.command.chassis.wz_rad_s, 6);
 }
 
 ZTEST(command_manager, test_operator_safety_and_timeout_boundaries) {
@@ -205,10 +212,18 @@ ZTEST(command_manager, test_operator_safety_and_timeout_boundaries) {
     disabled(s.out);
     zassert_true(s.out.reasons() & InvalidInputs);
 
+    s.input.remote.left_switch = RcSwitch::Up;
+    // The installed manual profile uses left Up for Manual, not Auto.
+    CommandArbiter normal_manual(CommandArbiter::Config{});
+    const auto manual_result = normal_manual.update(s.input);
+    zassert_ok(manual_result.error);
+    zassert_equal(manual_result.command.chassis.mode, ChassisMode::BodyVelocity);
+    // Explicitly selecting the legacy Auto-on-Up mapping while Auto is
+    // disabled must still fail closed.
     CommandArbiter::Config config{};
     config.allow_auto = false;
+    config.mapper.auto_on_up = true;
     CommandArbiter no_auto(config);
-    s.input.remote.left_switch = RcSwitch::Up;
     const auto result = no_auto.update(s.input);
     zassert_ok(result.error);
     disabled(result);
@@ -480,6 +495,41 @@ ZTEST(command_manager, test_algorithm_timings) {
     zassert_equal(automatic.out.command.shooter.mode, ShooterMode::FireContinuous);
     near(automatic.out.command.gimbal.yaw_target_rad, 0.25f);
     near(automatic.out.command.shooter.fire_rate_hz, 5);
+}
+
+
+ZTEST(command_manager, test_rc_rearm_neutral_and_preselected_spin_fire_blocked) {
+    using skywalker::samples::control::RcControlAdapter;
+    RcControlAdapter rc;
+    RemoteState r{};
+    r.online=true;r.left_switch=RcSwitch::Down;r.right_switch=RcSwitch::Middle;
+    auto update=[&](std::uint32_t seq, std::uint64_t ms) {
+        r.stamp={ms,seq,true};
+        return rc.update(r,ms);
+    };
+    zassert_false(update(1,1000).run_allowed);
+    zassert_false(update(2,1500).run_allowed);
+    r.left_switch=RcSwitch::Middle;
+    zassert_true(update(3,1501).armed);
+    r.right_switch=RcSwitch::Up; // preselect shooting while in Navigation
+    zassert_false(update(4,1502).friction_requested);
+    r.left_switch=RcSwitch::Up;
+    auto state=update(5,1503);
+    zassert_true(state.run_allowed);
+    zassert_false(state.friction_requested);
+    zassert_false(state.continuous_requested);
+    r.right_switch=RcSwitch::Middle;
+    zassert_false(update(6,1504).spin_requested);
+    r.right_switch=RcSwitch::Down;
+    zassert_true(update(7,1505).spin_requested);
+    r.left_switch=RcSwitch::Down;
+    zassert_false(update(8,1506).armed);
+    r.left_switch=RcSwitch::Up;
+    zassert_false(update(9,1507).run_allowed); // internal armed_ must also be clear
+    r.online=false;
+    zassert_false(update(10,1508).run_allowed);
+    r.online=true;
+    zassert_false(update(11,1509).run_allowed);
 }
 
 ZTEST_SUITE(command_manager, nullptr, nullptr, nullptr, nullptr, nullptr);
