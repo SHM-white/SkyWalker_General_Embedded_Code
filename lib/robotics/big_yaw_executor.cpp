@@ -66,7 +66,7 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
     const auto &r = in.request;
     if (r.mode == BigYawMode::Disabled)
         return suspend(now, WaitReason::Command);
-    if (r.mode != (config_.heading_lock_enabled ? BigYawMode::ImuHeadingHold : BigYawMode::FollowCenter) || !std::isfinite(r.target_rate_rad_s) ||
+    if (r.mode != BigYawMode::FollowCenter || !std::isfinite(r.target_rate_rad_s) ||
         std::fabs(r.target_rate_rad_s) > config_.rate_abs_max_rad_s)
         return suspend(now, WaitReason::Command, -ERANGE);
     if (!in.peer_online || !in.transport_ready || !in.local_boot_id || r.receiver_boot_id != in.local_boot_id)

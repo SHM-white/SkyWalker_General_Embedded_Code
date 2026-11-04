@@ -144,4 +144,70 @@ ZTEST(protocol_interboard, test_encoder_rejects_invalid_power_without_writing_ou
     zassert_equal(n, 34);
     zassert_equal(InterBoardCodec::encodeChassisConstraint(value, 2, output.data(), n-1), -ENOSPC);
 }
+
+ZTEST(protocol_interboard, test_reference_v4_feedback_status_wire_numbers) {
+    using namespace skywalker::robotics;
+    ChassisFeedbackSummary output{};
+    output.execution_state = ExecutionState::Active;
+    output.safety_state = SafetyState::Active;
+    const int n = InterBoardCodec::encodeChassisFeedback(output, 12, bytes.data(), bytes.size());
+    zassert_equal(n, 46);
+    // Reference protocol (alg_board_link.h): 2=Running, not local Ready.
+    zassert_equal(bytes[12], 2);
+    ChassisFeedbackSummary received{};
+    FrameMeta meta{BoardRole::ChassisController, MessageId::ChassisFeedback, 12, 100};
+    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, bytes.data()+12, 32, received));
+    zassert_equal(received.execution_state, ExecutionState::Active);
+    auto reference = bytes;
+    // Reference 5=Disabled is local Waiting; reference 4=Fault is ConfigBlocked.
+    reference[12] = 5;
+    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, reference.data()+12, 32, received));
+    zassert_equal(received.execution_state, ExecutionState::Waiting);
+    reference[12] = 4;
+    zassert_ok(InterBoardCodec::decodeChassisFeedback(meta, reference.data()+12, 32, received));
+    zassert_equal(received.execution_state, ExecutionState::ConfigBlocked);
+    BigYawFeedback yaw{};
+    yaw.execution_state = ExecutionState::Active;
+    zassert_equal(InterBoardCodec::encodeBigYawFeedback(yaw, 13, bytes.data(), bytes.size()), 38);
+    zassert_equal(bytes[12], 2);
+}
+
+ZTEST(protocol_interboard, test_reference_v4_0404_heading_payload) {
+    using namespace skywalker::robotics;
+    GimbalImuYaw value{};
+    value.valid = true; value.yaw_rad = 0.5f; value.yaw_rate_rad_s = -0.25f;
+    value.source_age_ms = 5; value.sample_sequence = 17;
+    value.zero_generation = 3; value.receiver_boot_id = 0x1122334455667788ULL;
+    const int n = InterBoardCodec::encodeGimbalImuYaw(value, 4, bytes.data(), bytes.size());
+    zassert_equal(n, 46); // Reference's 0x0404 is 32B payload (not 0x0405/40B).
+    zassert_equal(bytes[2], 4);
+    zassert_equal(bytes[3], 1);
+    zassert_equal(bytes[4], 4);
+    zassert_equal(bytes[5], 4);
+    zassert_equal(bytes[6], 32);
+    zassert_equal(bytes[7], 0);
+    zassert_equal(bytes[12], 1);
+    zassert_equal(bytes[13], 0);
+    zassert_equal(wire::loadLe32(bytes.data()+12+16), 17u);
+    zassert_equal(wire::loadLe32(bytes.data()+12+20), 3u);
+    zassert_equal(wire::loadLe64(bytes.data()+12+24), value.receiver_boot_id);
+    zassert_equal(wire::loadLe16(bytes.data()+n-2), interboardCrc16(bytes.data(), n-2));
+    FrameMeta meta{BoardRole::GimbalController, MessageId::GimbalImuYaw, 4, 123};
+    GimbalImuYaw decoded{};
+    zassert_ok(InterBoardCodec::decodeGimbalImuYaw(meta, bytes.data()+12, 32, decoded));
+    zassert_true(decoded.valid);
+    zassert_within(decoded.yaw_rad, .5f, 1e-6f);
+    zassert_within(decoded.yaw_rate_rad_s, -.25f, 1e-6f);
+    zassert_equal(decoded.receiver_boot_id, value.receiver_boot_id);
+}
+
+ZTEST(protocol_interboard, test_reference_v4_rejects_non_reference_yaw_mode) {
+    BigYawRequest r{};
+    r.mode = BigYawMode::ImuHeadingHold;
+    r.receiver_boot_id = 123; r.stamp = {100, 1, true};
+    r.permission = {true, true, {100, 1, true}};
+    // Reference codec only accepts mode 0/1; preserve that invariant.
+    zassert_equal(InterBoardCodec::encodeBigYawRequest(r, 1, bytes.data(), bytes.size()), -EINVAL);
+}
+
 ZTEST_SUITE(protocol_interboard, nullptr, nullptr, nullptr, nullptr, nullptr);

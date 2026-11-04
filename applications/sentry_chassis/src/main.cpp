@@ -6,12 +6,12 @@
 #include <drivers/imu/bmi088_imu.hpp>
 #include <drivers/imu/imu_receiver.hpp>
 #include <robotics/vehicle/motion_profile.hpp>
+#include <robotics/chassis/reference_v4_motion.hpp>
 #include <drivers/motor/can_bus.hpp>
 #include <robotics/vehicle/big_yaw_profile.hpp>
 #include <robotics/vehicle/chassis_profile.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <zephyr/drivers/regulator.h>
-#include "../../../samples/robotics/common/operator_controls.hpp"
 
 namespace {
 using namespace skywalker;
@@ -50,8 +50,8 @@ int main() {
     static imu::ImuReceiver body(body_source,{.poll_interval_us=500,.priority=5});
     static ImuHeadingReference body_heading;
     static ChassisMotionAdapter motion(installed::chassisMotionConfig());
-    const auto motion_config=installed::chassisMotionConfig();
-    const bool need_body=motion_config.frame!=ChassisMotionAdapter::Frame::Body || motion_config.compensation_enabled;
+    // Reference mode=1 requires BMI088 body yaw-rate compensation.
+    const bool need_body = true;
     const int body_error=need_body ? body.start() : 0;
     static BigYawExecutor big_axis(big_drive, installed::bigYawMotorConfig(), installed::bigYawExecutionConfig());
     int steer_error = installed::connections_confirmed ? steer_bus.attach(s0, s1, s2, s3) : -ENODEV;
@@ -75,7 +75,6 @@ int main() {
     diagnostics.event("chassis", chassis_error);
     diagnostics.event("body_imu",body_error);
     diagnostics.event("motor_rail", power_error);
-    samples::control::OperatorControlConsumer operator_controls;
     std::uint64_t peer_boot = 0;
     int previous_big_commit_error = 0;
     std::int64_t deadline = k_uptime_ticks();
@@ -84,7 +83,6 @@ int main() {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         endpoint.poll(now_ms);
         const auto rx = endpoint.snapshot();
-        const auto authority = operator_controls.update(rx, now_ms);
         if (rx.peer.stamp.valid && peer_boot != rx.peer.sender_boot_id) {
             peer_boot = rx.peer.sender_boot_id;
             (void)chassis.suspend(now_us, WaitReason::Reference, -ESTALE);
@@ -92,32 +90,53 @@ int main() {
         }
         ChassisExecutionInputs input{};
         input.command = rx.control.command;
-        if (rx.control.global_action != SafetyAction::Active || !authority.run_allowed ||
+        if (rx.control.global_action != SafetyAction::Active || !rx.online ||
             !rx.local_boot_id || rx.control.receiver_boot_id != rx.local_boot_id)
             input.command.mode = ChassisMode::Disabled;
-        const auto body_sample=body_heading.update(need_body ? body.snapshot() : imu::Snapshot{},!authority.run_allowed,now_us);
-        input.command=motion.update(input.command,body_sample,rx.gimbal_imu,rx.local_boot_id,!authority.run_allowed,now_ms,rx.peer);
+        const auto body_snapshot = body.snapshot();
+        const auto body_sample = body_heading.update(body_snapshot, input.command.mode==ChassisMode::Disabled, now_us);
+        // Unlike our old Body-frame v4 implementation, the reference sends
+        // gimbal-relative translation. The absolute encoder zero is fixed.
+        const auto yaw_feedback = big_drive.snapshot();
+        const bool encoder_valid = yaw_feedback.feedback_fresh &&
+            (yaw_feedback.feedback.valid & motor::FeedbackPosition) &&
+            isFresh({yaw_feedback.feedback.timestamp_ms, 1, true}, now_ms, 100);
+        input.command = referenceV4ChassisToBody(input.command, encoder_valid,
+            yaw_feedback.feedback.position_rad, installed::reference_big_yaw_forward_zero_rad,
+            installed::reference_big_yaw.direction, installed::reference_big_yaw.gear_ratio);
+        input.command=motion.update(input.command,body_sample,rx.gimbal_imu,rx.local_boot_id,input.command.mode==ChassisMode::Disabled,now_ms,rx.peer);
         input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
                                input.command.stamp.valid};
         input.transport_ready = steer_error == 0 && drive_error == 0 && chassis_error == 0 &&
                                  power_error == 0 && rx.online;
-        input.emergency_stop = authority.emergency_stop;
-        input.clear_estop = authority.clear_estop;
         // This fixed manual entry uses the real peer RC authority and bounded
         // current profiles; measured-power/referee execution is a later stage.
         auto status = chassis_error == 0 ? chassis.update(input, now_us)
                                         : chassis.suspend(now_us, WaitReason::Configuration, chassis_error, true);
         BigYawExecutionInputs big_input{};
         big_input.request = rx.big_yaw_request;
-        if (!authority.run_allowed)
+        // The same left-switch control must stop both the wheels and big Yaw.
+        if (input.command.mode == ChassisMode::Disabled)
             big_input.request.mode = BigYawMode::Disabled;
+        if (big_input.request.mode == BigYawMode::FollowCenter &&
+            !installed::big_yaw_heading_lock_enabled) {
+            // Local velocity backend accepts *joint-relative* speed; decode the
+            // reference's world-rate request using two real gyro observations.
+            const bool body_gyro_valid = body_snapshot.state == imu::State::Running &&
+                core::fresh(body_snapshot.sample.gyro_rad_s.stamp, now_us, 50000) &&
+                core::finite(body_snapshot.sample.gyro_rad_s.value);
+            if (!body_gyro_valid || !rx.gimbal_imu.valid)
+                big_input.request.mode = BigYawMode::Disabled;
+            else
+                big_input.request.target_rate_rad_s = referenceV4WorldToJointRate(
+                    big_input.request.target_rate_rad_s,
+                    body_snapshot.sample.gyro_rad_s.value.z, rx.gimbal_imu.yaw_rate_rad_s);
+        }
         big_input.head=rx.gimbal_imu;
         big_input.peer_boot_id=rx.peer.sender_boot_id;
         big_input.local_boot_id = rx.local_boot_id;
         big_input.peer_online = rx.online;
         big_input.transport_ready = big_error == 0 && power_error == 0 && rx.online;
-        big_input.emergency_stop = authority.emergency_stop;
-        big_input.clear_estop = authority.clear_estop;
         const auto big_status = big_error == 0 ? big_axis.update(big_input, now_us)
                                                : big_axis.suspend(now_us, WaitReason::Configuration, big_error, true);
         // One writer publishes each of the three physical buses once per cycle.
@@ -144,8 +163,6 @@ int main() {
         const auto reason = chassis_error || big_error || power_error
                                 ? installed::DiagnosticReason::InitFailed
                             : !rx.online ? installed::DiagnosticReason::PeerStale
-                            : !rx.operator_control_valid ? installed::DiagnosticReason::Permission
-                            : !authority.run_allowed ? installed::DiagnosticReason::Disarmed
                             : status.reason == WaitReason::Feedback || big_status.reason == WaitReason::Feedback
                                 ? installed::DiagnosticReason::FeedbackStale
                             : status.state == RunState::Active || big_status.state == RunState::Active

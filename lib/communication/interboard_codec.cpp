@@ -29,6 +29,29 @@ int frame(BoardRole role, MessageId id, std::uint32_t seq, const std::uint8_t *p
 bool header(const FrameMeta &m, MessageId id, BoardRole role) {
     return m.message_id == id && m.sender_role == role && m.version == kInterBoardProtocolVersion;
 }
+// v4's on-wire mechanism state is the reference firmware's
+// Waiting/Starting/Running/Stopping/Fault/Disabled, not Motor::ExecutionState.
+std::uint8_t referenceExecutionState(ExecutionState state) {
+    switch (state) {
+    case ExecutionState::Waiting: return 0;      // Waiting
+    case ExecutionState::Recovering: return 1;   // Starting
+    case ExecutionState::Ready: return 1;        // Starting, ready is separately indicated
+    case ExecutionState::Active: return 2;       // Running
+    case ExecutionState::EStopLatched: return 4; // Fault
+    case ExecutionState::ConfigBlocked: return 4;// Fault
+    }
+    return 4;
+}
+ExecutionState localExecutionState(std::uint8_t value) {
+    switch (value) {
+    case 0: return ExecutionState::Waiting;
+    case 1: return ExecutionState::Recovering;
+    case 2: return ExecutionState::Active;
+    case 3: return ExecutionState::Recovering;
+    case 4: return ExecutionState::ConfigBlocked;
+    default: return ExecutionState::Waiting; // reference Disabled=5
+    }
+}
 }
 int InterBoardCodec::decodeHeartbeat(const FrameMeta &m, const std::uint8_t *p, std::size_t n, BoardHeartbeat &out) {
     if (!p || n != 20 || m.version != kInterBoardProtocolVersion || m.message_id != MessageId::Heartbeat ||
@@ -147,7 +170,7 @@ int InterBoardCodec::decodeChassisFeedback(const FrameMeta &m, const std::uint8_
         p[2] > 1 || p[3] > 1 || (loadLe32(p + 12) & ~3u))
         return -EINVAL;
     ChassisFeedbackSummary t{};
-    t.execution_state = static_cast<ExecutionState>(p[0]);
+    t.execution_state = localExecutionState(p[0]);
     t.safety_state = static_cast<SafetyState>(p[1]);
     t.ready = p[2];
     t.armed = p[3];
@@ -168,7 +191,7 @@ int InterBoardCodec::decodeChassisFeedback(const FrameMeta &m, const std::uint8_
 int InterBoardCodec::encodeChassisFeedback(const ChassisFeedbackSummary &t, std::uint32_t seq, std::uint8_t *out,
                                            std::size_t cap) {
     std::uint8_t p[32]{};
-    p[0] = static_cast<std::uint8_t>(t.execution_state);
+    p[0] = referenceExecutionState(t.execution_state);
     p[1] = static_cast<std::uint8_t>(t.safety_state);
     p[2] = t.ready;
     p[3] = t.armed;
@@ -240,7 +263,7 @@ int InterBoardCodec::encodeBigYawRequest(const BigYawRequest &t, std::uint32_t s
     return ret < 0 ? ret : frame(BoardRole::GimbalController, MessageId::BigYawRequest, seq, p, sizeof(p), out, cap);
 }
 int InterBoardCodec::decodeBigYawRequest(const FrameMeta &m, const std::uint8_t *p, std::size_t n, BigYawRequest &out) {
-    if (!p || n != 36 || !header(m, MessageId::BigYawRequest, BoardRole::GimbalController) || p[0] > 2 || p[1] > 1 ||
+    if (!p || n != 36 || !header(m, MessageId::BigYawRequest, BoardRole::GimbalController) || p[0] > 1 || p[1] > 1 ||
         p[2] > 1 || p[3])
         return -EINVAL;
     BigYawRequest t{};
@@ -263,7 +286,7 @@ int InterBoardCodec::decodeBigYawRequest(const FrameMeta &m, const std::uint8_t 
 int InterBoardCodec::encodeBigYawFeedback(const BigYawFeedback &t, std::uint32_t seq, std::uint8_t *out,
                                           std::size_t cap) {
     std::uint8_t p[24]{};
-    p[0] = static_cast<std::uint8_t>(t.execution_state);
+    p[0] = referenceExecutionState(t.execution_state);
     p[1] = t.ready;
     p[2] = t.armed;
     p[3] = t.valid;
@@ -283,7 +306,7 @@ int InterBoardCodec::decodeBigYawFeedback(const FrameMeta &m, const std::uint8_t
         p[2] > 1 || p[3] > 1)
         return -EINVAL;
     BigYawFeedback t{};
-    t.execution_state = static_cast<ExecutionState>(p[0]);
+    t.execution_state = localExecutionState(p[0]);
     t.ready = p[1];
     t.armed = p[2];
     t.valid = p[3];
@@ -301,45 +324,10 @@ int InterBoardCodec::decodeBigYawFeedback(const FrameMeta &m, const std::uint8_t
 }
 
 namespace skywalker::communication {
+// Reference 0x0404 is the sole on-wire IMU heading message.
 int InterBoardCodec::decodeGimbalImuYaw(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
-                                       robotics::GimbalImuYaw &out) {
-    if (!p || n != 40 || !header(m, MessageId::GimbalImuYaw, BoardRole::GimbalController) ||
-        p[0] > 1 || p[1] || p[2] || p[3])
-        return -EINVAL;
-    robotics::GimbalImuYaw t{};
-    t.valid = p[0];
-    t.yaw_rad = wire::loadFloatLe(p+4);
-    t.yaw_rate_rad_s = wire::loadFloatLe(p+8);
-    t.source_age_ms = wire::loadLe32(p+12);
-    t.sample_sequence = wire::loadLe32(p+16);
-    t.zero_generation = wire::loadLe32(p+20);
-    t.receiver_boot_id = wire::loadLe64(p+24);
-    t.sender_boot_id = wire::loadLe64(p+32);
-    if (!std::isfinite(t.yaw_rad) || std::fabs(t.yaw_rad) > 3.141593f ||
-        !std::isfinite(t.yaw_rate_rad_s) || std::fabs(t.yaw_rate_rad_s) > 100 ||
-        !t.sender_boot_id || !t.receiver_boot_id || (t.valid && (!t.zero_generation || t.source_age_ms > 50)))
-        return -EINVAL;
-    t.stamp = {m.local_receive_ms, m.frame_sequence, true};
-    out = t;
-    return 0;
-}
-int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::uint32_t seq,
-                                       std::uint8_t *out, std::size_t cap) {
-    std::uint8_t p[40]{};
-    p[0]=t.valid;
-    wire::storeFloatLe(p+4,t.yaw_rad); wire::storeFloatLe(p+8,t.yaw_rate_rad_s);
-    wire::storeLe32(p+12,t.source_age_ms); wire::storeLe32(p+16,t.sample_sequence);
-    wire::storeLe32(p+20,t.zero_generation); wire::storeLe64(p+24,t.receiver_boot_id);
-    wire::storeLe64(p+32,t.sender_boot_id);
-    robotics::GimbalImuYaw check{};
-    const int ret=decodeGimbalImuYaw({BoardRole::GimbalController,MessageId::GimbalImuYaw,seq,0},p,sizeof(p),check);
-    return ret < 0 ? ret : frame(BoardRole::GimbalController,MessageId::GimbalImuYaw,seq,p,sizeof(p),out,cap);
-}
-// 0x0404：参考底盘私有布局。没有发送方 Boot ID，接收方只能按心跳会话绑定身份。
-// 保留字段必须为 0；valid 时要求零位代次非零且源年龄不超过 50 ms。
-int InterBoardCodec::decodeGimbalImuYawLegacy(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
                                               robotics::GimbalImuYaw &out) {
-    if (!p || n != 32 || !header(m, MessageId::GimbalImuYawLegacy, BoardRole::GimbalController) ||
+    if (!p || n != 32 || !header(m, MessageId::GimbalImuYaw, BoardRole::GimbalController) ||
         p[0] > 1 || p[1] || p[2] || p[3])
         return -EINVAL;
     robotics::GimbalImuYaw t{};
@@ -359,7 +347,7 @@ int InterBoardCodec::decodeGimbalImuYawLegacy(const FrameMeta &m, const std::uin
     out = t;
     return 0;
 }
-int InterBoardCodec::encodeGimbalImuYawLegacy(const robotics::GimbalImuYaw &t, std::uint32_t seq,
+int InterBoardCodec::encodeGimbalImuYaw(const robotics::GimbalImuYaw &t, std::uint32_t seq,
                                               std::uint8_t *out, std::size_t cap) {
     std::uint8_t p[32]{};
     p[0] = t.valid;
@@ -371,9 +359,9 @@ int InterBoardCodec::encodeGimbalImuYawLegacy(const robotics::GimbalImuYaw &t, s
     wire::storeLe32(p + 24, static_cast<std::uint32_t>(t.receiver_boot_id & 0xffffffffULL));
     wire::storeLe32(p + 28, static_cast<std::uint32_t>(t.receiver_boot_id >> 32));
     robotics::GimbalImuYaw check{};
-    const int ret = decodeGimbalImuYawLegacy(
-        {BoardRole::GimbalController, MessageId::GimbalImuYawLegacy, seq, 0}, p, sizeof(p), check);
+    const int ret = decodeGimbalImuYaw(
+        {BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, 0}, p, sizeof(p), check);
     return ret < 0 ? ret
-                   : frame(BoardRole::GimbalController, MessageId::GimbalImuYawLegacy, seq, p, sizeof(p), out, cap);
+                   : frame(BoardRole::GimbalController, MessageId::GimbalImuYaw, seq, p, sizeof(p), out, cap);
 }
 }

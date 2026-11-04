@@ -1,7 +1,7 @@
 # 哨兵底盘应用
 
-可选的 `ChassisMotionAdapter` 在运动学前执行坐标转换、旋转预测和降速，复用 BMI088。
-BigYawExecutor 可选择头部 IMU 世界航向 P/角速度 PI → MIT 力矩；默认关闭新模式并保持原跟随路径。
+参考 v4 的 `0x0101` 平移以云台系定义：底盘在舵轮运动学之前，使用大 Yaw 电机编码器及固定前向零位做车体系转换；参考小陀螺平移降速也在转换前执行。BMI088 用于将大 Yaw 目标世界角速度换算为关节相对角速度。
+大 Yaw 在板间只接受 `0x0402 mode=0/1`，不再接受 `mode=2` 线上扩展。可选 MIT 航向内环仍是本地驱动策略，不改变 v4 的速度语义。
 参数及双板启动、断流/重启规则见 [IMU 航向验收](../../docs/dev/哨兵IMU航向控制验收.md)。
 
 固定的手动板间底盘执行入口。`src/main.cpp` 自行装配八个舵轮电机、CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw、UART 板间端点及两个执行器，每个控制周期由一个执行线程各提交一次物理 CAN。无公共整车 `run()`、角色宏或场景宏。
@@ -12,7 +12,7 @@ west build -b dm_mc02/stm32h723xx applications/sentry_chassis -d ../build/applic
 
 硬件使用 [chassis.overlay](../../config/vehicle/installed/chassis.overlay)，系统配置固定引用同目录 `base.conf` / `chassis.conf`。参数由 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp)、[chassis_profile.hpp](../../include/robotics/vehicle/chassis_profile.hpp)、[swerve_profile.hpp](../../include/robotics/vehicle/swerve_profile.hpp) 和 [big_yaw_profile.hpp](../../include/robotics/vehicle/big_yaw_profile.hpp) 提供。不要通过角色参数或额外 conf 改成另一个上车应用；先运行 [无输出板间观察与大 Yaw 单项入口](../../samples/bringup/README.md)。
 
-只消费真实板间操作授权，不伪造本地永久解锁。云台遥控安全档归中 500 ms 后切左 Middle 建立解锁，并拨左 Up 手动运行。行走命令必须满足对端在线、有效操作输入、接收方 boot 绑定与命令新鲜度；大 Yaw 还独立检查原始输入/命令年龄、许可和本轴反馈。对端 boot 改变时，两执行器均先跨越恢复边界；停止、失联或授权失效时撤销输出，恢复行为由执行器的当前命令与恢复代次约束。
+底盘以参考 v4 的新鲜 `0x0101` 命令及 `0x0402` 请求为运行依据，不再要求独立 `0x0301` 授权。左下档由发送端转为停止命令。行走命令必须满足对端在线、接收方 boot 绑定与命令新鲜度；大 Yaw 还独立检查原始输入/命令年龄、许可和本轴反馈。对端 boot 改变时，两执行器均先跨越恢复边界；停止、失联或授权失效时撤销输出，恢复行为由执行器的当前命令与恢复代次约束。
 
 默认是受中央电流上限约束的手动机械链，不启用功率闭环，不以估算功率冒充实测，不宣称已实现裁判约束。当前轮半径、轮距、轴距和舵向零点仍需实车标定。大 Yaw 的 gear_ratio 指 Motor API 接口侧到关节侧速度比；线路目标/反馈均为关节 rad/s，见 [v4 契约](../../docs/protocols/interboard-v4.md)。
 

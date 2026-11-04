@@ -43,18 +43,18 @@ public:
 }
 ZTEST(imu_wire, test_codec_golden_bytes_length_reserved_and_finite) {
     std::uint8_t b[kMaxFrame]{}; auto s=sample();
-    zassert_equal(InterBoardCodec::encodeGimbalImuYaw(s,9,b,sizeof(b)),54);
-    zassert_equal(b[4],5);zassert_equal(b[5],4);zassert_equal(b[6],40);
+    zassert_equal(InterBoardCodec::encodeGimbalImuYaw(s,9,b,sizeof(b)),46);
+    zassert_equal(b[4],4);zassert_equal(b[5],4);zassert_equal(b[6],32);
     constexpr std::uint8_t prefix[]={1,0,0,0,0,0,0x80,0x3f,0,0,0,0xbf,7,0,0,0,42,0,0,0,2,0,0,0};
     zassert_mem_equal(b+12,prefix,sizeof(prefix));
-    zassert_equal(wire::loadLe64(b+36),22);zassert_equal(wire::loadLe64(b+44),11);
+    zassert_equal(wire::loadLe64(b+36),22); // 0404 has no sender Boot ID
     FrameMeta meta{BoardRole::GimbalController,MessageId::GimbalImuYaw,9,100};GimbalImuYaw out{};
-    zassert_ok(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,40,out));zassert_equal(out.sample_sequence,42);
-    for(std::size_t n : {0u,31u,32u,39u,41u}) zassert_equal(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,n,out),-EINVAL);
-    b[13]=1;zassert_equal(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,40,out),-EINVAL);b[13]=0;
-    wire::storeFloatLe(b+16,NAN);zassert_equal(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,40,out),-EINVAL);
+    zassert_ok(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,32,out));zassert_equal(out.sample_sequence,42);
+    for(std::size_t n : {0u,31u,33u,39u,41u}) zassert_equal(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,n,out),-EINVAL);
+    b[13]=1;zassert_equal(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,32,out),-EINVAL);b[13]=0;
+    wire::storeFloatLe(b+16,NAN);zassert_equal(InterBoardCodec::decodeGimbalImuYaw(meta,b+12,32,out),-EINVAL);
     s.source_age_ms=51;zassert_equal(InterBoardCodec::encodeGimbalImuYaw(s,1,b,sizeof(b)),-EINVAL);
-    s=sample();s.sender_boot_id=0;zassert_equal(InterBoardCodec::encodeGimbalImuYaw(s,1,b,sizeof(b)),-EINVAL);
+    s=sample();s.receiver_boot_id=0;zassert_equal(InterBoardCodec::encodeGimbalImuYaw(s,1,b,sizeof(b)),-EINVAL);
 }
 ZTEST(imu_wire, test_link_replay_generations_session_and_corruption) {
     InterBoardLink link(BoardRole::ChassisController);std::uint8_t b[kMaxFrame]{};
@@ -76,8 +76,11 @@ ZTEST(imu_wire, test_link_replay_generations_session_and_corruption) {
     zassert_equal(link.latestGimbalImuYaw(got),-EAGAIN);
     hb.sender_boot_id=11;n=InterBoardCodec::encodeHeartbeat(hb,999,b,sizeof(b));link.processRxBytes(b,n,140);
     BoardHeartbeat current{};zassert_ok(link.latestHeartbeat(current));zassert_equal(current.sender_boot_id,77);
+    // Reference 0x0404 has no sender Boot ID; the active heartbeat session owns
+    // the origin. It cannot reject a forged old-sender frame solely by identity.
     s=sample();n=InterBoardCodec::encodeGimbalImuYaw(s,100,b,sizeof(b));link.processRxBytes(b,n,140);
-    zassert_equal(link.latestGimbalImuYaw(got),-EAGAIN);
+    zassert_ok(link.latestGimbalImuYaw(got));
+    zassert_equal(got.sender_boot_id,77);
 }
 ZTEST(imu_wire, test_two_endpoint_freshness_receiver_reboot_and_rebinding) {
     Cable ga,ca;ga.peer=&ca;ca.peer=&ga;
@@ -102,7 +105,11 @@ ZTEST(imu_wire, test_two_endpoint_freshness_receiver_reboot_and_rebinding) {
     // New sender boot rejects an old IMU frame even when target boot still matches.
     std::uint8_t b[kMaxFrame]{};BoardHeartbeat hb{};hb.role=BoardRole::GimbalController;hb.sender_boot_id=123;
     int n=InterBoardCodec::encodeHeartbeat(hb,1,b,sizeof(b));ga.now=340;ga.send(b,n,10);reboot.poll(340);
+    // Wire 0x0404 does not carry the old sender Boot ID. The receiver binds a
+    // valid frame to the current heartbeat, even if an older sender produced it.
     s.sender_boot_id=g.snapshot().local_boot_id;n=InterBoardCodec::encodeGimbalImuYaw(s,999,b,sizeof(b));
-    ga.send(b,n,10);reboot.poll(341);zassert_false(reboot.snapshot().gimbal_imu.valid);
+    ga.send(b,n,10);reboot.poll(341);
+    zassert_true(reboot.snapshot().gimbal_imu.valid);
+    zassert_equal(reboot.snapshot().gimbal_imu.sender_boot_id, 123);
 }
 ZTEST_SUITE(imu_wire,nullptr,nullptr,nullptr,nullptr,nullptr);
