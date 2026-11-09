@@ -2,7 +2,7 @@
 
 文档按当前源码边界组织：工程与板级入口、可复用模块、跨模块工作流、整机应用。旧的 docs/01…19 文件名保留为迁移提示；正文以本目录链接指向的新页面为准。设计记录和待实施方案仍放在 dev/，不能当作当前 API 契约。
 
-本轮应用、实车配置和诊断文档对齐固件 `48984ed90898`（2026-10-25）。21 个独立上车工程、两个手动应用和四个受迁移影响的旧样例已完成共 27 项编译、链接；未执行测试、烧录或实板验证。未变化模块的接口页保留各自历史基线，设计记录不自动升级为实机验收。
+本轮核对代码基线：`dev@bad529abe5d682797ca27d49078bbf0a9b00266b`（2026-11-10，代码已快进到 `main`）。正式云台已改为**编码器手动闭环 + 板载 BMI088 载体航向补偿**，不再启动 CAN3 外置头部 IMU；底盘使用参考 v4 世界速度语义及原生大 Yaw 角反馈。新增状态灯、开发容器、航向/舵轮测试与调试专题。**27 项编译成功仅为 2026-10-25 旧基线记录**，本轮未重新运行编译、测试或实板验证；未修改的接口页可能保留历史基线，需以其源码链接为准。
 
 ## 按任务开始
 
@@ -18,7 +18,7 @@
 | 读取 IMU 或姿态 | [IMU](modules/drivers/imu.md) → [Kalman 与矩阵](modules/drivers/kalman-matrix.md) → [双 IMU 样例](../samples/imu/dual_imu/README.md) |
 | 接收遥控、裁判或板间消息 | [通信模块](modules/communication/communication.md) → [调用示例](modules/call-examples.md) |
 | 从命令走到云台或底盘 | [命令来源服务](modules/robotics/command-service.md) → [机器人模块](modules/robotics/robotics.md) → [模块联动](applications/module-integration.md) |
-| 配置双主控应用 | [双主控应用](applications/dual-controller.md) → [模块联动](applications/module-integration.md) |
+| 配置双主控应用 | [双主控应用（2026-11-10 状态）](applications/dual-controller.md) → [板间参考 v4](protocols/interboard-v4.md) → [模块联动](applications/module-integration.md) |
 | 查现场问题 | [调试与观测](guides/debugging.md) → [故障排查](guides/troubleshooting.md)；UART DMA 专项见 [说明](guides/uart-dma.md) |
 
 ## 接口与维护
@@ -62,3 +62,5 @@
 - [开发专题索引](dev/README.md) 收录设计方案、分析与待实施记录；以模块文档和源码判断当前状态。
 - `samples/bringup/` 是共享实车配置的固定上车入口；`applications/sentry_*` 各自装配手动整车。其他 `samples/` 保留教学与历史台架用法，接线及输出路径以各自 README 为准。
 - 共享接线、驱动后端与串口所有权见 [installed 配置](../config/vehicle/installed/README.md)；协议唯一规范入口为 [interboard-v4.md](protocols/interboard-v4.md)。视觉、功率实测与有载发射的接入状态单独登记。
+
+> 当前正式固件与独立示例需要区分：`docs/api/inertial.md` 描述可复用的外置 IMU 惯性适配 API，但不意味着 `applications/sentry_gimbal` 已装配该功能。当前正式入口与实车参数优先查看各自应用 README。
