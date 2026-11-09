@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <communication/interboard/configured_interboard_transport.hpp>
 #include <communication/interboard/interboard_endpoint.hpp>
 #include <core/clock.hpp>
@@ -116,10 +117,13 @@ int main() {
         // Unlike our old Body-frame v4 implementation, the reference sends
         // gimbal-relative translation. The absolute encoder zero is fixed.
         const auto yaw_feedback = big_drive.snapshot();
+        // The native drive angle shares the calibrated forward-zero coordinate
+        // and recovers after an RX gap without reseeding a continuous reference.
         const bool encoder_valid = yaw_feedback.feedback_fresh &&
-                                   (yaw_feedback.feedback.valid & motor::FeedbackPosition) &&
+                                   yaw_feedback.native_position_valid &&
+                                   std::isfinite(yaw_feedback.native_position_rad) &&
                                    isFresh({yaw_feedback.feedback.timestamp_ms, 1, true}, now_ms, 100);
-        input.command = referenceV4ChassisToBody(input.command, encoder_valid, yaw_feedback.feedback.position_rad,
+        input.command = referenceV4ChassisToBody(input.command, encoder_valid, yaw_feedback.native_position_rad,
                                                  installed::reference_big_yaw_forward_zero_rad,
                                                  installed::reference_big_yaw.direction,
                                                  installed::reference_big_yaw.gear_ratio);
