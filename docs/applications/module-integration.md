@@ -1,13 +1,13 @@
 # 模块联动与调用路线
 
-更新日期：2026-10-25。当前两个 sentry 应用各自持有 `main.cpp`、设备实例、初始化顺序和执行循环；上车阶段也分别有独立工程。共同使用 [实车配置与 profile](../../config/vehicle/installed/README.md) 以及已有驱动、协议、控制器和执行器 API，不再由公共 `vehicle_bench::run()` 调度最终应用。
+当前正式应用核对：2026-11-10（代码基线 `bad529abe5d6`）。当前两个 sentry 应用各自持有 `main.cpp`、设备实例、初始化顺序和执行循环；上车阶段也分别有独立工程。共同使用 [实车配置与 profile](../../config/vehicle/installed/README.md) 以及已有驱动、协议、控制器和执行器 API，不再由公共 `vehicle_bench::run()` 调度最终应用。
 
 | 层 | 当前职责与边界 |
 | --- | --- |
 | Remote / IMU 来源 | 保存实际采样 stamp、质量和参考；读取快照不续期 |
 | RcControlAdapter | 对新鲜 DR16 输入执行安全档归中和解锁；失联/撤权后重新解锁 |
 | CommandManager | 后台采样与仲裁，并接受执行循环发布的真实操作门控 |
-| 惯性适配 / 运动学 | 将惯性目标变换成机械命令，或将底盘速度分配到舵轮；不创建授权 |
+| 航向适配 / 运动学 | 当前正式云台用板载 BMI088 补偿编码器手动速度，底盘将云台系速度变到车体系；独立惯性适配 API 仍供样例使用 |
 | Executor | 检查命令、来源、许可和反馈时效，保存目标并处理停止与恢复边界 |
 | Motor / CanBus | 保存电机意图，推进协议使能、反馈和总线恢复；由应用协调每周期提交 |
 | InterBoardEndpoint | 编解码 v4、boot 绑定、转发年龄和状态生产时效；不代替执行器判定 |
@@ -15,20 +15,22 @@
 
 ## 当前云台链
 
-[云台 main](../../applications/sentry_gimbal/src/main.cpp) 在创建业务对象前启动诊断，再显式创建 DR16、CAN3 头部 DM IMU、CommandManager、CAN1 小 Yaw、CAN2 Pitch 和对应控制器。它不创建发射电机、视觉或裁判接收器。
+[云台 main](../../applications/sentry_gimbal/src/main.cpp) 在创建业务对象前启动诊断，再显式创建 DR16、**板载 SPI BMI088**、CommandManager、CAN1 小 Yaw、CAN2 Pitch 和对应执行器。当前不实例化 CAN3 外置头部 IMU、惯性适配器、发射电机、视觉或裁判接收器。
 
 ```text
-DR16 → 真实遥控解锁 → CommandManager 外部门控
-     → CommandSnapshot + 头部 IMU + 关节反馈
-     → InertialGimbalAdapter → GimbalExecutor → CAN1 / CAN2
-     → 小 Yaw 中心误差 → YawCenteringController → BigYawRequest
-CommandSnapshot.chassis → ChassisControl
-遥控原始 stamp / clear 事件 → OperatorControl
+DR16 → 真实遥控解锁 → CommandManager
+     → 编码器双轴手动命令 + BMI088 载体角速度补偿
+     → GimbalExecutor → CAN1 / CAN2
+     → 小 Yaw 中心偏角 + 新鲜载体航向
+     → YawCenteringController → 0x0402 世界速度 BigYawRequest
+板载 BMI088 航向/角速度 → 0x0404（32B）
+行走命令（云台系） → 0x0101（32B）
+USART10 Endpoint → 参考 v4 底盘
 ```
 
-执行循环为 5 ms 绝对节拍；同一循环推进 endpoint，每 10 ms 提交行走和大 Yaw 请求，周期末各提交一次 CAN1、CAN2。大 Yaw 回中以双轴惯性输出有效且云台 Active 为前提，默认最大 ±0.6 rad/s、斜坡 0.8 rad/s²；实际头部稳定误差不再作为额外回中启动条件。保留当前线路反号适配，不在此处擅自改对端的物理正方向。
+执行循环为 5 ms 绝对节拍；同一循环推进 endpoint，每 10 ms 提交行走和大 Yaw 请求，周期末各提交一次 CAN1、CAN2。大 Yaw 回中以小 Yaw 编码器反馈、轴执行状态及板载载体航向新鲜为前提，入口覆盖为增益 6.0、最大 1 rad/s、加速度 4 rad/s²；参考 v4 发送世界角速度意图，不在发送端额外乘电机安装方向。
 
-关节测量与目标以驱动标定坐标为基础，头部 IMU 参考及安装变换保留于惯性层。云台 CAN3 采用主动 CAN 四元数报告，从机 0x1 / 反馈 0x11，不再把该 CAN 设备交给 RS485 Source。
+关节测量与目标以驱动标定坐标为基础，板载 BMI088 随大 Yaw 载体转动，其航向不能等同独立头部世界姿态。CAN3 主动外置 IMU 是独立样例/后续方案，不是本次正式云台的运行来源。
 
 ## 当前底盘链
 
@@ -36,8 +38,8 @@ CommandSnapshot.chassis → ChassisControl
 
 ```text
 USART1 endpoint → OperatorControl + boot/年龄检查
-  ChassisControl → ChassisExecutor → SwerveChassis → 八电机目标
-  BigYawRequest  → BigYawExecutor → 大 Yaw 速度目标
+  0x0101 云台系平移 + 大 Yaw 原生角 → 车体系 → ChassisExecutor → 八电机目标
+  0x0402 世界角速度 + 双板 BMI088 角速度 → 补偿限幅 → BigYawExecutor
   单一执行循环 → CAN1 / CAN2 / CAN3 每周期各提交一次
   真实执行状态与实测大 Yaw 速度 → endpoint / 诊断
 ```
@@ -60,4 +62,4 @@ USART1 endpoint → OperatorControl + boot/年龄检查
 
 视觉观察/执行、真实裁判约束、实测功率控制、真实热量与拨盘归位支持的有载发射没有接入当前两个最终应用。库 API、旧 sample 的开关和 Pending 来源不能充当完成状态；后续应分别建立明确输入与资源的独立入口，再接最终组合。
 
-本次 27 个相关工程编译完成，未运行实板机构动作或故障场景。中央确认 bool 与编译通过均不能升级为接线、机构方向、停止时限或组合性能已经通过，仍须按阶段记录实车结论。完整应用关系见 [双主控应用](dual-controller.md)，协议布局和时效语义见 [interboard-v4](../protocols/interboard-v4.md)。
+2026-10-25 的旧基线有 27 个工程编译通过记录；本轮尚未重新构建、测试、烧录或运行实板机构动作/故障场景。中央确认 bool 与编译通过均不能升级为接线、机构方向、停止时限或组合性能已经通过，仍须按阶段记录实车结论。完整应用关系见 [双主控应用](dual-controller.md)，协议布局和时效语义见 [interboard-v4](../protocols/interboard-v4.md)。
