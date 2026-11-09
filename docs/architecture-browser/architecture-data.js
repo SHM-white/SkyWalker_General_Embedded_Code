@@ -678,8 +678,8 @@ window.SKYWALKER_ARCHITECTURE = {
     }
   ],
   "baseline": {
-    "branch": "工作区",
-    "commit": "48984ed90898726e8a9d451ac07bdc88c4663f11",
-    "date": "2026-10-25"
+    "branch": "main / dev（代码基线）",
+    "commit": "bad529abe5d682797ca27d49078bbf0a9b00266b",
+    "date": "2026-11-10"
   }
 };
