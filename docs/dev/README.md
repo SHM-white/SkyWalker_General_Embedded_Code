@@ -2,7 +2,7 @@
 
 本目录保存设计方案、实施记录和指定时间点的分析。查当前接口、启动顺序和返回值时以源码及[模块文档](../README.md)为准。
 
-2026-10-25 的应用与上车重构以固件 `48984ed90898` 为基线，当前操作见[独立上车入口](../../samples/bringup/README.md)；旧方案中的 MotorSession、ready/clearFault、Group 故障传播和恢复授权 generation 已被持续目标与逐轴自动恢复替代，历史正文仅保留演进背景。
+本索引包含 2026-10-25 固件 `48984ed90898` 的历史重构记录；**当前正式入口**以 2026-11-10 `bad529abe5d6` 的[双主控说明](../applications/dual-controller.md)为准。历史操作说明见[独立上车入口](../../samples/bringup/README.md)；旧方案中的 MotorSession、ready/clearFault、Group 故障传播和恢复授权 generation 已被持续目标与逐轴自动恢复替代，历史正文仅保留演进背景。
 
 ## 已落地的实现记录
 
