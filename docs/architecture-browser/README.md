@@ -44,13 +44,13 @@ bash docs/architecture-browser/run.sh
 
 ## 当前源码与发布基线
 
-本轮应用与实车文档对齐固件 `48984ed90898726e8a9d451ac07bdc88c4663f11`（2026-10-25）。Markdown 与源码读取指向本地或部署的同份快照；本轮只修改仓库文档及浏览器文档数据，没有发布在线站点。GitHub Pages 内容需等相应分支部署后才更新，不能把本地修改当成已上线。
+当前仓库文档与架构浏览器源码核对基线为 `dev@bad529abe5d682797ca27d49078bbf0a9b00266b`（2026-11-10，同步至 `main`）。本轮修订的是仓库文件，尚未核验 GitHub Pages 或历史私有站点实际部署结果；线上内容以部署提交为准。
 
-当前两个 sentry 入口分别拥有 `main.cpp` 装配：云台是物理 RC、CAN3 头 IMU、惯性双轴与回中；底盘是四舵轮与独立大 Yaw。它们共享 [installed 配置](../../config/vehicle/installed/README.md) 和 `include/robotics/vehicle/` 纯参数，不再共用 `vehicle_bench.hpp::run()`。21 个固定上车工程见[入口表](../../samples/bringup/README.md)，历史宏组合 sample 仍保留用于理解演进。
+当前两个 sentry 入口分别拥有 `main.cpp` 装配：云台是物理 RC、编码器手动双轴、板载 BMI088 载体角速度补偿与回中；**CAN3 外置头部 IMU 未在当前正式入口启动**。底盘是四舵轮与独立大 Yaw。它们共享 [installed 配置](../../config/vehicle/installed/README.md) 和 `include/robotics/vehicle/` 纯参数，不再共用 `vehicle_bench.hpp::run()`。21 个固定上车工程见[入口表](../../samples/bringup/README.md)，历史宏组合 sample 仍保留用于理解演进。
 
 电机继续采用持续目标、逐轴反馈与独立恢复；状态生产 stamp 不因通信重发续期，板间固定 v4，完整线协议见[统一契约](../protocols/interboard-v4.md)。当前诊断候选为 UART7 经 DAPLink 单口选择 Log/Vofa；云台板间 USART10、底盘板间 USART1。
 
-中央连接、IMU 安装和发射约束标志沿用 true，功率模型为 false；确认 bool 不能代替现场记录。上一轮共 27 个工程编译、链接通过，未运行测试、烧录或实板验证。当前最终应用不启动视觉或发射，不启用实测功率闭环；真实热量/发射许可、拨盘参考与视觉会话仍有输入缺口。协议车体实测速度/功率摘要尚未填充。
+中央连接、IMU 安装和发射约束标志沿用 true，功率模型为 false；确认 bool 不能代替现场记录。旧基线（2026-10-25）共 27 个工程曾编译、链接通过；本轮未重新构建、测试、烧录或实板验证。当前最终应用不启动视觉或发射，不启用实测功率闭环；真实热量/发射许可、拨盘参考与视觉会话仍有输入缺口。协议车体实测速度/功率摘要尚未填充。
 
 详情见[双主控正文](../applications/dual-controller.md)、[公开执行器](../modules/robotics/executors.md)、[诊断 API](../api/telemetry.md)和[上车说明](../../samples/bringup/README.md)。在线私有站点原地址保留为 [历史部署入口](https://skywalker-architecture-browser.docile-raven-1977.chatgpt.site/)，本轮未向它发布。
 
