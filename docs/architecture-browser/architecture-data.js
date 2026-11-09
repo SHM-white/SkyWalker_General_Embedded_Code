@@ -1,5 +1,5 @@
 'use strict';
-// Documentation snapshot of workspace 48984ed (2026-10-25); historical entries retain their context.
+// Current application snapshot: bad529abe5d6 (2026-11-10); historical entries retain their context.
 window.SKYWALKER_ARCHITECTURE = {
   "history": [
     {
@@ -58,10 +58,10 @@ window.SKYWALKER_ARCHITECTURE = {
     }
   ],
   "current": {
-    "summary": "两个 sentry 最终工程各自独立装配并运行 main：云台为手动双轴惯性/大 Yaw 回中与行走发送，底盘为八电机轮控/大 Yaw 执行；上车工程共用 installed 配置与纯 profile。当前未装配视觉、裁判、发射或实测功率闭环。27 个相关工程已编译，尚未实板验证；连接/IMU/发射确认现值 true、功率模型 false，配置值不等于现场通过。",
+    "summary": "两个 sentry 最终工程各自独立装配并运行 main：云台为编码器手动双轴、板载 BMI088 角速度补偿、大 Yaw 回中与行走发送，底盘为八电机轮控/大 Yaw 执行；上车工程共用 installed 配置与纯 profile。当前未装配视觉、裁判、发射或实测功率闭环。27 个相关工程的编译记录属于 2026-10-25 旧基线，本轮未重建或实板验证；连接/IMU/发射确认现值 true、功率模型 false，配置值不等于现场通过。",
     "lanes": [
       {
-        "title": "云台板：固定手动输入、CAN3 惯性双轴与统一提交",
+        "title": "云台板：编码器手动双轴、板载 BMI088 补偿与统一提交",
         "steps": [
           {
             "title": "DR16 与真实 RC 解锁",
@@ -76,9 +76,9 @@ window.SKYWALKER_ARCHITECTURE = {
             "status": "ready"
           },
           {
-            "title": "CAN3 头部惯性适配",
+            "title": "板载 BMI088 载体航向",
             "moduleId": "inertial",
-            "note": "DmImuCanSource 主动四元数 + 两轴机械反馈 → Rate；安装确认现值 true，实车安装/质量/参考待确认。",
+            "note": "板载 BMI088 与小 Yaw/Pitch 编码器实现手动闭环；载体角速度补偿小 Yaw，大 Yaw 回中要求航向新鲜；不实例化 CAN3 外置 IMU。",
             "status": "partial"
           },
           {
@@ -188,12 +188,12 @@ window.SKYWALKER_ARCHITECTURE = {
       },
       {
         "title": "DAPLink 接线与物理资源待现场核对",
-        "detail": "云台 USART10 板间/CAN3 IMU，底盘 USART1 板间/CAN1舵向/CAN2轮驱/CAN3大Yaw；两板候选 UART7 诊断，DAPLink 实际接线未实查。",
+        "detail": "云台 USART10 板间/板载 SPI BMI088（外置 CAN3 IMU 未启用），底盘 USART1 板间/CAN1舵向/CAN2轮驱/CAN3大Yaw；两板候选 UART7 诊断，DAPLink 实际接线未实查。",
         "source": "config/vehicle/installed/README.md"
       },
       {
         "title": "编译记录与实板结论分开",
-        "detail": "27 个相关工程编译完成，未实板运行；方向、停止时限和组合性能仍按独立上车阶段记录。搜索/里程计/导航尚未装配。",
+        "detail": "旧基线 27 个相关工程曾编译通过；本轮未重建或实板运行；方向、停止时限和组合性能仍按独立上车阶段记录。搜索/里程计/导航尚未装配。",
         "source": "samples/bringup/README.md"
       }
     ]
@@ -323,7 +323,7 @@ window.SKYWALKER_ARCHITECTURE = {
   "scenarios": [
     {
       "id": "manual-gimbal",
-      "title": "遥控如何驱动惯性双轴",
+      "title": "遥控如何驱动编码器双轴与载体补偿",
       "summary": "固定云台 main 的真实手动调用链；独立工程已编译，未进行实板动作。",
       "steps": [
         {
@@ -337,9 +337,9 @@ window.SKYWALKER_ARCHITECTURE = {
           "detail": "CommandManager worker → CommandArbiter → CommandSnapshot，多个消费者非消费式读取。"
         },
         {
-          "title": "头部 IMU 惯性适配",
+          "title": "板载 BMI088 载体补偿",
           "moduleId": "inertial",
-          "detail": "CAN3 主动头部 IMU 与两轴机械反馈转换成 Rate；安装确认现值 true，实车安装/质量/参考仍待验证。"
+          "detail": "当前正式云台不启动 CAN3 外置 IMU；板载 BMI088 角速度用于补偿小 Yaw 手动速度和大 Yaw 回中放行。"
         },
         {
           "title": "公开双轴执行器",
@@ -465,23 +465,23 @@ window.SKYWALKER_ARCHITECTURE = {
     },
     {
       "id": "imu-feedback",
-      "title": "IMU 如何进入惯性控制与视觉反馈",
-      "summary": "当前 CAN3 头部 IMU 已进入惯性云台；视觉反馈属于未接入的后续能力。",
+      "title": "板载 IMU 如何进入当前手动控制",
+      "summary": "当前正式云台使用板载 BMI088 载体航向/去偏角速度，外置 CAN3 IMU 与视觉回传均未装配。",
       "steps": [
         {
-          "title": "头部外置采集",
+          "title": "板载载体采集",
           "moduleId": "imu",
-          "detail": "云台 CAN3 DmImuCanSource 主动四元数 → ImuReceiver，保留原 stamp/quality/reference；不是 USART2 RS485。"
+          "detail": "云台 SPI BMI088 → ImuReceiver → ImuHeadingReference；外置 CAN3 IMU 未启动，板载测量不是独立头部姿态。"
         },
         {
           "title": "IMU 与机械快照",
           "moduleId": "inertial",
-          "detail": "惯性适配 owner 同周期读取头部和两轴快照；缺少数学测量只作废对应轴。"
+          "detail": "编码器手动双轴仍可独立运行；板载航向新鲜时进行小 Yaw 载体速度补偿并准许大 Yaw 回中。"
         },
         {
           "title": "参考变化处理",
           "moduleId": "inertial",
-          "detail": "frame_id/epoch 是坐标身份，不能用旧视觉目标匹配新参考。"
+          "detail": "板载 EKF 静止参考与 boot/样本年龄受检查；源失效撤销大 Yaw，不以重复采样续期。"
         },
         {
           "title": "视觉反馈完整来源",
