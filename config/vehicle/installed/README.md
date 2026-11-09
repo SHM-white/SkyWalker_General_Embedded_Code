@@ -5,7 +5,7 @@
 双板前向参考确认、MIT 模式和新增 PI 都须实车验收后启用，见
 [IMU 验收说明](../../../docs/dev/哨兵IMU航向控制验收.md)。
 
-日期：2026-10-25。此目录固定新 [独立上车工程](../../../samples/bringup/README.md) 和两个最终应用的板级资源、系统输出策略与驱动后端。当前内容依据仓库已有接线配置收敛，尚未实查 DAPLink 接线或完成实板验证。
+配置文档初始日期：2026-10-25；当前正式入口复核：2026-11-10（`bad529abe5d6`）。此目录固定新 [独立上车工程](../../../samples/bringup/README.md) 和两个最终应用的板级资源、系统输出策略与驱动后端。当前内容依据仓库已有接线配置收敛，尚未实查 DAPLink 接线或完成实板验证。
 
 每个工程的 `app.overlay` 只包含对应 `gimbal.overlay` 或 `chassis.overlay`；构建文件固定引用 `base.conf`、板级 conf 与工程本地 `prj.conf`。本地工程只选择所需模块能力，使用自己的 `main.cpp` 装配对象、启动接收器和执行控制循环。物理设备声明不意味着每个工程都会创建或使能该设备的执行器。
 
@@ -17,7 +17,7 @@
 | 云台 | USART10 | 板间 UART，PE3 TX / PE2 RX，460800 8N1；DMAMUX 通道 3/4，TX/RX 请求 119/118 |
 | 云台 | UART7 | `diagnostic-uart`，PE8 TX / PE7 RX，115200 8N1；移除 DMA，由诊断 worker 单独发送 |
 | 云台 | CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
-| 云台 | CAN3 | 头部 DM IMU 独占，1 Mbps、主动四元数上报，从机 0x1 / 反馈 0x11 |
+| 云台 | CAN3 | 预留给独立惯性工程的头部 DM IMU（1 Mbps、主动四元数）；当前正式手动云台不实例化 CAN3 外置 IMU，板载 SPI BMI088 为载体航向来源 |
 | 云台 | PC15 | 外部 5 V 供电使能，启动时启用；仍须核对实物供电 |
 | 底盘 | CAN1 / CAN2 / CAN3 | 四舵向 / 四轮驱 / 大 Yaw，分别只有一个 CAN 所有者 |
 | 底盘 | USART1 | 板间 UART，460800 8N1；沿用板级 DMA 通道 3/4 |
@@ -59,3 +59,5 @@ inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Log;
 参考的轮位 ID 已核对，零位和方向尚未在本工程重新实测；详见
 [符号、单位及上车验收](../../../docs/dev/哨兵参考工程移植验收.md)。默认新增最终舵角联锁和 cos³ 驱动补偿，
 不改变 CAN1/2/3 所有权或功率标定状态。
+
+> 正式云台当前使用板载 BMI088 角速度补偿编码器手动双轴，并通过参考 v4 `0x0404/32B` 向底盘发布载体航向。驱动选项或 overlay 保留 CAN3 配置不表示实际 `main.cpp` 已启动外置头部 IMU。详见[当前双主控应用](../../../docs/applications/dual-controller.md)。
