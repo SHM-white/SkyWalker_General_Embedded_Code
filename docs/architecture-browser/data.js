@@ -62,9 +62,9 @@ window.SKYWALKER_MODULES = [
     "title": "双主控应用与执行器",
     "category": "机器人与仲裁",
     "status": "partial",
-    "summary": "两个 sentry 工程各自独立装配：云台手动惯性双轴/回中发送，底盘四舵轮/大 Yaw 执行，共用实车配置和普通模块 API。",
+    "summary": "两个 sentry 工程各自独立装配：云台编码器手动双轴、板载航向补偿与回中发送，底盘四舵轮/大 Yaw 执行，共用实车配置和普通模块 API。",
     "responsibility": "每个 main 持有长期对象、初始化顺序、执行循环和物理 CAN 提交；固定上车工程共用 installed overlay/conf 与纯配置 profile，不共享整车 run。",
-    "statusNote": "27 个相关工程编译完成，未实板验证；连接/IMU/发射确认现值 true、功率模型 false。当前最终应用不装配视觉/裁判/发射或功率闭环。",
+    "statusNote": "旧基线 27 个相关工程曾编译通过；本轮代码未重新构建或实板验证。正式云台使用板载 BMI088，不实例化 CAN3 外置头部 IMU；视觉/裁判/发射/功率闭环未装配。",
     "depends": [
       "command",
       "interboard",
@@ -109,7 +109,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "BMI088、达妙 RS485 与 CAN 来源共用带时间戳的快照，独立采集与诊断。",
     "responsibility": "ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度；ImuReceiver 独占采集循环并可管理 ImuHeater。BMI088 可挂 QuaternionEkf 估计姿态；RS485 通过请求应答读取设备四元数；CAN 支持主动上报和被动轮询。",
-    "statusNote": "当前云台使用专用 CAN3 主动四元数上报(从机 1/反馈 0x11)与惯性适配；imu_mounting_confirmed 现值 true，安装/质量/参考仍待实车记录。",
+    "statusNote": "当前正式云台使用板载 BMI088 做载体航向与角速度补偿，CAN3 外置 IMU 未实例化；独立 IMU 样例/后续惯性方案保留，安装/质量/参考须实测。",
     "depends": [
       "boards",
       "kalman",
@@ -162,7 +162,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "把物理引脚、外设、alias、时钟、DMA与电源连接交给Zephyr，业务参数保留在应用配置。",
     "responsibility": "DTS 描述物理设备；installed overlay/conf 固定板级资源和驱动，calibration/profile 提供标定与纯配置。各独立工程自行装配。",
-    "statusNote": "新上车入口和最终应用共用 config/vehicle/installed；云台 USART10 板间/CAN3 IMU、底盘 USART1 板间，两板 UART7 诊断。DAPLink 接线尚未实查。",
+    "statusNote": "新上车入口和最终应用共用 config/vehicle/installed；云台 USART10 板间、板载 SPI BMI088（CAN3 外置 IMU 未启用）；底盘 USART1 板间，两板 UART7 诊断。DAPLink 接线尚未实查。",
     "depends": [],
     "reference": "docs/api/boards.md"
   },
@@ -307,7 +307,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
     "responsibility": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
-    "statusNote": "CAN3 头部 IMU 与独立惯性上车入口/最终装配已实现并编译；安装变换和实车性能仍需确认。",
+    "statusNote": "CAN3 外置 IMU 惯性适配保留在库及独立样例，当前正式云台使用编码器手动双轴与板载载体角速度补偿，未实例化该适配器。",
     "depends": [
       "imu",
       "gimbal",
@@ -322,7 +322,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
     "responsibility": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
-    "statusNote": "独立请求/执行/双 Yaw 工程与最终装配已有；执行在底盘 CAN3，线上为关节 rad/s，保留当前反号适配；未实板验证。",
+    "statusNote": "独立请求/执行/双 Yaw 工程与最终装配已有；执行在底盘 CAN3，线上为关节 rad/s，参考 v4 世界速度意图，不在云台发送端额外乘电机方向；未实板验证。",
     "depends": [
       "gimbal",
       "motor-control",
