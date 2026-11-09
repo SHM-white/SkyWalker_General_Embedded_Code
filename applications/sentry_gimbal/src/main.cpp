@@ -70,7 +70,9 @@ int main() {
                                          .correct_gyro_bias = true},
                                         &onboard_estimator);
     static imu::ImuReceiver onboard(onboard_source, {.poll_interval_us = 500, .priority = 5});
-    static ImuHeadingReference carrier_heading;
+    // BMI088 continues gyro prediction when acceleration rejects a gravity
+    // correction. Bridge brief degradation using fresh samples only.
+    static ImuHeadingReference carrier_heading({.max_degraded_prediction_us = 100000});
     static YawCenteringController centering(centeringConfig());
     static motor::Motor yaw(installed::yawHardware()), pitch(installed::pitchHardware());
     static motor::CanBus yaw_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
@@ -112,8 +114,13 @@ int main() {
     bool peer_feedback_was_valid = false;
     std::uint64_t last_peer_boot = 0;
     bool was_peer_online = false;
+    core::TimeUs previous_cycle_us = 0, last_heading_loss_dt_us = 0;
+    bool heading_was_fresh = false, have_heading_loss = false;
+    HeadingWaitReason last_heading_loss_reason = HeadingWaitReason::None;
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
+        const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
+        previous_cycle_us = now_us;
         endpoint.poll(now_ms);
         (void)remote.snapshot(remote_frame);
         auto operator_state = controls.update(remote_frame.remote, now_ms);
@@ -130,8 +137,20 @@ int main() {
         }
         commands.setOperatorGate(operator_state.run_allowed, 0);
         (void)commands.snapshot(frame);
-        const auto heading = carrier_heading.update(onboard.snapshot(), !operator_state.run_allowed, now_us);
+        const auto carrier_snapshot = onboard.snapshot();
+        const auto heading = carrier_heading.update(carrier_snapshot, !operator_state.run_allowed, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);
+        const auto heading_reason = !heading.valid ? heading.reason
+                                    : !heading_fresh ? HeadingWaitReason::ControlStale
+                                                     : HeadingWaitReason::None;
+        // Retain transient losses even when heading recovers before the next
+        // diagnostic packet. Motor execution errors remain separate in error.
+        if (heading_was_fresh && !heading_fresh) {
+            have_heading_loss = true;
+            last_heading_loss_reason = heading_reason;
+            last_heading_loss_dt_us = dt_us;
+        }
+        heading_was_fresh = heading_fresh;
         GimbalExecutionInputs input{};
         input.command = frame.decision.command.gimbal;
         input.source_stamp = sourceStamp(frame, input.command.source);
@@ -225,7 +244,7 @@ int main() {
                       : !installed::imu_mounting_confirmed ? installed::DiagnosticReason::Configuration
                       : !heading_fresh                     ? installed::DiagnosticReason::ImuStale
                       : !peer_state.online || !peer_feedback_valid ? installed::DiagnosticReason::PeerStale
-                      : !joint_valid                       ? installed::DiagnosticReason::FeedbackStale
+                      : !joint_valid || !yaw_running       ? installed::DiagnosticReason::FeedbackStale
                       : status.state == RunState::Active ? installed::DiagnosticReason::Ready
                                                          : installed::DiagnosticReason::CommandStale;
         (void)status_led.setStatus(
@@ -235,9 +254,11 @@ int main() {
                             .enabled = status.state == RunState::Active,
                             .target = static_cast<float>(gimbal.yawTargetRad()),
                             .feedback = ys.feedback.position_rad,
-                            .age_ms = age(heading.stamp, now_us),
+                            .age_ms = std::max(age(carrier_snapshot.sample.orientation.stamp, now_us),
+                                               age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),
+                            .dt_us = float(have_heading_loss ? last_heading_loss_dt_us : dt_us),
                             .effort = gimbal.yawTelemetry().effort_command,
-                            .detail = float(unsigned(centered.reason)),
+                            .detail = float(unsigned(have_heading_loss ? last_heading_loss_reason : heading_reason)),
                             .error = status.error ? status.error : onboard_error,
                             .extra0 = installed::small_yaw.direction * centered.center_error_rad,
                             .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN()});

@@ -12,31 +12,58 @@ float wrap(float a) {
 LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool disarmed, core::TimeUs now) {
     LocalHeading out{};
     out.generation = initialized_ ? 1 : 0;
+    const auto reject = [&](HeadingWaitReason reason) {
+        out.reason = reason;
+        return out;
+    };
     if (blocked_) {
         out.generation = 2;
-        return out;
+        return reject(blocked_reason_);
     }
     if (initialized_ && last_sample_us_ && now > last_sample_us_ && now - last_sample_us_ > 500000) {
         blocked_ = true;
+        blocked_reason_ = HeadingWaitReason::SampleGap;
         out.generation = 2;
-        return out;
+        return reject(blocked_reason_);
     }
     const auto &v = s.sample;
     auto q = v.orientation.value;
-    const bool fresh = s.state == imu::State::Running && core::fresh(v.orientation.stamp, now, 50000) &&
-                       core::fresh(v.gyro_rad_s.stamp, now, 50000) && v.reference.frame_id && v.reference.epoch &&
-                       core::normalize(q) && core::finite(v.gyro_rad_s.value) &&
-                       (v.attitude_quality == imu::AttitudeQuality::Tracking ||
-                        v.attitude_quality == imu::AttitudeQuality::Unknown);
-    if (!fresh) {
+    HeadingWaitReason input_reason = HeadingWaitReason::None;
+    if (s.state != imu::State::Running)
+        input_reason = HeadingWaitReason::SourceNotRunning;
+    else if (!core::fresh(v.orientation.stamp, now, 50000))
+        input_reason = HeadingWaitReason::OrientationStale;
+    else if (!core::fresh(v.gyro_rad_s.stamp, now, 50000))
+        input_reason = HeadingWaitReason::GyroStale;
+    else if (!v.reference.frame_id || !v.reference.epoch)
+        input_reason = HeadingWaitReason::ReferenceInvalid;
+    else if (!core::normalize(q))
+        input_reason = HeadingWaitReason::OrientationInvalid;
+    else if (!core::finite(v.gyro_rad_s.value))
+        input_reason = HeadingWaitReason::GyroInvalid;
+    else if (v.attitude_quality == imu::AttitudeQuality::Degraded) {
+        // A valid gyro prediction is a new observation, not permission to
+        // repeat an old heading. Bound it by the last actual Tracking sample,
+        // and never bridge initialization or a reference change.
+        const bool prediction_allowed = initialized_ && have_reference_ && reference_ == v.reference &&
+                                        config_.max_degraded_prediction_us &&
+                                        core::fresh(last_tracking_stamp_, now, config_.max_degraded_prediction_us);
+        if (!prediction_allowed)
+            input_reason = HeadingWaitReason::Degraded;
+    }
+    else if (v.attitude_quality != imu::AttitudeQuality::Tracking &&
+             v.attitude_quality != imu::AttitudeQuality::Unknown)
+        input_reason = HeadingWaitReason::QualityUnavailable;
+    if (input_reason != HeadingWaitReason::None) {
         stationary_samples_ = 0;
-        return out;
+        return reject(input_reason);
     }
     if (have_reference_ && reference_ != v.reference) {
         if (initialized_) {
             blocked_ = true;
+            blocked_reason_ = HeadingWaitReason::ReferenceReset;
             out.generation = 2;
-            return out;
+            return reject(blocked_reason_);
         }
         stationary_samples_ = 0;
     }
@@ -44,11 +71,15 @@ LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool disarmed, 
     have_reference_ = true;
     const auto e = core::euler(q);
     if (std::fabs(std::cos(e.pitch)) < .2f)
-        return out;
+        return reject(HeadingWaitReason::TiltSingular);
     const auto g = v.gyro_rad_s.value;
     const float rate = (std::sin(e.roll) * g.y + std::cos(e.roll) * g.z) / std::cos(e.pitch);
     if (!std::isfinite(rate) || std::fabs(rate) > 100)
-        return out;
+        return reject(HeadingWaitReason::RateInvalid);
+    if (v.attitude_quality == imu::AttitudeQuality::Tracking) {
+        last_tracking_stamp_ = v.orientation.stamp;
+        last_tracking_stamp_.time_us = std::min(v.orientation.stamp.time_us, v.gyro_rad_s.stamp.time_us);
+    }
     const bool distinct = v.orientation.stamp.sequence != last_sequence_ &&
                           v.orientation.stamp.time_us > last_sample_us_;
     if (distinct) {
@@ -66,11 +97,12 @@ LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool disarmed, 
         }
     }
     if (!initialized_)
-        return out;
+        return reject(HeadingWaitReason::Initializing);
     out.yaw_rad = wrap(e.yaw - zero_rad_);
     out.rate_rad_s = rate;
     out.generation = 1;
     out.valid = true;
+    out.reason = HeadingWaitReason::None;
     // The oldest constituent sample bounds the predicted heading's freshness.
     out.stamp = v.orientation.stamp;
     out.stamp.time_us = std::min(v.orientation.stamp.time_us, v.gyro_rad_s.stamp.time_us);

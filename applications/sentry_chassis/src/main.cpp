@@ -20,6 +20,7 @@ using namespace skywalker;
 using namespace robotics;
 namespace installed = robotics::vehicle;
 communication::AsyncUart::DmaBuffers link_dma __nocache;
+enum class BigYawGate : std::uint8_t { None, PeerDisabled, ChassisDisabled, BodyGyro, PeerImu, MissingRequest };
 std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
     return stamp.valid && now_ms >= stamp.timestamp_ms
                ? static_cast<std::uint32_t>(std::min<std::uint64_t>(now_ms - stamp.timestamp_ms, UINT32_MAX))
@@ -29,7 +30,7 @@ std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
 
 int main() {
     static installed::Diagnostics diagnostics;
-    diagnostics.start("sentry_chassis", "chassis", "steer=0.8A; drive=0.5A; big-yaw=1rad/s");
+    diagnostics.start("sentry_chassis", "chassis", "steer=0.8A; drive=0.5A; big-yaw joint limit=installed profile");
     static led::StatusLed status_led;
     const int status_led_error = status_led.start();
     if constexpr (led::StatusLed::available)
@@ -61,7 +62,8 @@ int main() {
     // Reference mode=1 requires BMI088 body yaw-rate compensation.
     const bool need_body = true;
     const int body_error = need_body ? body.start() : 0;
-    static BigYawExecutor big_axis(big_drive, installed::bigYawMotorConfig(), installed::bigYawExecutionConfig());
+    static const auto big_yaw_config = installed::bigYawExecutionConfig();
+    static BigYawExecutor big_axis(big_drive, installed::bigYawMotorConfig(), big_yaw_config);
     int steer_error = installed::connections_confirmed ? steer_bus.attach(s0, s1, s2, s3) : -ENODEV;
     int drive_error = installed::connections_confirmed ? drive_bus.attach(d0, d1, d2, d3) : -ENODEV;
     int big_error = installed::connections_confirmed ? big_bus.attach(big_drive) : -ENODEV;
@@ -85,10 +87,17 @@ int main() {
     diagnostics.event("motor_rail", power_error);
     std::uint64_t peer_boot = 0;
     int previous_big_commit_error = 0;
+    core::TimeUs previous_cycle_us = 0, last_big_stop_dt_us = 0;
+    bool big_was_requested = false, big_was_active = false, have_big_stop = false;
+    WaitReason last_big_stop_reason = WaitReason::None;
+    int last_big_stop_error = 0;
+    BigYawGate last_big_stop_gate = BigYawGate::None;
     std::int64_t deadline = k_uptime_ticks();
     const auto period = k_us_to_ticks_ceil64(installed::chassis_period_us);
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
+        const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
+        previous_cycle_us = now_us;
         endpoint.poll(now_ms);
         const auto rx = endpoint.snapshot();
         if (rx.peer.stamp.valid && peer_boot != rx.peer.sender_boot_id) {
@@ -126,22 +135,34 @@ int main() {
                                          : chassis.suspend(now_us, WaitReason::Configuration, chassis_error, true);
         BigYawExecutionInputs big_input{};
         big_input.request = rx.big_yaw_request;
+        auto big_gate = !rx.big_yaw_request.stamp.valid ? BigYawGate::MissingRequest
+                        : big_input.request.mode == BigYawMode::Disabled ? BigYawGate::PeerDisabled
+                                                                        : BigYawGate::None;
         // The same left-switch control must stop both the wheels and big Yaw.
-        if (input.command.mode == ChassisMode::Disabled)
+        if (input.command.mode == ChassisMode::Disabled) {
             big_input.request.mode = BigYawMode::Disabled;
+            if (big_gate == BigYawGate::None)
+                big_gate = BigYawGate::ChassisDisabled;
+        }
         if (big_input.request.mode == BigYawMode::FollowCenter && !installed::big_yaw_heading_lock_enabled) {
             // Local velocity backend accepts *joint-relative* speed; decode the
             // reference's world-rate request using two real gyro observations.
             const bool body_gyro_valid = body_snapshot.state == imu::State::Running &&
                                          core::fresh(body_snapshot.sample.gyro_rad_s.stamp, now_us, 50000) &&
                                          core::finite(body_snapshot.sample.gyro_rad_s.value);
-            if (!body_gyro_valid || !rx.gimbal_imu.valid)
+            if (!body_gyro_valid || !rx.gimbal_imu.valid) {
                 big_input.request.mode = BigYawMode::Disabled;
-            else
-                big_input.request
-                    .target_rate_rad_s = referenceV4WorldToJointRate(big_input.request.target_rate_rad_s,
-                                                                     body_snapshot.sample.gyro_rad_s.value.z,
-                                                                     rx.gimbal_imu.yaw_rate_rad_s);
+                big_gate = !body_gyro_valid ? BigYawGate::BodyGyro : BigYawGate::PeerImu;
+            }
+            else {
+                const float joint_rate = referenceV4WorldToJointRate(big_input.request.target_rate_rad_s,
+                                                                    body_snapshot.sample.gyro_rad_s.value.z,
+                                                                    rx.gimbal_imu.yaw_rate_rad_s);
+                // Compensation can exceed the world target. Saturate at the
+                // installed joint limit shared with the execution guard.
+                big_input.request.target_rate_rad_s =
+                    std::clamp(joint_rate, -big_yaw_config.rate_abs_max_rad_s, big_yaw_config.rate_abs_max_rad_s);
+            }
         }
         big_input.head = rx.gimbal_imu;
         big_input.peer_boot_id = rx.peer.sender_boot_id;
@@ -171,6 +192,18 @@ int main() {
         endpoint.setStatus(status);
         endpoint.setBigYawFeedback(big_axis.feedback());
         const auto feedback = big_axis.feedback();
+        const auto big_motor = big_drive.snapshot();
+        // Retain short interruptions across the 20 ms diagnostic sampling period.
+        // Enabling -> withdrawn also counts, even before the first Active state.
+        if ((big_was_requested && !big_status.requested) || (big_was_active && !feedback.armed)) {
+            have_big_stop = true;
+            last_big_stop_reason = big_status.reason;
+            last_big_stop_error = big_status.error ? big_status.error : big_motor.last_fault.error;
+            last_big_stop_gate = big_gate;
+            last_big_stop_dt_us = dt_us;
+        }
+        big_was_requested = big_status.requested;
+        big_was_active = feedback.armed;
         const auto reason = chassis_error || big_error || power_error ? installed::DiagnosticReason::InitFailed
                             : !rx.online                              ? installed::DiagnosticReason::PeerStale
                             : status.reason == WaitReason::Feedback || big_status.reason == WaitReason::Feedback
@@ -182,12 +215,33 @@ int main() {
         (void)status_led.setStatus(
             installed::statusLedFor(reason, status.state == RunState::Active || big_status.state == RunState::Active,
                                     false, execution_error));
-        diagnostics.status({.reason = reason,
+        const auto big_reason = big_error || power_error ? installed::DiagnosticReason::InitFailed
+                          : !rx.online ? installed::DiagnosticReason::PeerStale
+                          : big_status.reason == WaitReason::Command ? installed::DiagnosticReason::CommandStale
+                          : big_status.reason == WaitReason::Transport ? installed::DiagnosticReason::TransportError
+                          : big_status.reason == WaitReason::Feedback ? installed::DiagnosticReason::FeedbackStale
+                          : big_status.reason == WaitReason::Reference ? installed::DiagnosticReason::ImuStale
+                          : big_status.reason == WaitReason::Configuration ? installed::DiagnosticReason::Configuration
+                          : big_status.reason == WaitReason::Drive ? installed::DiagnosticReason::TransportError
+                          : big_status.reason == WaitReason::Power ? installed::DiagnosticReason::Permission
+                          : big_status.reason == WaitReason::Cycle ? installed::DiagnosticReason::CycleInvalid
+                          : feedback.armed ? installed::DiagnosticReason::Ready
+                                           : installed::DiagnosticReason::Disarmed;
+        diagnostics.status({.reason = big_reason,
                             .valid = feedback.valid,
-                            .enabled = status.state == RunState::Active || big_status.state == RunState::Active,
+                            .enabled = feedback.armed,
                             .target = big_input.request.target_rate_rad_s,
                             .feedback = feedback.actual_rate_rad_s,
-                            .age_ms = age(rx.control.command.stamp, now_ms)});
+                            .age_ms = age(rx.big_yaw_request.stamp, now_ms),
+                            .dt_us = float(have_big_stop ? last_big_stop_dt_us : dt_us),
+                            .effort = big_motor.feedback.torque_nm,
+                            .detail = float(unsigned(have_big_stop ? last_big_stop_reason : big_status.reason)),
+                            .error = big_error ? big_error
+                                     : power_error ? power_error
+                                     : have_big_stop ? last_big_stop_error
+                                     : big_status.error ? big_status.error : previous_big_commit_error,
+                            .extra0 = float(unsigned(big_motor.state)),
+                            .extra1 = float(unsigned(have_big_stop ? last_big_stop_gate : big_gate))});
         deadline += period;
         const auto ticks = k_uptime_ticks();
         if (deadline <= ticks)

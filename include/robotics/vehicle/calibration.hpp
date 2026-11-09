@@ -91,7 +91,8 @@ inline constexpr auto wheel = swerve_calibration_set == SwerveCalibrationSet::Re
                                   ? reference_wheel
                                   : legacy_wheel;
 // J4310 bus IDs are also unverified; MIT backend remains unchanged.
-inline constexpr MotorCalibration reference_big_yaw{6, 0x11, 1, -1, 0.5f, 1, 0};
+// Joint speed includes body-rotation compensation above the world-follow target.
+inline constexpr MotorCalibration reference_big_yaw{6, 0x11, 1, -1, 10.0f, 10.0f, 0};
 // Calibrated encoder forward zero in the reference firmware, 2026-10-28.
 // Confirm that the installed J4310 and CAN identity match before motor operation.
 inline constexpr float reference_big_yaw_forward_zero_rad = -1.132792f;

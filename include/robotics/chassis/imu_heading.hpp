@@ -3,25 +3,54 @@
 #include <drivers/imu/imu_types.hpp>
 #include <robotics/messages/interboard.hpp>
 namespace skywalker::robotics {
+enum class HeadingWaitReason : std::uint8_t {
+    None,
+    SourceNotRunning,
+    OrientationStale,
+    GyroStale,
+    ReferenceInvalid,
+    OrientationInvalid,
+    GyroInvalid,
+    Degraded,
+    QualityUnavailable,
+    ReferenceReset,
+    TiltSingular,
+    RateInvalid,
+    Initializing,
+    SampleGap,
+    ControlStale
+};
 struct LocalHeading {
     float yaw_rad = 0, rate_rad_s = 0;
     core::Stamp stamp{};
     std::uint32_t generation = 0;
     bool valid = false;
+    HeadingWaitReason reason = HeadingWaitReason::Initializing;
 };
 // A software zero belongs to one board startup. Transient losses preserve it;
 // a driver reference reset invalidates it until both boards are realigned/rebooted.
 class ImuHeadingReference {
 public:
+    struct Config {
+        // Opt-in for a source which keeps publishing fresh gyro predictions
+        // while accelerometer correction is rejected. Zero rejects Degraded.
+        core::TimeUs max_degraded_prediction_us = 0;
+    };
+    ImuHeadingReference() = default;
+    explicit ImuHeadingReference(const Config &config) : config_(config) {
+    }
     LocalHeading update(const imu::Snapshot &, bool disarmed, core::TimeUs now);
 
 private:
+    const Config config_{};
     core::OrientationReference reference_{};
+    core::Stamp last_tracking_stamp_{};
     std::uint64_t last_sequence_ = 0;
     core::TimeUs last_sample_us_ = 0;
     float zero_rad_ = 0;
     unsigned stationary_samples_ = 0;
     bool initialized_ = false, blocked_ = false, have_reference_ = false;
+    HeadingWaitReason blocked_reason_ = HeadingWaitReason::ReferenceReset;
 };
 // Compare boot-relative uptimes before pairing a new chassis zero with a peer.
 // This rejects a chassis-only restart that has lost its previous peer binding.
