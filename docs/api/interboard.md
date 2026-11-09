@@ -1,8 +1,8 @@
 # 双主控板间通信：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+当前参考 v4 核对基线：`dev@bad529abe5d682797ca27d49078bbf0a9b00266b`（2026-11-10，已同步 `main`）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
-统一 v4 字节契约，七类消息、boot/生产序号与原年龄，UART/RS485/CAN 三后端。
+统一参考 v4 字节契约，boot/生产序号与原年龄，传输框架支持 UART/RS485/CAN 后端；**当前正式应用固定 UART 并遵循参考工程的 0x0101/0x0402/0x0404 业务语义**。
 
 **接入状态：已有代码。** v4 已实现，旧版本直接拒绝；恢复授权 generation 删除。真实两板须使用一致的 v4 契约。当前独立应用固定 UART：云台 USART10、底盘 USART1，均 460800 8N1；诊断另占 UART7。完整字节、单位、年龄、boot 与停止语义以 [interboard-v4.md](../protocols/interboard-v4.md) 为规范。
 
@@ -114,7 +114,7 @@ const auto rx = endpoint.snapshot();
 
 | 配置项 | 作用与前提 |
 | --- | --- |
-| `kInterBoardProtocolVersion` | 4；最大 payload 128、frame 142 B，CRC16、小端；七类消息。 |
+| `kInterBoardProtocolVersion` | 4；最大 payload 128、frame 142 B，CRC16、小端；当前参考格式见 v4 规范。 |
 | `状态年龄` | RunStatus/BigYawFeedback 原始生产年龄；反复发送不续期。 |
 
 - v4 没有 resume_generation；不要用旧恢复教程。
@@ -135,9 +135,6 @@ const auto rx = endpoint.snapshot();
 
 [全部接口参考](README.md) · [文档同步清单](../maintenance.md)
 
-### IMU 航向快照
+### 当前正式固件的 IMU 航向帧
 
-`InterBoardEndpoint::submitGimbalImuYaw`（仅云台生产）与 `Snapshot::gimbal_imu`
-传递 `GimbalImuYaw` 值副本，复用现有短锁、批量发送、会话及解析路径。
-`InterBoardCodec::encode/decodeGimbalImuYaw` 使用 SkyWalker 0x0405/40 字节扩展；
-不是参考工程的 0x0404/32 字节。格式和重启规则见 [v4 协议](../protocols/interboard-v4.md)。
+`InterBoardEndpoint::submitGimbalImuYaw` 与 `Snapshot::gimbal_imu` 交换带原始样本年龄的 `GimbalImuYaw` 值副本；本轮正式发送为参考 v4 **`0x0404/32B`**。云台传递板载 BMI088 载体航向/去偏角速度，而非已装配外置头部 IMU。该帧不包含旧 SkyWalker `0x0405/40B` 的发送方 Boot 字段；双端必须匹配参考合同，见[规范](../protocols/interboard-v4.md)。
