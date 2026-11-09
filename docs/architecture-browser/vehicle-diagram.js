@@ -1,5 +1,5 @@
 'use strict';
-// Physical ownership: workspace 48984ed (2026-10-25), current assembly and remaining targets.
+// Current assembly reviewed at bad529abe5d6 (2026-11-10); target is future design.
 window.SKYWALKER_VEHICLE_MAP = {
   "current": {
     "height": 770,
@@ -30,8 +30,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "imu",
-        "title": "头部 IMU",
-        "detail": "CAN3 主动 · 安装待实查",
+        "title": "板载 BMI088",
+        "detail": "SPI · 载体航向/角速度；CAN3 外置未启用",
         "moduleId": "imu",
         "x": 470,
         "y": 24,
@@ -90,8 +90,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "inertial",
-        "title": "头部惯性适配",
-        "detail": "测量 / 参考 → 双轴 Rate",
+        "title": "编码器手动 + 载体补偿",
+        "detail": "板载角速度补偿小 Yaw；回中须新鲜航向",
         "moduleId": "inertial",
         "x": 55,
         "y": 320,
@@ -254,7 +254,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "inertial",
-        "label": "姿态 / 参考",
+        "label": "载体航向 / 角速度",
         "kind": "feedback",
         "from": "imu",
         "points": [
