@@ -34,7 +34,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 在线阅读：[GitHub Pages 架构与接口手册](https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/)；本地启动和私有站点见 [架构浏览器](docs/architecture-browser/README.md)。
 
-本轮应用与上车文档对齐固件 `48984ed90898`（2026-10-25）：21 个独立上车工程、共享实车配置、DAPLink 单串口诊断，以及各自装配的双主控手动应用。此前 27 个相关工程已编译、链接通过，尚未测试、烧录或实板验证；视觉、实测功率闭环与有载发射仍待接入。
+当前应用状态核对代码基线：`dev@bad529abe5d682797ca27d49078bbf0a9b00266b`（2026-11-10，已快进同步至 `main`）。正式云台使用小 Yaw/Pitch 编码器手动闭环与板载 BMI088 载体航向/角速度补偿；CAN3 外置头部 IMU、视觉和发射当前未实例化。底盘通过参考 v4 接收云台系平移与大 Yaw 世界角速度，转换时使用大 Yaw 原生角反馈。**2026-10-25 的 27 项编译/链接通过属于旧基线**，本次同步未重新构建、测试、烧录或实板验证。详见[双主控应用](docs/applications/dual-controller.md)与[板间 v4](docs/protocols/interboard-v4.md)。
 
 ## 当前能力
 
@@ -53,7 +53,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - 达妙：DM-J4310-2EC V1.1；支持 MIT、位置-速度、速度三种原生 CAN 模式，以及 Enable/Disable/ClearError/SaveZero。
 - 统一 CAN 电机驱动：`CanBus` 管物理传输，`Motor` 管端点，`Group` 提供显式批量启停，不传播成员故障；`VelocityMotor`、`PositionMotor` 复用纯 C 控制算法并暂存目标。
 - 纯 C 控制库：PID、前馈、复合前馈 PID、斜坡限幅、角度工具、速度环和位置-速度串级。
-- IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM IMU 支持 RS485 和 CAN 来源。当前实车云台与惯性上车入口使用 CAN3 主动四元数反馈。
+- IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM IMU 支持 RS485 和 CAN 来源。正式云台使用板载 BMI088 作为载体航向来源；CAN3 主动四元数反馈仍可用于独立惯性样例，但未在当前正式云台入口启动。
 
 ### 通信与机器人算法
 
@@ -111,6 +111,7 @@ skywalker_code/
 ├── dts/bindings/               本地设备 binding
 ├── drivers/
 │   ├── imu/                    独立 IMU source 与采集封装
+│   ├── led/                    MC02 状态灯
 │   └── motor/                  共享 CAN I/O、DJI / 达妙协议
 ├── include/                    公共头文件，按 drivers/lib 对应组织
 ├── lib/
