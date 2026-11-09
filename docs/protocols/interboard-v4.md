@@ -1,6 +1,6 @@
 # 板间协议 v4：参考工程统一合同
 
-本文件描述当前 SkyWalker `dev` **实际上车发送/接收的版本**。兼容目标为
+本文件描述已同步至 SkyWalker `main` 与 `dev` 的**当前正式应用发送/接收的参考 v4 版本**（核对基线 `bad529abe5d682797ca27d49078bbf0a9b00266b`，2026-11-10）。兼容目标为
 `JJL0612/sentry_gimbal@3cfbe1c` 与 `JJL0612/sentry_onlychassis@dcc8d4e`，
 不再承诺兼容 SkyWalker 原有 `0x0405` 扩展或此前的内部 `mode=2`。
 
