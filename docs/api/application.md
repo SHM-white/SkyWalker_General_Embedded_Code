@@ -1,14 +1,14 @@
 # 双主控应用与执行器：接口与调用参考
 
-本轮对齐固件 `48984ed90898`（2026-10-25）。两个 sentry 应用分别在自己的 `main.cpp` 中装配，不再调用 `samples::vehicle::run()`。完整源码、物理资源和参数见文末链接。
+当前正式应用核对基线 `dev@bad529abe5d682797ca27d49078bbf0a9b00266b`（2026-11-10，已同步 `main`）。两个 sentry 应用分别在自己的 `main.cpp` 中装配，不再调用 `samples::vehicle::run()`。完整源码、物理资源和参数见文末链接。
 
-**接入状态：手动机械链已有代码，实板待确认。** 21 个独立上车工程、两个应用和四个受迁移影响的旧样例共 27 项编译、链接通过；该记录不包含测试、烧录或实板验证。当前应用不启动视觉与发射，不启用实测功率闭环。
+**接入状态：手动机械链已有代码，实板待确认。** 正式云台为编码器双轴控制 + 板载 BMI088 载体角速度补偿，不实例化 CAN3 外置头部 IMU；底盘使用参考 v4 世界角速度、原生大 Yaw 角反馈和逐轮舵轮联锁。27 项编译、链接通过是 2026-10-25 旧基线，本轮未重新构建、测试、烧录或实板验证。当前应用不启动视觉与发射，不启用实测功率闭环。
 
 ## 职责与关联
 
 | 入口 | 自行装配的对象 | 固定职责 |
 | --- | --- | --- |
-| `applications/sentry_gimbal/src/main.cpp` | RemoteReceiver、CommandManager、CAN3 IMU、Yaw/Pitch Motor/Group/CanBus、GimbalExecutor、惯性适配与回中外环、UART Endpoint、Diagnostics | 真实物理遥控、头部惯性双轴、大 Yaw 请求与低速底盘命令 |
+| `applications/sentry_gimbal/src/main.cpp` | RemoteReceiver、CommandManager、板载 BMI088、Yaw/Pitch Motor/Group/CanBus、GimbalExecutor、载体角速度补偿与回中外环、UART Endpoint、Diagnostics | 真实物理遥控、编码器双轴、大 Yaw 世界速度请求与低速底盘命令 |
 | `applications/sentry_chassis/src/main.cpp` | 四舵向/四轮驱电机、三个 CanBus、SwerveHardware、ChassisExecutor、大 Yaw 电机/执行器、UART Endpoint、Diagnostics | 消费真实板间操作授权，执行四轮与大 Yaw，回传生产状态 |
 | `samples/bringup/<阶段>/src/main.cpp` | 只装配对应阶段需要的对象 | 观察、单机构与逐级组合；目录固定角色和机构 |
 
@@ -31,7 +31,7 @@
 
 | 位置 | 内容 |
 | --- | --- |
-| `config/vehicle/installed/` | 两板资源、DMA、基础系统输出策略、CAN IMU 后端 |
+| `config/vehicle/installed/` | 两板资源、DMA、基础系统输出策略与可选 CAN IMU 后端 |
 | `include/robotics/vehicle/calibration.hpp` | ID、方向、传动、零点、限位、安装变换与确认值 |
 | `gimbal_profile.hpp` / `chassis_profile.hpp` / `swerve_profile.hpp` / `big_yaw_profile.hpp` | 共享硬件、PID 与执行器参数 |
 | `manual_profile.hpp` | 最终手动应用命令、惯性与回中策略 |
@@ -40,7 +40,7 @@
 
 当前 `connections_confirmed`、`imu_mounting_confirmed`、`shooter_constraints_confirmed` 为 true，`power_model_calibrated` 为 false。这些是沿用的代码值，不是本次实板通过记录。中央参数修改后重建受影响的阶段和应用，旧固件不会自动更新。
 
-云台 CAN1/2/3 分别为小 Yaw/Pitch/头 IMU，板间 USART10；底盘 CAN1/2/3 为舵向/轮驱/大 Yaw，板间 USART1。诊断均为候选 UART7、115200 8N1，经 DAPLink 观察，实际接线待确认。新配置不提供 `vision-uart`，后续启用视觉前须单独分配资源。
+云台 CAN1/2 分别为小 Yaw/Pitch；CAN3 外置头部 IMU 在当前应用中不实例化，板间 USART10；底盘 CAN1/2/3 为舵向/轮驱/大 Yaw，板间 USART1。诊断均为候选 UART7、115200 8N1，经 DAPLink 观察，实际接线待确认。新配置不提供 `vision-uart`，后续启用视觉前须单独分配资源。
 
 ## 授权、时效与观测
 
