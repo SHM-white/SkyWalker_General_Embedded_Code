@@ -1,8 +1,8 @@
 # 机构执行器、惯性适配与大 Yaw 回中
 
-更新日期：2026-10-25。执行器位于 `include/robotics/` 与 `lib/robotics/`；[云台应用](../../../applications/sentry_gimbal/README.md)与[底盘应用](../../../applications/sentry_chassis/README.md)各自在自己的 `src/main.cpp` 中构造对象、初始化资源并执行控制循环。它们不调用公共 `vehicle_bench.hpp`。应用持有 Motor、Group、CanBus 和输入来源，完成 attach/start，并在所有机构暂存输出后对每条物理 CAN commit 一次。执行器不创建或提交 CAN 总线。
+当前正式应用核对：2026-11-10（`bad529abe5d6`）。公共执行器 API 与正式应用装配是两回事。执行器位于 `include/robotics/` 与 `lib/robotics/`；[云台应用](../../../applications/sentry_gimbal/README.md)与[底盘应用](../../../applications/sentry_chassis/README.md)各自在自己的 `src/main.cpp` 中构造对象、初始化资源并执行控制循环。它们不调用公共 `vehicle_bench.hpp`。应用持有 Motor、Group、CanBus 和输入来源，完成 attach/start，并在所有机构暂存输出后对每条物理 CAN commit 一次。执行器不创建或提交 CAN 总线。
 
-应用与[独立上车工程](../../../samples/bringup/README.md)共享 [installed 物理配置](../../../config/vehicle/installed/README.md)及 `include/robotics/vehicle/` 中的标定与纯配置工厂。云台使用 CAN1 小 Yaw、CAN2 Pitch、CAN3 头部 CAN IMU；底盘使用 CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw。UART7 为两板 DAPLink 诊断候选口，板间固定为云台 USART10、底盘 USART1。资源共用不会替代现场接线和标定确认。
+应用与[独立上车工程](../../../samples/bringup/README.md)共享 [installed 物理配置](../../../config/vehicle/installed/README.md)及 `include/robotics/vehicle/` 中的标定与纯配置工厂。正式云台使用 CAN1 小 Yaw、CAN2 Pitch 与板载 SPI BMI088（CAN3 外置 IMU 未实例化）；底盘使用 CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw。UART7 为两板 DAPLink 诊断候选口，板间固定为云台 USART10、底盘 USART1。资源共用不会替代现场接线和标定确认。
 
 所有有状态 update、begin、suspend 和 status 引用访问由一个执行线程拥有。跨线程使用 SnapshotCache 或 Endpoint 的值副本；读者不刷新生产时间。SnapshotCache 争锁使用有界短自旋，首次尚无发布时 snapshot 返回 -EAGAIN，ISR 调用返回 -EWOULDBLOCK。初始化配置失败保持 Blocked；运行意图由新鲜输入决定，电机等待/故障不阻止其他轴持续生产目标。Group 只是批量启停，Motor/CAN 独立恢复。
 
@@ -34,7 +34,7 @@
 | `yawTargetRad()` / `pitchTargetRad()` | 执行线程内读取机械目标，rad |
 | `const RunStatus &status()` | 仅执行线程读取内部引用；对外发布值副本 |
 
-`yaw_output_valid`、`pitch_output_valid` 由惯性适配器声明本轴数学输入是否够用，独立作废对应计算输出。`GimbalAxis::poll()` 当前返回 `feedback_healthy/error`，没有 `ready_for_enable`。有限位轴须使用真实标定范围与可信参考；Rate 目标时间轴不因电机离线重置，PositionMotor 在本轴恢复时自动重建控制历史。
+`yaw_output_valid`、`pitch_output_valid` 可由惯性适配器声明本轴数学输入是否够用；当前正式云台直接构造手动编码器轴目标，不依赖外置 IMU 完成双轴手动控制。`GimbalAxis::poll()` 当前返回 `feedback_healthy/error`，没有 `ready_for_enable`。有限位轴须使用真实标定范围与可信参考；Rate 目标时间轴不因电机离线重置，PositionMotor 在本轴恢复时自动重建控制历史。
 
 ## InertialGimbalAdapter
 
@@ -42,13 +42,13 @@
 
 输出 `command` 是给 GimbalExecutor 的关节 Rate 命令，`source_stamp` 保留原输入时间，两个 output_valid 分别表示数学测量足够，`stabilization_valid` 用于回中/供弹业务。适配器只做坐标与目标计算，没有电机/总线所有权。
 
-库 Config 默认头部 IMU 超时 20 ms，机械测量 50 ms，来源/命令 100 ms，周期上限 20 ms；Pitch 默认锁定。最终云台的 `manualInertialConfig()` 明确放开 Pitch，两个惯性上车工程则分别固定为仅 Yaw 或双轴，不靠锁轴宏选择。配置包括两轴方向、姿态误差增益、gyro damping、惯性 Pitch 范围、稳定误差阈值和姿态质量要求。IMU frame_id/epoch 是坐标身份；视觉目标与头部参考必须匹配，不能把世界角直接送机械编码器位置。电机恢复不重定义惯性业务目标。
+库 Config 默认头部 IMU 超时 20 ms，机械测量 50 ms，来源/命令 100 ms，周期上限 20 ms；Pitch 默认锁定。共享 `manualInertialConfig()` 仍可定义相关参数，但**当前正式云台没有实例化 `InertialGimbalAdapter`**；两个惯性上车工程可分别固定为仅 Yaw 或双轴，不靠锁轴宏选择。配置包括两轴方向、姿态误差增益、gyro damping、惯性 Pitch 范围、稳定误差阈值和姿态质量要求。IMU frame_id/epoch 是坐标身份；视觉目标与头部参考必须匹配，不能把世界角直接送机械编码器位置。电机恢复不重定义惯性业务目标。
 
 ## 小 Yaw 外环与 BigYawExecutor
 
 头文件：[yaw_centering.hpp](../../../include/robotics/gimbal/yaw_centering.hpp)、[big_yaw_executor.hpp](../../../include/robotics/execution/big_yaw_executor.hpp)。
 
-`YawCenteringController::update(const YawCenteringInputs &, now_us)` 使用已标定小 Yaw 中心、关节角及其采样时间、原始来源、head_stable 与 permission_valid，生成限速/斜坡后的大 Yaw 角速度。中心与编码器零点分开标定。库 Config 默认死区 0.05 rad、迟滞 0.025 rad、kp=0.5、最大 0.3 rad/s、加速度 0.4 rad/s²。最终云台 `manualCenteringConfig()` 的上限为 0.6 rad/s、加速度 0.8 rad/s²；独立双 Yaw 上车入口使用 `bringup::big_yaw_rate_rad_s=0.1 rad/s`，与其配套 `chassis_big_yaw` 接收上限一致。`reset()` 清外环历史。
+`YawCenteringController::update(const YawCenteringInputs &, now_us)` 使用已标定小 Yaw 中心、关节角及其采样时间、原始来源、head_stable 与 permission_valid，生成限速/斜坡后的大 Yaw 角速度。中心与编码器零点分开标定。库 Config 默认死区 0.05 rad、迟滞 0.025 rad、kp=0.5、最大 0.3 rad/s、加速度 0.4 rad/s²。当前正式云台从共享 `manualCenteringConfig()` 构建并在入口覆盖回中增益 6.0、世界系限速 1 rad/s、加速度 4 rad/s²；独立双 Yaw 上车入口使用 `bringup::big_yaw_rate_rad_s=0.1 rad/s`，与其配套 `chassis_big_yaw` 接收上限一致。`reset()` 清外环历史。
 
 `BigYawExecutor` 注入独立 Motor、VelocityMotor::Config 与自身 Config；`begin()` 配置，`update(const BigYawExecutionInputs &, now_us)` 消费请求，`suspend(...)` 撤销输入，`feedback()` 返回 BigYawFeedback 值副本。默认控制连续旋转速度，不需要绝对机械零点，不从八电机轮控状态取得许可。可选 heading_lock 后端消费独立头部 IMU，以世界航向 P/实测角速度 PI 产生 MIT 力矩；只有 MIT 模式和参考已确认才允许配置，不自动回退。详见 [航向验收](../../dev/哨兵IMU航向控制验收.md)。
 
@@ -62,7 +62,7 @@ v4 的 BigYawRequest 保留 receiver_boot_id、source_sequence 和来源/命令/
 
 SwerveHardware 的 Motor 顺序为舵向 FL/FR/RL/RR，再轮驱 FL/FR/RL/RR。`begin()` 校验，`read(ChassisFeedback &)` 逐轴填有效性和执行版本，`stage(output, steer_scale, drive_scale)` 逐轴暂存/作废 effort，`suspend()` 明确批量停止。它不 commit CAN。
 
-舵向需要新鲜绝对角与速度，轮驱只需要速度；ModuleFeedback 的 steer_valid/drive_valid 和 ModuleOutput 的 steer_output_valid/drive_output_valid 相互独立。SwerveModule 有最短转向、翻转迟滞、转向斜坡及 Hold/Coast；无全体对齐互锁、drive_ready 或 cos 缩速。转向掉线不让轮驱停止目标生产。位置/角速度分别为 rad/rad·s⁻¹，轮线速度为 m/s；几何占位值须实测。
+舵向需要新鲜绝对角与速度，轮驱只需要速度；ModuleFeedback 的 steer_valid/drive_valid 和 ModuleOutput 的 steer_output_valid/drive_output_valid 相互独立。SwerveModule 有最短转向、翻转迟滞、转向斜坡及 Hold/Coast；不使用全体对齐互锁；当前舵轮增加最终优化转角的 0.10/0.40 rad 逐轮驱动联锁和 cos³ 缩速。转向掉线不让轮驱停止目标生产。位置/角速度分别为 rad/rad·s⁻¹，轮线速度为 m/s；几何占位值须实测。
 
 功率模式需要新鲜真实预算与 PowerMeasurement；`IPowerMeasurementSource::sample()` 返回的原始 stamp 不可刷新。预算不是实测功率。`power_control_calibrated=false` 时使用台架独立缩放和电流上限；功率控制/模型标定与 estimated power 开关必须按实物确认。公共 Config 的默认缩放/上限不同于整车 profile，实际中央 profile 当前舵向 0.8 A、轮驱 0.5 A、独立缩放为 1。
 
@@ -78,24 +78,17 @@ SwerveHardware 的 Motor 顺序为舵向 FL/FR/RL/RR，再轮驱 FL/FR/RL/RR。`
 
 历史 [vehicle_integration](../../../samples/robotics/vehicle_integration/README.md) 仍通过 `vehicle_bench.hpp` 的 `run(IPowerMeasurementSource *, IShooterHeatSource *, IDialHomeSource *)` 注入来源；其默认 PendingPowerSource、PendingHeatSource、PendingDialHomeSource 无效。该历史宏组合入口不再决定两个最终应用的装配方式。视觉 AB 反馈所需的可信弹速/弹数与显式视觉参考会话仍待补齐，不能通过打开历史功能开关认定已完成。
 
-## 在应用周期中组合
+## 当前正式云台的周期组合
 
-```cpp
-// 当前云台的周期形态：对象由本工程构造并完成 attach/start/begin。
-// source、IMU、MotorSnapshot 均保留原采样时间。
-commands.setOperatorGate(operator_state.run_allowed, operator_state.clear_event_id);
-const auto adapted = inertial.update(inertial_inputs, now_us);
-gimbal_inputs.command = adapted.command;
-gimbal_inputs.source_stamp = adapted.source_stamp;
-gimbal_inputs.yaw_output_valid = adapted.yaw_output_valid;
-gimbal_inputs.pitch_output_valid = adapted.pitch_output_valid;
-const auto gimbal_status = gimbal.update(gimbal_inputs, now_us);
-const int yaw_error = yaw_bus.commit().error;
-const int pitch_error = pitch_bus.commit().error;
-endpoint.setStatus(gimbal_status); // 保留真实执行生产时间。
-// commit 错误进入诊断；输入/急停仍由本周期显式处理。
+```text
+RC/CommandManager 快照 → 编码器手动双轴命令
+板载 BMI088 → ImuHeadingReference（含样本年龄/质量判定）
+  ├─ 有效载体角速度 → 小 Yaw 手动角速度补偿
+  └─ 有效航向 + 小 Yaw 反馈/执行状态 → YawCenteringController
+GimbalExecutor.update() → CAN1/CAN2 分别 commit
+0x0404 板载航向 + 0x0402 世界角速度意图 + 0x0101 行走 → Endpoint.poll()
 ```
 
-这是独立应用的周期组织示意；完整初始化、失败门控和执行循环以各应用源码为准。最终云台通过物理 RC 的 `require_external_run_gate=true` 获取本地操作授权，再将带原始年龄与 boot 绑定的操作授权、行走及大 Yaw 请求发给底盘；底盘不创建 CommandManager，而消费真实板间授权并分别更新 ChassisExecutor 与 BigYawExecutor。只有历史组合/发射样例需要在同一个 CAN 提交者中继续编排 ShooterExecutor。
+当前正式云台不调用 `inertial.update()`；独立惯性样例仍可使用上文的 `InertialGimbalAdapter` API。板载 EKF 的短暂 Degraded 预测不等于独立头部姿态，准确的有效性和诊断判定见[云台应用 README](../../../applications/sentry_gimbal/README.md)。底盘按[参考 v4](../../protocols/interboard-v4.md)消费云台系行走、板载航向与大 Yaw 世界速度命令。
 
 配置阶段与两板分工见[双主控应用](../../applications/dual-controller.md)，持续控制/取消版本见[电机工作流](../../guides/motor-workflow.md)。诊断 Log/VOFA 的单变量选择及固定通道见[上车入口说明](../../../samples/bringup/README.md)。软件入口存在、编译通过与单舵轮调通均不代表整车、视觉、功率或有载发射已验收。
