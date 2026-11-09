@@ -1,14 +1,35 @@
 # gimbal_drive_command
 
-无本地电机的实际RC命令发送端。只生产低速底盘命令，配独立单轮/四轮/行走入口；不启动云台轴和大Yaw。
+与 `chassis_four_modules` 配套的前后低速直行发送端；无本地电机。此入口只发送 vx（±0.1m/s），vy、wz 固定为零。完整横移、自转不是本次联调范围。
 
 ```sh
-west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_drive_command -d ../build/bringup/gimbal_drive_command
+west build -p always -b dm_mc02/stm32h723xx samples/bringup/gimbal_drive_command -d ../build/bringup/gimbal_drive_command
 west flash -d ../build/bringup/gimbal_drive_command
 ```
 
-UART7/PE8-TX接DAPLink RX，共地，115200 8N1；云台USART10与底盘USART1互连为460800 8N1。当前映射沿用固件，未确认现场接线。修改共享diagnostics_config.hpp的diagnostic_output后重编译烧录选择文本或纯JustFloat，不发送切换命令。
+遥控接收机接云台 UART5/PD2 RX，100000、8E1。这个阶段只解码四个摇杆通道，不解码 DBUS 最后两个字节中的第五通道；右拨杆和拨轮不参与解锁或行走。
 
-VOFA布局1，固定19通道：layout、sequence低16、高16、uptime_ms低16、高16、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低16、高16、extra0、extra1。valid=0时feedback=NaN，age=-1未知。target=vx(m/s)，extra0=vy(m/s)，extra1=wz(rad/s)；底盘反馈目前无实测速度位，valid固定false。
+板间为云台 USART10（PE3 TX、PE2 RX）与底盘 USART1（PA9 TX、PA10 RX），460800、8N1，TX/RX 交叉并共地。两板诊断各自使用 UART7/PE8 TX，接 DAPLink RX，共地，115200、8N1。共享 `diagnostics_config.hpp` 选择文本或纯 VOFA JustFloat，不能混用解析方式。
 
-真实遥控双拨Down归中500ms，先把左Middle建立解锁、再拨左Up手动运行；左摇杆平移 ±0.1 m/s，手动档右 Down 请求 0.2 rad/s 小陀螺；左Down/输入过期/对端离线或重启均撤销授权，恢复后重新解锁。Disabled+0是失能，FollowCenter+0仍是零速闭环。目标限制不覆盖真实标定。先做[板间只观察](../gimbal_link_observe/README.md)，再支撑机构小幅操作。未做实板验证。
+两板上电并建立心跳后，四个摇杆归中，左拨 Down 保持至少 500ms；左拨到 Middle 解锁，再拨到 Up 运行。右拨杆任意合法档位均可。缓慢推动左摇杆前后；左 Down 停止并撤销解锁。遥控过期、板间断线或对端重启均需重新执行归中解锁。解锁不要求电机已执行，电机状态从底盘回报观察。板间线程每 1ms 轮询，遥控命令线程每 2ms 更新，原始遥控时间戳和序号不因重发刷新。
+
+板间仍发送本仓库配套的 `OperatorControl` 和 `ChassisControl`；接收端继续检查真实遥控年龄、心跳、Boot ID 和失能条件。本次不依赖参考固件、裁判功率或大 Yaw。不要混烧缺少授权帧的旧发送端。
+
+VOFA 保持布局 1、19 通道，编号从 0 开始。0=布局；1/2=采样序号低/高16位；3/4=本板时间低/高16位；5=reason；6=有效遥控在线；7=本地发送允许；8=vx目标 m/s；9=左摇杆前后原值（离线为 NaN）；10=原始遥控年龄 ms（-1=从未获得有效帧）；11=命令循环周期 us；12=安全档归中持续 ms；13=下表位掩码；14=错误码（包括接收线程实际 UART 错误）；15/16=诊断丢包数；17=左拨档×4+右拨档（Up=1、Middle=2、Down=3）；18=有效遥控帧序号低16位。
+
+| CH13 位值 | 含义 |
+| --- | --- |
+| 1 | 遥控新鲜且开关合法 |
+| 2 | 四个摇杆归中 |
+| 4 | 安全档归中已满足 500ms |
+| 8 | 已解锁 |
+| 16 | 左 Up 手动请求 |
+| 32 | 底盘心跳在线 |
+| 64 | 底盘执行反馈新鲜 |
+| 128 | 底盘回报执行 Active |
+
+reason：1=本地命令允许，2=初始化/UART失败，3=遥控过期或无有效帧，4=未进入手动，7=无底盘心跳。CH7=1 只表示发送端允许；底盘仍可能在等待反馈或舵轮对齐。
+
+排查顺序：CH6=1、CH18持续变化 → CH12在左Down归中时达到500 → CH13出现4/8/16 → CH7=1、CH8随前后摇杆变化。若 CH10=-1，先确认 UART5 接收数据及 CH14；若原来第五通道不符合解码要求，本入口不再因此丢弃整帧。
+
+首次烧录后支撑四轮离地，小幅输入。软件限流不替代电机方向、编码器零点及接线确认；未做实板验证。

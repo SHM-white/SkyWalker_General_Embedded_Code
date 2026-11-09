@@ -98,7 +98,7 @@ int QuaternionEkf::update(const Input &in) {
         quality_ = Quality::Tracking;
         return 0;
     }
-    if (stationary) {
+    if (stationary && c.adapt_gyro_bias) {
         const float beta = dt / (c.bias_tau_s + dt);
         bias_.x += beta * (g.x - bias_.x);
         bias_.y += beta * (g.y - bias_.y);

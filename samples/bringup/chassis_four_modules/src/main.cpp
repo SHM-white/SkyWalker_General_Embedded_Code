@@ -31,13 +31,26 @@ std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
                ? static_cast<std::uint32_t>(std::min<std::uint64_t>(now_ms - stamp.timestamp_ms, UINT32_MAX))
                : UINT32_MAX;
 }
+SwerveChassis::Config straightConfig() {
+    auto config = installed::swerveConfig();
+    config.kinematics.max_wheel_velocity_m_s = stage::chassis_speed_m_s;
+    // The 0.02m/s resume threshold consumed a fifth of this stage's entire
+    // stick range. Keep only a small speed hysteresis after the RC deadband.
+    config.kinematics.stationary_epsilon_m_s = 0.001f;
+    config.kinematics.resume_velocity_m_s = 0.002f;
+    for (auto &module : config.modules)
+        module.idle_behavior = SwerveModule::IdleBehavior::Hold;
+    // Use the installed single-module current ceilings (0.8A/0.5A), including
+    // their PID limits. A second 0.3A clamp can leave steering stuck off-axis.
+    return config;
+}
 } // namespace
 
 int main() {
     static installed::Diagnostics diagnostics;
-    diagnostics.start("chassis_four_modules", "chassis", "vx=0.1m/s; steer,drive=0.3A");
-    diagnostics.event("stage_steer_limit_mA", int(stage::steer_current_a * 1000));
-    diagnostics.event("stage_drive_limit_mA", int(stage::drive_current_a * 1000));
+    diagnostics.start("chassis_four_modules", "chassis", "vx=0.1m/s; steer=0.8A; drive=0.5A");
+    diagnostics.event("stage_steer_limit_mA", int(installed::steer_bench_current_a * 1000));
+    diagnostics.event("stage_drive_limit_mA", int(installed::drive_bench_current_a * 1000));
     diagnostics.event("stage_velocity_limit_mm_s", int(stage::chassis_speed_m_s * 1000));
     static communication::ConfiguredInterBoardTransport transport({.kind = communication::InterBoardTransportKind::Uart,
                                                                    .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
@@ -54,7 +67,7 @@ int main() {
     static motor::CanBus drive_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
     static SwerveHardware hardware({{&s0, &s1, &s2, &s3, &d0, &d1, &d2, &d3}}, motors,
                                    installed::swerveHardwareConfig());
-    static ChassisExecutor chassis(hardware, stage::chassisConfig(), stage::executionConfig());
+    static ChassisExecutor chassis(hardware, straightConfig(), installed::chassisExecutionConfig());
     int steer_error = installed::connections_confirmed ? steer_bus.attach(s0, s1, s2, s3) : -ENODEV;
     int drive_error = installed::connections_confirmed ? drive_bus.attach(d0, d1, d2, d3) : -ENODEV;
     if (steer_error == 0)
@@ -73,6 +86,8 @@ int main() {
                            : drive_error      ? drive_error
                            : controller_error ? controller_error
                                               : power_error;
+    const unsigned init_mask = unsigned(steer_error != 0) | (unsigned(drive_error != 0) << 1) |
+                               (unsigned(controller_error != 0) << 2) | (unsigned(power_error != 0) << 3);
     samples::control::OperatorControlConsumer operator_controls;
     bool emergency_latched = false;
     std::uint64_t peer_boot = 0;
@@ -80,10 +95,10 @@ int main() {
     std::int64_t deadline = k_uptime_ticks();
     const auto period = k_us_to_ticks_ceil64(installed::chassis_period_us);
     for (;;) {
+        const auto rx = endpoint.snapshot();
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const float dt_us = previous_us && now_us > previous_us ? float(now_us - previous_us) : 0;
         previous_us = now_us;
-        const auto rx = endpoint.snapshot();
         const auto authority = operator_controls.update(rx, now_ms);
         if (authority.emergency_stop)
             emergency_latched = true;
@@ -99,9 +114,13 @@ int main() {
         input.command.vy_m_s = input.command.wz_rad_s = 0;
         if (input.command.mode != ChassisMode::BodyVelocity)
             input.command.mode = ChassisMode::Disabled;
-        if (!rx.operator_control_valid || !authority.run_allowed || emergency_latched ||
-            rx.control.global_action != SafetyAction::Active || !rx.local_boot_id ||
-            rx.control.receiver_boot_id != rx.local_boot_id)
+        const bool bound = rx.local_boot_id && rx.control.receiver_boot_id == rx.local_boot_id;
+        const bool active_command = input.command.mode == ChassisMode::BodyVelocity &&
+                                    input.command.source == ControlSource::Remote &&
+                                    rx.control.global_action == SafetyAction::Active;
+        const bool authorized = rx.online && rx.operator_control_valid && authority.run_allowed &&
+                                !emergency_latched && bound && active_command;
+        if (!authorized)
             input.command.mode = ChassisMode::Disabled;
         input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
                               input.command.stamp.valid};
@@ -110,20 +129,45 @@ int main() {
         input.clear_estop = authority.clear_estop;
         auto status = init_error == 0 ? chassis.update(input, now_us)
                                       : chassis.suspend(now_us, WaitReason::Configuration, init_error, true);
+        int bus_error = 0;
         if (steer_started) {
             const int result = steer_bus.commit().error;
             if (result < 0)
-                status.error = result;
+                bus_error = result;
         }
         if (drive_started) {
             const int result = drive_bus.commit().error;
-            if (result < 0)
-                status.error = result;
+            if (result < 0 && !bus_error)
+                bus_error = result;
         }
-        if (status.error && status.state == RunState::Active) {
+        if (bus_error) {
+            status.error = bus_error;
+            status.reason = WaitReason::Transport;
+        }
+        unsigned steer_mask = 0, drive_mask = 0;
+        for (std::size_t i = 0; i < 4; ++i) {
+            const auto steer_feedback = hardware.motorAt(i).snapshot();
+            const auto drive_feedback = hardware.motorAt(i + 4).snapshot();
+            const auto required = motor::FeedbackAbsolutePosition | motor::FeedbackVelocity;
+            if (steer_feedback.feedback_fresh && (steer_feedback.feedback.valid & required) == required &&
+                std::isfinite(steer_feedback.feedback.absolute_position_rad) &&
+                std::isfinite(steer_feedback.feedback.velocity_rad_s))
+                steer_mask |= 1u << i;
+            if (drive_feedback.feedback_fresh && (drive_feedback.feedback.valid & motor::FeedbackVelocity) &&
+                std::isfinite(drive_feedback.feedback.velocity_rad_s))
+                drive_mask |= 1u << i;
+        }
+        const bool all_feedback = steer_mask == 15 && drive_mask == 15;
+        const bool moving = std::fabs(input.command.vx_m_s) > 0.001f;
+        const bool aligning = authorized && all_feedback && moving && !chassis.output().drive_permitted;
+        if (status.state == RunState::Active && (status.error || !all_feedback || aligning ||
+                                                status.reason == WaitReason::Cycle)) {
             status.ready = false;
             status.state = RunState::Recovering;
-            status.reason = WaitReason::Transport;
+            if (status.reason == WaitReason::None)
+                status.reason = status.error ? WaitReason::Transport
+                                : !all_feedback ? WaitReason::Feedback
+                                                : WaitReason::Reference;
         }
         endpoint.setStatus(status);
         // Multiplex the four modules in the same stable telemetry layout.
@@ -136,23 +180,38 @@ int main() {
         const bool steer_valid = steer_view.feedback_fresh &&
                                  (steer_view.feedback.valid & motor::FeedbackAbsolutePosition) &&
                                  std::isfinite(steer_view.feedback.absolute_position_rad);
-        const auto reason = init_error                                        ? installed::DiagnosticReason::InitFailed
-                            : !rx.online                                      ? installed::DiagnosticReason::PeerStale
-                            : !rx.operator_control_valid || emergency_latched ? installed::DiagnosticReason::Permission
-                            : !authority.run_allowed                          ? installed::DiagnosticReason::Disarmed
-                            : status.reason == WaitReason::Command ? installed::DiagnosticReason::CommandStale
-                            : status.state != RunState::Active     ? installed::DiagnosticReason::FeedbackStale
-                                                                   : installed::DiagnosticReason::Ready;
+        const bool command_fresh = isFresh(input.command.stamp, now_ms, stage::command_timeout_ms);
+        const auto reason = init_error                                ? installed::DiagnosticReason::InitFailed
+                            : !rx.online                              ? installed::DiagnosticReason::PeerStale
+                            : !rx.operator_control_valid || emergency_latched
+                                                                      ? installed::DiagnosticReason::Permission
+                            : !authority.run_allowed                  ? installed::DiagnosticReason::Disarmed
+                            : !bound || !active_command               ? installed::DiagnosticReason::Permission
+                            : !command_fresh                          ? installed::DiagnosticReason::CommandStale
+                            : bus_error || status.reason == WaitReason::Transport
+                                                                      ? installed::DiagnosticReason::TransportError
+                            : status.reason == WaitReason::Cycle      ? installed::DiagnosticReason::CycleInvalid
+                            : !all_feedback                           ? installed::DiagnosticReason::FeedbackStale
+                            : aligning                                ? installed::DiagnosticReason::Aligning
+                            : status.state != RunState::Active        ? installed::DiagnosticReason::FeedbackStale
+                                                                      : installed::DiagnosticReason::Ready;
+        // Exact integer below 2^24: wheel index, both feedback masks, init
+        // failures, then the individual authorization/alignment gates.
+        const unsigned detail = unsigned(index) | (steer_mask << 2) | (drive_mask << 6) | (init_mask << 10) |
+                                (unsigned(authority.run_allowed) << 14) | (unsigned(bound) << 15) |
+                                (unsigned(active_command) << 16) | (unsigned(command_fresh) << 17) |
+                                (unsigned(rx.operator_control_valid) << 18) | (unsigned(rx.online) << 19) |
+                                (unsigned(chassis.output().drive_permitted) << 20);
         diagnostics.status(
             {.reason = reason,
              .valid = drive_valid,
              .enabled = status.state == RunState::Active,
-             .target = output.drive_target_rad_s,
+             .target = input.command.vx_m_s / installed::wheel_radius_m,
              .feedback = installed::wheel[index].direction * drive_view.feedback.velocity_rad_s,
              .age_ms = age(input.command.stamp, now_ms),
              .dt_us = dt_us,
              .effort = output.drive_effort * chassis.effortScale(),
-             .detail = float(index),
+             .detail = float(detail),
              .error = status.error ? status.error : rx.error,
              .extra0 = output.optimized_angle_rad,
              .extra1 = steer_valid ? installed::steer[index].direction * steer_view.feedback.absolute_position_rad

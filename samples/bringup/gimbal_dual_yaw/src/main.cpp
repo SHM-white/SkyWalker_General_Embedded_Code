@@ -12,7 +12,6 @@
 #include <robotics/vehicle/bringup_policy.hpp>
 #include <robotics/vehicle/calibration.hpp>
 #include <robotics/chassis/imu_heading.hpp>
-#include <robotics/gimbal/world_yaw_window_follow.hpp>
 #include <control/attitude_ekf.hpp>
 #include <drivers/imu/bmi088_imu.hpp>
 #include <zephyr/drivers/regulator.h>
@@ -24,22 +23,21 @@
 using namespace skywalker;
 using namespace skywalker::robotics;
 namespace {
-// This bring-up firmware targets the fixed reference-v4 peer contract.
-inline constexpr bool reference_v4_peer = true;
+// Fixed peer: unmodified sentry_onlychassis v4, mode=1 means world yaw rate.
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
                                      samples::control::receiverConfig());
 RemoteSource source(remote);
 CommandManager commands(vehicle::manualCommandConfig());
 vehicle::Diagnostics diagnostics;
-imu::DmImuCanSource head_source(vehicle::headSensorConfig());
-imu::ImuReceiver head(head_source, {.poll_interval_us = 1000, .priority = 6});
-// 内置 IMU：板载 BMI088 + 四元数 EKF，只用于向底盘发布航向样本；
-// 小 Yaw 的惯性控制仍用头部 DM IMU，两条传感器不互相代替。
-control::QuaternionEkf onboard_estimator({});
+// 内置 IMU：板载 BMI088 + 四元数 EKF，向参考底盘发布航向与去偏角速度；
+// 本地关节使用编码器闭环，不启动 CAN3 外置 IMU，也不等待它的数据。
+// Startup stationary calibration only; slow real turns must not become gyro bias.
+control::QuaternionEkf onboard_estimator({.initialization_samples = 800, .adapt_gyro_bias = false});
 imu::Bmi088Imu onboard_source(DEVICE_DT_GET(DT_ALIAS(accel0)), DEVICE_DT_GET(DT_ALIAS(gyro0)),
                               {.reference = vehicle::carrier_reference,
-                               .sensor_to_body = vehicle::carrier_sensor_to_body},
+                               .sensor_to_body = vehicle::carrier_sensor_to_body,
+                               .correct_gyro_bias = true},
                               &onboard_estimator);
 imu::ImuReceiver onboard(onboard_source, {.poll_interval_us = 500, .priority = 5});
 ImuHeadingReference onboard_heading;
@@ -49,25 +47,20 @@ motor::CanBus yaw_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
 motor::CanBus pitch_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
 GimbalExecutor gimbal(yaw, pitch, motors, vehicle::yawMotorConfig(), vehicle::yawAxisConfig(),
                       vehicle::pitchMotorConfig(), vehicle::pitchAxisConfig(), vehicle::gimbalExecutionConfig());
-InertialGimbalAdapter::Config inertialConfig() {
-    auto c = vehicle::manualInertialConfig();
-    c.yaw.max_rate_rad_s = 1.0f;
-    c.pitch.max_rate_rad_s = 0.8f;
-    return c;
-}
-InertialGimbalAdapter adapter(inertialConfig());
 communication::AsyncUart::DmaBuffers link_dma __nocache;
 communication::UartInterBoardTransport transport(DEVICE_DT_GET(DT_ALIAS(interboard_uart)), link_dma);
 communication::InterBoardEndpoint endpoint(transport, {.role = BoardRole::GimbalController});
 YawCenteringController::Config centeringConfig() {
     auto c = vehicle::manualCenteringConfig();
-    c.max_rate_rad_s = vehicle::bringup::big_yaw_rate_rad_s;
+    // Raise speed at small offsets; the unmodified peer still clamps at 1 rad/s.
+    c.kp_rad_s_per_rad = 6.0f;
+    c.max_rate_rad_s = std::min(vehicle::bringup::big_yaw_rate_rad_s, 1.0f);
+    c.acceleration_rad_s2 = 4.0f;
+    c.deadband_rad = 0.003f;
+    c.hysteresis_rad = 0.002f;
     return c;
 }
 YawCenteringController centering(centeringConfig());
-// World-frame averaging is only sent to the reference chassis gyro backend.
-// Static storage avoids placing the bounded history buffer on Zephyr main stack.
-WorldYawWindowFollower world_follower;
 void communicationTask(void *, void *, void *) {
     for (;;) {
         endpoint.poll(k_uptime_get());
@@ -79,9 +72,7 @@ K_THREAD_DEFINE(dual_yaw_link_worker, 4096, communicationTask, nullptr, nullptr,
 
 int main() {
     diagnostics.start("gimbal_dual_yaw", "gimbal",
-                      "yaw<=1rad/s,pitch<=0.8rad/s,big_yaw<=0.1rad/s,yaw_effort<=1.2A,pitch_effort<=0.8Nm");
-    const int imu_error = head.start();
-    diagnostics.event("head.start", imu_error);
+                      "yaw<=1rad/s,pitch<=0.8rad/s,big_yaw_world<=1rad/s,encoder_center_follow");
     const int onboard_error = onboard.start();
     diagnostics.event("onboard.start", onboard_error);
     const int power_error = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
@@ -126,121 +117,82 @@ int main() {
             controls.withdraw();
         commands.setOperatorGate(op.run_allowed, op.clear_event_id);
         (void)commands.snapshot(frame);
-        const auto measured_head = head.snapshot();
         // 零位在解除授权时采集；发到线上的航向只相对于这个软件零位。
         const auto heading = onboard_heading.update(onboard.snapshot(), !op.run_allowed, now);
-        const auto fields = imu::Orientation | imu::Gyro;
-        const bool imu_fresh = !imu_error && measured_head.state == imu::State::Running &&
-                               (measured_head.fresh_mask & fields) == fields &&
-                               core::fresh(measured_head.sample.orientation.stamp, now, 20000) &&
-                               core::fresh(measured_head.sample.gyro_rad_s.stamp, now, 20000);
-        InertialGimbalInputs input{};
-        input.head = measured_head;
-        input.yaw = yaw.snapshot();
-        input.pitch = pitch.snapshot();
-        input.command = frame.decision.command.gimbal;
-        input.source_stamp = sourceStamp(frame, input.command.source);
-        input.prerequisites_ready = configured && vehicle::imu_mounting_confirmed;
-        if (!op.run_allowed || !imu_fresh || source_error)
-            input.command.mode = GimbalMode::Disabled;
-        const auto inertial = adapter.update(input, now);
+        const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now, 20000);
         GimbalExecutionInputs request{};
-        request.command = inertial.command;
-        request.source_stamp = inertial.source_stamp;
-        request.yaw_output_valid = inertial.yaw_output_valid;
-        request.pitch_output_valid = inertial.pitch_output_valid;
-        request.transport_ready = configured && !source_error && !imu_error;
+        request.command = frame.decision.command.gimbal;
+        request.source_stamp = sourceStamp(frame, request.command.source);
+        // Only the encoder closes the joint loops. Counter carrier rotation so
+        // big-Yaw recentering can reduce the small-Yaw offset instead of spinning
+        // both axes together with an unchanged relative encoder angle.
+        if (request.command.mode == GimbalMode::Rate) {
+            request.command.yaw_rate_rad_s = vehicle::small_yaw.direction *
+                (request.command.yaw_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
+            request.command.pitch_rate_rad_s *= vehicle::pitch.direction;
+        }
+        if (!op.run_allowed)
+            request.command.mode = GimbalMode::Disabled;
+        request.transport_ready = configured && !source_error;
         request.clear_estop = op.clear_estop;
         const auto run = configured ? gimbal.update(request, now)
                                     : gimbal.suspend(now, WaitReason::Configuration, setup_error, true);
         const int yaw_error = yaw_started ? yaw_bus.commit().error : 0;
         const int pitch_error = pitch_started ? pitch_bus.commit().error : 0;
-        const auto ys = yaw.snapshot(), ps = pitch.snapshot();
-        const auto age = measured_head.sample.orientation.stamp.valid &&
-                                 now >= measured_head.sample.orientation.stamp.time_us
-                             ? std::min<std::uint64_t>((now - measured_head.sample.orientation.stamp.time_us) / 1000,
-                                                       UINT32_MAX)
-                             : UINT32_MAX;
+        const auto ys = yaw.snapshot();
         const auto peer = endpoint.snapshot();
         const auto &feedback = peer.big_yaw_feedback;
         // The reference peer publishes BigYawFeedback at 100 ms intervals.
         // A 50 ms timeout would repeatedly invalidate feedback and reset the
-        // world-history window, preventing meaningful delayed follow.
-        const auto peer_feedback_timeout_ms = reference_v4_peer ? 250U : 50U;
+        // centering rate ramp before the next remote feedback arrives.
+        constexpr auto peer_feedback_timeout_ms = 250U;
         const bool peer_feedback_valid = peer.online && feedback.valid &&
                                          forwardedFresh(feedback.stamp, feedback.production_age_ms, ms,
                                                         peer_feedback_timeout_ms) &&
                                          std::isfinite(feedback.actual_rate_rad_s) &&
                                          std::fabs(feedback.actual_rate_rad_s) <= vehicle::big_yaw.velocity_limit_rad_s;
-        if (peer_feedback_valid != peer_feedback_was_valid) {
+        if (peer_feedback_valid != peer_feedback_was_valid)
             centering.reset();
-            world_follower.reset();
-        }
         peer_feedback_was_valid = peer_feedback_valid;
+        const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
+                                 bool(ys.feedback.valid & motor::FeedbackPosition);
+        const bool yaw_running = gimbal.yawTelemetry().output_valid;
         YawCenteringInputs follow{};
         follow.joint_yaw_rad = ys.feedback.position_rad;
         follow.joint_stamp = {ys.feedback.timestamp_ms * 1000, ys.feedback.timestamp_ms, ys.feedback_fresh};
-        follow.source_stamp = input.source_stamp;
-        follow.enabled = op.run_allowed && peer.online && input.command.mode != GimbalMode::Disabled;
-        follow.head_stable = inertial.stabilization_valid && run.state == RunState::Active;
+        follow.source_stamp = request.source_stamp;
+        follow.enabled = op.run_allowed && peer.online && peer_feedback_valid &&
+                         request.command.mode != GimbalMode::Disabled;
+        // External IMU and Pitch output are not prerequisites for encoder recentering.
+        follow.head_stable = yaw_running && joint_valid && heading_fresh;
         follow.permission_valid = vehicle::connections_confirmed && vehicle::imu_mounting_confirmed && op.run_allowed &&
                                   !op.clear_estop;
         const auto centered = centering.update(follow, now);
-        // The onboard BMI088 measures big-Yaw/carrier heading in the world.
-        // Adding the calibrated small-Yaw joint offset gives head world heading.
-        // Both terms share the same yaw sign and IMU zero, unlike combining the
-        // independently initialized onboard and head IMU Euler angles.
-        const bool joint_valid = ys.feedback_fresh && input.yaw.position_reference_valid &&
-                                 bool(ys.feedback.valid & motor::FeedbackPosition);
-        // The world-window history must also run while the operator is moving
-        // the head. Inertial stabilization_valid additionally requires small
-        // tracking errors and would repeatedly discard the history in motion.
-        const bool inertial_running = inertial.yaw_output_valid && inertial.pitch_output_valid &&
-                                      run.state == RunState::Active;
-        const bool world_ready = reference_v4_peer && follow.enabled && inertial_running && follow.permission_valid &&
-                                 joint_valid && heading.valid && core::fresh(heading.stamp, now, 20000) &&
-                                 peer_feedback_valid;
-        const auto world_center = world_follower.update(heading.yaw_rad,
-                                                        vehicle::small_yaw.direction *
-                                                            (ys.feedback.position_rad - vehicle::yaw_center_rad),
-                                                        now, world_ready);
+        const bool big_channel_ready = peer.online && follow.permission_valid && heading_fresh &&
+                                       yaw_running && joint_valid;
         BigYawRequest big_request{};
-        if (reference_v4_peer) {
-            // This peer interprets mode=1 as world angular-rate intent and
-            // compensates chassis gyro itself; never apply big_yaw_wire_direction.
-            // A valid zero request may be needed to enable the peer and obtain
-            // feedback, but stale feedback/heading must not command motion.
-            big_request.mode = peer.online && follow.permission_valid && heading.valid ? BigYawMode::FollowCenter
-                                                                                       : BigYawMode::Disabled;
-            big_request.target_rate_rad_s = world_center.valid ? world_center.world_rate_rad_s : 0;
-            big_request.stamp = {ms, ++big_sequence, true};
-        }
-        else {
-            big_request.mode = centered.enabled ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-            // A disabled drive can need a zero-speed enable to start reporting.
-            // Missing real feedback never permits a nonzero carrier request.
-            big_request.target_rate_rad_s = peer_feedback_valid
-                                                ? vehicle::big_yaw_wire_direction * centered.velocity_rad_s
-                                                : 0;
-            big_request.stamp = centered.stamp;
-        }
-        big_request.source_sequence = static_cast<std::uint32_t>(input.source_stamp.sequence);
-        big_request.source_age_ms = input.source_stamp.valid && now >= input.source_stamp.time_us
+        // Encoder offset requests WORLD rate. The peer applies gyro compensation
+        // and motor direction; do not negate it here. Zero enables initial feedback.
+        big_request.mode = big_channel_ready ? BigYawMode::FollowCenter : BigYawMode::Disabled;
+        big_request.target_rate_rad_s = big_channel_ready && centered.enabled ? centered.velocity_rad_s : 0;
+        big_request.stamp = {ms, ++big_sequence, true};
+        big_request.source_sequence = static_cast<std::uint32_t>(request.source_stamp.sequence);
+        big_request.source_age_ms = request.source_stamp.valid && now >= request.source_stamp.time_us
                                         ? static_cast<std::uint32_t>(
-                                              std::min<std::uint64_t>((now - input.source_stamp.time_us) / 1000,
+                                              std::min<std::uint64_t>((now - request.source_stamp.time_us) / 1000,
                                                                       UINT32_MAX))
                                         : UINT32_MAX;
-        big_request.command_age_ms = input.command.stamp.valid && ms >= input.command.stamp.timestamp_ms
+        big_request.command_age_ms = request.command.stamp.valid && ms >= request.command.stamp.timestamp_ms
                                          ? static_cast<std::uint32_t>(
-                                               std::min<std::uint64_t>(ms - input.command.stamp.timestamp_ms,
+                                               std::min<std::uint64_t>(ms - request.command.stamp.timestamp_ms,
                                                                        UINT32_MAX))
                                          : UINT32_MAX;
-        big_request.permission = {op.fresh, follow.permission_valid, op.remote.stamp};
+        big_request.permission = {op.fresh, big_channel_ready, op.remote.stamp};
         endpoint.submitBigYaw(big_request);
         // 参考底盘的 gyro 大 Yaw 后端必须有云台航向样本才允许使能。
         if (peer.online && peer.peer.sender_boot_id) {
             GimbalImuYaw sample{};
-            sample.valid = heading.valid;
+            sample.valid = heading_fresh;
             sample.yaw_rad = heading.yaw_rad;
             sample.yaw_rate_rad_s = heading.rate_rad_s;
             sample.zero_generation = heading.generation;
@@ -255,42 +207,42 @@ int main() {
             endpoint.submitGimbalImuYaw(sample);
         }
         // 参考底盘的 RobotBigYawControl() 只在底盘控制源被授权时执行；零速 BodyVelocity 只放行通道。
-        // 只在对端确实是参考底盘时发送，避免影响本仓库底盘的控制源选择。
-        if (reference_v4_peer) {
-            ChassisCommand chassis{};
-            chassis.mode = peer.online && follow.permission_valid ? ChassisMode::BodyVelocity : ChassisMode::Disabled;
-            chassis.source = ControlSource::Remote;
-            chassis.stamp = {ms, ++chassis_sequence, true};
-            endpoint.submit(chassis);
-        }
+        ChassisCommand chassis{};
+        chassis.mode = big_channel_ready ? ChassisMode::BodyVelocity : ChassisMode::Disabled;
+        chassis.source = ControlSource::Remote;
+        chassis.stamp = {ms, ++chassis_sequence, true};
+        endpoint.submit(chassis);
         endpoint.setStatus(run);
-        const auto reason = setup_error || source_error || imu_error || onboard_error
+        const auto reason = setup_error || source_error || onboard_error
                                 ? vehicle::DiagnosticReason::InitFailed
                             : !op.fresh                            ? vehicle::DiagnosticReason::RemoteStale
                             : !op.run_allowed                      ? vehicle::DiagnosticReason::Disarmed
-                            : !imu_fresh                           ? vehicle::DiagnosticReason::ImuStale
+                            : !vehicle::imu_mounting_confirmed     ? vehicle::DiagnosticReason::Configuration
+                            : !heading_fresh                       ? vehicle::DiagnosticReason::ImuStale
                             : !peer.online || !peer_feedback_valid ? vehicle::DiagnosticReason::PeerStale
-                            : !inertial.yaw_output_valid || !inertial.pitch_output_valid
+                            : !joint_valid || !yaw_running
                                 ? vehicle::DiagnosticReason::FeedbackStale
                                 : vehicle::DiagnosticReason::Ready;
         diagnostics.status(
             {.reason = reason,
-             .valid = imu_fresh && ys.feedback_fresh && ps.feedback_fresh && peer_feedback_valid,
-             .enabled = (reference_v4_peer ? world_center.valid : centered.enabled) && peer_feedback_valid,
+             .valid = heading_fresh && joint_valid && peer_feedback_valid,
+             .enabled = big_channel_ready && centered.enabled && peer_feedback_valid,
              .target = big_request.target_rate_rad_s,
-             .feedback = peer_feedback_valid ? feedback.actual_rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
+             .feedback = peer_feedback_valid ? vehicle::reference_big_yaw.direction * feedback.actual_rate_rad_s /
+                                                  vehicle::reference_big_yaw.gear_ratio
+                                            : std::numeric_limits<float>::quiet_NaN(),
              .age_ms = feedback.valid ? feedback.production_age_ms : UINT32_MAX,
              .dt_us = float(dt_us),
              .effort = gimbal.yawTelemetry().effort_command,
              .detail = float(unsigned(centered.reason)),
              .error = setup_error    ? setup_error
                       : source_error ? source_error
-                      : imu_error    ? imu_error
+                      : onboard_error ? onboard_error
                       : yaw_error    ? yaw_error
                       : pitch_error  ? pitch_error
                                      : run.error,
-             .extra0 = reference_v4_peer ? world_center.error_rad : centered.center_error_rad,
-             .extra1 = reference_v4_peer ? world_center.target_world_yaw_rad : inertial.head_yaw_rad});
+             .extra0 = vehicle::small_yaw.direction * centered.center_error_rad,
+             .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN()});
         k_sleep(K_USEC(vehicle::gimbal_period_us));
     }
 }

@@ -52,6 +52,7 @@ public:
         // 视觉执行样例保留原三档：左 Middle=手动、左 Up=自动；其余样例左 Up=手动。
         bool allow_auto = false;
         bool keyboard_mouse_selectable = false; // 右 Middle 在手动档选择键鼠。
+        bool require_right_middle_to_arm = true; // 仅前后行走入口不使用右拨杆。
         std::uint32_t input_timeout_ms = 100;   // ms，须与接收和命令层失联期限协调。
         std::uint32_t neutral_arm_ms = 500;     // ms，安全档归中保持时间，防止上电直接运行。
     };
@@ -117,6 +118,7 @@ public:
         last_input_ms_ = input_ms;
         const bool neutral = centered(remote);
         const auto left = remote.left_switch, right = remote.right_switch;
+        const bool arm_switch_ready = !config_.require_right_middle_to_arm || right == RcSwitch::Middle;
 
         if (left == RcSwitch::Down) {
             if (previous_left_ != RcSwitch::Down || state_.run_allowed)
@@ -127,7 +129,7 @@ public:
             state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
             state_.keyboard_mouse_selected = false;
             // Right Middle is the neutral position (Down=spin, Up=shoot).
-            if (neutral && right == RcSwitch::Middle) {
+            if (neutral && arm_switch_ready) {
                 if (!neutral_timing_) {
                     neutral_since_ = input_ms;
                     neutral_timing_ = true;
@@ -143,7 +145,7 @@ public:
         else {
             // 安全档归中基线成立后，左 Down→Middle 只建立解锁；手动档在左 Up。
             if (left == RcSwitch::Middle && previous_left_ == RcSwitch::Down && neutral_ready_ && neutral &&
-                right == RcSwitch::Middle && state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
+                arm_switch_ready && state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
                 ++state_.start_event_id;
                 armed_ = true;
             }

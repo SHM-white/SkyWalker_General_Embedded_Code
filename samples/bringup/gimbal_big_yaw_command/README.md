@@ -1,28 +1,26 @@
 # gimbal_big_yaw_command
 
-无本地电机的实际RC命令发送端。只生产大Yaw请求，配 `chassis_big_yaw` 或参考底盘 `sentry_onlychassis`；不启动轮控。
+不启动本地电机的实际 RC 大 Yaw 命令发送端，固定配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。这次适配只需重编译、烧录云台板，底盘保持现有 v4 固件。
 
 ```sh
 west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_big_yaw_command -d ../build/bringup/gimbal_big_yaw_command
 west flash -d ../build/bringup/gimbal_big_yaw_command
 ```
 
-## 发送内容
+## 请求与反馈
 
-| 帧 | 触发 | 说明 |
-|---|---|---|
-| `0x0301` OperatorControl | 每周期 | 原始解锁/清故障事件，绑定对端 Boot ID |
-| `0x0402` BigYawRequest | 每周期 | `mode=1` + 权限；`target_rate_rad_s = -normalize(右杆X) × bringup::big_yaw_rate_rad_s` |
-| `0x0404` GimbalImuYaw（32 B） | 对端在线 | **板载 BMI088** 经四元数 EKF 得到的、相对软件零位的航向与世界角速度 |
-| `0x0405` GimbalImuYaw（40 B） | 对端在线 | 本工程标准扩展，与 0x0404 同时发送 |
-| `0x0101` ChassisControl | 每周期 | **零速 BodyVelocity**，只为让参考底盘执行 `RobotBigYawControl()`；不给轮子速度 |
+`0x0402` 的 `mode=1` 请求世界系角速度：`-normalize(右杆X) × min(bringup::big_yaw_rate_rad_s, 1.0)` rad/s。右杆归中请求零速航向保持；左 Down 撤销授权并失能。参考底盘持续使用自己的陀螺补偿、板载航向和角速度 PI，不需要开启小陀螺才运行 IMU 闭环。
 
-内置 IMU 按 `samples/imu/dual_imu` 的 onboard 一路接：`accel0` / `gyro0`（板载 BMI088，SPI）+ `control::QuaternionEkf` + `imu::ImuReceiver{poll=500us, prio=5}`，安装变换用 `carrier_reference` / `carrier_sensor_to_body`（dual_imu 里该板对应 `large_yaw_carrier`）。零位由 `ImuHeadingReference` 在**解除授权**时采集：上电后要先双拨 Down 归中 500 ms 才可能拿到有效航向。
+同时发送参考 v4 `0x0404`（32 字节）航向，以及零速 `0x0101` 底盘控制以放行大 Yaw 通道。没有额外的 `0x0405` IMU 帧，也不依赖 `0x0301` 遥控扩展作为运行前提。该世界系请求不能直接发给本仓库只接受关节相对速度的独立 `chassis_big_yaw`。
 
-参考底盘的 gyro 大 Yaw 后端要求 `mode=1`、权限有效、以及 50 ms 内的 0x0404 航向样本，并且底盘自身 BMI088 就绪；缺任一项它只发 Disable。它把 `mode=1` 的 `target_rate_rad_s` 当作**头部世界角速度**，所以本样例右杆X量纲是世界角速度而不是关节相对速度。切回本仓库 `chassis_big_yaw` 时同一帧是关节相对速度，两种语义不可混用。
+板载 BMI088 使用 SPI `accel0` / `gyro0`，必须安装在大 Yaw 随动体上。启动时用 800 个静止样本估计陀螺偏置，此后禁止在线学习偏置，避免误吸收真实慢转。`correct_gyro_bias=true` 使对外角速度与姿态积分使用相同的偏置；姿态和去偏角速度一起发布，初始化或计算失败不发送原始角速度作为替代。
 
-UART7/PE8-TX接DAPLink RX，共地，115200 8N1；云台USART10与底盘USART1互连为460800 8N1。当前映射沿用固件，未确认现场接线。修改共享diagnostics_config.hpp的diagnostic_output后重编译烧录选择文本或纯JustFloat，不发送切换命令。
+航向有效且对端在线时才授权；远端实际速度未反馈时仅发送零速请求以启动反馈。反馈接收期限为 250 ms，匹配参考底盘 100 ms 上报周期；无效反馈不允许非零手动目标。UART7/PE8-TX 接诊断接收端 RX，共地，115200 8N1；云台 USART10 与底盘 USART1 为 460800 8N1。
 
-VOFA布局1，固定19通道：layout、sequence低16、高16、uptime_ms低16、高16、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低16、高16、extra0、extra1。valid=0时feedback=NaN，age=-1未知。target/feedback为线上的目标与实际角速度rad/s；age为RC年龄；reason 依次判定 InitFailed→RemoteStale→PeerStale→ImuStale→Disarmed→Ready。
+## 操作与诊断
 
-真实遥控双拨Down归中500ms，先把左Middle建立解锁、再拨左Up手动运行；左Down/输入过期/对端离线或重启均撤销授权，恢复后重新解锁。Disabled+0是失能，FollowCenter+0仍是零速闭环。目标限制不覆盖真实标定。先做[板间只观察](../gimbal_link_observe/README.md)，再支撑机构小幅操作。未做实板验证。
+上电静置至少 2 秒，左 Down、右 Middle，摇杆及拨轮归中至少 500 ms，再左 Down→Middle→Up 进入手动。遥控失联、对端掉线或重启后重新解锁。先确认零输入停住，再小幅正反操作，避免碰撞或缠线。
+
+固定 19 通道诊断：通道 8 target 为世界速度请求；通道 9 feedback 为按参考安装方向和传动比转换后的大 Yaw 关节速度（rad/s，底盘静止时可与 target 比较）；通道 17 extra0 为板载启动零点相对航向（rad）；通道 18 extra1 为发给底盘的去偏航向角速度（rad/s）。无有效航向时 extra0/extra1 为 NaN，valid=0 时 feedback 为 NaN。额外字段不再用于 ready/armed 标记。
+
+单轴零输入仍持续转时，先记录 target、feedback、extra0、extra1，并观察参考底盘自身陀螺、航向误差和速度积分。这能区分发送侧偏差与参考底盘闭环偏差，不能把零请求直接理解为电机零输出。本次未烧录或实板验证，传感器安装、启动静止条件及温漂仍需现场确认。

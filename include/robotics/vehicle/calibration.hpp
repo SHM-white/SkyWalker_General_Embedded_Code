@@ -44,8 +44,11 @@ inline constexpr MotorCalibration dial{4, 0, 36, 1, 10.0, 20, 0};
 inline constexpr float wheel_gear_ratio = 3591.0f / 187.0f;
 inline constexpr float steer_bench_current_a = 0.8f, drive_bench_current_a = 0.5f;
 // ID1=FL, ID2=RL, ID3=RR, ID4=FR; 0..8191 ticks, indexed by motor ID - 1.
-// Old candidates from h7_framework-main-source.zip (2026-10-02), not a new calibration.
-inline constexpr std::array<std::uint16_t, 4> steer_zero_ticks_by_id{{3060, 2421, 2383, 3097}};
+// ID1 retains the old candidate from h7_framework-main-source.zip (2026-10-02).
+// ID2 moved by 180deg: (2421 + 4096) % 8192 = 6517.
+// IDs 3/4: clockwise 90deg from the old zeros, then another 180deg.
+// With the active +1 steering directions: 335+4096=4431, 1049+4096=5145.
+inline constexpr std::array<std::uint16_t, 4> steer_zero_ticks_by_id{{3060, 6517, 4431, 5145}};
 inline constexpr std::array<MotorCalibration, 4> legacy_steer{{
     {1, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[0]}, // FL
     {4, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[3]}, // FR

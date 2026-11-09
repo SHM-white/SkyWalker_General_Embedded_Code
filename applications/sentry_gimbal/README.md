@@ -1,44 +1,45 @@
 # 哨兵云台应用
 
-固定的手动双轴惯性云台 + 大 Yaw 回中发送 + 底盘行走发送入口。`src/main.cpp` 显式装配遥控、CAN3 头部 IMU、CAN1 小 Yaw、CAN2 Pitch、板间端点和控制器，不再调用样例公共 `vehicle::run()`。不启动摩擦轮、拨盘、视觉或裁判接收器。
+固定手动编码器双轴云台、大 Yaw 回中和底盘行走发送入口，配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。本地小 Yaw/Pitch 由 CAN1/CAN2 电机编码器闭环；板载 BMI088 随大 Yaw 转动。当前不启动 CAN3 外置头部 IMU、视觉、裁判或发射机构。
 
 ```sh
 west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d ../build/applications/sentry_gimbal
+west flash -d ../build/applications/sentry_gimbal
 ```
 
-不叠加旧 `imu_*.conf`、`pitch_free.conf`、`referee.conf`、`shooting.conf`、`vision_*.conf` 等角色/场景配置。它们属于历史公共运行体的构建方式；机械单轴、IMU、板间观察应选择 [独立上车工程](../../samples/bringup/README.md) 中的相应目录。修改中央配置后重新构建相关固件。
+只需重新编译、烧录云台板，不修改参考底盘或 v4 协议。不叠加历史 `vision_*.conf`、`imu_*.conf` 等场景配置；未来视觉功能见[视觉姿态回传与外置 IMU 接管方案](../../docs/dev/云台视觉姿态回传与外置IMU接管方案.md)。这些旧 conf 文件存在不代表当前固定入口启动了视觉。
 
-## 共用配置与接线
+## 反馈与控制
 
-物理配置使用 [gimbal.overlay](../../config/vehicle/installed/gimbal.overlay)、系统配置使用同目录的 `base.conf` 和 `gimbal.conf`。标定、硬件驱动、PID、关节限位分别来自 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp)、[gimbal_profile.hpp](../../include/robotics/vehicle/gimbal_profile.hpp)；手动策略来自 [manual_profile.hpp](../../include/robotics/vehicle/manual_profile.hpp)。阶段程序与最终应用共用这些配置。
+本地手动控制不检查外置 IMU 初始化、姿态、角速度或 CAN3 回传期限。小 Yaw/Pitch 的 PID、驱动方向、原点与机械限位继续由共享 `calibration.hpp` / `gimbal_profile.hpp` 提供。没有板载航向时，本地仍可执行编码器手动闭环，大 Yaw 请求保持 Disabled。
 
-| 资源 | 固定用途 |
+有新鲜的板载载体角速度时，小 Yaw 关节速度按 `small_yaw.direction × (手动世界角速度请求 - 载体世界角速度)` 计算。这样大 Yaw 转动时小 Yaw 会反向补偿，相对编码器偏角才能逐渐回中；若只锁住相对编码器角，大 Yaw 与小 Yaw 会一起转、偏角不会消除。该补偿不使用外置 IMU，也不等同于完整的头部实测姿态闭环；Pitch 采用编码器相对角控制，暂不执行外置 IMU 的世界俯仰稳向。
+
+大 Yaw 请求来自小 Yaw 编码器相对 `yaw_center_rad` 的偏角：增益 6.0，速度上限 1 rad/s，加速度 4 rad/s²，停止死区 0.003 rad，重新跟随门限 0.005 rad。板载航向、真实小 Yaw 反馈和小 Yaw 输出有效才放行；不再以外置 IMU 或 Pitch 惯性输出作为前提。远端实际速度缺失时只发授权零速以启动反馈；参考反馈接收期限 250 ms，匹配其 100 ms 上报周期。
+
+参考底盘持续用云台板载航向/角速度及底盘自身陀螺控制大 Yaw，不以小陀螺开启为前提。`0x0402 mode=1` 是世界系角速度意图，不乘电机安装反号；`0x0404/32B` 发布板载 BMI088 载体航向与去偏角速度。板载 IMU 不跟随小 Yaw；不能将其航向直接当成枪口的世界航向。
+
+板载 EKF 初始采集 800 个静止样本，姿态与对外角速度扣除同一份偏置。随后不再学习静止偏置，避免把慢转误学成零偏。运行中板载航向无效会撤销大 Yaw；本地编码器控制继续受自身反馈、原始遥控时效及授权约束。链路曾上线后丢失或对端 Boot ID 改变会撤销本地授权，需要重新解锁。
+
+## 资源与操作
+
+| 资源 | 当前用途 |
 | --- | --- |
-| UART5 / DBUS | DR16 遥控 |
-| USART10 PE3 TX / PE2 RX，460800 8N1 | v4 板间 UART |
-| UART7 PE8 TX / PE7 RX，115200 8N1 | DAPLink 单口诊断；TX 接 DAPLink RX 并共地 |
+| UART5 | DR16 遥控 |
+| USART10 PE3/PE2，460800 8N1 | 对参考底盘的 v4 板间链路 |
+| UART7 PE8/PE7，115200 8N1 | 唯一诊断串口，不能同时给视觉 |
 | CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
-| CAN3，1 Mbps | 头部 DM IMU，主动上报，从机 0x1 / 反馈 0x11 |
+| SPI accel0 / gyro0 | 大 Yaw 载体上的板载 BMI088 |
+| CAN3 | 当前无外置 IMU 接收实例；留给未来头部实测姿态 |
 
-UART7 被诊断独占，视觉不能再沿用这个端口。DAPLink 是否实际接到 UART7、IMU 安装变换和实车机械端点仍需按现场记录确认；共享配置的确认值保留现值，不能代替实板记录。
+共享配置仍可能编译外置 IMU 驱动，但没有实例化或启动它，不会因 CAN3 无回传而阻止手动控制。不在本次修改共享接线或其他惯性实验入口。
 
-## 运行与停止
+上电静止至少 2 秒，左 Down、右 Middle，摇杆/拨轮归中保持至少 500 ms，左 Down→Middle 建立解锁，再拨 Up 手动。右杆控制小 Yaw/Pitch，左杆控制云台坐标内前后/横移，限速各 0.3 m/s；进入手动后右拨杆先经过 Middle，再主动切 Down 才请求 0.5 rad/s 小陀螺。拨轮不再叠加大 Yaw 速度，以免打断自动回中。左 Down 停止；当前没有导航、自动视觉或发射执行。
 
-左 Down + 右 Middle，摇杆与拨轮归中保持 500 ms，左 Down→Middle 建立解锁，再拨左 Up 进入手动。进入手动后右拨杆必须先经过 Middle，主动拨 Down/Up 才会请求小陀螺/发射；不得继承解锁前选定的危险档位。手动档右横杆控制小 Yaw，右纵杆控制 Pitch；左摇杆前后/横移各限 ±0.3 m/s；右 Down 在重新选择后请求 0.5 rad/s 小陀螺；右 Up 为发射机构保留（本最终云台应用没有实例化发射执行器）。拨轮用于大 Yaw 世界角速度意图，范围 ±1 rad/s。左 Middle 是导航档（当前未接入导航源时保持停机），左拨杆 Down 或遥控过期撤销运行；不支持自动视觉档。
-
-双轴惯性输出有效且云台执行处于 Active 时，关节中心误差驱动大 Yaw 回中，限速 ±0.6 rad/s、斜坡 0.8 rad/s²。保留当前对端的线上反号适配 `big_yaw_wire_direction = -1`；不擅自统一两端正方向。协议速度是大 Yaw 关节侧 rad/s，见 [v4 协议契约](../../docs/protocols/interboard-v4.md)。头部 IMU 过期、初始化失败、输入撤销等情况下仍产生 `Disabled + 0` 请求。
-
-应用循环每 5 ms 更新一次，每 10 ms 发布大 Yaw 请求及行走命令。请求携带原始输入与控制命令年龄，发送不会延长旧运动的有效期。链路曾上线后丢失或对端 boot 改变，会撤销本地解锁，必须归中重新解锁；本地初次调试不要求对端已上线。底盘自行约束 boot、授权、命令时效和反馈恢复。
+应用每 5 ms 控制，每 10 ms 发布大 Yaw 与行走请求。先确认小幅输入和撤权停止，再从中心两侧验证回中方向；编码器中心和 IMU 安装方向仍须实测，不能以候选标定或编译结果代替。
 
 ## 诊断
 
-只修改 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 中的 `diagnostic_output`，然后重新编译烧录，选择文本日志或 VOFA JustFloat。使用同一 DAPLink COM 口与共享波特率；VOFA 固件不输出系统文本。初始化失败仍继续报告失败步骤与错误码。
+沿用共享 19 通道输出选择。通道 8/9 为小 Yaw 关节目标/反馈角 rad；通道 7 enabled 表示本地执行 Active，并不代表远端大 Yaw 已运行。通道 10 是板载航向年龄；通道 13 是编码器回中 WaitReason；通道 17 是带物理方向的中心偏角 rad；通道 18 是板载去偏航向角速度 rad/s，无有效航向时 NaN。
 
-本应用提交的小 Yaw 诊断目标/反馈单位均为 rad，`enabled` 表示双轴执行 Active，`valid` 表示小 Yaw 测量有效，`age_ms` 为头部姿态年龄。通道顺序及布局版本沿用共享 [诊断说明](../../samples/bringup/README.md)。诊断字段不等于对端内部 PID 观测，也不证明实际停止时限或惯性稳定性已通过。
-
-尚未进行实板验证。射击真实热量/许可/归位、视觉参考会话与功率实测均属于独立后续能力。
-
-板间协议已以未修改的参考工程 v4 为准：只发送 `0x0404/32B` IMU 航向，
-`0x0402 mode=1` 为头部世界角速度（叠加小 Yaw 历史航向均值回中），
-`0x0101` 中 vx/vy 属于云台坐标。正式固件不发送额外的 `0x0301` 独立运行授权。
-详见 [统一板间 v4 合同](../../docs/protocols/interboard-v4.md)。
+`reason=6` 仅指当前使用的板载航向无效，不再表示 CAN3 无回传；本地手动可运行而大 Yaw 因板载航向或对端反馈被禁止。其他原因沿用共享诊断定义。尚未烧录或实板验证；视觉回传、自动瞄准、姿态源接管均只记录后续方案，未接入此固件。

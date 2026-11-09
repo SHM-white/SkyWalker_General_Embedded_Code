@@ -195,6 +195,28 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
             return InterBoardCodec::encodeHeartbeat(heartbeat, seq, bytes, cap);
         });
         if (config_.role == BoardRole::GimbalController) {
+            // Optional bench authorization: send only when a producer supplied
+            // it for this peer session. Do not rebind an old release on retry.
+            if (next.online && outgoing.operator_control.stamp.valid &&
+                outgoing.operator_control.receiver_boot_id == peer_boot_)
+                append(MessageId::OperatorControl, [&](auto seq, auto *bytes, auto cap) {
+                    auto request = outgoing.operator_control;
+                    const bool current = forwardedFresh(request.stamp, request.source_age_ms, now,
+                                                        config_.command_timeout_ms);
+                    const auto elapsed = age(request.stamp, now);
+                    request.sender_boot_id = boot_id_;
+                    request.source_age_ms = addAge(request.source_age_ms, elapsed);
+                    request.run_allowed = request.run_allowed && current;
+                    if (!current || !request.clear_event_id ||
+                        !forwardedFresh(request.stamp, request.clear_event_age_ms, now,
+                                        config_.command_timeout_ms)) {
+                        request.clear_event_id = 0;
+                        request.clear_event_age_ms = UINT32_MAX;
+                    }
+                    else
+                        request.clear_event_age_ms = addAge(request.clear_event_age_ms, elapsed);
+                    return InterBoardCodec::encodeOperatorControl(request, seq, bytes, cap);
+                });
             if (next.online && isFresh(outgoing.command.stamp, now, config_.command_timeout_ms) &&
                 (outgoing.command.mode == ChassisMode::Disabled || !have_baseline_ ||
                  sequenceAfter(outgoing.command.stamp.sequence, baseline_sequence_)))

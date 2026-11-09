@@ -12,6 +12,9 @@ public:
         float innovation_gate = 16.27f, accel_tau_s = 0.02f;
         float stationary_gyro_rad_s = 0.15f, bias_tau_s = 20.0f;
         unsigned initialization_samples = 100;
+        // A moving carrier must not learn a slow real turn as stationary bias.
+        // Initial stationary calibration still runs when adaptation is disabled.
+        bool adapt_gyro_bias = true;
     };
     enum class Quality { Initializing, Tracking, Degraded };
     struct Input {
@@ -25,6 +28,10 @@ public:
     int update(const Input &); // 0 valid output; -EAGAIN initializing; negative errno otherwise.
     core::Quaternion attitude() const {
         return q_;
+    }
+    // Sensor-frame rad/s; read only from the thread that calls update().
+    core::Vec3 gyroBiasRadS() const {
+        return bias_;
     }
     Quality quality() const {
         return quality_;

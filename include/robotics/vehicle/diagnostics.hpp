@@ -14,7 +14,10 @@ enum class DiagnosticReason : std::uint8_t {
     PeerStale,
     Configuration,
     Permission,
-    CommandStale
+    CommandStale,
+    Aligning,
+    CycleInvalid,
+    TransportError
 };
 struct DiagnosticStatus {
     DiagnosticReason reason = DiagnosticReason::Boot;

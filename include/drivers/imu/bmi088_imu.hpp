@@ -11,6 +11,9 @@ public:
         core::OrientationReference reference{1, 1};
         core::Quaternion sensor_to_body{};
         Freshness freshness{};
+        // Requires an estimator. Publish attitude and its bias-corrected gyro together;
+        // initialization/failure never falls back to raw gyro.
+        bool correct_gyro_bias = false;
     };
     Bmi088Imu(const device *accel, const device *gyro, const Config &c, control::QuaternionEkf *estimator = nullptr)
         : accel_(accel), gyro_(gyro), config_(c), estimator_(estimator), state_(c.freshness) {
