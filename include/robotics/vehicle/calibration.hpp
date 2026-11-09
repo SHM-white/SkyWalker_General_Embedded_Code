@@ -47,13 +47,16 @@ inline constexpr float steer_bench_current_a = 0.8f, drive_bench_current_a = 0.5
 // ID1 retains the old candidate from h7_framework-main-source.zip (2026-10-02).
 // ID2 moved by 180deg: (2421 + 4096) % 8192 = 6517.
 // IDs 3/4: clockwise 90deg from the old zeros, then another 180deg.
-// With the active +1 steering directions: 335+4096=4431, 1049+4096=5145.
+// Raw zero adjustments: 335+4096=4431, 1049+4096=5145.
 inline constexpr std::array<std::uint16_t, 4> steer_zero_ticks_by_id{{3060, 6517, 4431, 5145}};
+// All four steering motors are mounted upside down: their native positive
+// rotation opposes body-positive (CCW viewed from above). The hardware adapter
+// applies this sign to angle/velocity feedback AND current output.
 inline constexpr std::array<MotorCalibration, 4> legacy_steer{{
-    {1, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[0]}, // FL
-    {4, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[3]}, // FR
-    {2, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[1]}, // RL
-    {3, 0, 1, 1, steer_bench_current_a, 4, steer_zero_ticks_by_id[2]}, // RR
+    {1, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[0]}, // FL
+    {4, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[3]}, // FR
+    {2, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[1]}, // RL
+    {3, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[2]}, // RR
 }};
 // Preserve the original direction of each motor ID; reconfirm after remounting.
 inline constexpr std::array<MotorCalibration, 4> legacy_wheel{{
@@ -94,7 +97,7 @@ inline constexpr MotorCalibration reference_big_yaw{6, 0x11, 1, -1, 0.5f, 1, 0};
 inline constexpr float reference_big_yaw_forward_zero_rad = -1.132792f;
 inline constexpr float steer_position_kp = 40, steer_velocity_kp = 0.20f;
 // A/(motor-shaft rad/s); swerve_profile converts once to wheel-shaft units.
-inline constexpr float drive_rotor_velocity_kp = 0.0515502929687f;
+inline constexpr float drive_rotor_velocity_kp = 0.08f;
 inline constexpr float chassis_steer_scale = 1, chassis_drive_scale = 1;
 inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us = 1000000;
 

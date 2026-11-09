@@ -31,7 +31,7 @@ std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
                ? static_cast<std::uint32_t>(std::min<std::uint64_t>(now_ms - stamp.timestamp_ms, UINT32_MAX))
                : UINT32_MAX;
 }
-SwerveChassis::Config straightConfig() {
+SwerveChassis::Config motionConfig() {
     auto config = installed::swerveConfig();
     config.kinematics.max_wheel_velocity_m_s = stage::chassis_speed_m_s;
     // The 0.02m/s resume threshold consumed a fifth of this stage's entire
@@ -48,7 +48,7 @@ SwerveChassis::Config straightConfig() {
 
 int main() {
     static installed::Diagnostics diagnostics;
-    diagnostics.start("chassis_four_modules", "chassis", "vx=0.1m/s; steer=0.8A; drive=0.5A");
+    diagnostics.start("chassis_four_modules", "chassis", "vx,vy=0.1m/s; wz=0.2rad/s; steer=0.8A; drive=0.5A");
     diagnostics.event("stage_steer_limit_mA", int(installed::steer_bench_current_a * 1000));
     diagnostics.event("stage_drive_limit_mA", int(installed::drive_bench_current_a * 1000));
     diagnostics.event("stage_velocity_limit_mm_s", int(stage::chassis_speed_m_s * 1000));
@@ -67,7 +67,7 @@ int main() {
     static motor::CanBus drive_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
     static SwerveHardware hardware({{&s0, &s1, &s2, &s3, &d0, &d1, &d2, &d3}}, motors,
                                    installed::swerveHardwareConfig());
-    static ChassisExecutor chassis(hardware, straightConfig(), installed::chassisExecutionConfig());
+    static ChassisExecutor chassis(hardware, motionConfig(), installed::chassisExecutionConfig());
     int steer_error = installed::connections_confirmed ? steer_bus.attach(s0, s1, s2, s3) : -ENODEV;
     int drive_error = installed::connections_confirmed ? drive_bus.attach(d0, d1, d2, d3) : -ENODEV;
     if (steer_error == 0)
@@ -110,12 +110,9 @@ int main() {
         }
         ChassisExecutionInputs input{};
         input.command = stage::boundedCommand(rx.control.command);
-        // Fixed straight-line stage: vx only; Spin, lateral and rotation do not execute.
-        input.command.vy_m_s = input.command.wz_rad_s = 0;
-        if (input.command.mode != ChassisMode::BodyVelocity)
-            input.command.mode = ChassisMode::Disabled;
         const bool bound = rx.local_boot_id && rx.control.receiver_boot_id == rx.local_boot_id;
-        const bool active_command = input.command.mode == ChassisMode::BodyVelocity &&
+        const bool active_command = (input.command.mode == ChassisMode::BodyVelocity ||
+                                     input.command.mode == ChassisMode::Spin) &&
                                     input.command.source == ControlSource::Remote &&
                                     rx.control.global_action == SafetyAction::Active;
         const bool authorized = rx.online && rx.operator_control_valid && authority.run_allowed &&
@@ -158,7 +155,10 @@ int main() {
                 drive_mask |= 1u << i;
         }
         const bool all_feedback = steer_mask == 15 && drive_mask == 15;
-        const bool moving = std::fabs(input.command.vx_m_s) > 0.001f;
+        const auto &targets = chassis.output().target;
+        const bool moving = std::any_of(targets.begin(), targets.end(), [](const ModuleTarget &target) {
+            return target.wheel_velocity_m_s != 0;
+        });
         const bool aligning = authorized && all_feedback && moving && !chassis.output().drive_permitted;
         if (status.state == RunState::Active && (status.error || !all_feedback || aligning ||
                                                 status.reason == WaitReason::Cycle)) {
@@ -206,7 +206,7 @@ int main() {
             {.reason = reason,
              .valid = drive_valid,
              .enabled = status.state == RunState::Active,
-             .target = input.command.vx_m_s / installed::wheel_radius_m,
+             .target = output.optimized_wheel_velocity_m_s / installed::wheel_radius_m,
              .feedback = installed::wheel[index].direction * drive_view.feedback.velocity_rad_s,
              .age_ms = age(input.command.stamp, now_ms),
              .dt_us = dt_us,

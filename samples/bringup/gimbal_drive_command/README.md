@@ -1,17 +1,17 @@
 # gimbal_drive_command
 
-与 `chassis_four_modules` 配套的前后低速直行发送端；无本地电机。此入口只发送 vx（±0.1m/s），vy、wz 固定为零。完整横移、自转不是本次联调范围。
+与 `chassis_four_modules` 或 `chassis_drive_link` 配套的低速底盘命令发送端；无本地电机。发送 vx/vy（分别 ±0.1m/s）及自转请求 wz（0.2rad/s），支持前后、横移、斜向和边平移边旋转。
 
 ```sh
 west build -p always -b dm_mc02/stm32h723xx samples/bringup/gimbal_drive_command -d ../build/bringup/gimbal_drive_command
 west flash -d ../build/bringup/gimbal_drive_command
 ```
 
-遥控接收机接云台 UART5/PD2 RX，100000、8E1。这个阶段只解码四个摇杆通道，不解码 DBUS 最后两个字节中的第五通道；右拨杆和拨轮不参与解锁或行走。
+遥控接收机接云台 UART5/PD2 RX，100000、8E1。只解码四个摇杆通道，不解码 DBUS 最后两个字节中的第五通道；右拨杆不参与解锁，拨轮不参与解锁或行走。
 
 板间为云台 USART10（PE3 TX、PE2 RX）与底盘 USART1（PA9 TX、PA10 RX），460800、8N1，TX/RX 交叉并共地。两板诊断各自使用 UART7/PE8 TX，接 DAPLink RX，共地，115200、8N1。共享 `diagnostics_config.hpp` 选择文本或纯 VOFA JustFloat，不能混用解析方式。
 
-两板上电并建立心跳后，四个摇杆归中，左拨 Down 保持至少 500ms；左拨到 Middle 解锁，再拨到 Up 运行。右拨杆任意合法档位均可。缓慢推动左摇杆前后；左 Down 停止并撤销解锁。遥控过期、板间断线或对端重启均需重新执行归中解锁。解锁不要求电机已执行，电机状态从底盘回报观察。板间线程每 1ms 轮询，遥控命令线程每 2ms 更新，原始遥控时间戳和序号不因重发刷新。
+两板上电并建立心跳后，四个摇杆归中，左拨 Down 保持至少 500ms；左拨到 Middle 解锁，再拨到 Up 运行。右拨杆任意合法档位均可完成解锁。左摇杆前后控制 vx、左右控制 vy；进入手动档后先让右拨处于 Middle，再切到 Down 请求 0.2rad/s 自转，回到 Middle 停止自转。解锁时已经处于 Down 不会自动开始旋转。左 Down 停止并撤销解锁。遥控过期、板间断线或对端重启均需重新执行归中解锁。解锁不要求电机已执行，电机状态从底盘回报观察。板间线程每 1ms 轮询，遥控命令线程每 2ms 更新，原始遥控时间戳和序号不因重发刷新。
 
 板间仍发送本仓库配套的 `OperatorControl` 和 `ChassisControl`；接收端继续检查真实遥控年龄、心跳、Boot ID 和失能条件。本次不依赖参考固件、裁判功率或大 Yaw。不要混烧缺少授权帧的旧发送端。
 
@@ -27,6 +27,7 @@ VOFA 保持布局 1、19 通道，编号从 0 开始。0=布局；1/2=采样序�
 | 32 | 底盘心跳在线 |
 | 64 | 底盘执行反馈新鲜 |
 | 128 | 底盘回报执行 Active |
+| 256 | 手动档自转请求 |
 
 reason：1=本地命令允许，2=初始化/UART失败，3=遥控过期或无有效帧，4=未进入手动，7=无底盘心跳。CH7=1 只表示发送端允许；底盘仍可能在等待反馈或舵轮对齐。
 

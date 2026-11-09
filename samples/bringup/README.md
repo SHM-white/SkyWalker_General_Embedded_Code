@@ -16,7 +16,7 @@
 | 6 | [gimbal_big_yaw_command](gimbal_big_yaw_command/README.md) | [chassis_big_yaw](chassis_big_yaw/README.md) | 关节侧±0.1rad/s，轮控不启动 |
 | 7 | [gimbal_dual_yaw](gimbal_dual_yaw/README.md) | [chassis_big_yaw](chassis_big_yaw/README.md) | 双Yaw回中，不平移 |
 | 8 | [gimbal_drive_command](gimbal_drive_command/README.md) | [FL](chassis_module_fl/README.md)、[FR](chassis_module_fr/README.md)、[RL](chassis_module_rl/README.md)、[RR](chassis_module_rr/README.md) | 逐轮固定工程，仅注册本轮 |
-| 9 | [gimbal_drive_command](gimbal_drive_command/README.md) | [chassis_four_modules](chassis_four_modules/README.md) | 四轮仅前后低速直行 |
+| 9 | [gimbal_drive_command](gimbal_drive_command/README.md) | [chassis_four_modules](chassis_four_modules/README.md) | 四轮低速平移与自转 |
 | 9 | [gimbal_drive_command](gimbal_drive_command/README.md) | [chassis_drive_link](chassis_drive_link/README.md) | 完整低速车体运动 |
 | 10 | [sentry_gimbal](../../applications/sentry_gimbal/README.md) | [sentry_chassis](../../applications/sentry_chassis/README.md) | 各板独立装配的手动整车 |
 

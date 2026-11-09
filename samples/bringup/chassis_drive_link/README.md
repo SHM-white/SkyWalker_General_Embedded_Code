@@ -2,6 +2,10 @@
 
 固定完整低速行走阶段。接受BodyVelocity的vx/vy/wz和Spin，Spin按协议忽略平移。用于直线阶段通过后确认横移、自转和跨板行走。本入口直接装配四路舵向和四路轮驱，只启动CAN1/CAN2，不启动大Yaw。共享中央硬件、PID、零点与方向；阶段策略只施加更低输出上限。
 
+配套更新后的 `gimbal_drive_command`：左 Down 归中 500ms → Middle 解锁 → Up 手动运行，左摇杆控制前后及横移；手动档右拨先 Middle 再 Down 请求 0.2rad/s 自转，回 Middle 停止自转。可同时平移和旋转。云台发送端需重新编译、烧录以恢复 vy/wz 输出。
+
+实车四路舵电机均为倒装，共享标定中的舵向 `direction=-1` 同时用于角度/速度反馈和电流输出，使车体俯视逆时针为正。当前电机 ID 1/2/3/4 的原始编码器零点分别为 3060/6517/4431/5145；零点偏移与安装方向分别配置。方向修改后重新编译、烧录底盘。
+
 ```sh
 west build -b dm_mc02/stm32h723xx samples/bringup/chassis_drive_link -d ../build/bringup/chassis_drive_link
 ```

@@ -22,8 +22,8 @@ communication::InterBoardEndpoint endpoint(transport, {BoardRole::GimbalControll
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver::Config driveReceiverConfig() {
     auto config = samples::control::receiverConfig();
-    // Only four sticks and the left switch are used. Reserved DBUS bytes or
-    // an uncentered wheel must not prevent decoding/arming this stage.
+    // Decode the four stick channels; reserved DBUS bytes or an uncentered
+    // optional wheel must not prevent decoding/arming this stage.
     config.decoder.decode_wheel = false;
     return config;
 }
@@ -40,7 +40,7 @@ void linkTask(void *, void *, void *) {
 
 int main() {
     installed::Diagnostics diagnostics;
-    diagnostics.start("gimbal_drive_command", "gimbal", "vx=0.1m/s; left switch only; no wheel channel");
+    diagnostics.start("gimbal_drive_command", "gimbal", "vx,vy=0.1m/s; wz=0.2rad/s; no wheel channel");
     const int setup = remote.start();
     diagnostics.event("remote.start", setup);
     k_thread_create(&link_thread, link_stack, K_THREAD_STACK_SIZEOF(link_stack), linkTask, nullptr, nullptr, nullptr,
@@ -81,6 +81,9 @@ int main() {
         request.source = allowed ? ControlSource::Remote : ControlSource::None;
         request.vx_m_s = allowed ? samples::control::RcControlAdapter::normalize(received.remote.analog.left_y) * 0.1f
                                  : 0;
+        request.vy_m_s = allowed ? -samples::control::RcControlAdapter::normalize(received.remote.analog.left_x) * 0.1f
+                                 : 0;
+        request.wz_rad_s = allowed && state.spin_requested ? 0.2f : 0;
         request.stamp = received.remote.stamp;
         endpoint.submit(request);
         const bool feedback_fresh = peer.online && isFresh(peer.feedback.stamp, now, 100);
@@ -88,7 +91,8 @@ int main() {
                                (unsigned(controls.armReady()) << 2) | (unsigned(state.armed) << 3) |
                                (unsigned(state.run_allowed) << 4) | (unsigned(peer.online) << 5) |
                                (unsigned(feedback_fresh) << 6) |
-                               (unsigned(feedback_fresh && peer.feedback.armed) << 7);
+                               (unsigned(feedback_fresh && peer.feedback.armed) << 7) |
+                               (unsigned(state.spin_requested) << 8);
         diagnostics.status({.reason = setup || received.uart_error ? DiagnosticReason::InitFailed
                                       : !state.fresh               ? DiagnosticReason::RemoteStale
                                       : !peer.online               ? DiagnosticReason::PeerStale

@@ -6,9 +6,9 @@
 namespace skywalker::robotics::vehicle::bringup {
 // Stage limits only. Installed IDs, geometry, encoder zeros and signs remain
 // in the installed profiles; no stage overrides physical calibration.
-inline constexpr float chassis_speed_m_s = 0.1f;
-inline constexpr float chassis_yaw_rate_rad_s = 0.2f;
-inline constexpr float steer_current_a = 0.3f, drive_current_a = 0.3f;
+inline constexpr float chassis_speed_m_s = 5.0f;
+inline constexpr float chassis_yaw_rate_rad_s = 5.0f;
+inline constexpr float steer_current_a = 3.0f, drive_current_a = 5.0f;
 inline constexpr std::uint32_t command_timeout_ms = 100;
 
 inline SwerveChassis::Config chassisConfig() {
