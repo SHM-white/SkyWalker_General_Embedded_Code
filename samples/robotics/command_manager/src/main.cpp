@@ -14,7 +14,7 @@ static communication::RemoteReceiver remote(bench::inputs.remote_uart, rc_dma, b
 static communication::vision::AbProtocol protocol(bench::inputs.protocol);
 static communication::vision::VisionReceiver vision(bench::inputs.vision_uart, vision_dma, protocol,
                                                     bench::inputs.vision);
-static communication::RefereeReceiver referee(bench::inputs.referee_uart, referee_dma, bench::inputs.referee_version,
+static communication::RefereeReceiver referee(bench::inputs.referee_uart, referee_dma,
                                               bench::inputs.referee_timeout_ms);
 static robotics::RemoteSource remote_source(remote);
 class ArmedRemoteSource final : public robotics::ICommandSource {

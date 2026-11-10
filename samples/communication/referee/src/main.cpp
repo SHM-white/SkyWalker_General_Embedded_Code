@@ -8,9 +8,9 @@ int main() {
     using namespace skywalker;
     static communication::AsyncUart::DmaBuffers dma_buffers __nocache;
     static communication::AsyncUart uart(bench::referee_uart, dma_buffers);
-    communication::RefereeParser parser(bench::version);
+    communication::RefereeParser parser;
     int ret = uart.init();
-    LOG_INF("Referee physical UART init=%d profile=%d", ret, int(bench::version));
+    LOG_INF("Referee physical UART init=%d protocol=%s", ret, bench::protocol_name);
     std::uint64_t next_log = 0;
     for (;;) {
         const auto now = static_cast<std::uint64_t>(k_uptime_get());

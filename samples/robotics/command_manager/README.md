@@ -19,11 +19,11 @@ snapshot() 复制最新完整帧，不消费消息；current() 只复制最终 R
 | --- | --- | --- |
 | DR16 遥控 | UART5 PD2 RX | 100000 8E1，确认 DBUS 反相链路 |
 | 视觉 AB | UART7 PE7 RX / PE8 TX | 115200 8N1，仅 RX |
-| 裁判 | USART1 PA10 RX / PA9 TX | 115200 8N1，Rm2026V1_3 |
+| 裁判 | USART1 PA10 RX / PA9 TX | 115200 8N1，编译期 RM2027 V1.0.0（可在 Kconfig 选择 RM2026） |
 | 终端 | USART10 PE3 TX / PE2 RX | 115200 8N1 |
 | VOFA | USB CDC ACM | JustFloat，16 通道 |
 
-外部 TX 接板端 RX 并共地。裁判设备与模拟发送器二选一。
+外部 TX 接板端 RX 并共地。裁判设备与模拟发送器二选一。模拟脚本默认 `--protocol 2027`，测试旧裁判固件时，在编译时选择 `CONFIG_SKYWALKER_REFEREE_RM2026=y`（而非修改 C++ 代码），并将脚本设置为 `--protocol 2026`。固件一次只包含一个年份的解析实现。
 
 ```sh
 west build -p always -b dm_mc02/stm32h723xx samples/robotics/command_manager -d build/command-manager-terminal
@@ -45,7 +45,7 @@ west flash -d build/command-manager-terminal
 
 ```sh
 python3 samples/communication/vision/send_command.py --port /dev/ttyUSB_VISION --mode 1 --yaw 0.25 --pitch -0.20 --yaw-vel 0.10 --hz 50 --count 3000
-python3 samples/robotics/command_manager/send_referee.py --port /dev/ttyUSB_REFEREE --flags 7 --hz 10 --count 600
+python3 samples/robotics/command_manager/send_referee.py --port /dev/ttyUSB_REFEREE --protocol 2027 --flags 7 --hz 10 --count 600
 ```
 
 1. 没有输入时观察全部 Disabled 和 RcUnavailable。

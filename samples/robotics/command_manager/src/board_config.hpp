@@ -10,7 +10,6 @@ struct InputConfig {
     skywalker::communication::RemoteReceiver::Config remote{};
     skywalker::communication::vision::AbProtocol::Config protocol{};
     skywalker::communication::vision::VisionReceiver::Config vision{};
-    skywalker::communication::RefereeVersion referee_version = skywalker::communication::RefereeVersion::Rm2026V1_3;
     std::uint32_t referee_timeout_ms = 500;
 };
 inline const InputConfig inputs{

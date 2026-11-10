@@ -4,8 +4,7 @@
 namespace skywalker::communication {
 class RefereeService {
 public:
-    explicit RefereeService(RefereeVersion version, std::uint32_t timeout_ms = 500)
-        : parser_(version), timeout_ms_(timeout_ms) {
+    explicit RefereeService(std::uint32_t timeout_ms = 500) : timeout_ms_(timeout_ms) {
     }
     int processBytes(const std::uint8_t *p, std::size_t n, std::uint64_t now) {
         return parser_.consume(p, n, now);

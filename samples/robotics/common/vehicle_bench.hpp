@@ -173,8 +173,7 @@ inline CommandManager::Config commandConfig() {
 inline CommandManager commands(commandConfig());
 #if defined(CONFIG_VEHICLE_REFEREE)
 inline communication::AsyncUart::DmaBuffers referee_dma __nocache;
-inline communication::RefereeReceiver referee(DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma,
-                                              communication::RefereeVersion::Rm2026V1_3);
+inline communication::RefereeReceiver referee(DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma);
 inline RefereePermissionSource original_permission(referee);
 class PausablePermission final : public IPermissionSource {
 public:

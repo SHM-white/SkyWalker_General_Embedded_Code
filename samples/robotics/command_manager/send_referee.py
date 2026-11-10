@@ -20,14 +20,20 @@ def crc16(data):
             value = (value >> 1) ^ (0x8408 if value & 1 else 0)
     return value
 
-def encode(flags, sequence, power_only):
+def encode(flags, sequence, power_only, protocol='2027'):
     if power_only:
         # 只刷新0x0202状态与缓冲能量，不产生/刷新输出许可。
         command_id = 0x0202
         payload = bytes(8) + struct.pack('<HHH', 30, 0, 0)
     else:
         command_id = 0x0201
-        payload = struct.pack('<BB5HB', 3, 1, 100, 100, 10, 200, 80, flags)
+        if protocol == '2027':
+            # 0x0201 V1.0.0: speed limit added at offset 12, output flags moved to 16.
+            payload = struct.pack('<BB5HfB', 3, 1, 100, 100, 10, 200, 80, 30.5, flags)
+        elif protocol == '2026':
+            payload = struct.pack('<BB5HB', 3, 1, 100, 100, 10, 200, 80, flags)
+        else:
+            raise ValueError('unsupported referee protocol')
     header = b'\xA5' + struct.pack('<HB', len(payload), sequence & 0xFF)
     header += bytes([crc8(header)])
     body = header + struct.pack('<H', command_id) + payload
@@ -37,6 +43,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port')
     parser.add_argument('--flags', type=int, choices=range(8), default=7)
+    parser.add_argument('--protocol', choices=('2026', '2027'), default='2027')
     parser.add_argument('--hz', type=float, default=10)
     parser.add_argument('--count', type=int, default=600)
     parser.add_argument('--power-only', action='store_true')
@@ -45,7 +52,7 @@ def main():
     if not math.isfinite(args.hz) or not 0 < args.hz <= 100 or args.count < 1:
         parser.error('use 0 < hz <= 100 and count >= 1')
     if args.hex_only:
-        print(encode(args.flags, 0, args.power_only).hex(' '))
+        print(encode(args.flags, 0, args.power_only, args.protocol).hex(' '))
         return
     if not args.port:
         parser.error('--port is required unless --hex-only is used')
@@ -53,7 +60,7 @@ def main():
     with serial.Serial(args.port, 115200, timeout=0.1, write_timeout=1) as uart:
         deadline = time.monotonic()
         for sequence in range(args.count):
-            frame = encode(args.flags, sequence, args.power_only)
+            frame = encode(args.flags, sequence, args.power_only, args.protocol)
             if uart.write(frame) != len(frame):
                 raise OSError('short serial write')
             deadline += 1 / args.hz

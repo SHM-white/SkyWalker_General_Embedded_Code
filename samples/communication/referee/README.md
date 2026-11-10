@@ -13,14 +13,17 @@
 ```sh
 west build -b dm_mc02 samples/communication/referee -d build/bench_referee
 west flash -d build/bench_referee
+
+# 如果裁判设备仍使用 2026 协议，请单独编译：
+west build -b dm_mc02/stm32h723xx samples/communication/referee -d build/bench_referee_2026 -- -DEXTRA_CONF_FILE=rm2026.conf
 ```
 
 ## 操作与预期现象
 
-观察 frames、crc、robot、outputs、permission_fresh、limit_W、buffer_J。拔线后 online 和 permission_fresh 分别按各自超时失效。若帧计数增加但状态不更新，核对协议 profile、命令号和长度；未知命令只计数。
+观察 frames、crc、robot、outputs、permission_fresh、limit_W、buffer_J。2027 的发射初速度上限可通过 `parser.state().robot.bullet_speed_limit_m_s` 读取，需检查 `bullet_speed_limit_stamp.valid`；2026 该字段无效。拔线后 online 和 permission_fresh 分别按各自超时失效。若帧计数增加但状态不更新，核对协议 profile、命令号和长度；未知命令只计数。
 
 ## 自行配置
 
-`app.overlay` 改串口，`src/board_config.hpp` 选择协议版本。目前支持 Rm2026V1_3；Unspecified 只统计，不发布许可。该版本保留字节不输出假功率。
+`app.overlay` 用来调整串口，协议版本由 Zephyr Kconfig `choice` 在编译期选择。默认 `CONFIG_SKYWALKER_REFEREE_RM2027=y`；如需旧设备，使用 `rm2026.conf` 构建独立固件。CMake 只链接选中年份的解析类，运行时不再传版本参数。2027 的 `0x0201` 长 17 字节，2026 长 13 字节；两版 `0x0202` 保留区均不作为实测底盘功率。
 
 目前已做固件编译，未在此环境刷写或连接真实外设验证。

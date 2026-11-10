@@ -2,6 +2,13 @@
 #include <cstring>
 #include <communication/wire.hpp>
 #include <communication/referee/referee_parser.hpp>
+#if defined(CONFIG_SKYWALKER_REFEREE_RM2026)
+#include <communication/referee/referee_2026_parser.hpp>
+#elif defined(CONFIG_SKYWALKER_REFEREE_RM2027)
+#include <communication/referee/referee_2027_parser.hpp>
+#else
+#error "Select a referee protocol in Kconfig"
+#endif
 namespace skywalker::communication {
 std::uint8_t refereeCrc8(const std::uint8_t *p, std::size_t n) {
     std::uint8_t c = 0xff;
@@ -37,34 +44,28 @@ void RefereeParser::discard(std::size_t n) {
         started_ms_ = receive_ms_[0];
 }
 void RefereeParser::decode(std::uint16_t id, const std::uint8_t *p, std::size_t n, std::uint64_t now) {
-    using namespace robotics;
-    // RM2026 communication protocol V1.3.0, tables 1-12 and 1-13.
-    if (version_ != RefereeVersion::Rm2026V1_3 || (id != 0x0201 && id != 0x0202)) {
-        ++stats_.unknown_commands;
-        return;
-    }
-    if ((id == 0x0201 && n != 13) || (id == 0x0202 && n != 14)) {
-        ++stats_.length_errors;
-        return;
-    }
+    // Kconfig compiles only the selected season decoder.
     auto next = state_;
-    const MessageStamp stamp{now, ++sequence_, true};
-    if (id == 0x0201) {
-        next.robot.robot_id = p[0];
-        next.robot.gimbal_output = {true, (p[12] & 1) != 0, stamp};
-        next.robot.chassis_output = {true, (p[12] & 2) != 0, stamp};
-        next.robot.shooter_output = {true, (p[12] & 4) != 0, stamp};
-        next.power.chassis_power_limit_w = wire::loadLe16(p + 10);
-        next.power.limit_stamp = stamp;
+    const robotics::MessageStamp stamp{now, sequence_ + 1, true};
+#if defined(CONFIG_SKYWALKER_REFEREE_RM2026)
+    const auto result = Referee2026Parser::decode(id, p, n, stamp, next);
+#elif defined(CONFIG_SKYWALKER_REFEREE_RM2027)
+    const auto result = Referee2027Parser::decode(id, p, n, stamp, next);
+#endif
+    switch (result) {
+    case RefereeDecodeResult::Decoded:
+        sequence_ = stamp.sequence;
+        next.stamp = stamp;
+        next.online = true;
+        state_ = next;
+        break;
+    case RefereeDecodeResult::InvalidLength:
+        ++stats_.length_errors;
+        break;
+    case RefereeDecodeResult::UnknownCommand:
+        ++stats_.unknown_commands;
+        break;
     }
-    else {
-        // Bytes 0..7 are RESERVED in this version: never publish fake measured power.
-        next.power.buffer_energy_j = wire::loadLe16(p + 8);
-        next.power.stamp = stamp;
-    }
-    next.stamp = stamp;
-    next.online = true;
-    state_ = next;
 }
 void RefereeParser::scan(std::uint64_t now) {
     while (used_) {

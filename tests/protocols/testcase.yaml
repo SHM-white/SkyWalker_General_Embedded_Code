@@ -2,4 +2,11 @@ tests:
   skywalker.protocols.contracts:
     platform_allow: [native_sim/native/64]
     tags: [communication, dr16, referee, interboard, protocol]
+    extra_args: CONFIG_SKYWALKER_REFEREE_RM2027=y
+    harness: ztest
+
+  skywalker.protocols.contracts_rm2026:
+    platform_allow: [native_sim/native/64]
+    tags: [communication, dr16, referee, interboard, protocol]
+    extra_args: CONFIG_SKYWALKER_REFEREE_RM2026=y
     harness: ztest
