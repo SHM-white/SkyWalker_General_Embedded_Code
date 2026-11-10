@@ -101,54 +101,54 @@ ZTEST(sentry, test_candidate_mapping_and_real_motor_sign_units) {
     zassert_within(s0.copyStaged().command.primary, -.1f, 1e-6f);
     zassert_within(d0.copyStaged().command.primary, -.2f, 1e-6f);
 }
-ZTEST(sentry, test_final_angle_interlock_hysteresis_and_pid_recovery) {
+ZTEST(sentry, test_per_wheel_cosine_and_independent_feedback_recovery) {
     SwerveChassis c(config());
     auto f = feedback();
     ChassisOutput o{};
     ChassisCommand cmd{.mode = ChassisMode::BodyVelocity, .vy_m_s = .5f};
     ticks(c, cmd, f, o, 20);
-    zassert_false(o.drive_permitted);
-    zassert_true(o.module[0].steer_reference_rad < .2f); // Ramp is near feedback, final error is pi/2.
-    for (auto &m : f.module)
-        m.steer_absolute_rad = pi / 2 - .09f;
-    ticks(c, cmd, f, o);
-    zassert_true(o.drive_permitted);
-    zassert_true(o.module[0].drive_effort > 0);
-    for (auto &m : f.module)
-        m.steer_absolute_rad = pi / 2 - .3f;
-    ticks(c, cmd, f, o);
-    zassert_true(o.drive_permitted);
-    for (auto &m : f.module)
-        m.steer_absolute_rad = pi / 2 - .41f;
-    ticks(c, cmd, f, o, 500);
-    zassert_false(o.drive_permitted);
-    for (auto &m : o.module) {
-        zassert_equal(m.drive_effort, 0);
-        zassert_equal(m.drive_target_rad_s, 0);
-    }
+    zassert_true(o.drive_permitted); // No chassis-wide steering alignment gate.
+    zassert_within(o.module[0].drive_target_rad_s, 0, 1e-5f);
     for (auto &m : f.module)
         m.steer_absolute_rad = pi / 2;
-    ticks(c, cmd, f, o, 1);
-    zassert_equal(o.module[0].drive_effort, 0);
-    ticks(c, cmd, f, o, 1);
-    zassert_true(o.module[0].drive_effort < .1f); // Rebuilt slew/integral.
+    ticks(c, cmd, f, o, 20);
+    zassert_true(o.drive_permitted);
+    zassert_true(o.module[0].drive_effort > 0);
     f.module[2].steer_valid = false;
     ticks(c, cmd, f, o);
-    zassert_false(o.drive_permitted);
-    for (auto &m : o.module)
-        zassert_equal(m.drive_effort, 0);
+    zassert_false(o.drive_permitted); // Diagnostic summary, not an output gate.
+    zassert_false(o.module[2].drive_output_valid);
+    for (unsigned i : {0u, 1u, 3u})
+        zassert_true(o.module[i].drive_output_valid);
     f.module[2].steer_valid = true;
     ticks(c, cmd, f, o);
     zassert_true(o.drive_permitted);
     f.module[1].drive_valid = false;
     ticks(c, cmd, f, o);
     zassert_false(o.drive_permitted);
+    for (unsigned i : {0u, 2u, 3u})
+        zassert_true(o.module[i].drive_output_valid);
     f.module[1].drive_valid = true;
     ++f.module[1].drive_enable_generation;
-    ticks(c, cmd, f, o, 1);
-    zassert_false(o.drive_permitted);
     ticks(c, cmd, f, o);
     zassert_true(o.drive_permitted);
+}
+ZTEST(sentry, test_cosine_zero_reaches_drive_pid_without_stale_slew) {
+    SwerveModule m(vehicle::swerveConfig().modules[0]);
+    auto f = feedback().module[0];
+    ModuleOutput o{};
+    zassert_ok(m.reset(f));
+    for (unsigned i = 0; i < 400; ++i) {
+        ++f.steer_feedback_stamp_ms;
+        zassert_ok(m.step({0.0f, .3f}, f, .002f, o));
+    }
+    zassert_true(o.drive_effort > 0);
+    ++f.steer_feedback_stamp_ms;
+    zassert_ok(m.step({pi / 2, .3f}, f, .002f, o));
+    zassert_within(o.cosine_scale, 0, 1e-6f);
+    zassert_within(o.drive_target_rad_s, 0, 1e-6f);
+    // Installed drive profile has no integral term; measured rate is zero.
+    zassert_within(o.drive_effort, 0, 1e-6f);
 }
 ZTEST(sentry, test_cosine_reverse_flip_hysteresis_zero_and_invalid) {
     SwerveModule m(config().modules[0]);
@@ -177,7 +177,7 @@ ZTEST(sentry, test_cosine_reverse_flip_hysteresis_zero_and_invalid) {
     zassert_equal(m.step({NAN, .5f}, f, .002f, o), -EINVAL);
     zassert_equal(o.drive_effort, 0);
 }
-ZTEST(sentry, test_rotation_start_alignment_continuity_and_exit) {
+ZTEST(sentry, test_rotation_has_no_collective_alignment_gate) {
     for (bool mixed : {false, true}) {
         SwerveChassis c(config());
         auto f = feedback();
@@ -186,34 +186,23 @@ ZTEST(sentry, test_rotation_start_alignment_continuity_and_exit) {
                            .vx_m_s = mixed ? .1f : 0,
                            .wz_rad_s = .8f};
         ticks(c, cmd, f, o);
-        zassert_false(o.drive_permitted);
-        for (unsigned i = 0; i < 4; ++i)
-            f.module[i].steer_absolute_rad = o.module[i].optimized_angle_rad;
-        ticks(c, cmd, f, o);
         zassert_true(o.drive_permitted);
-        for (unsigned i = 0; i < 4; ++i)
-            f.module[i].steer_absolute_rad = o.module[i].optimized_angle_rad - .6f;
-        ticks(c, cmd, f, o, 20);
-        zassert_true(o.drive_permitted);
-        for (auto &m : o.module) {
-            zassert_true(std::fabs(m.drive_target_rad_s) > 0);
-            zassert_true(m.cosine_scale < 1);
-        }
+        for (auto &m : o.module)
+            zassert_true(m.drive_output_valid);
         f.module[0].steer_valid = false;
         ticks(c, cmd, f, o);
         zassert_false(o.drive_permitted);
+        zassert_false(o.module[0].drive_output_valid);
+        for (unsigned i = 1; i < 4; ++i)
+            zassert_true(o.module[i].drive_output_valid);
         f.module[0].steer_valid = true;
-        ticks(c, cmd, f, o);
-        zassert_false(o.drive_permitted);
-        for (unsigned i = 0; i < 4; ++i)
-            f.module[i].steer_absolute_rad = o.module[i].optimized_angle_rad;
         ticks(c, cmd, f, o);
         zassert_true(o.drive_permitted);
         cmd.wz_rad_s = 0;
         cmd.mode = ChassisMode::BodyVelocity;
         cmd.vy_m_s = .5f;
         ticks(c, cmd, f, o);
-        zassert_false(o.drive_permitted);
+        zassert_true(o.drive_permitted);
         ticks(c, {}, f, o);
         zassert_false(o.drive_permitted);
     }
