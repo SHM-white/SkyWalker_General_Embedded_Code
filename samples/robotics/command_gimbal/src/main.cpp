@@ -45,7 +45,7 @@ public:
 #ifdef CONFIG_COMMAND_GIMBAL_REFEREE
 communication::AsyncUart::DmaBuffers referee_dma __nocache;
 const device *const referee_uart = DEVICE_DT_GET(DT_ALIAS(referee_uart));
-communication::RefereeReceiver referee(referee_uart, referee_dma, communication::RefereeVersion::Rm2026V1_3, 500);
+communication::RefereeReceiver referee(referee_uart, referee_dma, communication::RefereeVersion::Rm2027V1_0, 500);
 RefereePermissionSource referee_source(referee);
 class PausablePermissions final : public IPermissionSource {
 public:
