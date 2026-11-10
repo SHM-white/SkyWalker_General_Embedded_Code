@@ -16,6 +16,10 @@ struct RefereePowerState {
 struct RefereeRobotState {
     // 裁判系统分配的机器人编号。
     std::uint8_t robot_id = 0;
+    // RM2027 0x0201 新增的射击初速度上限，单位 m/s。
+    // RM2026 不提供该字段，stamp.valid 保持 false。
+    float bullet_speed_limit_m_s = 0;
+    MessageStamp bullet_speed_limit_stamp{};
     // 底盘输出许可。
     OutputPermission chassis_output{};
     // 云台输出许可。

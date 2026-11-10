@@ -38,12 +38,16 @@ void RefereeParser::discard(std::size_t n) {
 }
 void RefereeParser::decode(std::uint16_t id, const std::uint8_t *p, std::size_t n, std::uint64_t now) {
     using namespace robotics;
-    // RM2026 communication protocol V1.3.0, tables 1-12 and 1-13.
-    if (version_ != RefereeVersion::Rm2026V1_3 || (id != 0x0201 && id != 0x0202)) {
+    // RM2026 V1.3.0: 0x0201 = 13 bytes (permission flags at offset 12).
+    // RM2027 V1.0.0: 0x0201 = 17 bytes (float speed limit at 12, flags at 16).
+    // Both versions: 0x0202 = 14 bytes, measured chassis power is reserved.
+    const bool rm2026 = version_ == RefereeVersion::Rm2026V1_3;
+    const bool rm2027 = version_ == RefereeVersion::Rm2027V1_0;
+    if ((!rm2026 && !rm2027) || (id != 0x0201 && id != 0x0202)) {
         ++stats_.unknown_commands;
         return;
     }
-    if ((id == 0x0201 && n != 13) || (id == 0x0202 && n != 14)) {
+    if ((id == 0x0201 && n != (rm2027 ? 17u : 13u)) || (id == 0x0202 && n != 14u)) {
         ++stats_.length_errors;
         return;
     }
@@ -51,9 +55,14 @@ void RefereeParser::decode(std::uint16_t id, const std::uint8_t *p, std::size_t 
     const MessageStamp stamp{now, ++sequence_, true};
     if (id == 0x0201) {
         next.robot.robot_id = p[0];
-        next.robot.gimbal_output = {true, (p[12] & 1) != 0, stamp};
-        next.robot.chassis_output = {true, (p[12] & 2) != 0, stamp};
-        next.robot.shooter_output = {true, (p[12] & 4) != 0, stamp};
+        const std::uint8_t outputs = p[rm2027 ? 16 : 12];
+        next.robot.gimbal_output = {true, (outputs & 1) != 0, stamp};
+        next.robot.chassis_output = {true, (outputs & 2) != 0, stamp};
+        next.robot.shooter_output = {true, (outputs & 4) != 0, stamp};
+        if (rm2027) {
+            next.robot.bullet_speed_limit_m_s = wire::loadFloatLe(p + 12);
+            next.robot.bullet_speed_limit_stamp = stamp;
+        }
         next.power.chassis_power_limit_w = wire::loadLe16(p + 10);
         next.power.limit_stamp = stamp;
     }
