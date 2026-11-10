@@ -125,9 +125,10 @@ ZTEST(execution, test_live_endpoint_stopped_status_producer_withdraws_ready) {
     zassert_ok(transport.observer.latestHeartbeat(heartbeat));
     zassert_false(heartbeat.ready);
     zassert_equal(heartbeat.active_reasons, FeedbackStale);
-    status.stamp = {1160, 2, true};
+    // The feedback published at 1150 is next due at 1170.
+    status.stamp = {1170, 2, true};
     endpoint.setStatus(status);
-    endpoint.poll(1160);
+    endpoint.poll(1170);
     zassert_ok(transport.observer.latestChassisFeedback(feedback));
     zassert_true(feedback.armed);
     // A fresh producer must also wait for the next heartbeat publication.
