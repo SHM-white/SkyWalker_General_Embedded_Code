@@ -45,6 +45,7 @@ private:
     int failStart(int error, std::uint32_t reason);
     CommandArbiter arbiter_;
     const bool require_permissions_;
+    const bool require_gimbal_permissions_, require_shooter_permissions_;
     const std::uint32_t permission_timeout_ms_;
     const bool require_external_gate_;
     struct OperatorGate {

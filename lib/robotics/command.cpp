@@ -121,6 +121,10 @@ int CommandArbiter::observeRemoteFrame(const RemoteState &remote, bool run_allow
         return ret;
     }
     const bool selected = mapped.mode != OperatorMode::Safe && mapped.source == ControlSource::KeyboardMouse;
+    if (!config_.enable_shooter || config_.mapper.input_profile == RemoteInputProfile::PhysicalRemote) {
+        withdrawMouseShooter();
+        return 0;
+    }
     return mouse_gesture_.update(remote, selected, run_allowed, now_ms, mouse_fire_);
 }
 
@@ -142,7 +146,8 @@ int CommandArbiter::validateConfig() const {
     for (float v : nonnegative)
         if (!std::isfinite(v) || v < 0)
             return -EINVAL;
-    if (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0)
+    if (config_.enable_shooter &&
+        (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0))
         return -EINVAL;
     if (!config_.input_timeout_ms || !config_.permission_timeout_ms)
         return -EINVAL;
@@ -160,7 +165,11 @@ int CommandArbiter::validateConfig() const {
         return -EINVAL;
     OperatorIntent unused{};
     const int ret = ManualCommandMapper(config_.mapper).map(RemoteState{}, unused);
-    return ret < 0 ? ret : MouseShooterGesture(gestureConfig(config_)).configError();
+    if (ret < 0)
+        return ret;
+    const bool mouse_shooter_enabled =
+        config_.enable_shooter && config_.mapper.input_profile != RemoteInputProfile::PhysicalRemote;
+    return mouse_shooter_enabled ? MouseShooterGesture(gestureConfig(config_)).configError() : 0;
 }
 void CommandArbiter::updateAutoOverride(OperatorIntent &i, const CommandInputs &in, core::TimeUs now) {
     const float magnitude = std::max(std::fabs(i.gimbal_yaw_rate_norm), std::fabs(i.gimbal_pitch_rate_norm));
@@ -226,13 +235,13 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     if (ManualCommandMapper(mapperConfig()).map(in.remote, i) < 0)
         return disable(InvalidInputs, -EINVAL);
     const auto &robot = in.referee.robot;
-    const auto cr = config_.require_referee_for_motion
+    const auto cr = config_.require_referee_for_chassis
                         ? permissionReason(robot.chassis_output, ms, config_.permission_timeout_ms)
                         : 0u;
-    const auto gr = config_.require_referee_for_motion
+    const auto gr = config_.require_referee_for_gimbal
                         ? permissionReason(robot.gimbal_output, ms, config_.permission_timeout_ms)
                         : 0u;
-    const auto sr = config_.require_referee_for_motion
+    const auto sr = config_.require_referee_for_shooter
                         ? permissionReason(robot.shooter_output, ms, config_.permission_timeout_ms)
                         : 0u;
     if (observeRemoteFrame(in.remote, !gr && !sr, ms) < 0)
@@ -314,7 +323,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
             g.pitch_rate_rad_s = target.pitch.rate_rad_s;
         }
     }
-    if (!i.friction_requested)
+    if (!config_.enable_shooter || !i.friction_requested)
         n.shooter_reasons |= ShooterNotArmed;
     else {
         auto &s = n.requested.shooter;
@@ -343,8 +352,13 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     n.chassis_reasons |= cr;
     n.gimbal_reasons |= gr;
     n.shooter_reasons |= sr;
-    if (cr)
-        n.command.chassis = {};
+    if (cr) {
+        // A valid referee motion veto means a zero-speed closed-loop hold,
+        // not an operator Disabled command or a four-wheel suspend.
+        n.command.chassis.vx_m_s = 0;
+        n.command.chassis.vy_m_s = 0;
+        n.command.chassis.wz_rad_s = 0;
+    }
     if (gr)
         n.command.gimbal = {};
     if (sr)

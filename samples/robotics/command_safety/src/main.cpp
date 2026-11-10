@@ -38,7 +38,9 @@ int main() {
     static ArmedRemoteSource armed_source(source);
     static const CommandManager::Config config = [] {
         CommandManager::Config value{};
-        value.require_referee_for_motion = false;
+        value.require_referee_for_chassis = false;
+        value.require_referee_for_gimbal = false;
+        value.require_referee_for_shooter = false;
         value.allow_auto = false;
         value.mapper.input_profile = RemoteInputProfile::PhysicalRemote;
         return value;

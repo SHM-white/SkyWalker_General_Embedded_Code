@@ -62,7 +62,9 @@ inline skywalker::robotics::GimbalAxisConfig shooterPitchAxisConfig() {
 
 inline const skywalker::robotics::CommandManager::Config command_policy = [] {
     auto c = calibration::gimbalCommandConfig();
-    c.require_referee_for_motion = IS_ENABLED(CONFIG_COMMAND_GIMBAL_REFEREE);
+    c.require_referee_for_chassis = IS_ENABLED(CONFIG_COMMAND_GIMBAL_REFEREE);
+    c.require_referee_for_gimbal = IS_ENABLED(CONFIG_COMMAND_GIMBAL_REFEREE);
+    c.require_referee_for_shooter = IS_ENABLED(CONFIG_COMMAND_GIMBAL_REFEREE);
     c.allow_auto = IS_ENABLED(CONFIG_COMMAND_GIMBAL_VISION_EXECUTE);
     // TODO(reference): AB carries no epoch metadata; negotiate a new reference
     // session with the vision producer after IMU reset before enabling Auto.
@@ -75,7 +77,10 @@ inline skywalker::robotics::CommandManager::Config shooterCommandPolicy() {
     c.mapper.input_profile = skywalker::robotics::RemoteInputProfile::ShooterSelectable;
     c.require_external_run_gate = true;
     c.allow_auto = false;
-    c.require_referee_for_motion = false;
+    c.require_referee_for_chassis = false;
+    c.require_referee_for_gimbal = false;
+    c.require_referee_for_shooter = false;
+    c.enable_shooter = true;
     // 调参：连点间隔严格小于500 ms；达到500 ms无新点击则撤销连发。
     // 长按250 ms是未实机确认的初值，与连点门槛独立。
     c.mouse_gesture.rapid_click_gap_ms = 500;

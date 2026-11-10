@@ -11,7 +11,11 @@ public:
         std::uint32_t input_timeout_ms = 100;
         ManualCommandMapper::Config mapper{};
         std::uint32_t permission_timeout_ms = 300;
-        bool require_referee_for_motion = true;
+        // Referee restrictions are action-local; no global motion veto.
+        bool require_referee_for_chassis = true;
+        bool require_referee_for_gimbal = true;
+        bool require_referee_for_shooter = true;
+        bool enable_shooter = true;
         bool allow_auto = true;
         core::TimeUs vision_timeout_us = 100000;
         core::OrientationReference expected_vision_reference{1, 1};

@@ -144,7 +144,10 @@ inline constexpr CommandManager::Config gimbalCommandConfig() {
     c.max_gimbal_yaw_rate_rad_s = manual_max_gimbal_yaw_rate_rad_s;
     c.max_gimbal_pitch_rate_rad_s = manual_max_gimbal_pitch_rate_rad_s;
     c.input_timeout_ms = gimbal_command_timeout_ms;
-    c.require_referee_for_motion = false;
+    c.require_referee_for_chassis = false;
+    c.require_referee_for_gimbal = false;
+    c.require_referee_for_shooter = false;
+    c.enable_shooter = false;
     c.allow_auto = false;
     c.expected_vision_reference = head_reference;
     return c;

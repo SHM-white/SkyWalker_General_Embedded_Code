@@ -18,7 +18,11 @@ bool matches(SourceRole role, const SourceValue &value) {
 }
 }
 CommandManager::CommandManager(const Config &config)
-    : arbiter_(config), require_permissions_(config.require_referee_for_motion),
+    : arbiter_(config), require_permissions_(config.require_referee_for_chassis ||
+                                                config.require_referee_for_gimbal ||
+                                                config.require_referee_for_shooter),
+       require_gimbal_permissions_(config.require_referee_for_gimbal),
+       require_shooter_permissions_(config.require_referee_for_shooter),
       permission_timeout_ms_(config.permission_timeout_ms), require_external_gate_(config.require_external_run_gate) {
 }
 void CommandManager::setOperatorGate(bool allowed, std::uint32_t session) {
@@ -205,7 +209,7 @@ void CommandManager::run() {
         const auto permission_available = [&](const OutputPermission &permission) {
             // Missing/expired referee data is allowed; only a current explicit
             // denial restricts the selected output.
-            return !require_permissions_ || !permission.valid || !permission.stamp.valid ||
+            return !permission.valid || !permission.stamp.valid ||
                    !isFresh(permission.stamp, now_ms, permission_timeout_ms_) || permission.enabled;
         };
         const bool output_allowed = permission_available(next.observed.referee.robot.shooter_output) &&
