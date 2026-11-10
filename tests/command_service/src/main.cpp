@@ -263,11 +263,11 @@ ZTEST(command_service, test_registration_startup_and_failed_lifetime) {
     static Source needs_permission;
     static Permission too_late;
     zassert_ok(missing_permission.registerSource(needs_permission));
-    zassert_equal(missing_permission.start(), -ENODEV);
-    zassert_equal(needs_permission.starts, 0);
+    // No bound referee source is not a reason to prevent RC startup.
+    zassert_ok(missing_permission.start());
+    zassert_equal(needs_permission.starts, 1);
     failed = awaitSnapshot(missing_permission, [](const auto &) { return true; });
-    disabled(failed.decision.command);
-    zassert_true(failed.decision.reasons() & PermissionMissing);
+    zassert_false(failed.decision.reasons() & PermissionMissing);
     zassert_equal(missing_permission.bindPermissions(too_late), -EBUSY);
 
     static CommandManager invalid{invalidConfig()};

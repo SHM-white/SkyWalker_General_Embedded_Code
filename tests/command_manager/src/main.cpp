@@ -268,6 +268,7 @@ ZTEST(command_manager, test_only_enabled_functions_validate_configuration_and_pe
     c.require_referee_for_chassis = false;
     c.require_referee_for_gimbal = true;
     c.require_referee_for_shooter = false;
+    c.permission_timeout_ms = 300;
     CommandArbiter arbiter(c);
     zassert_ok(arbiter.configError());
     Scenario s;

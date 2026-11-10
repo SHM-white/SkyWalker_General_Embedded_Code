@@ -150,7 +150,9 @@ int CommandArbiter::validateConfig() const {
     if (config_.enable_shooter &&
         (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0))
         return -EINVAL;
-    if (!config_.input_timeout_ms || !config_.permission_timeout_ms)
+    if (!config_.input_timeout_ms ||
+        ((config_.require_referee_for_chassis || config_.require_referee_for_gimbal ||
+          config_.require_referee_for_shooter) && !config_.permission_timeout_ms))
         return -EINVAL;
     // Vision and auto-override parameters are only meaningful when the auto
     // source is actually enabled; manual startup must not fail on unused tuning.
@@ -242,7 +244,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     const auto gr = config_.require_referee_for_gimbal
                         ? permissionReason(robot.gimbal_output, ms, config_.permission_timeout_ms)
                         : 0u;
-    const auto sr = config_.require_referee_for_shooter
+    const auto sr = config_.enable_shooter && config_.require_referee_for_shooter
                         ? permissionReason(robot.shooter_output, ms, config_.permission_timeout_ms)
                         : 0u;
     if (observeRemoteFrame(in.remote, !gr && !sr, ms) < 0)

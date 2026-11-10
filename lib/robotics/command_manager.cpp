@@ -18,10 +18,7 @@ bool matches(SourceRole role, const SourceValue &value) {
 }
 }
 CommandManager::CommandManager(const Config &config)
-    : arbiter_(config), require_permissions_(config.require_referee_for_chassis ||
-                                                config.require_referee_for_gimbal ||
-                                                config.require_referee_for_shooter),
-       require_gimbal_permissions_(config.require_referee_for_gimbal),
+    : arbiter_(config), require_gimbal_permissions_(config.require_referee_for_gimbal),
        require_shooter_permissions_(config.require_referee_for_shooter),
       permission_timeout_ms_(config.permission_timeout_ms), require_external_gate_(config.require_external_run_gate) {
 }
@@ -92,8 +89,6 @@ int CommandManager::start() {
         have_operator = have_operator || sources_[i].role == SourceRole::Operator;
     if (!have_operator)
         return failStart(-EINVAL, RcUnavailable);
-    if (require_permissions_ && !permissions_)
-        return failStart(-ENODEV, PermissionMissing);
     for (std::size_t i = 0; i < source_count_; ++i) {
         auto &slot = sources_[i];
         const int ret = slot.source->start();
