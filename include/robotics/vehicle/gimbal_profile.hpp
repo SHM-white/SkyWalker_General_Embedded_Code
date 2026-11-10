@@ -138,11 +138,11 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
 }
 
 #if defined(CONFIG_SKYWALKER_COMMAND_SERVICE)
-inline CommandManager::Config gimbalCommandConfig() {
+inline constexpr CommandManager::Config gimbalCommandConfig() {
     CommandManager::Config c{};
     c.mapper.input_profile = RemoteInputProfile::PhysicalRemote;
-    c.max_gimbal_yaw_rate_rad_s = 1.0f;
-    c.max_gimbal_pitch_rate_rad_s = 0.8f;
+    c.max_gimbal_yaw_rate_rad_s = manual_max_gimbal_yaw_rate_rad_s;
+    c.max_gimbal_pitch_rate_rad_s = manual_max_gimbal_pitch_rate_rad_s;
     c.input_timeout_ms = gimbal_command_timeout_ms;
     c.require_referee_for_motion = false;
     c.allow_auto = false;

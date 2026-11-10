@@ -54,7 +54,6 @@ public:
         bool keyboard_mouse_selectable = false;  // 右 Middle 在手动档选择键鼠。
         bool require_right_middle_to_arm = true; // 仅前后行走入口不使用右拨杆。
         std::uint32_t input_timeout_ms = 100;    // ms，须与接收和命令层失联期限协调。
-        std::uint32_t neutral_arm_ms = 500;      // ms，安全档归中保持时间，防止上电直接运行。
     };
     RcControlAdapter() = default;
     explicit RcControlAdapter(Config config) : config_(config) {
@@ -67,10 +66,9 @@ public:
     bool armReady() const {
         return neutral_ready_;
     }
+    // Kept for diagnostics compatibility. The 500 ms timed baseline is gone.
     std::uint64_t neutralHeldMs() const {
-        return neutral_timing_ && state_.remote.stamp.timestamp_ms >= neutral_since_
-                   ? state_.remote.stamp.timestamp_ms - neutral_since_
-                   : 0;
+        return 0;
     }
 
     static float normalize(std::int16_t raw) {
@@ -81,75 +79,87 @@ public:
     // Withdraw only for user stop/emergency or an expired real input/link.
     // Motor and CAN execution states never withdraw this input intent.
     void withdraw() {
-        state_.armed = state_.navigation_active = state_.manual_active = false;
-        state_.run_allowed = false;
-        state_.mode = RcMode::Safe;
-        state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
-        state_.keyboard_mouse_selected = false;
-        neutral_timing_ = neutral_ready_ = safe_baseline_ = false;
-        armed_ = false;
-        right_neutral_seen_ = false;
-        mouse_release_seen_ = false;
+        stopMotion();
+        neutral_ready_ = false;
+        startup_neutral_available_ = false;
+        if (have_input_time_)
+            startup_consumed_ = true;
     }
 
     const RcControlState &update(const robotics::RemoteState &remote, std::uint64_t now_ms) {
         using robotics::RcSwitch;
-        state_.remote = remote;
-        state_.fresh = remote.online && robotics::isFresh(remote.stamp, now_ms, config_.input_timeout_ms) &&
-                       remote.left_switch != RcSwitch::Unknown && remote.right_switch != RcSwitch::Unknown;
-        if (!state_.fresh) {
+        const bool fresh = remote.online && robotics::isFresh(remote.stamp, now_ms, config_.input_timeout_ms) &&
+                           remote.left_switch != RcSwitch::Unknown && remote.right_switch != RcSwitch::Unknown;
+        if (!fresh) {
+            state_.remote = remote;
+            state_.fresh = false;
             withdraw();
             previous_left_ = previous_right_ = RcSwitch::Unknown;
             return state_;
         }
+        // Old sequence or time-regressed candidates are dropped without
+        // overwriting the last accepted frame or withdrawing its state.
         if (have_sequence_ && !robotics::sequenceAfter(remote.stamp.sequence, last_sequence_))
             return state_;
+        const auto input_ms = remote.stamp.timestamp_ms;
+        if (have_input_time_ && input_ms < last_input_ms_)
+            return state_;
+        const bool first_frame = !have_input_time_;
+        state_.remote = remote;
+        state_.fresh = true;
         have_sequence_ = true;
         last_sequence_ = remote.stamp.sequence;
-        const auto input_ms = remote.stamp.timestamp_ms;
-        if (have_input_time_ && input_ms < last_input_ms_) {
-            withdraw();
-            state_.fresh = false;
-            previous_left_ = previous_right_ = RcSwitch::Unknown;
-            last_input_ms_ = input_ms;
-            return state_;
-        }
         have_input_time_ = true;
         last_input_ms_ = input_ms;
         const bool neutral = centered(remote);
         const auto left = remote.left_switch, right = remote.right_switch;
         const bool arm_switch_ready = !config_.require_right_middle_to_arm || right == RcSwitch::Middle;
 
+        // One-shot startup shortcut: the first accepted frame may arm from a
+        // centered neutral pose without a 500 ms hold. It is never rebuilt after
+        // a later link loss or a non-neutral frame.
+        if (first_frame && !startup_consumed_) {
+            if (neutral && arm_switch_ready)
+                startup_neutral_available_ = true;
+            else
+                startup_consumed_ = true;
+        }
+        if (startup_neutral_available_ && (!neutral || !arm_switch_ready)) {
+            startup_neutral_available_ = false;
+            startup_consumed_ = true;
+        }
+
         if (left == RcSwitch::Down) {
             if (previous_left_ != RcSwitch::Down || state_.run_allowed)
-                withdraw();
+                stopMotion();
             state_.mode = RcMode::Safe;
             state_.run_allowed = false;
             state_.manual_active = state_.navigation_active = false;
             state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
             state_.keyboard_mouse_selected = false;
-            // Right Middle is the neutral position (Down=spin, Up=shoot).
-            if (neutral && arm_switch_ready) {
-                if (!neutral_timing_) {
-                    neutral_since_ = input_ms;
-                    neutral_timing_ = true;
-                }
-                if (input_ms >= neutral_since_ && input_ms - neutral_since_ >= config_.neutral_arm_ms)
-                    neutral_ready_ = safe_baseline_ = true;
-            }
-            else {
-                neutral_timing_ = neutral_ready_ = false;
-            }
-            // No independent clear-estop gesture: left Down stops.
+            // Down still stops immediately. It does not destroy the startup
+            // shortcut while the pose remains centered and the right switch is Middle.
+            neutral_ready_ = neutral && arm_switch_ready;
+            if (!neutral_ready_)
+                startup_neutral_available_ = false;
         }
         else {
-            // 安全档归中基线成立后，左 Down→Middle 只建立解锁；手动档在左 Up。
+            // The startup shortcut arms on the first non-Down frame. After that,
+            // the normal explicit Down->Middle edge remains the only re-arm path.
+            if (startup_neutral_available_) {
+                if (state_.start_event_id != std::numeric_limits<std::uint64_t>::max())
+                    ++state_.start_event_id;
+                armed_ = true;
+                startup_neutral_available_ = false;
+                startup_consumed_ = true;
+            }
             if (left == RcSwitch::Middle && previous_left_ == RcSwitch::Down && neutral_ready_ && neutral &&
-                arm_switch_ready && state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
+                arm_switch_ready && !armed_ &&
+                state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
                 ++state_.start_event_id;
                 armed_ = true;
             }
-            neutral_timing_ = neutral_ready_ = safe_baseline_ = false;
+            neutral_ready_ = false;
             // 视觉执行样例保留 Middle=手动、Up=Auto；其余样例只有左 Up 是手动档。
             const bool manual = armed_ && (config_.allow_auto ? left != RcSwitch::Down : left == RcSwitch::Up);
             state_.manual_active = manual;
@@ -184,6 +194,16 @@ public:
     }
 
 private:
+    void stopMotion() {
+        state_.armed = state_.navigation_active = state_.manual_active = false;
+        state_.run_allowed = false;
+        state_.mode = RcMode::Safe;
+        state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
+        state_.keyboard_mouse_selected = false;
+        armed_ = false;
+        right_neutral_seen_ = false;
+        mouse_release_seen_ = false;
+    }
     static bool centered(const robotics::RemoteState &remote) {
         const auto centered_axis = [](std::int16_t raw) { return std::abs(int(raw)) <= 33; };
         return centered_axis(remote.analog.left_x) && centered_axis(remote.analog.left_y) &&
@@ -195,10 +215,10 @@ private:
     robotics::RcSwitch previous_left_ = robotics::RcSwitch::Unknown;
     robotics::RcSwitch previous_right_ = robotics::RcSwitch::Unknown;
     std::uint32_t last_sequence_ = 0;
-    std::uint64_t neutral_since_ = 0, last_input_ms_ = 0;
-    bool have_sequence_ = false, neutral_timing_ = false, neutral_ready_ = false;
-    bool safe_baseline_ = false, have_input_time_ = false;
-    bool armed_ = false;
+    std::uint64_t last_input_ms_ = 0;
+    bool have_sequence_ = false, neutral_ready_ = false;
+    bool have_input_time_ = false, armed_ = false;
+    bool startup_neutral_available_ = false, startup_consumed_ = false;
     bool right_neutral_seen_ = false, mouse_release_seen_ = false;
 };
 

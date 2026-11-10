@@ -44,8 +44,8 @@ int GimbalAxis::feedbackError(const motor::MotorSnapshot &snapshot) const {
     const float angle = limited ? snapshot.feedback.position_rad : snapshot.feedback.absolute_position_rad;
     if (!std::isfinite(angle))
         return -EINVAL;
-    if (limited && (angle < config_.min_angle_rad || angle > config_.max_angle_rad))
-        return -ERANGE;
+    // A valid measured angle outside the software range is still a usable
+    // feedback. The target clamp brings it back without withdrawing the axis.
     return 0;
 }
 
@@ -92,6 +92,9 @@ int GimbalAxis::seed(const motor::MotorSnapshot &snapshot) {
         return ret;
     target_angle_rad_ = config_.topology == AxisTopology::Continuous ? double(snapshot.feedback.absolute_position_rad)
                                                                      : double(snapshot.feedback.position_rad);
+    if (config_.topology == AxisTopology::Limited)
+        target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad),
+                                       double(config_.max_angle_rad));
     observed_enable_generation_ = snapshot.enable_generation;
     observed_reference_generation_ = snapshot.reference_generation;
     initialized_ = true;
@@ -117,8 +120,11 @@ int GimbalAxis::reset() {
 int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt) {
     if (!configured_)
         return -EACCES;
-    if (action > SafetyAction::Active || command.mode > GimbalMode::AbsoluteAngle || !std::isfinite(dt) || dt < 0 ||
-        !std::isfinite(command.rate_rad_s) || !std::isfinite(command.target_rad))
+    if (action > SafetyAction::Active || command.mode > GimbalMode::AbsoluteAngle || !std::isfinite(dt) || dt < 0)
+        return -EINVAL;
+    if (command.mode == GimbalMode::Rate && !std::isfinite(command.rate_rad_s))
+        return -EINVAL;
+    if (command.mode == GimbalMode::AbsoluteAngle && !std::isfinite(command.target_rad))
         return -EINVAL;
     if (action == SafetyAction::Disable || command.mode == GimbalMode::Disabled) {
         withdraw();
@@ -196,9 +202,9 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
         target_angle_rad_ = std::clamp(candidate, double(config_.min_angle_rad), double(config_.max_angle_rad));
         target_status_.mechanical_limited = target_angle_rad_ != candidate;
         if (!hold && command.mode == GimbalMode::Rate && config_.max_lead_rad > 0) {
-            // The measured joint coordinate was validated above for freshness,
-            // reference validity and mechanical range. Do not apply this to an
-            // inertial AbsoluteAngle target or to a wrapped continuous axis.
+            // Do not apply the lead guard to an inertial AbsoluteAngle target
+            // or to a wrapped continuous axis. The measured value may be outside
+            // the software range; the final target clamp below still applies.
             const auto before_lead = target_angle_rad_;
             target_angle_rad_ = std::clamp(before_lead, target_status_.measured_rad - double(config_.max_lead_rad),
                                            target_status_.measured_rad + double(config_.max_lead_rad));

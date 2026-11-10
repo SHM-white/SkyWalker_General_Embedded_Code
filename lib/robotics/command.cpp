@@ -129,10 +129,10 @@ int CommandArbiter::observeRemoteFrame(const RemoteState &remote, bool run_allow
 namespace skywalker::robotics {
 namespace {
 std::uint32_t permissionReason(const OutputPermission &p, std::uint64_t now, std::uint32_t timeout) {
-    if (!p.valid || !p.stamp.valid)
-        return PermissionMissing;
-    if (!isFresh(p.stamp, now, timeout))
-        return PermissionStale;
+    // Missing or expired referee data is not a denial. Only a currently valid
+    // explicit false restricts the selected action.
+    if (!p.valid || !p.stamp.valid || !isFresh(p.stamp, now, timeout))
+        return 0;
     return p.enabled ? 0u : PermissionDenied;
 }
 }
@@ -142,16 +142,21 @@ int CommandArbiter::validateConfig() const {
     for (float v : nonnegative)
         if (!std::isfinite(v) || v < 0)
             return -EINVAL;
-    const float positive[] = {config_.max_vision_yaw_acceleration_rad_s2, config_.max_vision_pitch_acceleration_rad_s2,
-                              config_.requested_fire_rate_hz};
-    for (float v : positive)
-        if (!std::isfinite(v) || v <= 0)
-            return -EINVAL;
-    if (!config_.input_timeout_ms || !config_.permission_timeout_ms || !config_.vision_timeout_us ||
-        !config_.expected_vision_reference.frame_id || !config_.expected_vision_reference.epoch ||
-        !config_.override_release_us || !std::isfinite(config_.override_enter_norm) ||
-        !std::isfinite(config_.override_exit_norm) || config_.override_exit_norm < 0 ||
-        config_.override_exit_norm >= config_.override_enter_norm || config_.override_enter_norm > 1)
+    if (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0)
+        return -EINVAL;
+    if (!config_.input_timeout_ms || !config_.permission_timeout_ms)
+        return -EINVAL;
+    // Vision and auto-override parameters are only meaningful when the auto
+    // source is actually enabled; manual startup must not fail on unused tuning.
+    if (config_.allow_auto &&
+        (!std::isfinite(config_.max_vision_yaw_acceleration_rad_s2) ||
+         !std::isfinite(config_.max_vision_pitch_acceleration_rad_s2) ||
+         config_.max_vision_yaw_acceleration_rad_s2 <= 0 || config_.max_vision_pitch_acceleration_rad_s2 <= 0 ||
+         !config_.vision_timeout_us || !config_.expected_vision_reference.frame_id ||
+         !config_.expected_vision_reference.epoch || !config_.override_release_us ||
+         !std::isfinite(config_.override_enter_norm) || !std::isfinite(config_.override_exit_norm) ||
+         config_.override_exit_norm < 0 || config_.override_exit_norm >= config_.override_enter_norm ||
+         config_.override_enter_norm > 1))
         return -EINVAL;
     OperatorIntent unused{};
     const int ret = ManualCommandMapper(config_.mapper).map(RemoteState{}, unused);

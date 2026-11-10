@@ -35,19 +35,15 @@ inline SwerveHardware::Config swerveHardwareConfig() {
     }
     return c;
 }
-inline ChassisExecutor::Config chassisExecutionConfig() {
+inline constexpr ChassisExecutor::Config chassisExecutionConfig() {
     ChassisExecutor::Config c{};
     // Manual low-current operation; measured power remains a separate capability.
     c.require_power_budget = false;
     c.power_model_calibrated = power_model_calibrated;
-    c.power_control_calibrated = false;
     c.allow_estimated_power = false;
     c.estimate_idle_power_w = power_idle_w;
     c.estimate_w_per_abs_amp = power_per_abs_amp_w;
-    c.bench_effort_scale = chassis_drive_scale;
-    c.bench_steer_effort_scale = chassis_steer_scale;
-    c.bench_drive_current_limit_a = drive_bench_current_a;
-    c.bench_steer_current_limit_a = steer_bench_current_a;
     return c;
 }
+static_assert(chassisExecutionConfig().estimate_idle_power_w >= 0);
 } // namespace skywalker::robotics::vehicle

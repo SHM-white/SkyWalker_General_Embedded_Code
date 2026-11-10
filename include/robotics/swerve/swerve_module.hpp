@@ -20,9 +20,9 @@ public:
     int reset(const ModuleFeedback &);
     // One writer. Feedback loss invalidates only the affected axis's output.
     int step(const ModuleTarget &, const ModuleFeedback &, float dt_s, ModuleOutput &out);
-    // Chassis prepares ALL steering targets before granting any drive output.
     int prepare(const ModuleTarget &, const ModuleFeedback &, float dt_s, ModuleOutput &out);
-    int finishDrive(const ModuleFeedback &, float dt_s, bool permitted, ModuleOutput &out);
+    // Drive only when this module has a trusted steering result. No chassis-wide permit.
+    int finishDrive(const ModuleFeedback &, float dt_s, ModuleOutput &out);
 
 private:
     int steer(const ModuleFeedback &, float dt_s, ModuleOutput &out);

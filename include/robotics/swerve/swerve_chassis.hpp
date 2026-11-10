@@ -7,8 +7,6 @@ public:
     struct Config {
         SwerveKinematics::Config kinematics{};
         std::array<SwerveModule::Config, 4> modules{};
-        float align_enter_rad = 0.10f, align_exit_rad = 0.40f;
-        float rotation_epsilon_rad_s = 0.0001f;
     };
     explicit SwerveChassis(const Config &c)
         : config_(c), kinematics_(c.kinematics), modules_{SwerveModule(c.modules[0]), SwerveModule(c.modules[1]),
@@ -23,7 +21,5 @@ private:
     SwerveKinematics kinematics_;
     std::array<SwerveModule, 4> modules_;
     bool initialized_ = false;
-    bool drive_permitted_ = false, rotating_ = false;
-    std::array<std::uint64_t, 4> drive_generation_{};
 };
 }

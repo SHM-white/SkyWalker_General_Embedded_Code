@@ -1,23 +1,26 @@
 #pragma once
 #include <robotics/chassis/imu_heading.hpp>
+#include <robotics/vehicle/calibration.hpp>
 namespace skywalker::robotics::vehicle {
 // Bench-only opt-ins. Confirm common forward startup pose and both IMU mounting transforms.
 inline constexpr bool startup_heading_alignment_confirmed = false;
-// 只选择本仓库本地大 Yaw 执行器（MIT 力矩后端）。它不再是线上模式开关：
-// Reference v4 wire mode=1 always denotes desired world yaw rate.
-// No peer-specific wire mode switch is required.
-inline constexpr bool big_yaw_heading_lock_enabled = false;
-inline constexpr bool big_yaw_mit_mode_confirmed = false;
-// Confirm actual CTRL_MODE=3, CAN ID / feedback ID and motor direction on the
-// installed hardware before enabling. This selects a DIFFERENT motor backend.
-inline constexpr bool big_yaw_native_velocity_profile_confirmed = true;
-static_assert(!(big_yaw_native_velocity_profile_confirmed && big_yaw_heading_lock_enabled),
-              "Native velocity and MIT heading torque cannot control the same motor");
-inline ChassisMotionAdapter::Config chassisMotionConfig() {
+// One compile-time backend choice. The wire mode is always a world-rate intent;
+// this enum only selects which local motor backend executes it.
+enum class BigYawBackend { NativeVelocity, MitVelocity, MitHeading };
+inline constexpr auto big_yaw_backend = BigYawBackend::NativeVelocity;
+inline constexpr bool big_yaw_native_velocity_profile_confirmed = big_yaw_backend == BigYawBackend::NativeVelocity;
+inline constexpr bool big_yaw_mit_mode_confirmed = big_yaw_backend == BigYawBackend::MitVelocity ||
+                                                   big_yaw_backend == BigYawBackend::MitHeading;
+inline constexpr bool big_yaw_heading_lock_enabled = big_yaw_backend == BigYawBackend::MitHeading;
+inline constexpr ChassisMotionAdapter::Config chassisMotionConfig() {
     ChassisMotionAdapter::Config c{};
     c.frame = ChassisMotionAdapter::Frame::Body;
     c.compensation_enabled = false;
     c.startup_alignment_confirmed = startup_heading_alignment_confirmed;
+    c.spin_forward_scale = chassis_spin_forward_scale;
+    c.spin_lateral_scale = chassis_spin_lateral_scale;
+    c.max_wz_rad_s = chassis_max_wz_rad_s;
     return c;
 }
+static_assert(chassisMotionConfig().max_wz_rad_s > 0);
 }

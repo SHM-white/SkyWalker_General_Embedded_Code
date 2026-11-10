@@ -25,6 +25,25 @@ struct MotorCalibration {
     std::uint16_t encoder_zero_ticks = 0;
 };
 
+constexpr bool validDirection(float direction) {
+    return direction == 1.0f || direction == -1.0f;
+}
+constexpr bool positive(float value) {
+    return value > 0.0f;
+}
+template <std::size_t N> constexpr bool validMotorSet(const std::array<MotorCalibration, N> &motors) {
+    for (std::size_t i = 0; i < N; ++i) {
+        if (!motors[i].id || !validDirection(motors[i].direction) || !positive(motors[i].gear_ratio) ||
+            !positive(motors[i].effort_limit) || !positive(motors[i].velocity_limit_rad_s) ||
+            motors[i].encoder_zero_ticks >= 8192)
+            return false;
+        for (std::size_t j = 0; j < i; ++j)
+            if (motors[i].id == motors[j].id || (motors[i].master_id && motors[i].master_id == motors[j].master_id))
+                return false;
+    }
+    return true;
+}
+
 // TODO(calibration): ID/mode, current-mode firmware, output-shaft units and signs.
 inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
 inline constexpr MotorCalibration pitch{1, 0x00, 1, 1, 10.0f, 10, 0};
@@ -42,28 +61,30 @@ inline constexpr MotorCalibration dial{4, 0, 36, 1, 10.0, 20, 0};
 // raw encoder again; installation order alone cannot determine a new zero.
 // Encoder polarity is fixed for every motion mode.
 inline constexpr float wheel_gear_ratio = 3591.0f / 187.0f;
-inline constexpr float steer_bench_current_a = 0.8f, drive_bench_current_a = 0.5f;
 // ID1=FL, ID2=RL, ID3=RR, ID4=FR; 0..8191 ticks, indexed by motor ID - 1.
 // ID1 retains the old candidate from h7_framework-main-source.zip (2026-10-02).
 // ID2 moved by 180deg: (2421 + 4096) % 8192 = 6517.
 // IDs 3/4: clockwise 90deg from the old zeros, then another 180deg.
 // Raw zero adjustments: 335+4096=4431, 1049+4096=5145.
 inline constexpr std::array<std::uint16_t, 4> steer_zero_ticks_by_id{{3060, 6517, 4431, 5145}};
+static_assert(steer_zero_ticks_by_id[0] < 8192 && steer_zero_ticks_by_id[1] < 8192 &&
+                  steer_zero_ticks_by_id[2] < 8192 && steer_zero_ticks_by_id[3] < 8192,
+              "steer encoder zero must be a 13-bit tick value");
 // All four steering motors are mounted upside down: their native positive
 // rotation opposes body-positive (CCW viewed from above). The hardware adapter
 // applies this sign to angle/velocity feedback AND current output.
 inline constexpr std::array<MotorCalibration, 4> legacy_steer{{
-    {1, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[0]}, // FL
-    {4, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[3]}, // FR
-    {2, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[1]}, // RL
-    {3, 0, 1, -1, steer_bench_current_a, 4, steer_zero_ticks_by_id[2]}, // RR
+    {1, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[0]}, // FL
+    {4, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[3]}, // FR
+    {2, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[1]}, // RL
+    {3, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[2]}, // RR
 }};
 // Preserve the original direction of each motor ID; reconfirm after remounting.
 inline constexpr std::array<MotorCalibration, 4> legacy_wheel{{
-    {1, 0, wheel_gear_ratio, -1, drive_bench_current_a, 10, 0}, // FL
-    {4, 0, wheel_gear_ratio, 1, drive_bench_current_a, 10, 0},  // FR
-    {2, 0, wheel_gear_ratio, 1, drive_bench_current_a, 10, 0},  // RL
-    {3, 0, wheel_gear_ratio, -1, drive_bench_current_a, 10, 0}, // RR
+    {1, 0, wheel_gear_ratio, -1, 0.5f, 10, 0}, // FL
+    {4, 0, wheel_gear_ratio, 1, 0.5f, 10, 0},  // FR
+    {2, 0, wheel_gear_ratio, 1, 0.5f, 10, 0},  // RL
+    {3, 0, wheel_gear_ratio, -1, 0.5f, 10, 0}, // RR
 }};
 // Source: JJL0612/sentry_onlychassis 7c7e870 (2026-10-28), NOT a new measurement.
 // Same FL/FR/RL/RR coordinates; hardware adapter owns both feedback/output signs.
@@ -90,17 +111,64 @@ inline constexpr auto steer = swerve_calibration_set == SwerveCalibrationSet::Re
 inline constexpr auto wheel = swerve_calibration_set == SwerveCalibrationSet::Reference20261028Candidate
                                   ? reference_wheel
                                   : legacy_wheel;
+static_assert(validMotorSet(steer), "steer calibration must have unique IDs, +/-1 direction and valid limits");
+static_assert(validMotorSet(wheel), "wheel calibration must have unique IDs, +/-1 direction and valid limits");
+static_assert(validMotorSet(legacy_steer) && validMotorSet(reference_steer),
+              "both steer calibration sets must be valid");
+static_assert(validMotorSet(legacy_wheel) && validMotorSet(reference_wheel),
+              "both wheel calibration sets must be valid");
+static_assert(validMotorSet(friction), "friction calibration must have unique IDs, +/-1 direction and valid limits");
+static_assert(validDirection(small_yaw.direction) && validDirection(pitch.direction) &&
+                  validDirection(big_yaw.direction),
+              "single-axis motor direction must be +/-1");
+static_assert(small_yaw.encoder_zero_ticks < 8192 && pitch.encoder_zero_ticks < 8192 &&
+                  big_yaw.encoder_zero_ticks < 8192,
+              "DJI-compatible encoder zero must be a 13-bit tick value");
+static_assert(positive(small_yaw.gear_ratio) && positive(pitch.gear_ratio) && positive(big_yaw.gear_ratio) &&
+                  positive(small_yaw.effort_limit) && positive(pitch.effort_limit) && positive(big_yaw.effort_limit) &&
+                  positive(small_yaw.velocity_limit_rad_s) && positive(pitch.velocity_limit_rad_s) &&
+                  positive(big_yaw.velocity_limit_rad_s),
+              "gear ratios, effort and velocity limits must be positive");
 // J4310 bus IDs are also unverified; MIT backend remains unchanged.
 // Joint speed includes body-rotation compensation above the world-follow target.
 inline constexpr MotorCalibration reference_big_yaw{6, 0x11, 1, -1, 10.0f, 10.0f, 0};
+static_assert(validDirection(reference_big_yaw.direction) && positive(reference_big_yaw.gear_ratio) &&
+                  positive(reference_big_yaw.effort_limit) && positive(reference_big_yaw.velocity_limit_rad_s),
+              "reference big-Yaw calibration must be valid");
 // Calibrated encoder forward zero in the reference firmware, 2026-10-28.
 // Confirm that the installed J4310 and CAN identity match before motor operation.
 inline constexpr float reference_big_yaw_forward_zero_rad = -1.132792f;
 inline constexpr float steer_position_kp = 40, steer_velocity_kp = 0.20f;
 // A/(motor-shaft rad/s); swerve_profile converts once to wheel-shaft units.
 inline constexpr float drive_rotor_velocity_kp = 0.08f;
-inline constexpr float chassis_steer_scale = 1, chassis_drive_scale = 1;
 inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us = 1000000;
+
+// 调参：手动底盘/云台速度上限，单位 m/s 或 rad/s。
+inline constexpr float manual_max_vx_m_s = 0.3f, manual_max_vy_m_s = 0.3f, manual_max_wz_rad_s = 0.5f;
+inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 1.0f, manual_max_gimbal_pitch_rate_rad_s = 0.8f;
+// 调参：小陀螺边平移的参考倍率；0..1。
+inline constexpr float chassis_spin_forward_scale = 0.3f, chassis_spin_lateral_scale = 0.4f;
+// 调参：舵轮启停迟滞，单位 m/s；与轮轴角度/线速度无关。
+inline constexpr float chassis_zero_speed_epsilon_m_s = 0.1f, chassis_resume_speed_m_s = 0.2f;
+// 调参：底盘运动适配器的车体 wz 上限、舵向目标速率和驱动/舵向参考斜率。
+inline constexpr float chassis_max_wz_rad_s = 1.0f, chassis_steer_speed_rad_s = 4.0f;
+inline constexpr float chassis_drive_slew_rad_s2 = 10.0f, chassis_steer_slew_rad_s2 = 100.0f;
+// 调参：大 Yaw 世界速度到关节速度的反馈增益和原生速度加速度。
+inline constexpr float big_yaw_world_rate_feedback_gain = 0.25f;
+inline constexpr float big_yaw_native_acceleration_rad_s2 = 4.0f;
+static_assert(positive(manual_max_vx_m_s) && positive(manual_max_vy_m_s) && positive(manual_max_wz_rad_s) &&
+                  positive(manual_max_gimbal_yaw_rate_rad_s) && positive(manual_max_gimbal_pitch_rate_rad_s),
+              "manual speed limits must be positive");
+static_assert(chassis_spin_forward_scale >= 0 && chassis_spin_forward_scale <= 1 && chassis_spin_lateral_scale >= 0 &&
+                  chassis_spin_lateral_scale <= 1,
+              "spin translation scales must be within 0..1");
+static_assert(chassis_zero_speed_epsilon_m_s >= 0 && chassis_resume_speed_m_s >= chassis_zero_speed_epsilon_m_s,
+              "chassis speed hysteresis must be ordered");
+static_assert(positive(chassis_max_wz_rad_s) && positive(chassis_steer_speed_rad_s) &&
+                  positive(chassis_drive_slew_rad_s2) && positive(chassis_steer_slew_rad_s2),
+              "chassis rate and slew limits must be positive");
+static_assert(big_yaw_world_rate_feedback_gain >= 0 && positive(big_yaw_native_acceleration_rad_s2),
+              "big-Yaw feedback gain and acceleration must be valid");
 
 inline constexpr float two_pi = 6.2831853071795864769f;
 // 调参：小 Yaw 原始编码器上下限，ticks（8192 ticks/转）；当前为全量程，非实测机械安全端点。
@@ -111,10 +179,15 @@ inline constexpr float yaw_max_rad = (yaw_high_ticks - small_yaw.encoder_zero_ti
 inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
 // 调参：Pitch 驱动坐标的软件限位，rad；沿用现值，须与实测机械端点确认后再修改。
 inline constexpr float pitch_min_rad = 2.60f, pitch_max_rad = 3.40f;
+static_assert(yaw_min_rad < yaw_max_rad && yaw_center_rad > yaw_min_rad && yaw_center_rad < yaw_max_rad &&
+                  pitch_min_rad < pitch_max_rad,
+              "gimbal software limits must be ordered and contain their centers");
 // TODO(measure): these are existing geometry placeholders, not validated by
 // the reference's empirical radius=0.01 / reduction=1 speed conversion.
 // wheel_gear_ratio must include any transmission between the rotor and wheel.
 inline constexpr float wheel_radius_m = 0.05f, wheelbase_m = 0.4f, track_m = 0.4f;
+static_assert(positive(wheel_radius_m) && positive(wheelbase_m) && positive(track_m),
+              "wheel radius, wheelbase and track must be positive");
 
 // TODO(IMU): measure sensor-to-mechanical-body rotations, then establish epochs
 // on each boot/reference reset; equal frame IDs do not synchronize two clocks.

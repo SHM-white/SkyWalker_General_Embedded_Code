@@ -203,8 +203,10 @@ void CommandManager::run() {
             next.observed.run_allowed = gate.allowed && !safe_gate_latched;
         }
         const auto permission_available = [&](const OutputPermission &permission) {
-            return !require_permissions_ || (permission.valid && permission.enabled &&
-                                             isFresh(permission.stamp, now_ms, permission_timeout_ms_));
+            // Missing/expired referee data is allowed; only a current explicit
+            // denial restricts the selected output.
+            return !require_permissions_ || !permission.valid || !permission.stamp.valid ||
+                   !isFresh(permission.stamp, now_ms, permission_timeout_ms_) || permission.enabled;
         };
         const bool output_allowed = permission_available(next.observed.referee.robot.shooter_output) &&
                                     permission_available(next.observed.referee.robot.gimbal_output);

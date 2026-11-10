@@ -25,7 +25,6 @@ public:
     struct Config {
         std::uint32_t command_timeout_ms = 100;
         core::TimeUs source_timeout_us = 100000;
-        std::uint32_t permission_timeout_ms = 300;
         core::TimeUs max_cycle_us = 20000;
         // Fixed at startup. No automatic fallback between world/relative feedback.
         bool heading_lock_enabled = false, mit_mode_confirmed = false, heading_reference_confirmed = false;

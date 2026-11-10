@@ -40,11 +40,11 @@ inline control::VelocityMotor::Config bigYawMotorConfig() {
     c.loop.effort_abs_max = big_yaw.effort_limit;
     return c;
 }
-inline BigYawExecutor::Config bigYawExecutionConfig() {
+inline constexpr BigYawExecutor::Config bigYawExecutionConfig() {
     BigYawExecutor::Config c{};
     c.heading_lock_enabled = big_yaw_heading_lock_enabled;
     c.native_velocity_mode_confirmed = big_yaw_native_velocity_profile_confirmed;
-    c.native_velocity_acceleration_rad_s2 = 4.0f;
+    c.native_velocity_acceleration_rad_s2 = big_yaw_native_acceleration_rad_s2;
     c.mit_mode_confirmed = big_yaw_mit_mode_confirmed;
     c.heading_reference_confirmed = startup_heading_alignment_confirmed;
     c.heading.torque_max_nm = big_yaw.effort_limit;

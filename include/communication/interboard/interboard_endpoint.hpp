@@ -12,9 +12,13 @@ class InterBoardEndpoint {
 public:
     struct Config {
         robotics::BoardRole role;
-        std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 100;
+        std::uint32_t command_timeout_ms = 100, heartbeat_timeout_ms = 200;
         std::uint32_t tx_timeout_ms = 60;
         std::uint32_t status_timeout_ms = 100;
+        // Per-message send periods. Control/feedback stay at 100 Hz; heartbeat
+        // is reduced to 20 Hz and IMU samples remain at 50 Hz.
+        std::uint32_t heartbeat_period_ms = 50, control_period_ms = 10;
+        std::uint32_t imu_period_ms = 20, aux_period_ms = 20;
     };
     struct Snapshot {
         robotics::BoardHeartbeat peer{};

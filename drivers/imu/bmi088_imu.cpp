@@ -61,16 +61,22 @@ int Bmi088Imu::service() {
     report(ar);
     const int gr = read(gyro_, SENSOR_CHAN_GYRO_XYZ, g);
     report(gr);
-    Update u{};
+    Update accel_update{}, gyro_update{};
     if (!ar) {
-        u.sample.accel_m_s2 = a;
-        u.sample.accel_m_s2.value = core::rotate(config_.sensor_to_body, a.value);
-        u.updated_mask |= Accel;
+        accel_update.sample.accel_m_s2 = a;
+        accel_update.sample.accel_m_s2.value = core::rotate(config_.sensor_to_body, a.value);
+        accel_update.updated_mask |= Accel;
     }
-    if (!gr && !config_.correct_gyro_bias) {
-        u.sample.gyro_rad_s = g;
-        u.sample.gyro_rad_s.value = core::rotate(config_.sensor_to_body, g.value);
-        u.updated_mask |= Gyro;
+    if (!gr) {
+        auto gyro = g.value;
+        if (config_.correct_gyro_bias && estimator_->quality() != control::QuaternionEkf::Quality::Initializing) {
+            const auto bias = estimator_->gyroBiasRadS();
+            if (core::finite(bias))
+                gyro = {gyro.x - bias.x, gyro.y - bias.y, gyro.z - bias.z};
+        }
+        gyro_update.sample.gyro_rad_s = g;
+        gyro_update.sample.gyro_rad_s.value = core::rotate(config_.sensor_to_body, gyro);
+        gyro_update.updated_mask |= Gyro;
     }
     // In the pinned BMI08x driver DIE_TEMP performs its own SPI read, not a cache get.
     if (now >= next_temperature_) {
@@ -86,6 +92,10 @@ int Bmi088Imu::service() {
         else
             report(tr);
     }
+    if (accel_update.updated_mask)
+        report(state_.publish(accel_update));
+    if (gyro_update.updated_mask)
+        report(state_.publish(gyro_update));
 #ifdef CONFIG_SKYWALKER_ATTITUDE_EKF
     if (estimator_ && !ar && !gr) {
         const auto skew = a.stamp.time_us > g.stamp.time_us ? a.stamp.time_us - g.stamp.time_us
@@ -99,21 +109,16 @@ int Bmi088Imu::service() {
                 state_.resetOrientation(config_.reference);
             }
             if (!er) {
-                u.updated_mask |= Orientation;
-                u.sample.reference = config_.reference;
-                u.sample.orientation = {core::multiply(estimator_->attitude(), core::conjugate(config_.sensor_to_body)),
-                                        {std::max(a.stamp.time_us, g.stamp.time_us), 0, true}};
-                u.sample.attitude_quality = estimator_->quality() == control::QuaternionEkf::Quality::Tracking
-                                                ? AttitudeQuality::Tracking
-                                                : AttitudeQuality::Degraded;
-                if (config_.correct_gyro_bias) {
-                    const auto bias = estimator_->gyroBiasRadS();
-                    u.sample.gyro_rad_s = g;
-                    u.sample.gyro_rad_s.value = core::rotate(config_.sensor_to_body,
-                                                             {g.value.x - bias.x, g.value.y - bias.y,
-                                                              g.value.z - bias.z});
-                    u.updated_mask |= Gyro;
-                }
+                Update attitude{};
+                attitude.updated_mask = Orientation;
+                attitude.sample.reference = config_.reference;
+                attitude.sample.orientation = {
+                    core::multiply(estimator_->attitude(), core::conjugate(config_.sensor_to_body)),
+                    {std::max(a.stamp.time_us, g.stamp.time_us), 0, true}};
+                attitude.sample.attitude_quality = estimator_->quality() == control::QuaternionEkf::Quality::Tracking
+                                                       ? AttitudeQuality::Tracking
+                                                       : AttitudeQuality::Degraded;
+                report(state_.publish(attitude));
             }
             else if (er != -EAGAIN)
                 report(er);
@@ -122,8 +127,6 @@ int Bmi088Imu::service() {
             report(-ESTALE);
     }
 #endif
-    if (u.updated_mask)
-        report(state_.publish(u));
     return error;
 }
 }

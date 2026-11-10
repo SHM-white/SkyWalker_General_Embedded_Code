@@ -61,14 +61,9 @@ inline robotics::ChassisExecutor::Config executorConfig(bool power_budget) {
     c.power_model_calibrated = calibration::power_model_calibrated;
     // TODO(power): complete measured-current/voltage model identification and
     // mechanical tracking acceptance before opening full power control.
-    c.power_control_calibrated = false;
     c.allow_estimated_power = false;
     c.estimate_idle_power_w = calibration::power_idle_w;
     c.estimate_w_per_abs_amp = calibration::power_per_abs_amp_w;
-    c.bench_effort_scale = calibration::chassis_drive_scale;
-    c.bench_steer_effort_scale = calibration::chassis_steer_scale;
-    c.bench_drive_current_limit_a = calibration::drive_bench_current_a;
-    c.bench_steer_current_limit_a = calibration::steer_bench_current_a;
     return c;
 }
 

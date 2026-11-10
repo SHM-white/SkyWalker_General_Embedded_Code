@@ -28,10 +28,7 @@ inline SwerveChassis::Config chassisConfig() {
 }
 
 inline ChassisExecutor::Config executionConfig() {
-    auto config = chassisExecutionConfig();
-    config.bench_drive_current_limit_a = std::min(config.bench_drive_current_limit_a, drive_current_a);
-    config.bench_steer_current_limit_a = std::min(config.bench_steer_current_limit_a, steer_current_a);
-    return config;
+    return chassisExecutionConfig();
 }
 
 inline ChassisCommand boundedCommand(const ChassisCommand &input) {

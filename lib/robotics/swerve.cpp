@@ -197,28 +197,23 @@ int SwerveModule::drive(const ModuleFeedback &f, float dt, ModuleOutput &out) {
     out.drive_output_valid = true;
     return 0;
 }
-int SwerveModule::finishDrive(const ModuleFeedback &f, float dt, bool permitted, ModuleOutput &out) {
+int SwerveModule::finishDrive(const ModuleFeedback &f, float dt, ModuleOutput &out) {
     out.drive_enable_generation = f.drive_enable_generation;
-    out.drive_permitted = permitted && out.steer_output_valid && out.cosine_scale > 0;
-    if (!out.drive_permitted) {
-        // No hidden integral or slewed reference survives an alignment/fault stop.
-        drive_history_valid_ = false;
-        drive_ = {};
+    // No chassis-wide permit: a valid steering result and a finite target are
+    // enough to run this wheel. cosine_scale == 0 is a normal zero-speed target.
+    if (!out.steer_output_valid || !std::isfinite(out.drive_target_rad_s)) {
+        out.drive_permitted = out.drive_output_valid = false;
         out.drive_target_rad_s = out.drive_effort = 0;
-        const auto &pid = config_.drive.regulator.feedback;
-        out.drive_output_valid = f.drive_valid && std::isfinite(f.drive_velocity_rad_s) && std::isfinite(dt) &&
-                                 dt >= pid.dt_min_s && dt <= pid.dt_max_s;
         return 0;
     }
-    return drive(f, dt, out);
+    const int ret = drive(f, dt, out);
+    out.drive_permitted = out.drive_output_valid;
+    return ret;
 }
 int SwerveModule::step(const ModuleTarget &target, const ModuleFeedback &f, float dt, ModuleOutput &out) {
-    const int ret = prepare(target, f, dt, out);
-    if (ret < 0) {
-        (void)reset(f);
-        return ret;
-    }
-    return finishDrive(f, dt, true, out);
+    const int prepared = prepare(target, f, dt, out);
+    const int driven = finishDrive(f, dt, out);
+    return prepared < 0 ? prepared : driven;
 }
 int SwerveModule::prepare(const ModuleTarget &target, const ModuleFeedback &f, float dt, ModuleOutput &out) {
     if (!std::isfinite(target.angle_rad) || !std::isfinite(target.wheel_velocity_m_s) || !std::isfinite(dt) || dt < 0) {
@@ -260,11 +255,6 @@ int SwerveModule::prepare(const ModuleTarget &target, const ModuleFeedback &f, f
     return steer_error;
 }
 int SwerveChassis::validate() const {
-    if (!std::isfinite(config_.align_enter_rad) || !std::isfinite(config_.align_exit_rad) ||
-        config_.align_enter_rad <= 0 || config_.align_enter_rad >= config_.align_exit_rad ||
-        config_.align_exit_rad >= pi / 2 || !std::isfinite(config_.rotation_epsilon_rad_s) ||
-        config_.rotation_epsilon_rad_s < 0)
-        return -EINVAL;
     int ret = kinematics_.validate();
     if (ret < 0)
         return ret;
@@ -276,8 +266,6 @@ int SwerveChassis::validate() const {
     return 0;
 }
 int SwerveChassis::reset(const ChassisFeedback &f) {
-    drive_permitted_ = rotating_ = false;
-    drive_generation_ = {};
     ModuleTargets angles{};
     for (unsigned i = 0; i < 4; ++i) {
         (void)modules_[i].reset(f.module[i]);
@@ -297,7 +285,8 @@ int SwerveChassis::step(const ChassisCommand &command, const ChassisFeedback &f,
     ChassisOutput next{};
     const int solve_error = kinematics_.solve(command, next.target);
     if (solve_error < 0) {
-        (void)reset(f);
+        // No new outputs this cycle. Keep per-module controller history and do
+        // not reset all four modules for one invalid command batch.
         out = {};
         return solve_error;
     }
@@ -319,42 +308,20 @@ int SwerveChassis::step(const ChassisCommand &command, const ChassisFeedback &f,
                 first_error = ret;
         }
     }
-    bool healthy = first_error == 0, moving = false;
-    float max_error = 0;
-    for (unsigned i = 0; i < 4; ++i) {
-        const auto &m = next.module[i];
-        const auto &fb = f.module[i];
-        healthy = healthy && m.steer_output_valid && !m.steer_reinitialized && fb.drive_valid &&
-                  std::isfinite(fb.drive_velocity_rad_s) && drive_generation_[i] == fb.drive_enable_generation;
-        drive_generation_[i] = fb.drive_enable_generation;
-        max_error = std::max(max_error, std::fabs(m.alignment_error_rad));
-        moving = moving || next.target[i].wheel_velocity_m_s != 0;
-    }
-    const bool rotating = command.mode != ChassisMode::Disabled &&
-                          std::fabs(command.wz_rad_s) > config_.rotation_epsilon_rad_s;
-    if (!healthy || !moving || command.mode == ChassisMode::Disabled || rotating != rotating_)
-        drive_permitted_ = false;
-    // Rotation starts aligned, then tracks with individual cos^3 compensation.
-    // Ordinary motion uses 0.10/0.40 rad hysteresis against FINAL targets.
-    if (healthy && moving && command.mode != ChassisMode::Disabled) {
-        if (!drive_permitted_ && max_error < config_.align_enter_rad)
-            drive_permitted_ = true;
-        else if (drive_permitted_ && !rotating && max_error > config_.align_exit_rad)
-            drive_permitted_ = false;
-    }
-    rotating_ = rotating;
-    next.drive_permitted = drive_permitted_;
     if (command.mode != ChassisMode::Disabled) {
         for (unsigned i = 0; i < 4; ++i) {
-            const int ret = modules_[i].finishDrive(f.module[i], dt, drive_permitted_, next.module[i]);
-            if (!first_error && ret < 0)
+            const int ret = modules_[i].finishDrive(f.module[i], dt, next.module[i]);
+            if (first_error == 0 && ret < 0)
                 first_error = ret;
         }
-        if (first_error < 0) {
-            drive_permitted_ = next.drive_permitted = false;
-            for (unsigned i = 0; i < 4; ++i)
-                (void)modules_[i].finishDrive(f.module[i], dt, false, next.module[i]);
-        }
+    }
+    // Diagnostic summary only; never used as a gate.
+    if (command.mode == ChassisMode::Disabled)
+        next.drive_permitted = false;
+    else {
+        next.drive_permitted = true;
+        for (const auto &m : next.module)
+            next.drive_permitted = next.drive_permitted && m.drive_output_valid;
     }
     out = next;
     return first_error;

@@ -49,8 +49,8 @@ SwerveChassis::Config motionConfig() {
 int main() {
     static installed::Diagnostics diagnostics;
     diagnostics.start("chassis_four_modules", "chassis", "vx,vy=0.1m/s; wz=0.2rad/s; steer=0.8A; drive=0.5A");
-    diagnostics.event("stage_steer_limit_mA", int(installed::steer_bench_current_a * 1000));
-    diagnostics.event("stage_drive_limit_mA", int(installed::drive_bench_current_a * 1000));
+    diagnostics.event("stage_steer_limit_mA", int(installed::steer[0].effort_limit * 1000));
+    diagnostics.event("stage_drive_limit_mA", int(installed::wheel[0].effort_limit * 1000));
     diagnostics.event("stage_velocity_limit_mm_s", int(stage::chassis_speed_m_s * 1000));
     static communication::ConfiguredInterBoardTransport transport({.kind = communication::InterBoardTransportKind::Uart,
                                                                    .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},

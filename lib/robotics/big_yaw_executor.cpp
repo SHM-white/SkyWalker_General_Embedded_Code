@@ -10,7 +10,7 @@ int BigYawExecutor::begin() {
     if (begin_attempted_)
         return -EALREADY;
     begin_attempted_ = true;
-    config_error_ = !config_.permission_timeout_ms || !config_.max_cycle_us ||
+    config_error_ = !config_.max_cycle_us ||
                             !std::isfinite(config_.rate_abs_max_rad_s) || config_.rate_abs_max_rad_s <= 0 ||
                             !std::isfinite(config_.motor_to_joint_ratio) || config_.motor_to_joint_ratio <= 0 ||
                             (config_.direction != 1 && config_.direction != -1) || !config_.command_timeout_ms ||
@@ -57,7 +57,8 @@ RunStatus BigYawExecutor::suspend(core::TimeUs now, WaitReason reason, int error
 }
 RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs now) {
     const auto now_ms = now / 1000;
-    const bool cycle = previous_us_ && now > previous_us_ && now - previous_us_ <= config_.max_cycle_us;
+    const bool have_previous = previous_us_ != 0;
+    const bool cycle = have_previous && now > previous_us_ && now - previous_us_ <= config_.max_cycle_us;
     const float dt = cycle ? float(now - previous_us_) / 1e6f : 0;
     previous_us_ = now;
     if (!configured_)
@@ -72,12 +73,9 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
         return suspend(now, WaitReason::Command, -ERANGE);
     if (!in.peer_online || !in.transport_ready || !in.local_boot_id || r.receiver_boot_id != in.local_boot_id)
         return suspend(now, WaitReason::Transport, -ESTALE);
-    if (!forwardedFresh(r.stamp, r.command_age_ms, now_ms, config_.command_timeout_ms) ||
-        !forwardedFresh(r.stamp, r.source_age_ms, now_ms, config_.source_timeout_us / 1000))
+    const auto effective_age = std::max(r.command_age_ms, r.source_age_ms);
+    if (!forwardedFresh(r.stamp, effective_age, now_ms, config_.command_timeout_ms))
         return suspend(now, WaitReason::Command, -ESTALE);
-    if (!r.permission.valid || !r.permission.enabled ||
-        !forwardedFresh(r.permission.stamp, r.permission_age_ms, now_ms, config_.permission_timeout_ms))
-        return suspend(now, WaitReason::Power, -EACCES);
     if (config_.heading_lock_enabled && (!in.head.valid || in.head.receiver_boot_id != in.local_boot_id ||
                                          !in.peer_boot_id || in.head.sender_boot_id != in.peer_boot_id ||
                                          !forwardedFresh(in.head.stamp, in.head.source_age_ms, now_ms, 50)))
@@ -85,15 +83,21 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
     status_.requested = true;
     status_.last_command_sequence = r.stamp.sequence;
     int error = drive_.enable();
+    if (!have_previous || !cycle) {
+        // Missed interval: keep the enable request pending and stage no new
+        // output. Do not disable the drive or reset the heading controller.
+        status_.ready = false;
+        return publish(now, RunState::Recovering, WaitReason::Cycle, error);
+    }
     if (config_.heading_lock_enabled) {
         const auto view = drive_.snapshot();
-        if (!cycle || view.state != motor::MotorState::Active || !view.feedback_fresh || !view.enabled_requested ||
+        if (view.state != motor::MotorState::Active || !view.feedback_fresh || !view.enabled_requested ||
             !view.output_permitted || !(view.feedback.valid & motor::FeedbackVelocity) ||
             !std::isfinite(view.feedback.velocity_rad_s)) {
             heading_.reset();
             (void)drive_.invalidateComputedEffort();
             status_.ready = false;
-            return publish(now, RunState::Recovering, !cycle ? WaitReason::Cycle : WaitReason::Feedback, error);
+            return publish(now, RunState::Recovering, WaitReason::Feedback, error);
         }
         if (heading_enable_generation_ != view.enable_generation) {
             heading_.reset();
@@ -112,10 +116,6 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
         return publish(now, RunState::Active, WaitReason::None, error);
     }
     if (config_.native_velocity_mode_confirmed) {
-        // A missed execution cycle is a hard recovery boundary, not an
-        // opportunity to repeat a previously staged velocity command.
-        if (!cycle)
-            return suspend(now, WaitReason::Cycle);
         if (error < 0)
             return suspend(now, WaitReason::Drive, error);
         const auto view = drive_.snapshot();

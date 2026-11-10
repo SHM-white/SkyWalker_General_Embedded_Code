@@ -72,7 +72,8 @@ InterBoardEndpoint::Snapshot InterBoardEndpoint::snapshot() const {
 void InterBoardEndpoint::poll(std::uint64_t now) {
     if ((config_.role != BoardRole::GimbalController && config_.role != BoardRole::ChassisController) ||
         !config_.command_timeout_ms || !config_.heartbeat_timeout_ms || !config_.tx_timeout_ms ||
-        config_.tx_timeout_ms > 1000 || !config_.status_timeout_ms) {
+        config_.tx_timeout_ms > 1000 || !config_.status_timeout_ms || !config_.heartbeat_period_ms ||
+        !config_.control_period_ms || !config_.imu_period_ms || !config_.aux_period_ms) {
         const auto key = k_spin_lock(&lock_);
         published_ = {};
         published_.transport = transport_.kind();
@@ -142,9 +143,8 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
     next.operator_control_valid = next.online && op.sender_boot_id == next.peer.sender_boot_id &&
                                   op.receiver_boot_id == boot_id_ &&
                                   forwardedFresh(op.stamp, op.source_age_ms, now, config_.command_timeout_ms);
-    if (!forwardedFresh(next.big_yaw_request.stamp, next.big_yaw_request.command_age_ms, now,
-                        config_.command_timeout_ms) ||
-        !forwardedFresh(next.big_yaw_request.stamp, next.big_yaw_request.source_age_ms, now,
+    if (!forwardedFresh(next.big_yaw_request.stamp,
+                        std::max(next.big_yaw_request.command_age_ms, next.big_yaw_request.source_age_ms), now,
                         config_.command_timeout_ms))
         next.big_yaw_request = {};
     if (!next.big_yaw_feedback.valid ||
@@ -155,6 +155,13 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
         next.big_yaw_feedback.armed = false;
     }
     if (transport_ready && now >= next_tx_ms_ && !transport_.txBusy()) {
+        std::array<std::uint32_t, kMessageCount> periods{};
+        periods.fill(config_.aux_period_ms);
+        periods[messageIndex(MessageId::Heartbeat)] = config_.heartbeat_period_ms;
+        periods[messageIndex(MessageId::ChassisControl)] = config_.control_period_ms;
+        periods[messageIndex(MessageId::BigYawRequest)] = config_.control_period_ms;
+        periods[messageIndex(MessageId::BigYawFeedback)] = config_.control_period_ms;
+        periods[messageIndex(MessageId::GimbalImuYaw)] = config_.imu_period_ms;
         std::uint8_t batch[InterBoardTransport::kTxCapacity]{};
         std::size_t used = 0;
         std::array<bool, kMessageCount> included{};
@@ -230,19 +237,17 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 });
             append(MessageId::BigYawRequest, [&](auto seq, auto *bytes, auto cap) {
                 auto request = outgoing.big_yaw_request;
-                const bool current = forwardedFresh(request.stamp, request.source_age_ms, now,
-                                                    config_.command_timeout_ms) &&
-                                     forwardedFresh(request.stamp, request.command_age_ms, now,
-                                                    config_.command_timeout_ms) &&
-                                     (!have_big_yaw_baseline_ ||
-                                      sequenceAfter(request.stamp.sequence, big_yaw_baseline_sequence_));
+                const bool current =
+                    forwardedFresh(request.stamp, std::max(request.source_age_ms, request.command_age_ms), now,
+                                   config_.command_timeout_ms) &&
+                    (!have_big_yaw_baseline_ || sequenceAfter(request.stamp.sequence, big_yaw_baseline_sequence_));
                 const auto elapsed = age(request.stamp, now);
                 request.source_age_ms = addAge(request.source_age_ms, elapsed);
                 request.command_age_ms = addAge(request.command_age_ms, elapsed);
                 request.permission_age_ms = age(request.permission.stamp, now);
                 request.receiver_boot_id = peer_boot_;
-                if (!next.online || !current || request.mode != BigYawMode::FollowCenter || !request.permission.valid ||
-                    !request.permission.enabled || !std::isfinite(request.target_rate_rad_s)) {
+                if (!next.online || !current || request.mode != BigYawMode::FollowCenter ||
+                    !std::isfinite(request.target_rate_rad_s)) {
                     request.mode = BigYawMode::Disabled;
                     request.target_rate_rad_s = 0;
                     request.permission.enabled = false;
@@ -297,7 +302,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 next_tx_ms_ = now + 1;
                 for (std::size_t i = 0; i < included.size(); ++i)
                     if (included[i])
-                        next_message_ms_[i] = now + ((i == 1 || i == 4 || i == 5) ? 10 : 20);
+                        next_message_ms_[i] = now + periods[i];
             }
             else if (ret != -EAGAIN)
                 error_ = ret;

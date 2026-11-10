@@ -91,12 +91,7 @@ int ChassisExecutor::begin() {
     int ret = chassis_.validate();
     if (ret == 0 &&
         (!config_.max_cycle_us || config_.max_cycle_us > 20000 || !config_.measurement_timeout_us ||
-         !config_.permission_timeout_ms || !config_.command_timeout_ms || !config_.source_timeout_us ||
-         !std::isfinite(config_.bench_effort_scale) || config_.bench_effort_scale < 0 ||
-         config_.bench_effort_scale > 1 || !std::isfinite(config_.bench_steer_effort_scale) ||
-         config_.bench_steer_effort_scale < 0 || config_.bench_steer_effort_scale > 1 ||
-         !std::isfinite(config_.bench_drive_current_limit_a) || config_.bench_drive_current_limit_a <= 0 ||
-         !std::isfinite(config_.bench_steer_current_limit_a) || config_.bench_steer_current_limit_a <= 0 ||
+         !config_.permission_timeout_ms || !config_.command_timeout_ms ||
          !std::isfinite(config_.estimate_idle_power_w) || config_.estimate_idle_power_w < 0 ||
          !std::isfinite(config_.estimate_w_per_abs_amp) || config_.estimate_w_per_abs_amp < 0 ||
          (config_.allow_estimated_power && (!config_.power_model_calibrated || config_.estimate_w_per_abs_amp <= 0))))
@@ -131,8 +126,6 @@ RunStatus ChassisExecutor::suspend(core::TimeUs now, WaitReason reason, int erro
     return publish(now, blocked ? RunState::Blocked : RunState::Disabled, reason, error);
 }
 int ChassisExecutor::power(const ChassisExecutionInputs &inputs, core::TimeUs now_us, float dt_s) {
-    effort_scale_ = config_.bench_effort_scale;
-    steer_effort_scale_ = config_.bench_steer_effort_scale;
     selected_power_ = inputs.measured_power;
     const auto valid_measurement = [&] {
         return selected_power_.valid && selected_power_.source != PowerMeasurementSource::None &&
@@ -154,28 +147,36 @@ int ChassisExecutor::power(const ChassisExecutionInputs &inputs, core::TimeUs no
                            PowerMeasurementSource::Estimated,
                            {hardware_.oldestFeedbackMs() * 1000, status_.stamp.sequence, true}};
     }
-    if (!config_.require_power_budget)
+    effort_scale_ = steer_effort_scale_ = last_power_scale_;
+    if (!config_.require_power_budget) {
+        last_power_scale_ = 1.0f;
+        effort_scale_ = steer_effort_scale_ = 1.0f;
         return 0;
+    }
     const auto now_ms = now_us / 1000;
     const auto &budget = inputs.power_budget;
-    if (!isFresh(budget.stamp, now_ms, config_.permission_timeout_ms) ||
-        !isFresh(budget.limit_stamp, now_ms, config_.permission_timeout_ms) || !valid_measurement())
-        return -ESTALE;
-    ChassisPowerDecision decision{};
-    const int ret = limiter_.step({selected_power_.power_w, budget.chassis_power_limit_w, budget.buffer_energy_j}, dt_s,
-                                  decision);
-    if (ret == 0) {
-        // Measurement includes steering. Total-budget reduction must also
-        // constrain it; independent bench scales never exempt steering power.
-        effort_scale_ *= decision.effort_scale;
-        steer_effort_scale_ *= decision.effort_scale;
+    if (isFresh(budget.limit_stamp, now_ms, config_.permission_timeout_ms) &&
+        std::isfinite(budget.chassis_power_limit_w) && budget.chassis_power_limit_w >= 0) {
+        last_power_limit_w_ = budget.chassis_power_limit_w;
+        have_power_limit_ = true;
     }
-    return ret;
+    const bool buffer_fresh = isFresh(budget.stamp, now_ms, config_.permission_timeout_ms) &&
+                              std::isfinite(budget.buffer_energy_j) && budget.buffer_energy_j >= 0;
+    if (!have_power_limit_ || !buffer_fresh || !valid_measurement())
+        return 0;
+    ChassisPowerDecision decision{};
+    const int ret =
+        limiter_.step({selected_power_.power_w, last_power_limit_w_, budget.buffer_energy_j}, dt_s, decision);
+    if (ret == 0 && std::isfinite(decision.effort_scale))
+        last_power_scale_ = std::clamp(decision.effort_scale, 0.0f, 1.0f);
+    effort_scale_ = steer_effort_scale_ = last_power_scale_;
+    return 0;
 }
 
 RunStatus ChassisExecutor::update(const ChassisExecutionInputs &in, core::TimeUs now) {
     const auto now_ms = now / 1000;
-    const bool cycle = have_time_ && now > previous_us_ && now - previous_us_ <= config_.max_cycle_us;
+    const bool have_previous = previous_us_ != 0;
+    const bool cycle = have_previous && now > previous_us_ && now - previous_us_ <= config_.max_cycle_us;
     const float dt = cycle ? float(now - previous_us_) / 1e6f : 0;
     previous_us_ = now;
     have_time_ = true;
@@ -186,40 +187,36 @@ RunStatus ChassisExecutor::update(const ChassisExecutionInputs &in, core::TimeUs
     if (in.command.mode > ChassisMode::Spin || !std::isfinite(in.command.vx_m_s) || !std::isfinite(in.command.vy_m_s) ||
         !std::isfinite(in.command.wz_rad_s))
         return suspend(now, WaitReason::Command, -EINVAL);
-    const bool fresh = isFresh(in.command.stamp, now_ms, config_.command_timeout_ms) &&
-                       core::fresh(in.source_stamp, now, config_.source_timeout_us);
+    const bool fresh = isFresh(in.command.stamp, now_ms, config_.command_timeout_ms);
     if (!fresh || in.command.mode == ChassisMode::Disabled)
         return suspend(now, WaitReason::Command, fresh ? 0 : -ESTALE);
     if (!in.transport_ready)
         return suspend(now, WaitReason::Transport, -ESTALE);
-    if (in.require_permission && (!in.permission.valid || !in.permission.enabled ||
-                                  !isFresh(in.permission.stamp, now_ms, config_.permission_timeout_ms)))
-        return suspend(now, WaitReason::Power, -EACCES);
+    ChassisCommand command = in.command;
+    if (in.require_permission && in.permission.valid && in.permission.stamp.valid &&
+        isFresh(in.permission.stamp, now_ms, config_.permission_timeout_ms) && !in.permission.enabled) {
+        // Referee denial restricts motion only; steering and the executor stay
+        // alive, and Big Yaw is a separate executor.
+        command.vx_m_s = command.vy_m_s = command.wz_rad_s = 0;
+    }
     status_.requested = true;
     status_.last_command_sequence = in.command.stamp.sequence;
     int first_error = hardware_.group().enable();
     const int read = hardware_.read(feedback_);
     if (read < 0 && !first_error)
         first_error = read;
-    const int calculated = chassis_.step(in.command, feedback_, dt, output_);
+    if (!have_previous || !cycle) {
+        // No new kinematics output or CAN command this cycle. The motor command
+        // lifetime remains the only stop mechanism; do not disable the group.
+        status_.ready = false;
+        return publish(now, RunState::Recovering, WaitReason::Cycle, first_error);
+    }
+    const int calculated = chassis_.step(command, feedback_, dt, output_);
     if (calculated < 0 && !first_error)
         first_error = calculated;
-    // Keep enabled power control; missing measurements affect output, not input intent.
-    const int limited = cycle ? power(in, now, dt) : 0;
-    if (limited < 0) {
-        effort_scale_ = steer_effort_scale_ = 0;
-        for (auto &m : output_.module)
-            m.steer_output_valid = m.drive_output_valid = false;
-    }
+    // Keep enabled power control; missing/stale power data reuses the last scale.
+    const int limited = power(in, now, dt);
     auto staged = output_;
-    if (!config_.power_control_calibrated) {
-        for (auto &m : staged.module) {
-            m.steer_effort = std::clamp(m.steer_effort, -config_.bench_steer_current_limit_a,
-                                        config_.bench_steer_current_limit_a);
-            m.drive_effort = std::clamp(m.drive_effort, -config_.bench_drive_current_limit_a,
-                                        config_.bench_drive_current_limit_a);
-        }
-    }
     const int sent = hardware_.stage(staged, steer_effort_scale_, effort_scale_);
     if (sent < 0 && !first_error)
         first_error = sent;

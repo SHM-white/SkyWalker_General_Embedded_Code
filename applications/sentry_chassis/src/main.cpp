@@ -21,7 +21,13 @@ using namespace skywalker;
 using namespace robotics;
 namespace installed = robotics::vehicle;
 communication::AsyncUart::DmaBuffers link_dma __nocache;
-enum class BigYawGate : std::uint8_t { None, PeerDisabled, ChassisDisabled, BodyGyro, PeerImu, MissingRequest };
+enum class BigYawGate : std::uint8_t {
+    None = 0,
+    PeerDisabled = 1,
+    BodyGyro = 3,
+    PeerImu = 4,
+    MissingRequest = 5,
+};
 std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
     return stamp.valid && now_ms >= stamp.timestamp_ms
                ? static_cast<std::uint32_t>(std::min<std::uint64_t>(now_ms - stamp.timestamp_ms, UINT32_MAX))
@@ -125,11 +131,11 @@ int main() {
         input.command = referenceV4ChassisToBody(input.command, encoder_valid, yaw_feedback.native_position_rad,
                                                  installed::reference_big_yaw_forward_zero_rad,
                                                  installed::reference_big_yaw.direction,
-                                                 installed::reference_big_yaw.gear_ratio);
+                                                 installed::reference_big_yaw.gear_ratio,
+                                                 installed::chassis_spin_forward_scale,
+                                                 installed::chassis_spin_lateral_scale);
         input.command = motion.update(input.command, body_sample, rx.gimbal_imu, rx.local_boot_id,
                                       input.command.mode == ChassisMode::Disabled, now_ms, rx.peer);
-        input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
-                              input.command.stamp.valid};
         input.transport_ready = steer_error == 0 && drive_error == 0 && chassis_error == 0 && power_error == 0 &&
                                 rx.online;
         // This fixed manual entry uses the real peer RC authority and bounded
@@ -141,12 +147,6 @@ int main() {
         auto big_gate = !rx.big_yaw_request.stamp.valid                  ? BigYawGate::MissingRequest
                         : big_input.request.mode == BigYawMode::Disabled ? BigYawGate::PeerDisabled
                                                                          : BigYawGate::None;
-        // The same left-switch control must stop both the wheels and big Yaw.
-        if (input.command.mode == ChassisMode::Disabled) {
-            big_input.request.mode = BigYawMode::Disabled;
-            if (big_gate == BigYawGate::None)
-                big_gate = BigYawGate::ChassisDisabled;
-        }
         if (big_input.request.mode == BigYawMode::FollowCenter && !installed::big_yaw_heading_lock_enabled) {
             // Local velocity backend accepts *joint-relative* speed; decode the
             // reference's world-rate request using two real gyro observations.
@@ -160,7 +160,9 @@ int main() {
             else {
                 const float joint_rate = referenceV4WorldToJointRate(big_input.request.target_rate_rad_s,
                                                                      body_snapshot.sample.gyro_rad_s.value.z,
-                                                                     rx.gimbal_imu.yaw_rate_rad_s);
+                                                                     rx.gimbal_imu.yaw_rate_rad_s,
+                                                                     installed::big_yaw_world_rate_feedback_gain,
+                                                                     installed::reference_big_yaw.velocity_limit_rad_s);
                 // Compensation can exceed the world target. Saturate at the
                 // installed joint limit shared with the execution guard.
                 big_input.request.target_rate_rad_s = std::clamp(joint_rate, -big_yaw_config.rate_abs_max_rad_s,

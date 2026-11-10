@@ -10,13 +10,15 @@ inline constexpr std::uint32_t manual_command_timeout_ms = gimbal_command_timeou
 // Old physical joint-direction hint retained for standalone benches;
 // reference-v4 world-rate commands must NOT apply this factor.
 inline constexpr float big_yaw_wire_direction = -1.0f;
-inline CommandManager::Config manualCommandConfig() {
+inline constexpr CommandManager::Config manualCommandConfig() {
     auto c = gimbalCommandConfig();
     c.require_external_run_gate = true;
-    c.max_chassis_vx_m_s = c.max_chassis_vy_m_s = 0.3f;
-    c.max_chassis_wz_rad_s = 0.5f;
+    c.max_chassis_vx_m_s = manual_max_vx_m_s;
+    c.max_chassis_vy_m_s = manual_max_vy_m_s;
+    c.max_chassis_wz_rad_s = manual_max_wz_rad_s;
     return c;
 }
+static_assert(manualCommandConfig().max_chassis_wz_rad_s > 0);
 inline InertialGimbalAdapter::Config manualInertialConfig() {
     InertialGimbalAdapter::Config c{};
     c.yaw = yawAxisConfig();
