@@ -161,7 +161,9 @@ inline CommandManager::Config commandConfig() {
     auto c = board_config::command_policy;
     c.mapper.input_profile = IS_ENABLED(CONFIG_VEHICLE_SAMPLE_CONTROLS) ? RemoteInputProfile::PhysicalRemote
                                                                         : RemoteInputProfile::KeyboardMouseSelectable;
-    c.require_referee_for_motion = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
+    c.require_referee_for_chassis = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
+    c.require_referee_for_gimbal = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
+    c.require_referee_for_shooter = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
     c.allow_auto = IS_ENABLED(CONFIG_VEHICLE_VISION_EXECUTE);
     c.expected_vision_reference = calibration::head_reference;
     // Left stick: forward/lateral velocity limits in m/s.

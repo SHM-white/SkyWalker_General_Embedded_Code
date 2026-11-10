@@ -31,8 +31,9 @@ void fillManualMotion(const OperatorIntent &i, const CommandArbiter::Config &c, 
 int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     if (!std::isfinite(config_.channel_range) || config_.channel_range <= 0 ||
         !std::isfinite(config_.analog_deadband) || config_.analog_deadband < 0 || config_.analog_deadband >= 1 ||
-        !std::isfinite(config_.mouse_yaw_scale) || !std::isfinite(config_.mouse_pitch_scale) ||
-        !std::isfinite(config_.mouse_yaw_rate_per_unit) || !std::isfinite(config_.mouse_pitch_rate_per_unit) ||
+        (config_.input_profile != RemoteInputProfile::PhysicalRemote &&
+         (!std::isfinite(config_.mouse_yaw_scale) || !std::isfinite(config_.mouse_pitch_scale) ||
+          !std::isfinite(config_.mouse_yaw_rate_per_unit) || !std::isfinite(config_.mouse_pitch_rate_per_unit))) ||
         (config_.input_profile != RemoteInputProfile::PhysicalRemote &&
          config_.input_profile != RemoteInputProfile::KeyboardMouseSelectable &&
          config_.input_profile != RemoteInputProfile::ShooterSelectable))
