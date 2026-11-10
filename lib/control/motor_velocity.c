@@ -69,12 +69,15 @@ int control_motor_velocity_reset(control_motor_velocity_state *state, float meas
     return 0;
 }
 
-int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config,
-                                const control_motor_velocity_input *input, control_motor_velocity_output *output) {
+int control_motor_velocity_step_scaled(control_motor_velocity_state *state, const control_motor_velocity_config *config,
+                                const control_motor_velocity_input *input, float reference_scale, control_motor_velocity_output *output) {
     if (state == NULL || input == NULL || output == NULL) {
         return -EINVAL;
     }
 
+    if (!isfinite(reference_scale) || reference_scale < 0.0f || reference_scale > 1.0f) {
+        return -EINVAL;
+    }
     int ret = control_motor_velocity_validate(config);
     if (ret < 0) {
         return ret;
@@ -114,6 +117,9 @@ int control_motor_velocity_step(control_motor_velocity_state *state, const contr
         return ret;
     }
 
+    // Reference slew tracks the requested nominal speed, not the alignment-scaled speed.
+    local.velocity_reference_rad_s *= reference_scale;
+    local.acceleration_reference_rad_s2 *= reference_scale;
     local.velocity_error_rad_s = local.velocity_reference_rad_s - filtered_velocity;
     const float effective_error = apply_soft_deadband(local.velocity_error_rad_s, config->soft_deadband_rad_s);
     const float regulator_measurement = local.velocity_reference_rad_s - effective_error;
@@ -152,4 +158,9 @@ int control_motor_velocity_step(control_motor_velocity_state *state, const contr
     *state = next;
     *output = local;
     return 0;
+}
+
+int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config,
+                                const control_motor_velocity_input *input, control_motor_velocity_output *output) {
+    return control_motor_velocity_step_scaled(state, config, input, 1.0f, output);
 }

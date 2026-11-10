@@ -58,6 +58,11 @@ int control_motor_velocity_reset(control_motor_velocity_state *state, float meas
  */
 int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config,
                                 const control_motor_velocity_input *input, control_motor_velocity_output *output);
+/* Swerve cosine compensation: ramp nominal speed first, then scale the
+ * PID reference. A zero scale means zero-speed closed-loop, not disable. */
+int control_motor_velocity_step_scaled(control_motor_velocity_state *state, const control_motor_velocity_config *config,
+                                       const control_motor_velocity_input *input, float reference_scale,
+                                       control_motor_velocity_output *output);
 
 #ifdef __cplusplus
 }
