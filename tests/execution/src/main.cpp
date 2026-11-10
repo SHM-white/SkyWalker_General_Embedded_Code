@@ -110,24 +110,35 @@ ZTEST(execution, test_live_endpoint_stopped_status_producer_withdraws_ready) {
     endpoint.poll(1100);
     zassert_ok(transport.observer.latestHeartbeat(heartbeat));
     zassert_true(heartbeat.ready);
-    // Heartbeat remains live, but the independent execution status is stale.
+    // The 10 ms feedback is refreshed at this poll, but heartbeat uses
+    // its independent 50 ms cadence and still reports the prior value.
     endpoint.poll(1120);
-    zassert_true(transport.observer.peerOnline(1120, 100));
     zassert_ok(transport.observer.latestHeartbeat(heartbeat));
     zassert_ok(transport.observer.latestChassisFeedback(feedback));
-    zassert_false(heartbeat.ready);
-    zassert_equal(heartbeat.active_reasons, FeedbackStale);
+    zassert_true(heartbeat.ready);
     zassert_false(feedback.ready);
     zassert_false(feedback.armed);
     zassert_equal(feedback.execution_state, ExecutionState::Waiting);
-    status.stamp = {1140, 2, true};
+    // The next due heartbeat must report the same stale producer status.
+    endpoint.poll(1150);
+    zassert_true(transport.observer.peerOnline(1150, 100));
+    zassert_ok(transport.observer.latestHeartbeat(heartbeat));
+    zassert_false(heartbeat.ready);
+    zassert_equal(heartbeat.active_reasons, FeedbackStale);
+    status.stamp = {1160, 2, true};
     endpoint.setStatus(status);
-    endpoint.poll(1140);
+    endpoint.poll(1160);
+    zassert_ok(transport.observer.latestChassisFeedback(feedback));
+    zassert_true(feedback.armed);
+    // A fresh producer must also wait for the next heartbeat publication.
+    zassert_ok(transport.observer.latestHeartbeat(heartbeat));
+    zassert_false(heartbeat.ready);
+    endpoint.poll(1200);
     zassert_ok(transport.observer.latestHeartbeat(heartbeat));
     zassert_ok(transport.observer.latestChassisFeedback(feedback));
     zassert_true(heartbeat.ready);
     zassert_true(feedback.armed);
-    zassert_equal(transport.sends, 4);
+    zassert_equal(transport.sends, 6);
 }
 
 ZTEST(execution, test_endpoint_invalid_timeouts_fail_closed_without_sends) {

@@ -221,7 +221,9 @@ ZTEST(heading, test_big_yaw_executor_mit_authority_timeout_and_recovery) {
     zassert_false(drive.snapshot().enabled_requested);
     in.head.valid = true;
     in.request.permission.enabled = false;
-    zassert_equal(e.update(in, 108000).reason, WaitReason::Power);
+    // A stale/duplicate wire permission is no longer a second control veto.
+    // After the head fault the motor may still be re-enabling this cycle.
+    zassert_true(e.update(in, 108000).reason != WaitReason::Power);
     in.request.permission.enabled = true;
     in.request.receiver_boot_id = 21;
     zassert_equal(e.update(in, 110000).reason, WaitReason::Transport);

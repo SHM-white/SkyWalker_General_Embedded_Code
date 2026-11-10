@@ -242,7 +242,9 @@ ZTEST(swerve_chassis, test_four_wheel_targets_and_safe_initial_cycle) {
     for (unsigned i = 0; i < 4; ++i) {
         expect_vector(out.target[i], vx[i], vy[i]);
         expect_vector({out.module[i].optimized_angle_rad, out.module[i].optimized_wheel_velocity_m_s}, vx[i], vy[i]);
-        zassert_within(out.module[i].drive_target_rad_s, 0, 1e-4f);
+        // First cycle holds zero actuator effort while preparing the feedback
+        // history; it does not erase a valid wheel-speed demand.
+        zassert_true(out.module[i].drive_target_rad_s > 0);
         zassert_equal(out.module[i].drive_effort, 0);
         zassert_true(out.module[i].steer_output_valid && out.module[i].drive_output_valid);
     }

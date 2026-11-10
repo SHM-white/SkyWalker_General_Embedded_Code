@@ -402,8 +402,10 @@ ZTEST(sentry, test_native_big_yaw_slew_expiry_and_recovery) {
     in.request.permission.stamp.timestamp_ms = 1006;
     zassert_true(executor.update(in, 1006000).ready);
     zassert_within(drive.copyStaged().command.primary, -0.02f, 1e-6f);
+    // Permission has already been resolved by the sender. Its duplicate
+    // wire field must not independently revoke an otherwise valid request.
     in.request.permission.enabled = false;
-    zassert_false(executor.update(in, 1008000).ready);
-    zassert_false(drive.copyStaged().valid);
+    zassert_true(executor.update(in, 1008000).ready);
+    zassert_true(drive.copyStaged().valid);
 }
 ZTEST_SUITE(sentry, nullptr, nullptr, nullptr, nullptr, nullptr);

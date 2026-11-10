@@ -66,7 +66,10 @@ private:
 
 const CommandManager::Config manager_config = [] {
     CommandManager::Config config{};
-    config.require_referee_for_motion = false;
+    config.require_referee_for_chassis = false;
+    config.require_referee_for_gimbal = false;
+    config.require_referee_for_shooter = false;
+    config.enable_shooter = false;
     config.allow_auto = false;
     config.input_timeout_ms = 100;
     config.max_chassis_vx_m_s = config.max_chassis_vy_m_s = 0.3f;
