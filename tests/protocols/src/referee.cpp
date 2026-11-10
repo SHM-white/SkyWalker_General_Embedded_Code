@@ -2,6 +2,8 @@
 #include <cerrno>
 #include <cstdint>
 #include <communication/referee/referee_parser.hpp>
+#include <communication/referee/referee_2026_parser.hpp>
+#include <communication/referee/referee_2027_parser.hpp>
 #include <communication/referee/referee_protocol.hpp>
 #include <communication/wire.hpp>
 #include <zephyr/ztest.h>
@@ -153,4 +155,39 @@ ZTEST(protocol_referee, test_robot_status_length_is_version_specific) {
     zassert_false(old_parser.state().stamp.valid);
     zassert_false(new_parser.state().stamp.valid);
 }
+ZTEST(protocol_referee, test_season_decoders_are_independent) {
+    using namespace skywalker;
+    const auto old_frame = robotFrame();
+    const auto new_frame = robotFrame2027();
+    const robotics::MessageStamp stamp{123, 5, true};
+    robotics::RefereeState old_state{};
+    robotics::RefereeState new_state{};
+
+    zassert_true(communication::Referee2026Parser::decode(0x0201, old_frame.data() + 7, 13, stamp, old_state) ==
+                 communication::RefereeDecodeResult::Decoded);
+    zassert_equal(old_state.robot.robot_id, 9u);
+    zassert_true(old_state.robot.gimbal_output.enabled);
+    zassert_false(old_state.robot.chassis_output.enabled);
+    zassert_false(old_state.robot.bullet_speed_limit_stamp.valid);
+
+    zassert_true(communication::Referee2027Parser::decode(0x0201, new_frame.data() + 7, 17, stamp, new_state) ==
+                 communication::RefereeDecodeResult::Decoded);
+    zassert_equal(new_state.robot.robot_id, 7u);
+    zassert_equal(new_state.robot.bullet_speed_limit_m_s, 30.5f);
+    zassert_true(new_state.robot.bullet_speed_limit_stamp.valid);
+
+    // Each decoder independently owns its command lengths; rejects the other
+    // version without modifying previously published fields.
+    zassert_true(communication::Referee2026Parser::decode(0x0201, new_frame.data() + 7, 17, stamp, old_state) ==
+                 communication::RefereeDecodeResult::InvalidLength);
+    zassert_true(communication::Referee2027Parser::decode(0x0201, old_frame.data() + 7, 13, stamp, new_state) ==
+                 communication::RefereeDecodeResult::InvalidLength);
+    zassert_equal(old_state.robot.robot_id, 9u);
+    zassert_equal(new_state.robot.robot_id, 7u);
+    zassert_true(communication::Referee2026Parser::decode(0x1234, old_frame.data() + 7, 13, stamp, old_state) ==
+                 communication::RefereeDecodeResult::UnknownCommand);
+    zassert_true(communication::Referee2027Parser::decode(0x1234, new_frame.data() + 7, 17, stamp, new_state) ==
+                 communication::RefereeDecodeResult::UnknownCommand);
+}
+
 ZTEST_SUITE(protocol_referee, nullptr, nullptr, nullptr, nullptr, nullptr);

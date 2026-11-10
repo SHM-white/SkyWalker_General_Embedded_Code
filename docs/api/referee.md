@@ -8,7 +8,7 @@
 
 ## 职责与关联
 
-RefereeParser 负责 CRC 与已支持命令，RefereeService 计算在线状态，RefereeReceiver 用 poll 推进 UART。裁判许可约束运动命令，不能与遥控或视觉竞争控制来源。
+RefereeParser 只负责共享的流式帧组装、CRC 与版本分派，`Referee2026Parser` / `Referee2027Parser` 各自负责本版本的命令号、长度和字段布局；各版之间不共享命令解码分支。RefereeService 计算在线状态，RefereeReceiver 用 poll 推进 UART。裁判许可约束运动命令，不能与遥控或视觉竞争控制来源。
 
 输入 / 依赖：[异步 UART 与 DMA](uart.md)
 
@@ -61,7 +61,7 @@ robotics::RefereeState RefereeReceiver::poll(std::uint64_t now_ms); int RefereeR
 int RefereeParser::reset(); int RefereeParser::consume(const std::uint8_t *bytes, std::size_t size, std::uint64_t timestamp_ms)
 ```
 
-纯解析入口：reset 清除状态与统计；consume 校验帧头、CRC8、长度与 CRC16，按构造时指定的版本解析受支持命令并记录统计。
+纯解析入口：reset 清除状态与统计；consume 只做帧头、CRC8、帧总长与 CRC16 校验，成功后选择对应版本解析类。两个版本的命令长度检查与字段解码分别位于 `referee_2026.cpp` 和 `referee_2027.cpp`。只有成功解码才发布新状态、更新时间戳和序号。
 
 | 参数 | 含义与边界 |
 | --- | --- |
@@ -100,8 +100,8 @@ int RefereeService::processBytes(const std::uint8_t *bytes, std::size_t size, st
 
 | 命令 | RM2026 V1.3.0 | RM2027 V1.0.0 | 适配策略 |
 | --- | --- | --- | --- |
-| 帧封装 | A5 + 5 字节头 / 2 字节命令 / CRC16 | 不变 | 复用流式扫描与 CRC8/CRC16 |
-| 0x0201 | 13 字节，偏移 12 为输出许可 | 17 字节，偏移 12～15 是 float 初速度上限，偏移 16 是输出许可 | 按显式 profile 检查精确长度及各字段偏移 |
+| 帧封装 | A5 + 5 字节头 / 2 字节命令 / CRC16 | 不变 | 公共 `RefereeParser` 只复用流式扫描与 CRC8/CRC16 |
+| 0x0201 | 13 字节，偏移 12 为输出许可 | 17 字节，偏移 12～15 是 float 初速度上限，偏移 16 是输出许可 | `Referee2026Parser` / `Referee2027Parser` 各自检查长度并解码 |
 | 0x0202 | 14 字节，偏移 8～9 为缓冲能量 | 不变 | 保留 0～7 字节不产生“实测功率” |
 
 特别注意：2027 `0x0201` 的偏移 12 是浮点数**第一个字节**，不能当输出许可掩码读取，否则可能误允许底盘、云台或发射机构。本模块在两个方向均拒绝不匹配的报文长度。
@@ -172,6 +172,8 @@ board_config::referee_uart 来自对应样例/应用。正式 CommandManager 会
 - [流式解析器](../../include/communication/referee/referee_parser.hpp)
 - [支持的版本与线格式](../../include/communication/referee/referee_protocol.hpp)
 - [许可与功率消息](../../include/robotics/messages/referee.hpp)
-- [解析实现](../../lib/communication/referee.cpp)
+- [公共帧组装与分派](../../lib/communication/referee.cpp)
+- [2026 解析接口](../../include/communication/referee/referee_2026_parser.hpp) / [实现](../../lib/communication/referee_2026.cpp)
+- [2027 解析接口](../../include/communication/referee/referee_2027_parser.hpp) / [实现](../../lib/communication/referee_2027.cpp)
 
 [全部接口参考](README.md) · [文档同步清单](../maintenance.md)

@@ -2,6 +2,8 @@
 #include <cstring>
 #include <communication/wire.hpp>
 #include <communication/referee/referee_parser.hpp>
+#include <communication/referee/referee_2026_parser.hpp>
+#include <communication/referee/referee_2027_parser.hpp>
 namespace skywalker::communication {
 std::uint8_t refereeCrc8(const std::uint8_t *p, std::size_t n) {
     std::uint8_t c = 0xff;
@@ -37,43 +39,35 @@ void RefereeParser::discard(std::size_t n) {
         started_ms_ = receive_ms_[0];
 }
 void RefereeParser::decode(std::uint16_t id, const std::uint8_t *p, std::size_t n, std::uint64_t now) {
-    using namespace robotics;
-    // RM2026 V1.3.0: 0x0201 = 13 bytes (permission flags at offset 12).
-    // RM2027 V1.0.0: 0x0201 = 17 bytes (float speed limit at 12, flags at 16).
-    // Both versions: 0x0202 = 14 bytes, measured chassis power is reserved.
-    const bool rm2026 = version_ == RefereeVersion::Rm2026V1_3;
-    const bool rm2027 = version_ == RefereeVersion::Rm2027V1_0;
-    if ((!rm2026 && !rm2027) || (id != 0x0201 && id != 0x0202)) {
-        ++stats_.unknown_commands;
-        return;
-    }
-    if ((id == 0x0201 && n != (rm2027 ? 17u : 13u)) || (id == 0x0202 && n != 14u)) {
-        ++stats_.length_errors;
-        return;
-    }
+    // Transport framing and publication are shared. Season-specific command
+    // lengths and offsets live exclusively in the dedicated parser classes.
     auto next = state_;
-    const MessageStamp stamp{now, ++sequence_, true};
-    if (id == 0x0201) {
-        next.robot.robot_id = p[0];
-        const std::uint8_t outputs = p[rm2027 ? 16 : 12];
-        next.robot.gimbal_output = {true, (outputs & 1) != 0, stamp};
-        next.robot.chassis_output = {true, (outputs & 2) != 0, stamp};
-        next.robot.shooter_output = {true, (outputs & 4) != 0, stamp};
-        if (rm2027) {
-            next.robot.bullet_speed_limit_m_s = wire::loadFloatLe(p + 12);
-            next.robot.bullet_speed_limit_stamp = stamp;
-        }
-        next.power.chassis_power_limit_w = wire::loadLe16(p + 10);
-        next.power.limit_stamp = stamp;
+    const robotics::MessageStamp stamp{now, sequence_ + 1, true};
+    RefereeDecodeResult result = RefereeDecodeResult::UnknownCommand;
+    switch (version_) {
+    case RefereeVersion::Rm2026V1_3:
+        result = Referee2026Parser::decode(id, p, n, stamp, next);
+        break;
+    case RefereeVersion::Rm2027V1_0:
+        result = Referee2027Parser::decode(id, p, n, stamp, next);
+        break;
+    case RefereeVersion::Unspecified:
+        break;
     }
-    else {
-        // Bytes 0..7 are RESERVED in this version: never publish fake measured power.
-        next.power.buffer_energy_j = wire::loadLe16(p + 8);
-        next.power.stamp = stamp;
+    switch (result) {
+    case RefereeDecodeResult::Decoded:
+        sequence_ = stamp.sequence;
+        next.stamp = stamp;
+        next.online = true;
+        state_ = next;
+        break;
+    case RefereeDecodeResult::InvalidLength:
+        ++stats_.length_errors;
+        break;
+    case RefereeDecodeResult::UnknownCommand:
+        ++stats_.unknown_commands;
+        break;
     }
-    next.stamp = stamp;
-    next.online = true;
-    state_ = next;
 }
 void RefereeParser::scan(std::uint64_t now) {
     while (used_) {

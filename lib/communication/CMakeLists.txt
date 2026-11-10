@@ -1,6 +1,6 @@
 zephyr_library()
 zephyr_library_sources_ifdef(CONFIG_SKYWALKER_REMOTE_DR16 remote.cpp)
-zephyr_library_sources_ifdef(CONFIG_SKYWALKER_REFEREE referee.cpp)
+zephyr_library_sources_ifdef(CONFIG_SKYWALKER_REFEREE referee.cpp referee_2026.cpp referee_2027.cpp)
 if(CONFIG_SKYWALKER_INTERBOARD)
     zephyr_library_sources(interboard_codec.cpp interboard_parser.cpp interboard_link.cpp)
     zephyr_library_sources_ifdef(CONFIG_SKYWALKER_INTERBOARD_ENDPOINT interboard_endpoint.cpp)
