@@ -8,9 +8,9 @@ inline SwerveChassis::Config swerveConfig() {
     SwerveChassis::Config c{};
     const float x = wheelbase_m * 0.5f, y = track_m * 0.5f;
     c.kinematics.locations = {ModuleLocation{x, y}, {x, -y}, {-x, y}, {-x, -y}};
-    c.kinematics.max_wheel_velocity_m_s = 3.0f;
-    c.kinematics.stationary_epsilon_m_s = 0.01f;
-    c.kinematics.resume_velocity_m_s = 0.02f;
+    c.kinematics.max_wheel_velocity_m_s = 10.0f;
+    c.kinematics.stationary_epsilon_m_s = 0.1f;
+    c.kinematics.resume_velocity_m_s = 0.2f;
     for (std::size_t i = 0; i < 4; ++i) {
         auto &m = c.modules[i];
         m.wheel_radius_m = wheel_radius_m;
