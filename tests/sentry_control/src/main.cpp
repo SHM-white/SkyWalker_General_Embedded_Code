@@ -48,6 +48,24 @@ void ticks(SwerveChassis &c, const ChassisCommand &cmd, ChassisFeedback &f, Chas
     }
 }
 }
+ZTEST(sentry, test_low_speed_spin_and_translation_start_from_rest) {
+    const auto config = vehicle::swerveConfig();
+    zassert_within(config.kinematics.stationary_epsilon_m_s, .01f, 1e-6f);
+    zassert_within(config.kinematics.resume_velocity_m_s, .02f, 1e-6f);
+    SwerveKinematics kinematics(config.kinematics);
+    ModuleTargets initial{}, result{};
+    zassert_ok(kinematics.reset(initial));
+    const ChassisCommand spin{.mode = ChassisMode::Spin, .wz_rad_s = .5f};
+    zassert_ok(kinematics.solve(spin, result));
+    for (const auto &wheel : result)
+        zassert_true(wheel.wheel_velocity_m_s > .1f);
+    zassert_ok(kinematics.reset(initial));
+    const ChassisCommand forward{.mode = ChassisMode::BodyVelocity, .vx_m_s = .1f};
+    zassert_ok(kinematics.solve(forward, result));
+    for (const auto &wheel : result)
+        zassert_true(wheel.wheel_velocity_m_s > .09f);
+}
+
 ZTEST(sentry, test_candidate_mapping_and_real_motor_sign_units) {
     constexpr unsigned ids[] = {1, 4, 2, 3}, zeros[] = {3060, 986, 2383, 4390};
     for (unsigned i = 0; i < 4; ++i) {
