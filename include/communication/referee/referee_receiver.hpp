@@ -6,9 +6,8 @@ namespace skywalker::communication {
 // One owner task polls. This object and DMA buffers must outlive callbacks.
 class RefereeReceiver {
 public:
-    RefereeReceiver(const device *device, AsyncUart::DmaBuffers &dma, RefereeVersion version,
-                    std::uint32_t timeout_ms = 500)
-        : uart_(device, dma), service_(version, timeout_ms) {
+    RefereeReceiver(const device *device, AsyncUart::DmaBuffers &dma, std::uint32_t timeout_ms = 500)
+        : uart_(device, dma), service_(timeout_ms) {
     }
     robotics::RefereeState poll(std::uint64_t now_ms) {
         if (now_ms >= retry_ms_) {

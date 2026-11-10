@@ -19,11 +19,11 @@ snapshot() 复制最新完整帧，不消费消息；current() 只复制最终 R
 | --- | --- | --- |
 | DR16 遥控 | UART5 PD2 RX | 100000 8E1，确认 DBUS 反相链路 |
 | 视觉 AB | UART7 PE7 RX / PE8 TX | 115200 8N1，仅 RX |
-| 裁判 | USART1 PA10 RX / PA9 TX | 115200 8N1，Rm2027V1_0（可显式切回 2026） |
+| 裁判 | USART1 PA10 RX / PA9 TX | 115200 8N1，编译期 RM2027 V1.0.0（可在 Kconfig 选择 RM2026） |
 | 终端 | USART10 PE3 TX / PE2 RX | 115200 8N1 |
 | VOFA | USB CDC ACM | JustFloat，16 通道 |
 
-外部 TX 接板端 RX 并共地。裁判设备与模拟发送器二选一。模拟脚本默认 `--protocol 2027`，测试旧裁判固件时同时把 `board_config.hpp` 的 `referee_version` 和脚本的 `--protocol` 改为 2026。
+外部 TX 接板端 RX 并共地。裁判设备与模拟发送器二选一。模拟脚本默认 `--protocol 2027`，测试旧裁判固件时，在编译时选择 `CONFIG_SKYWALKER_REFEREE_RM2026=y`（而非修改 C++ 代码），并将脚本设置为 `--protocol 2026`。固件一次只包含一个年份的解析实现。
 
 ```sh
 west build -p always -b dm_mc02/stm32h723xx samples/robotics/command_manager -d build/command-manager-terminal

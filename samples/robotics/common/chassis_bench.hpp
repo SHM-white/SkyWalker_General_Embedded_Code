@@ -164,8 +164,7 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
     RefereeState referee{};
 #if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
     static communication::AsyncUart::DmaBuffers referee_dma __nocache;
-    static communication::RefereeReceiver receiver(referee_uart, referee_dma,
-                                                   communication::RefereeVersion::Rm2027V1_0);
+    static communication::RefereeReceiver receiver(referee_uart, referee_dma);
 #endif
     printk("8 motors FL/FR/RL/RR: steer IDs=%u/%u/%u/%u drive IDs=%u/%u/%u/%u; topology=%d config=%d\n",
            unsigned(calibration::steer[0].id), unsigned(calibration::steer[1].id), unsigned(calibration::steer[2].id),

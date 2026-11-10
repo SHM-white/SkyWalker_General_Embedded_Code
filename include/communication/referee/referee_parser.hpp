@@ -9,8 +9,7 @@ public:
         std::uint32_t valid_frames = 0, crc8_errors = 0, crc16_errors = 0, length_errors = 0, unknown_commands = 0,
                       assembly_timeouts = 0;
     };
-    explicit RefereeParser(RefereeVersion version = RefereeVersion::Unspecified) : version_(version) {
-    }
+    RefereeParser() = default;
     int reset();
     void discardPartial() {
         used_ = 0;
@@ -27,7 +26,6 @@ private:
     void scan(std::uint64_t now);
     void discard(std::size_t n);
     void decode(std::uint16_t id, const std::uint8_t *, std::size_t, std::uint64_t now);
-    RefereeVersion version_;
     std::array<std::uint8_t, 256> buffer_{};
     std::array<std::uint64_t, 256> receive_ms_{};
     std::size_t used_ = 0;

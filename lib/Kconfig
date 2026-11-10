@@ -63,6 +63,19 @@ config SKYWALKER_REFEREE
     default y
     depends on SKYWALKER_LIB_COMMUNICATION
 
+choice SKYWALKER_REFEREE_PROTOCOL
+    prompt "Referee protocol version (compile-time selection)"
+    depends on SKYWALKER_REFEREE
+    default SKYWALKER_REFEREE_RM2027
+
+config SKYWALKER_REFEREE_RM2026
+    bool "RoboMaster 2026 V1.3.0"
+
+config SKYWALKER_REFEREE_RM2027
+    bool "RoboMaster 2027 V1.0.0"
+
+endchoice
+
 config SKYWALKER_INTERBOARD
     bool "Interboard codec, parser and session"
     default y

@@ -2,8 +2,13 @@
 #include <cstring>
 #include <communication/wire.hpp>
 #include <communication/referee/referee_parser.hpp>
+#if defined(CONFIG_SKYWALKER_REFEREE_RM2026)
 #include <communication/referee/referee_2026_parser.hpp>
+#elif defined(CONFIG_SKYWALKER_REFEREE_RM2027)
 #include <communication/referee/referee_2027_parser.hpp>
+#else
+#error "Select a referee protocol in Kconfig"
+#endif
 namespace skywalker::communication {
 std::uint8_t refereeCrc8(const std::uint8_t *p, std::size_t n) {
     std::uint8_t c = 0xff;
@@ -39,21 +44,14 @@ void RefereeParser::discard(std::size_t n) {
         started_ms_ = receive_ms_[0];
 }
 void RefereeParser::decode(std::uint16_t id, const std::uint8_t *p, std::size_t n, std::uint64_t now) {
-    // Transport framing and publication are shared. Season-specific command
-    // lengths and offsets live exclusively in the dedicated parser classes.
+    // Kconfig compiles only the selected season decoder.
     auto next = state_;
     const robotics::MessageStamp stamp{now, sequence_ + 1, true};
-    RefereeDecodeResult result = RefereeDecodeResult::UnknownCommand;
-    switch (version_) {
-    case RefereeVersion::Rm2026V1_3:
-        result = Referee2026Parser::decode(id, p, n, stamp, next);
-        break;
-    case RefereeVersion::Rm2027V1_0:
-        result = Referee2027Parser::decode(id, p, n, stamp, next);
-        break;
-    case RefereeVersion::Unspecified:
-        break;
-    }
+#if defined(CONFIG_SKYWALKER_REFEREE_RM2026)
+    const auto result = Referee2026Parser::decode(id, p, n, stamp, next);
+#elif defined(CONFIG_SKYWALKER_REFEREE_RM2027)
+    const auto result = Referee2027Parser::decode(id, p, n, stamp, next);
+#endif
     switch (result) {
     case RefereeDecodeResult::Decoded:
         sequence_ = stamp.sequence;
