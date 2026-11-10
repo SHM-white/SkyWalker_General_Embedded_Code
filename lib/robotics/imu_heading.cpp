@@ -9,7 +9,7 @@ float wrap(float a) {
     return std::remainder(a, 2 * pi);
 }
 }
-LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool disarmed, core::TimeUs now) {
+LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool /*disarmed*/, core::TimeUs now) {
     LocalHeading out{};
     out.generation = initialized_ ? 1 : 0;
     const auto reject = [&](HeadingWaitReason reason) {
@@ -86,7 +86,8 @@ LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool disarmed, 
         last_sequence_ = v.orientation.stamp.sequence;
         last_sample_us_ = v.orientation.stamp.time_us;
         if (!initialized_) {
-            if (disarmed && now >= 1000000 && core::norm(g) < .05f)
+            // RC arming is independent of establishing a stationary IMU zero.
+            if (now >= 1000000 && core::norm(g) < .05f)
                 ++stationary_samples_;
             else
                 stationary_samples_ = 0;

@@ -226,7 +226,7 @@ int main() {
             if (!operator_state.run_allowed)
                 wheel_command.mode = ChassisMode::Disabled;
             if (wheel_command.mode != ChassisMode::Disabled)
-                wheel_command.wz_rad_s = operator_state.spin_requested ? .5f : 0;
+                wheel_command.wz_rad_s = operator_state.spin_requested ? installed::manual_max_wz_rad_s : 0;
             endpoint.submit(wheel_command);
         }
         if (yaw_started) {

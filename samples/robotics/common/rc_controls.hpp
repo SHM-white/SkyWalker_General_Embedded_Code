@@ -88,22 +88,30 @@ public:
 
     const RcControlState &update(const robotics::RemoteState &remote, std::uint64_t now_ms) {
         using robotics::RcSwitch;
-        const bool fresh = remote.online && robotics::isFresh(remote.stamp, now_ms, config_.input_timeout_ms) &&
-                           remote.left_switch != RcSwitch::Unknown && remote.right_switch != RcSwitch::Unknown;
-        if (!fresh) {
+        // The accepted frame, not an untrusted candidate, owns the input lease.
+        // An offline receiver is a real link-loss event; an old/bad candidate is not.
+        if (!remote.online) {
             state_.remote = remote;
             state_.fresh = false;
             withdraw();
             previous_left_ = previous_right_ = RcSwitch::Unknown;
             return state_;
         }
-        // Old sequence or time-regressed candidates are dropped without
-        // overwriting the last accepted frame or withdrawing its state.
-        if (have_sequence_ && !robotics::sequenceAfter(remote.stamp.sequence, last_sequence_))
+        const bool newer = remote.stamp.valid &&
+                           (!have_sequence_ || robotics::sequenceAfter(remote.stamp.sequence, last_sequence_)) &&
+                           (!have_input_time_ || remote.stamp.timestamp_ms >= last_input_ms_);
+        const bool candidate_valid = newer &&
+                                     robotics::isFresh(remote.stamp, now_ms, config_.input_timeout_ms) &&
+                                     remote.left_switch != RcSwitch::Unknown && remote.right_switch != RcSwitch::Unknown;
+        if (!candidate_valid) {
+            if (!have_input_time_ || !robotics::isFresh(state_.remote.stamp, now_ms, config_.input_timeout_ms)) {
+                state_.fresh = false;
+                withdraw();
+                previous_left_ = previous_right_ = RcSwitch::Unknown;
+            }
             return state_;
+        }
         const auto input_ms = remote.stamp.timestamp_ms;
-        if (have_input_time_ && input_ms < last_input_ms_)
-            return state_;
         const bool first_frame = !have_input_time_;
         state_.remote = remote;
         state_.fresh = true;

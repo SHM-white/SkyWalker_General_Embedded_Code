@@ -533,4 +533,23 @@ ZTEST(command_manager, test_rc_rearm_neutral_and_preselected_spin_fire_blocked) 
     zassert_false(update(11, 1509).run_allowed);
 }
 
+ZTEST(command_manager, test_rc_old_candidate_does_not_revoke_fresh_accepted_input) {
+    using skywalker::samples::control::RcControlAdapter;
+    RcControlAdapter rc;
+    RemoteState sample{};
+    sample.online = true;
+    sample.left_switch = RcSwitch::Up;
+    sample.right_switch = RcSwitch::Middle;
+    sample.stamp = {1000, 4, true};
+    zassert_true(rc.update(sample, 1000).run_allowed);
+    sample.stamp = {800, 3, true};
+    const auto &kept = rc.update(sample, 1010);
+    zassert_true(kept.fresh);
+    zassert_true(kept.run_allowed);
+    zassert_equal(kept.remote.stamp.timestamp_ms, 1000);
+    // Neither replays nor dropped candidates extend the accepted lease.
+    zassert_false(rc.update(sample, 1101).run_allowed);
+    zassert_false(rc.update(sample, 1101).fresh);
+}
+
 ZTEST_SUITE(command_manager, nullptr, nullptr, nullptr, nullptr, nullptr);
