@@ -165,6 +165,9 @@ inline CommandManager::Config commandConfig() {
     c.require_referee_for_gimbal = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
     c.require_referee_for_shooter = IS_ENABLED(CONFIG_VEHICLE_REFEREE);
     c.allow_auto = IS_ENABLED(CONFIG_VEHICLE_VISION_EXECUTE);
+    // Vehicle integration may actually drive the shooter; gimbal-only
+    // profiles intentionally disable its configuration/command path.
+    c.enable_shooter = IS_ENABLED(CONFIG_VEHICLE_SHOOTING);
     c.expected_vision_reference = calibration::head_reference;
     // Left stick: forward/lateral velocity limits in m/s.
     c.max_chassis_vx_m_s = c.max_chassis_vy_m_s = 0.3f;
