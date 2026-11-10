@@ -208,8 +208,7 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                     request.source_age_ms = addAge(request.source_age_ms, elapsed);
                     request.run_allowed = request.run_allowed && current;
                     if (!current || !request.clear_event_id ||
-                        !forwardedFresh(request.stamp, request.clear_event_age_ms, now,
-                                        config_.command_timeout_ms)) {
+                        !forwardedFresh(request.stamp, request.clear_event_age_ms, now, config_.command_timeout_ms)) {
                         request.clear_event_id = 0;
                         request.clear_event_age_ms = UINT32_MAX;
                     }

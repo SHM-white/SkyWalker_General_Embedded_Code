@@ -65,10 +65,10 @@ int main() {
     // CAN3 IMU or vision receiver is instantiated in this manual application.
     static control::QuaternionEkf onboard_estimator({.initialization_samples = 800, .adapt_gyro_bias = false});
     static imu::Bmi088Imu onboard_source(DEVICE_DT_GET(DT_ALIAS(accel0)), DEVICE_DT_GET(DT_ALIAS(gyro0)),
-                                        {.reference = installed::carrier_reference,
-                                         .sensor_to_body = installed::carrier_sensor_to_body,
-                                         .correct_gyro_bias = true},
-                                        &onboard_estimator);
+                                         {.reference = installed::carrier_reference,
+                                          .sensor_to_body = installed::carrier_sensor_to_body,
+                                          .correct_gyro_bias = true},
+                                         &onboard_estimator);
     static imu::ImuReceiver onboard(onboard_source, {.poll_interval_us = 500, .priority = 5});
     // BMI088 continues gyro prediction when acceleration rejects a gravity
     // correction. Bridge brief degradation using fresh samples only.
@@ -102,8 +102,8 @@ int main() {
     diagnostics.event("gimbal", control_error);
     diagnostics.event("motor_rail", power_error);
     // Carrier IMU failure blocks big Yaw, but not the local encoder/manual loops.
-    const bool setup_ready = command_error == 0 && yaw_error == 0 && pitch_error == 0 &&
-                             control_error == 0 && power_error == 0;
+    const bool setup_ready = command_error == 0 && yaw_error == 0 && pitch_error == 0 && control_error == 0 &&
+                             power_error == 0;
     samples::control::RcControlAdapter controls;
     communication::RemoteReceiver::Snapshot remote_frame{};
     CommandSnapshot frame{};
@@ -140,7 +140,7 @@ int main() {
         const auto carrier_snapshot = onboard.snapshot();
         const auto heading = carrier_heading.update(carrier_snapshot, !operator_state.run_allowed, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);
-        const auto heading_reason = !heading.valid ? heading.reason
+        const auto heading_reason = !heading.valid   ? heading.reason
                                     : !heading_fresh ? HeadingWaitReason::ControlStale
                                                      : HeadingWaitReason::None;
         // Retain transient losses even when heading recovers before the next
@@ -158,7 +158,7 @@ int main() {
             // Encoder loops own both motors. Counter measured carrier rotation
             // so recentering actually reduces the relative small-Yaw angle.
             input.command.yaw_rate_rad_s = installed::small_yaw.direction *
-                (input.command.yaw_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
+                                           (input.command.yaw_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
             input.command.pitch_rate_rad_s *= installed::pitch.direction;
         }
         if (!operator_state.run_allowed)
@@ -174,13 +174,14 @@ int main() {
         const bool peer_feedback_valid = peer_state.online && feedback.valid &&
                                          forwardedFresh(feedback.stamp, feedback.production_age_ms, now_ms, 250) &&
                                          std::isfinite(feedback.actual_rate_rad_s) &&
-                                         std::fabs(feedback.actual_rate_rad_s) <= installed::big_yaw.velocity_limit_rad_s;
+                                         std::fabs(feedback.actual_rate_rad_s) <=
+                                             installed::big_yaw.velocity_limit_rad_s;
         if (peer_feedback_valid != peer_feedback_was_valid)
             centering.reset();
         peer_feedback_was_valid = peer_feedback_valid;
         const bool big_channel_ready = setup_ready && operator_state.fresh && operator_state.run_allowed &&
-                                       peer_state.online && installed::imu_mounting_confirmed &&
-                                       heading_fresh && joint_valid && yaw_running;
+                                       peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
+                                       joint_valid && yaw_running;
         YawCenteringInputs follow{};
         follow.joint_yaw_rad = ys.feedback.position_rad;
         follow.joint_stamp = {ys.feedback.timestamp_ms * 1000, ys.feedback.timestamp_ms, ys.feedback_fresh};
@@ -201,7 +202,8 @@ int main() {
             // Zero enable obtains initial real feedback before any nonzero follow.
             request.mode = big_channel_ready ? BigYawMode::FollowCenter : BigYawMode::Disabled;
             request.target_rate_rad_s = big_channel_ready && peer_feedback_valid && centered.enabled
-                                           ? centered.velocity_rad_s : 0;
+                                            ? centered.velocity_rad_s
+                                            : 0;
             if (peer_state.online && peer_state.peer.sender_boot_id) {
                 GimbalImuYaw sample{};
                 sample.valid = heading_fresh;
@@ -238,15 +240,15 @@ int main() {
                 status.error = error;
         }
         endpoint.setStatus(status);
-        const auto reason = !setup_ready || onboard_error ? installed::DiagnosticReason::InitFailed
-                      : !operator_state.fresh              ? installed::DiagnosticReason::RemoteStale
-                      : !operator_state.run_allowed        ? installed::DiagnosticReason::Disarmed
-                      : !installed::imu_mounting_confirmed ? installed::DiagnosticReason::Configuration
-                      : !heading_fresh                     ? installed::DiagnosticReason::ImuStale
-                      : !peer_state.online || !peer_feedback_valid ? installed::DiagnosticReason::PeerStale
-                      : !joint_valid || !yaw_running       ? installed::DiagnosticReason::FeedbackStale
-                      : status.state == RunState::Active ? installed::DiagnosticReason::Ready
-                                                         : installed::DiagnosticReason::CommandStale;
+        const auto reason = !setup_ready || onboard_error                ? installed::DiagnosticReason::InitFailed
+                            : !operator_state.fresh                      ? installed::DiagnosticReason::RemoteStale
+                            : !operator_state.run_allowed                ? installed::DiagnosticReason::Disarmed
+                            : !installed::imu_mounting_confirmed         ? installed::DiagnosticReason::Configuration
+                            : !heading_fresh                             ? installed::DiagnosticReason::ImuStale
+                            : !peer_state.online || !peer_feedback_valid ? installed::DiagnosticReason::PeerStale
+                            : !joint_valid || !yaw_running               ? installed::DiagnosticReason::FeedbackStale
+                            : status.state == RunState::Active           ? installed::DiagnosticReason::Ready
+                                                                         : installed::DiagnosticReason::CommandStale;
         (void)status_led.setStatus(
             installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
         diagnostics.status({.reason = reason,

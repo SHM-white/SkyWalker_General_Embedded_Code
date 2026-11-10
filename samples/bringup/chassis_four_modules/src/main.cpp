@@ -115,8 +115,8 @@ int main() {
                                      input.command.mode == ChassisMode::Spin) &&
                                     input.command.source == ControlSource::Remote &&
                                     rx.control.global_action == SafetyAction::Active;
-        const bool authorized = rx.online && rx.operator_control_valid && authority.run_allowed &&
-                                !emergency_latched && bound && active_command;
+        const bool authorized = rx.online && rx.operator_control_valid && authority.run_allowed && !emergency_latched &&
+                                bound && active_command;
         if (!authorized)
             input.command.mode = ChassisMode::Disabled;
         input.source_stamp = {input.command.stamp.timestamp_ms * 1000, input.command.stamp.sequence,
@@ -156,16 +156,15 @@ int main() {
         }
         const bool all_feedback = steer_mask == 15 && drive_mask == 15;
         const auto &targets = chassis.output().target;
-        const bool moving = std::any_of(targets.begin(), targets.end(), [](const ModuleTarget &target) {
-            return target.wheel_velocity_m_s != 0;
-        });
+        const bool moving = std::any_of(targets.begin(), targets.end(),
+                                        [](const ModuleTarget &target) { return target.wheel_velocity_m_s != 0; });
         const bool aligning = authorized && all_feedback && moving && !chassis.output().drive_permitted;
-        if (status.state == RunState::Active && (status.error || !all_feedback || aligning ||
-                                                status.reason == WaitReason::Cycle)) {
+        if (status.state == RunState::Active &&
+            (status.error || !all_feedback || aligning || status.reason == WaitReason::Cycle)) {
             status.ready = false;
             status.state = RunState::Recovering;
             if (status.reason == WaitReason::None)
-                status.reason = status.error ? WaitReason::Transport
+                status.reason = status.error    ? WaitReason::Transport
                                 : !all_feedback ? WaitReason::Feedback
                                                 : WaitReason::Reference;
         }
@@ -181,20 +180,19 @@ int main() {
                                  (steer_view.feedback.valid & motor::FeedbackAbsolutePosition) &&
                                  std::isfinite(steer_view.feedback.absolute_position_rad);
         const bool command_fresh = isFresh(input.command.stamp, now_ms, stage::command_timeout_ms);
-        const auto reason = init_error                                ? installed::DiagnosticReason::InitFailed
-                            : !rx.online                              ? installed::DiagnosticReason::PeerStale
-                            : !rx.operator_control_valid || emergency_latched
-                                                                      ? installed::DiagnosticReason::Permission
-                            : !authority.run_allowed                  ? installed::DiagnosticReason::Disarmed
-                            : !bound || !active_command               ? installed::DiagnosticReason::Permission
-                            : !command_fresh                          ? installed::DiagnosticReason::CommandStale
+        const auto reason = init_error                                        ? installed::DiagnosticReason::InitFailed
+                            : !rx.online                                      ? installed::DiagnosticReason::PeerStale
+                            : !rx.operator_control_valid || emergency_latched ? installed::DiagnosticReason::Permission
+                            : !authority.run_allowed                          ? installed::DiagnosticReason::Disarmed
+                            : !bound || !active_command                       ? installed::DiagnosticReason::Permission
+                            : !command_fresh ? installed::DiagnosticReason::CommandStale
                             : bus_error || status.reason == WaitReason::Transport
-                                                                      ? installed::DiagnosticReason::TransportError
-                            : status.reason == WaitReason::Cycle      ? installed::DiagnosticReason::CycleInvalid
-                            : !all_feedback                           ? installed::DiagnosticReason::FeedbackStale
-                            : aligning                                ? installed::DiagnosticReason::Aligning
-                            : status.state != RunState::Active        ? installed::DiagnosticReason::FeedbackStale
-                                                                      : installed::DiagnosticReason::Ready;
+                                ? installed::DiagnosticReason::TransportError
+                            : status.reason == WaitReason::Cycle ? installed::DiagnosticReason::CycleInvalid
+                            : !all_feedback                      ? installed::DiagnosticReason::FeedbackStale
+                            : aligning                           ? installed::DiagnosticReason::Aligning
+                            : status.state != RunState::Active   ? installed::DiagnosticReason::FeedbackStale
+                                                                 : installed::DiagnosticReason::Ready;
         // Exact integer below 2^24: wheel index, both feedback masks, init
         // failures, then the individual authorization/alignment gates.
         const unsigned detail = unsigned(index) | (steer_mask << 2) | (drive_mask << 6) | (init_mask << 10) |

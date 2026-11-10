@@ -119,8 +119,7 @@ int main() {
         const auto yaw_feedback = big_drive.snapshot();
         // The native drive angle shares the calibrated forward-zero coordinate
         // and recovers after an RX gap without reseeding a continuous reference.
-        const bool encoder_valid = yaw_feedback.feedback_fresh &&
-                                   yaw_feedback.native_position_valid &&
+        const bool encoder_valid = yaw_feedback.feedback_fresh && yaw_feedback.native_position_valid &&
                                    std::isfinite(yaw_feedback.native_position_rad) &&
                                    isFresh({yaw_feedback.feedback.timestamp_ms, 1, true}, now_ms, 100);
         input.command = referenceV4ChassisToBody(input.command, encoder_valid, yaw_feedback.native_position_rad,
@@ -139,9 +138,9 @@ int main() {
                                          : chassis.suspend(now_us, WaitReason::Configuration, chassis_error, true);
         BigYawExecutionInputs big_input{};
         big_input.request = rx.big_yaw_request;
-        auto big_gate = !rx.big_yaw_request.stamp.valid ? BigYawGate::MissingRequest
+        auto big_gate = !rx.big_yaw_request.stamp.valid                  ? BigYawGate::MissingRequest
                         : big_input.request.mode == BigYawMode::Disabled ? BigYawGate::PeerDisabled
-                                                                        : BigYawGate::None;
+                                                                         : BigYawGate::None;
         // The same left-switch control must stop both the wheels and big Yaw.
         if (input.command.mode == ChassisMode::Disabled) {
             big_input.request.mode = BigYawMode::Disabled;
@@ -160,12 +159,12 @@ int main() {
             }
             else {
                 const float joint_rate = referenceV4WorldToJointRate(big_input.request.target_rate_rad_s,
-                                                                    body_snapshot.sample.gyro_rad_s.value.z,
-                                                                    rx.gimbal_imu.yaw_rate_rad_s);
+                                                                     body_snapshot.sample.gyro_rad_s.value.z,
+                                                                     rx.gimbal_imu.yaw_rate_rad_s);
                 // Compensation can exceed the world target. Saturate at the
                 // installed joint limit shared with the execution guard.
-                big_input.request.target_rate_rad_s =
-                    std::clamp(joint_rate, -big_yaw_config.rate_abs_max_rad_s, big_yaw_config.rate_abs_max_rad_s);
+                big_input.request.target_rate_rad_s = std::clamp(joint_rate, -big_yaw_config.rate_abs_max_rad_s,
+                                                                 big_yaw_config.rate_abs_max_rad_s);
             }
         }
         big_input.head = rx.gimbal_imu;
@@ -219,18 +218,20 @@ int main() {
         (void)status_led.setStatus(
             installed::statusLedFor(reason, status.state == RunState::Active || big_status.state == RunState::Active,
                                     false, execution_error));
-        const auto big_reason = big_error || power_error ? installed::DiagnosticReason::InitFailed
-                          : !rx.online ? installed::DiagnosticReason::PeerStale
-                          : big_status.reason == WaitReason::Command ? installed::DiagnosticReason::CommandStale
-                          : big_status.reason == WaitReason::Transport ? installed::DiagnosticReason::TransportError
-                          : big_status.reason == WaitReason::Feedback ? installed::DiagnosticReason::FeedbackStale
-                          : big_status.reason == WaitReason::Reference ? installed::DiagnosticReason::ImuStale
-                          : big_status.reason == WaitReason::Configuration ? installed::DiagnosticReason::Configuration
-                          : big_status.reason == WaitReason::Drive ? installed::DiagnosticReason::TransportError
-                          : big_status.reason == WaitReason::Power ? installed::DiagnosticReason::Permission
-                          : big_status.reason == WaitReason::Cycle ? installed::DiagnosticReason::CycleInvalid
-                          : feedback.armed ? installed::DiagnosticReason::Ready
-                                           : installed::DiagnosticReason::Disarmed;
+        const auto big_reason = big_error || power_error                   ? installed::DiagnosticReason::InitFailed
+                                : !rx.online                               ? installed::DiagnosticReason::PeerStale
+                                : big_status.reason == WaitReason::Command ? installed::DiagnosticReason::CommandStale
+                                : big_status.reason == WaitReason::Transport
+                                    ? installed::DiagnosticReason::TransportError
+                                : big_status.reason == WaitReason::Feedback ? installed::DiagnosticReason::FeedbackStale
+                                : big_status.reason == WaitReason::Reference ? installed::DiagnosticReason::ImuStale
+                                : big_status.reason == WaitReason::Configuration
+                                    ? installed::DiagnosticReason::Configuration
+                                : big_status.reason == WaitReason::Drive ? installed::DiagnosticReason::TransportError
+                                : big_status.reason == WaitReason::Power ? installed::DiagnosticReason::Permission
+                                : big_status.reason == WaitReason::Cycle ? installed::DiagnosticReason::CycleInvalid
+                                : feedback.armed                         ? installed::DiagnosticReason::Ready
+                                                                         : installed::DiagnosticReason::Disarmed;
         diagnostics.status({.reason = big_reason,
                             .valid = feedback.valid,
                             .enabled = feedback.armed,
@@ -240,10 +241,11 @@ int main() {
                             .dt_us = float(have_big_stop ? last_big_stop_dt_us : dt_us),
                             .effort = big_motor.feedback.torque_nm,
                             .detail = float(unsigned(have_big_stop ? last_big_stop_reason : big_status.reason)),
-                            .error = big_error ? big_error
-                                     : power_error ? power_error
-                                     : have_big_stop ? last_big_stop_error
-                                     : big_status.error ? big_status.error : previous_big_commit_error,
+                            .error = big_error          ? big_error
+                                     : power_error      ? power_error
+                                     : have_big_stop    ? last_big_stop_error
+                                     : big_status.error ? big_status.error
+                                                        : previous_big_commit_error,
                             .extra0 = float(unsigned(big_motor.state)),
                             .extra1 = float(unsigned(have_big_stop ? last_big_stop_gate : big_gate))});
         deadline += period;

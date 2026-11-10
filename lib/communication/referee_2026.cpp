@@ -2,9 +2,8 @@
 #include <communication/wire.hpp>
 
 namespace skywalker::communication {
-RefereeDecodeResult Referee2026Parser::decode(std::uint16_t command_id, const std::uint8_t *payload,
-                                              std::size_t length, const robotics::MessageStamp &stamp,
-                                              robotics::RefereeState &state) {
+RefereeDecodeResult Referee2026Parser::decode(std::uint16_t command_id, const std::uint8_t *payload, std::size_t length,
+                                              const robotics::MessageStamp &stamp, robotics::RefereeState &state) {
     // RoboMaster 2026 V1.3.0, 0x0201: 13-byte robot status.
     if (command_id == 0x0201) {
         if (length != 13)

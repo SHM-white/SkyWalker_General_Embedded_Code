@@ -9,8 +9,7 @@ int Bmi088Imu::init() {
     if (initialized_)
         return -EALREADY;
     if (!config_.sample_period_us || !config_.temperature_period_us || !config_.max_input_skew_us ||
-        (config_.correct_gyro_bias && !estimator_) ||
-        !core::normalize(config_.sensor_to_body))
+        (config_.correct_gyro_bias && !estimator_) || !core::normalize(config_.sensor_to_body))
         return -EINVAL;
     if (!accel_ || !gyro_ || !device_is_ready(accel_) || !device_is_ready(gyro_))
         return -ENODEV;
@@ -111,8 +110,8 @@ int Bmi088Imu::service() {
                     const auto bias = estimator_->gyroBiasRadS();
                     u.sample.gyro_rad_s = g;
                     u.sample.gyro_rad_s.value = core::rotate(config_.sensor_to_body,
-                                                           {g.value.x - bias.x, g.value.y - bias.y,
-                                                            g.value.z - bias.z});
+                                                             {g.value.x - bias.x, g.value.y - bias.y,
+                                                              g.value.z - bias.z});
                     u.updated_mask |= Gyro;
                 }
             }

@@ -43,8 +43,8 @@ int main() {
     diagnostics.start("gimbal_drive_command", "gimbal", "vx,vy=0.1m/s; wz=0.2rad/s; no wheel channel");
     const int setup = remote.start();
     diagnostics.event("remote.start", setup);
-    k_thread_create(&link_thread, link_stack, K_THREAD_STACK_SIZEOF(link_stack), linkTask, nullptr, nullptr, nullptr,
-                    6, 0, K_NO_WAIT);
+    k_thread_create(&link_thread, link_stack, K_THREAD_STACK_SIZEOF(link_stack), linkTask, nullptr, nullptr, nullptr, 6,
+                    0, K_NO_WAIT);
     samples::control::RcControlAdapter controls({.require_right_middle_to_arm = false});
     samples::control::OperatorControlPublisher authority;
     communication::RemoteReceiver::Snapshot received{};
@@ -93,23 +93,25 @@ int main() {
                                (unsigned(feedback_fresh) << 6) |
                                (unsigned(feedback_fresh && peer.feedback.armed) << 7) |
                                (unsigned(state.spin_requested) << 8);
-        diagnostics.status({.reason = setup || received.uart_error ? DiagnosticReason::InitFailed
-                                      : !state.fresh               ? DiagnosticReason::RemoteStale
-                                      : !peer.online               ? DiagnosticReason::PeerStale
-                                      : !allowed                   ? DiagnosticReason::Disarmed
-                                                                   : DiagnosticReason::Ready,
-                            .valid = state.fresh,
-                            .enabled = allowed,
-                            .target = request.vx_m_s,
-                            .feedback = float(received.remote.analog.left_y),
-                            .age_ms = age,
-                            .dt_us = previous_ms ? float(now - previous_ms) * 1000 : 0,
-                            .effort = float(controls.neutralHeldMs()),
-                            .detail = float(flags),
-                            .error = setup ? setup : received.uart_error ? received.uart_error : peer.error,
-                            .extra0 = float(unsigned(received.remote.left_switch) * 4 +
-                                            unsigned(received.remote.right_switch)),
-                            .extra1 = float(received.remote.stamp.sequence & 0xffff)});
+        diagnostics.status(
+            {.reason = setup || received.uart_error ? DiagnosticReason::InitFailed
+                       : !state.fresh               ? DiagnosticReason::RemoteStale
+                       : !peer.online               ? DiagnosticReason::PeerStale
+                       : !allowed                   ? DiagnosticReason::Disarmed
+                                                    : DiagnosticReason::Ready,
+             .valid = state.fresh,
+             .enabled = allowed,
+             .target = request.vx_m_s,
+             .feedback = float(received.remote.analog.left_y),
+             .age_ms = age,
+             .dt_us = previous_ms ? float(now - previous_ms) * 1000 : 0,
+             .effort = float(controls.neutralHeldMs()),
+             .detail = float(flags),
+             .error = setup                 ? setup
+                      : received.uart_error ? received.uart_error
+                                            : peer.error,
+             .extra0 = float(unsigned(received.remote.left_switch) * 4 + unsigned(received.remote.right_switch)),
+             .extra1 = float(received.remote.stamp.sequence & 0xffff)});
         previous_ms = now;
         k_sleep(K_MSEC(2));
     }

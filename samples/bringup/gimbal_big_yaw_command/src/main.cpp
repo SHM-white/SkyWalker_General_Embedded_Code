@@ -79,10 +79,11 @@ int main() {
         BigYawRequest request{};
         request.mode = allowed ? BigYawMode::FollowCenter : BigYawMode::Disabled;
         // Preserve the current v4 peer convention; do not silently flip one end.
-        request.target_rate_rad_s = allowed && peer_feedback_valid ? -samples::control::RcControlAdapter::normalize(
-                                                  received.remote.analog.right_x) *
-                                                  std::min(installed::bringup::big_yaw_rate_rad_s, 1.0f)
-                                            : 0;
+        request.target_rate_rad_s = allowed && peer_feedback_valid
+                                        ? -samples::control::RcControlAdapter::normalize(
+                                              received.remote.analog.right_x) *
+                                              std::min(installed::bringup::big_yaw_rate_rad_s, 1.0f)
+                                        : 0;
         request.source_sequence = received.remote.stamp.sequence;
         request.source_age_ms = age;
         request.receiver_boot_id = peer.peer.sender_boot_id;
@@ -115,13 +116,13 @@ int main() {
         chassis.stamp = {now, ++chassis_sequence, true};
         endpoint.submit(chassis);
         diagnostics.status(
-            {.reason = !ready           ? DiagnosticReason::InitFailed
-                       : !state.fresh   ? DiagnosticReason::RemoteStale
-                       : !peer.online   ? DiagnosticReason::PeerStale
-                       : !heading_fresh ? DiagnosticReason::ImuStale
-                       : !allowed       ? DiagnosticReason::Disarmed
+            {.reason = !ready                 ? DiagnosticReason::InitFailed
+                       : !state.fresh         ? DiagnosticReason::RemoteStale
+                       : !peer.online         ? DiagnosticReason::PeerStale
+                       : !heading_fresh       ? DiagnosticReason::ImuStale
+                       : !allowed             ? DiagnosticReason::Disarmed
                        : !peer_feedback_valid ? DiagnosticReason::PeerStale
-                                        : DiagnosticReason::Ready,
+                                              : DiagnosticReason::Ready,
              .valid = heading_fresh && peer_feedback_valid,
              .enabled = allowed && peer_feedback_valid,
              .target = request.target_rate_rad_s,

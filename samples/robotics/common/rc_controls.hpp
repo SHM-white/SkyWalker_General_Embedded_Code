@@ -51,10 +51,10 @@ public:
     struct Config {
         // 视觉执行样例保留原三档：左 Middle=手动、左 Up=自动；其余样例左 Up=手动。
         bool allow_auto = false;
-        bool keyboard_mouse_selectable = false; // 右 Middle 在手动档选择键鼠。
+        bool keyboard_mouse_selectable = false;  // 右 Middle 在手动档选择键鼠。
         bool require_right_middle_to_arm = true; // 仅前后行走入口不使用右拨杆。
-        std::uint32_t input_timeout_ms = 100;   // ms，须与接收和命令层失联期限协调。
-        std::uint32_t neutral_arm_ms = 500;     // ms，安全档归中保持时间，防止上电直接运行。
+        std::uint32_t input_timeout_ms = 100;    // ms，须与接收和命令层失联期限协调。
+        std::uint32_t neutral_arm_ms = 500;      // ms，安全档归中保持时间，防止上电直接运行。
     };
     RcControlAdapter() = default;
     explicit RcControlAdapter(Config config) : config_(config) {

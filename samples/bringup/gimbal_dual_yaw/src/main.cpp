@@ -128,7 +128,8 @@ int main() {
         // both axes together with an unchanged relative encoder angle.
         if (request.command.mode == GimbalMode::Rate) {
             request.command.yaw_rate_rad_s = vehicle::small_yaw.direction *
-                (request.command.yaw_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
+                                             (request.command.yaw_rate_rad_s -
+                                              (heading_fresh ? heading.rate_rad_s : 0.0f));
             request.command.pitch_rate_rad_s *= vehicle::pitch.direction;
         }
         if (!op.run_allowed)
@@ -168,8 +169,8 @@ int main() {
         follow.permission_valid = vehicle::connections_confirmed && vehicle::imu_mounting_confirmed && op.run_allowed &&
                                   !op.clear_estop;
         const auto centered = centering.update(follow, now);
-        const bool big_channel_ready = peer.online && follow.permission_valid && heading_fresh &&
-                                       yaw_running && joint_valid;
+        const bool big_channel_ready = peer.online && follow.permission_valid && heading_fresh && yaw_running &&
+                                       joint_valid;
         BigYawRequest big_request{};
         // Encoder offset requests WORLD rate. The peer applies gyro compensation
         // and motor direction; do not negate it here. Zero enables initial feedback.
@@ -213,36 +214,34 @@ int main() {
         chassis.stamp = {ms, ++chassis_sequence, true};
         endpoint.submit(chassis);
         endpoint.setStatus(run);
-        const auto reason = setup_error || source_error || onboard_error
-                                ? vehicle::DiagnosticReason::InitFailed
-                            : !op.fresh                            ? vehicle::DiagnosticReason::RemoteStale
-                            : !op.run_allowed                      ? vehicle::DiagnosticReason::Disarmed
-                            : !vehicle::imu_mounting_confirmed     ? vehicle::DiagnosticReason::Configuration
-                            : !heading_fresh                       ? vehicle::DiagnosticReason::ImuStale
-                            : !peer.online || !peer_feedback_valid ? vehicle::DiagnosticReason::PeerStale
-                            : !joint_valid || !yaw_running
-                                ? vehicle::DiagnosticReason::FeedbackStale
-                                : vehicle::DiagnosticReason::Ready;
-        diagnostics.status(
-            {.reason = reason,
-             .valid = heading_fresh && joint_valid && peer_feedback_valid,
-             .enabled = big_channel_ready && centered.enabled && peer_feedback_valid,
-             .target = big_request.target_rate_rad_s,
-             .feedback = peer_feedback_valid ? vehicle::reference_big_yaw.direction * feedback.actual_rate_rad_s /
+        const auto reason = setup_error || source_error || onboard_error ? vehicle::DiagnosticReason::InitFailed
+                            : !op.fresh                                  ? vehicle::DiagnosticReason::RemoteStale
+                            : !op.run_allowed                            ? vehicle::DiagnosticReason::Disarmed
+                            : !vehicle::imu_mounting_confirmed           ? vehicle::DiagnosticReason::Configuration
+                            : !heading_fresh                             ? vehicle::DiagnosticReason::ImuStale
+                            : !peer.online || !peer_feedback_valid       ? vehicle::DiagnosticReason::PeerStale
+                            : !joint_valid || !yaw_running               ? vehicle::DiagnosticReason::FeedbackStale
+                                                                         : vehicle::DiagnosticReason::Ready;
+        diagnostics.status({.reason = reason,
+                            .valid = heading_fresh && joint_valid && peer_feedback_valid,
+                            .enabled = big_channel_ready && centered.enabled && peer_feedback_valid,
+                            .target = big_request.target_rate_rad_s,
+                            .feedback = peer_feedback_valid
+                                            ? vehicle::reference_big_yaw.direction * feedback.actual_rate_rad_s /
                                                   vehicle::reference_big_yaw.gear_ratio
                                             : std::numeric_limits<float>::quiet_NaN(),
-             .age_ms = feedback.valid ? feedback.production_age_ms : UINT32_MAX,
-             .dt_us = float(dt_us),
-             .effort = gimbal.yawTelemetry().effort_command,
-             .detail = float(unsigned(centered.reason)),
-             .error = setup_error    ? setup_error
-                      : source_error ? source_error
-                      : onboard_error ? onboard_error
-                      : yaw_error    ? yaw_error
-                      : pitch_error  ? pitch_error
-                                     : run.error,
-             .extra0 = vehicle::small_yaw.direction * centered.center_error_rad,
-             .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN()});
+                            .age_ms = feedback.valid ? feedback.production_age_ms : UINT32_MAX,
+                            .dt_us = float(dt_us),
+                            .effort = gimbal.yawTelemetry().effort_command,
+                            .detail = float(unsigned(centered.reason)),
+                            .error = setup_error     ? setup_error
+                                     : source_error  ? source_error
+                                     : onboard_error ? onboard_error
+                                     : yaw_error     ? yaw_error
+                                     : pitch_error   ? pitch_error
+                                                     : run.error,
+                            .extra0 = vehicle::small_yaw.direction * centered.center_error_rad,
+                            .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN()});
         k_sleep(K_USEC(vehicle::gimbal_period_us));
     }
 }
