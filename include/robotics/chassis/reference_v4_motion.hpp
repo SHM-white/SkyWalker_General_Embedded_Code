@@ -42,16 +42,4 @@ inline ChassisCommand referenceV4ChassisToBody(ChassisCommand input, bool encode
     input.vy_m_s = static_cast<float>((sn * vx + c * vy) * scale);
     return input;
 }
-
-// The wire request's mode=1 rate is the desired head/world rate, whereas the
-// native velocity executor expects joint-relative rad/s. This stateless helper
-// is superseded by BigYawWorldHeadingFollower and is removed in the next commit.
-inline float referenceV4WorldToJointRate(float desired_world_rate, float body_rate, float head_rate,
-                                         float feedback_gain = .25f, float rate_limit = 10.0f) {
-    if (!std::isfinite(desired_world_rate) || !std::isfinite(body_rate) || !std::isfinite(head_rate) ||
-        !std::isfinite(feedback_gain) || feedback_gain < 0 || !std::isfinite(rate_limit) || rate_limit <= 0)
-        return 0;
-    return std::clamp(desired_world_rate - body_rate + feedback_gain * (desired_world_rate - head_rate), -rate_limit,
-                      rate_limit);
-}
 } // namespace skywalker::robotics

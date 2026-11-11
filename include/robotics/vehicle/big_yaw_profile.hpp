@@ -1,5 +1,6 @@
 #pragma once
 #include <robotics/execution/big_yaw_executor.hpp>
+#include <robotics/execution/big_yaw_heading_follower.hpp>
 #include <robotics/vehicle/calibration.hpp>
 #include <robotics/vehicle/motion_profile.hpp>
 namespace skywalker::robotics::vehicle {
@@ -52,6 +53,21 @@ inline constexpr BigYawExecutor::Config bigYawExecutionConfig() {
     c.rate_abs_max_rad_s = cal.velocity_limit_rad_s;
     c.motor_to_joint_ratio = cal.gear_ratio;
     c.direction = cal.direction;
+    return c;
+}
+// World-heading follower for the FollowCenter request. Output is a physical
+// joint rate; BigYawExecutor applies direction and ratio exactly once.
+inline BigYawWorldHeadingFollower::Config bigYawHeadingFollowerConfig() {
+    const auto &cal = big_yaw_native_velocity_profile_confirmed ? reference_big_yaw : big_yaw;
+    BigYawWorldHeadingFollower::Config c{};
+    c.heading_kp = big_yaw_heading_kp;
+    c.heading_rate_max_rad_s = big_yaw_heading_rate_max_rad_s;
+    c.heading_error_max_rad = 1.5707963f;
+    c.rate_kp = big_yaw_heading_rate_kp;
+    c.rate_ki = big_yaw_heading_rate_ki;
+    c.rate_integral_max_rad_s = big_yaw_heading_integral_max_rad_s;
+    c.output_max_rad_s = cal.velocity_limit_rad_s;
+    c.release_epsilon_rad_s = big_yaw_heading_release_epsilon_rad_s;
     return c;
 }
 } // namespace skywalker::robotics::vehicle
