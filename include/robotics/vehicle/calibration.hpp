@@ -155,7 +155,7 @@ inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_s
 // 调参：舵轮启停迟滞，单位 m/s；与轮轴角度/线速度无关。
 inline constexpr float chassis_zero_speed_epsilon_m_s = 0.01f, chassis_resume_speed_m_s = 0.02f;
 // 调参：底盘运动适配器的车体 wz 上限、舵向目标速率和驱动/舵向参考斜率。
-inline constexpr float chassis_max_wz_rad_s = 1.0f, chassis_steer_speed_rad_s = 4.0f;
+inline constexpr float chassis_max_wz_rad_s = 10.0f, chassis_steer_speed_rad_s = 10.0f;
 inline constexpr float chassis_drive_slew_rad_s2 = 10.0f, chassis_steer_slew_rad_s2 = 100.0f;
 // 调参：大 Yaw 世界航向闭环（航向 P + 角速度 PI），单位 rad/s；仅作实车整定起点，新硬件上未验证。
 // heading_kp 作用于航向误差，修正量上限 heading_rate_max_rad_s；
