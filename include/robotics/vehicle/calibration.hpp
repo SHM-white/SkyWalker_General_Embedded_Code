@@ -155,10 +155,17 @@ inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_s
 // 调参：舵轮启停迟滞，单位 m/s；与轮轴角度/线速度无关。
 inline constexpr float chassis_zero_speed_epsilon_m_s = 0.01f, chassis_resume_speed_m_s = 0.02f;
 // 调参：底盘运动适配器的车体 wz 上限、舵向目标速率和驱动/舵向参考斜率。
-inline constexpr float chassis_max_wz_rad_s = 1.0f, chassis_steer_speed_rad_s = 4.0f;
+inline constexpr float chassis_max_wz_rad_s = 10.0f, chassis_steer_speed_rad_s = 10.0f;
 inline constexpr float chassis_drive_slew_rad_s2 = 10.0f, chassis_steer_slew_rad_s2 = 100.0f;
-// 调参：大 Yaw 世界速度到关节速度的反馈增益和原生速度加速度。
-inline constexpr float big_yaw_world_rate_feedback_gain = 0.25f;
+// 调参：大 Yaw 世界航向闭环（航向 P + 角速度 PI），单位 rad/s；仅作实车整定起点，新硬件上未验证。
+// heading_kp 作用于航向误差，修正量上限 heading_rate_max_rad_s；
+// rate_kp/rate_ki 作用于“目标世界角速度 - 实测角速度”，积分上限 integral_max_rad_s。
+// release_epsilon_rad_s 是回中断的“零速”判断，只用于松手捕获航向，不是运行许可。
+inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s = 1.5f;
+inline constexpr float big_yaw_heading_rate_kp = 0.25f, big_yaw_heading_rate_ki = 0.5f;
+inline constexpr float big_yaw_heading_integral_max_rad_s = 1.5f;
+inline constexpr float big_yaw_heading_release_epsilon_rad_s = 1e-4f;
+// 调参：大 Yaw 原生速度模式的目标加速度，单位电机轴 rad/s²。
 inline constexpr float big_yaw_native_acceleration_rad_s2 = 4.0f;
 static_assert(positive(manual_max_vx_m_s) && positive(manual_max_vy_m_s) && positive(manual_max_wz_rad_s) &&
                   positive(manual_max_gimbal_yaw_rate_rad_s) && positive(manual_max_gimbal_pitch_rate_rad_s),
@@ -171,8 +178,10 @@ static_assert(chassis_zero_speed_epsilon_m_s >= 0 && chassis_resume_speed_m_s >=
 static_assert(positive(chassis_max_wz_rad_s) && positive(chassis_steer_speed_rad_s) &&
                   positive(chassis_drive_slew_rad_s2) && positive(chassis_steer_slew_rad_s2),
               "chassis rate and slew limits must be positive");
-static_assert(big_yaw_world_rate_feedback_gain >= 0 && positive(big_yaw_native_acceleration_rad_s2),
-              "big-Yaw feedback gain and acceleration must be valid");
+static_assert(big_yaw_heading_kp >= 0 && big_yaw_heading_rate_max_rad_s > 0 && big_yaw_heading_rate_kp >= 0 &&
+                  big_yaw_heading_rate_ki >= 0 && big_yaw_heading_integral_max_rad_s > 0 &&
+                  big_yaw_heading_release_epsilon_rad_s >= 0 && positive(big_yaw_native_acceleration_rad_s2),
+              "big-Yaw heading follower gains and acceleration must be valid");
 
 inline constexpr float two_pi = 6.2831853071795864769f;
 // 调参：小 Yaw 原始编码器上下限，ticks（8192 ticks/转）；当前为全量程，非实测机械安全端点。

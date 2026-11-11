@@ -7,9 +7,15 @@ namespace skywalker::robotics {
 // Reference v4 ChassisControl carries +X forward/+Y left in the *gimbal* frame.
 // A calibrated big-Yaw encoder zero defines its orientation relative to the body;
 // no IMU startup heading is needed for ordinary translation.
-inline ChassisCommand referenceV4ChassisToBody(ChassisCommand input, bool encoder_valid, float encoder_rad,
-                                               float forward_zero_rad, float joint_direction, float gear_ratio,
+//
+// encoder_rad must be the motor's continuous native coordinate
+// (MotorSnapshot::native_unwrapped_position_rad), not the raw ±PMAX angle:
+// one J4310 protocol span is 25 rad, so reducing the raw value after a wrap
+// would rotate the translation by |25 - 4*2*pi| = 0.133 rad on every crossing.
+inline ChassisCommand referenceV4ChassisToBody(ChassisCommand input, bool encoder_valid, double encoder_rad,
+                                               double forward_zero_rad, float joint_direction, float gear_ratio,
                                                float spin_forward_scale = .3f, float spin_lateral_scale = .4f) {
+    constexpr double pi = 3.14159265358979323846;
     if (input.mode == ChassisMode::Disabled)
         return input;
     if (!encoder_valid || !std::isfinite(encoder_rad) || !std::isfinite(forward_zero_rad) ||
@@ -20,29 +26,20 @@ inline ChassisCommand referenceV4ChassisToBody(ChassisCommand input, bool encode
         input.vx_m_s = input.vy_m_s = 0;
         return input; // A valid spin command can continue without a translation reference.
     }
-    const float vx = input.vx_m_s, vy = input.vy_m_s;
+    const double vx = input.vx_m_s, vy = input.vy_m_s;
     const bool spinning = std::fabs(input.wz_rad_s) > 1e-4f;
-    const float scale = spinning ? (std::fabs(vy) > 1e-4f   ? spin_lateral_scale
-                                    : std::fabs(vx) > 1e-4f ? spin_forward_scale
-                                                            : 1.0f)
-                                 : 1.0f;
-    const float theta = std::remainder(joint_direction * (encoder_rad - forward_zero_rad) / gear_ratio,
-                                       6.2831853071795864769f);
-    const float c = std::cos(theta), sn = std::sin(theta);
-    input.vx_m_s = (c * vx - sn * vy) * scale;
-    input.vy_m_s = (sn * vx + c * vy) * scale;
+    const double scale = spinning ? (std::fabs(vy) > 1e-4   ? static_cast<double>(spin_lateral_scale)
+                                     : std::fabs(vx) > 1e-4 ? static_cast<double>(spin_forward_scale)
+                                                            : 1.0)
+                                  : 1.0;
+    // encoder_rad already extends the protocol wraps; only the physical joint
+    // angle is reduced modulo 2*pi, so direction stays continuous for any turn count.
+    const double mechanical_angle = static_cast<double>(joint_direction) * (encoder_rad - forward_zero_rad) /
+                                    static_cast<double>(gear_ratio);
+    const double theta = std::remainder(mechanical_angle, 2.0 * pi);
+    const double c = std::cos(theta), sn = std::sin(theta);
+    input.vx_m_s = static_cast<float>((c * vx - sn * vy) * scale);
+    input.vy_m_s = static_cast<float>((sn * vx + c * vy) * scale);
     return input;
-}
-
-// The wire request's mode=1 rate is the desired head/world rate, whereas the
-// legacy local velocity controller expects joint-relative rad/s.
-// Use body gyro feedforward and head gyro feedback; keep the local motor limit.
-inline float referenceV4WorldToJointRate(float desired_world_rate, float body_rate, float head_rate,
-                                         float feedback_gain = .25f, float rate_limit = 10.0f) {
-    if (!std::isfinite(desired_world_rate) || !std::isfinite(body_rate) || !std::isfinite(head_rate) ||
-        !std::isfinite(feedback_gain) || feedback_gain < 0 || !std::isfinite(rate_limit) || rate_limit <= 0)
-        return 0;
-    return std::clamp(desired_world_rate - body_rate + feedback_gain * (desired_world_rate - head_rate), -rate_limit,
-                      rate_limit);
 }
 } // namespace skywalker::robotics

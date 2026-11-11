@@ -9,6 +9,7 @@
 #include <robotics/vehicle/motion_profile.hpp>
 #include <robotics/chassis/reference_v4_motion.hpp>
 #include <drivers/motor/can_bus.hpp>
+#include <robotics/execution/big_yaw_heading_follower.hpp>
 #include <robotics/vehicle/big_yaw_profile.hpp>
 #include <robotics/vehicle/chassis_profile.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
@@ -70,6 +71,9 @@ int main() {
     const bool need_body = true;
     const int body_error = need_body ? body.start() : 0;
     static const auto big_yaw_config = installed::bigYawExecutionConfig();
+    // One owner for the world-heading capture/integral. The executor keeps the
+    // native velocity backend, sign, ratio, slew and command limits.
+    static BigYawWorldHeadingFollower heading_follower(installed::bigYawHeadingFollowerConfig());
     static BigYawExecutor big_axis(big_drive, installed::bigYawMotorConfig(), big_yaw_config);
     int steer_error = installed::connections_confirmed ? steer_bus.attach(s0, s1, s2, s3) : -ENODEV;
     int drive_error = installed::connections_confirmed ? drive_bus.attach(d0, d1, d2, d3) : -ENODEV;
@@ -104,6 +108,7 @@ int main() {
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
+        const bool cycle_valid = dt_us && dt_us <= big_yaw_config.max_cycle_us;
         previous_cycle_us = now_us;
         endpoint.poll(now_ms);
         const auto rx = endpoint.snapshot();
@@ -123,12 +128,14 @@ int main() {
         // Unlike our old Body-frame v4 implementation, the reference sends
         // gimbal-relative translation. The absolute encoder zero is fixed.
         const auto yaw_feedback = big_drive.snapshot();
-        // The native drive angle shares the calibrated forward-zero coordinate
-        // and recovers after an RX gap without reseeding a continuous reference.
-        const bool encoder_valid = yaw_feedback.feedback_fresh && yaw_feedback.native_position_valid &&
-                                   std::isfinite(yaw_feedback.native_position_rad) &&
+        // Use the continuous native protocol coordinate, not the raw +-PMAX
+        // value: a J4310 wraps every 25 rad, which is not a multiple of 2*pi.
+        // It keeps the calibrated forward zero and survives an RX gap.
+        const bool encoder_valid = yaw_feedback.feedback_fresh && yaw_feedback.native_unwrapped_position_valid &&
+                                   std::isfinite(yaw_feedback.native_unwrapped_position_rad) &&
                                    isFresh({yaw_feedback.feedback.timestamp_ms, 1, true}, now_ms, 100);
-        input.command = referenceV4ChassisToBody(input.command, encoder_valid, yaw_feedback.native_position_rad,
+        input.command = referenceV4ChassisToBody(input.command, encoder_valid,
+                                                 yaw_feedback.native_unwrapped_position_rad,
                                                  installed::reference_big_yaw_forward_zero_rad,
                                                  installed::reference_big_yaw.direction,
                                                  installed::reference_big_yaw.gear_ratio,
@@ -147,28 +154,40 @@ int main() {
         auto big_gate = !rx.big_yaw_request.stamp.valid                  ? BigYawGate::MissingRequest
                         : big_input.request.mode == BigYawMode::Disabled ? BigYawGate::PeerDisabled
                                                                          : BigYawGate::None;
+        bool heading_follow_active = false;
         if (big_input.request.mode == BigYawMode::FollowCenter && !installed::big_yaw_heading_lock_enabled) {
-            // Local velocity backend accepts *joint-relative* speed; decode the
-            // reference's world-rate request using two real gyro observations.
+            // The wire rate is a *world* rate for the head, while the native
+            // velocity backend takes a physical joint rate. The follower owns
+            // heading capture and the rate PI; the executor still applies
+            // direction/ratio, slew and the joint limit exactly once.
             const bool body_gyro_valid = body_snapshot.state == imu::State::Running &&
                                          core::fresh(body_snapshot.sample.gyro_rad_s.stamp, now_us, 50000) &&
                                          core::finite(body_snapshot.sample.gyro_rad_s.value);
-            if (!body_gyro_valid || !rx.gimbal_imu.valid) {
+            float joint_rate = 0;
+            int follow_error = -ESTALE;
+            if (body_gyro_valid) {
+                BigYawWorldHeadingInputs follow{};
+                follow.head = rx.gimbal_imu;
+                follow.now_ms = now_ms;
+                follow.body_rate_rad_s = body_snapshot.sample.gyro_rad_s.value.z;
+                follow.desired_world_rate_rad_s = big_input.request.target_rate_rad_s;
+                // A missed interval stages no motor output this cycle; do not
+                // integrate a heading step over it either.
+                follow.dt_s = cycle_valid ? static_cast<float>(dt_us) * 1e-6f : 0;
+                follow_error = heading_follower.step(follow, joint_rate);
+            }
+            if (follow_error < 0) {
                 big_input.request.mode = BigYawMode::Disabled;
-                big_gate = !body_gyro_valid ? BigYawGate::BodyGyro : BigYawGate::PeerImu;
+                big_gate = body_gyro_valid ? BigYawGate::PeerImu : BigYawGate::BodyGyro;
             }
             else {
-                const float joint_rate = referenceV4WorldToJointRate(big_input.request.target_rate_rad_s,
-                                                                     body_snapshot.sample.gyro_rad_s.value.z,
-                                                                     rx.gimbal_imu.yaw_rate_rad_s,
-                                                                     installed::big_yaw_world_rate_feedback_gain,
-                                                                     installed::reference_big_yaw.velocity_limit_rad_s);
-                // Compensation can exceed the world target. Saturate at the
-                // installed joint limit shared with the execution guard.
+                heading_follow_active = true;
                 big_input.request.target_rate_rad_s = std::clamp(joint_rate, -big_yaw_config.rate_abs_max_rad_s,
                                                                  big_yaw_config.rate_abs_max_rad_s);
             }
         }
+        if (!heading_follow_active && !installed::big_yaw_heading_lock_enabled)
+            heading_follower.reset();
         big_input.head = rx.gimbal_imu;
         big_input.peer_boot_id = rx.peer.sender_boot_id;
         big_input.local_boot_id = rx.local_boot_id;

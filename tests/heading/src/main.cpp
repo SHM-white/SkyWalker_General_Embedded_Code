@@ -251,8 +251,6 @@ ZTEST(heading, test_reference_v4_gimbal_to_body_frame_and_spin_scaling) {
     zassert_equal(out.vx_m_s, 0);
     zassert_equal(out.vy_m_s, 0);
     zassert_equal(out.wz_rad_s, .5f);
-    zassert_within(referenceV4WorldToJointRate(0, 2, 0), -2, 1e-5f);
-    zassert_within(referenceV4WorldToJointRate(1, 0, 0), 1.25f, 1e-5f);
 }
 
 ZTEST_SUITE(heading, nullptr, nullptr, nullptr, nullptr, nullptr);
