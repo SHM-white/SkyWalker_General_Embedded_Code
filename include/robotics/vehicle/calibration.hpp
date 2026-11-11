@@ -78,17 +78,17 @@ static_assert(steer_zero_ticks_by_id[0] < 8192 && steer_zero_ticks_by_id[1] < 81
 // rotation opposes body-positive (CCW viewed from above). The hardware adapter
 // applies this sign to angle/velocity feedback AND current output.
 inline constexpr std::array<MotorCalibration, 4> legacy_steer{{
-    {1, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[0]}, // FL
-    {4, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[3]}, // FR
-    {2, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[1]}, // RL
-    {3, 0, 1, -1, 0.8f, 4, steer_zero_ticks_by_id[2]}, // RR
+    {1, 0, 1, -1, 2.0f, 4, steer_zero_ticks_by_id[0]}, // FL
+    {4, 0, 1, -1, 2.0f, 4, steer_zero_ticks_by_id[3]}, // FR
+    {2, 0, 1, -1, 2.0f, 4, steer_zero_ticks_by_id[1]}, // RL
+    {3, 0, 1, -1, 2.0f, 4, steer_zero_ticks_by_id[2]}, // RR
 }};
 // Preserve the original direction of each motor ID; reconfirm after remounting.
 inline constexpr std::array<MotorCalibration, 4> legacy_wheel{{
-    {1, 0, wheel_gear_ratio, -1, 0.5f, 10, 0}, // FL
-    {4, 0, wheel_gear_ratio, 1, 0.5f, 10, 0},  // FR
-    {2, 0, wheel_gear_ratio, 1, 0.5f, 10, 0},  // RL
-    {3, 0, wheel_gear_ratio, -1, 0.5f, 10, 0}, // RR
+    {1, 0, wheel_gear_ratio, -1, 20.0f, 40, 0}, // FL
+    {4, 0, wheel_gear_ratio, 1, 20.0f, 40, 0},  // FR
+    {2, 0, wheel_gear_ratio, 1, 20.0f, 40, 0},  // RL
+    {3, 0, wheel_gear_ratio, -1, 20.0f, 40, 0}, // RR
 }};
 // Source: JJL0612/sentry_onlychassis 7c7e870 (2026-10-28), NOT a new measurement.
 // Same FL/FR/RL/RR coordinates; hardware adapter owns both feedback/output signs.
@@ -148,7 +148,7 @@ inline constexpr float drive_rotor_velocity_kp = 0.08f;
 inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us = 1000000;
 
 // 调参：手动底盘/云台速度上限，单位 m/s 或 rad/s。
-inline constexpr float manual_max_vx_m_s = 5.0f, manual_max_vy_m_s = 5.0f, manual_max_wz_rad_s = 5.0f;
+inline constexpr float manual_max_vx_m_s = 1.0f, manual_max_vy_m_s = 1.0f, manual_max_wz_rad_s = 1.0f;
 inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 1.0f, manual_max_gimbal_pitch_rate_rad_s = 0.8f;
 // 调参：小陀螺边平移的参考倍率；0..1。
 inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_scale = 1.0f;
@@ -156,13 +156,13 @@ inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_s
 inline constexpr float chassis_zero_speed_epsilon_m_s = 0.01f, chassis_resume_speed_m_s = 0.02f;
 // 调参：底盘运动适配器的车体 wz 上限、舵向目标速率和驱动/舵向参考斜率。
 inline constexpr float chassis_max_wz_rad_s = 10.0f, chassis_steer_speed_rad_s = 10.0f;
-inline constexpr float chassis_drive_slew_rad_s2 = 10.0f, chassis_steer_slew_rad_s2 = 100.0f;
+inline constexpr float chassis_drive_slew_rad_s2 = 30.0f, chassis_steer_slew_rad_s2 = 100.0f;
 // 调参：大 Yaw 世界航向闭环（航向 P + 角速度 PI），单位 rad/s；仅作实车整定起点，新硬件上未验证。
 // heading_kp 作用于航向误差，修正量上限 heading_rate_max_rad_s；
 // rate_kp/rate_ki 作用于“目标世界角速度 - 实测角速度”，积分上限 integral_max_rad_s。
 // release_epsilon_rad_s 是回中断的“零速”判断，只用于松手捕获航向，不是运行许可。
-inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s = 1.5f;
-inline constexpr float big_yaw_heading_rate_kp = 0.25f, big_yaw_heading_rate_ki = 0.5f;
+inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s = 3.0f;
+inline constexpr float big_yaw_heading_rate_kp = 0.0f, big_yaw_heading_rate_ki = 0.0f;
 inline constexpr float big_yaw_heading_integral_max_rad_s = 1.5f;
 inline constexpr float big_yaw_heading_release_epsilon_rad_s = 1e-4f;
 // 调参：大 Yaw 原生速度模式的目标加速度，单位电机轴 rad/s²。
@@ -198,7 +198,7 @@ static_assert(yaw_min_rad < yaw_max_rad && yaw_center_rad > yaw_min_rad && yaw_c
 // TODO(measure): these are existing geometry placeholders, not validated by
 // the reference's empirical radius=0.01 / reduction=1 speed conversion.
 // wheel_gear_ratio must include any transmission between the rotor and wheel.
-inline constexpr float wheel_radius_m = 0.05f, wheelbase_m = 0.4f, track_m = 0.4f;
+inline constexpr float wheel_radius_m = 0.055f, wheelbase_m = 0.4f, track_m = 0.4f;
 static_assert(positive(wheel_radius_m) && positive(wheelbase_m) && positive(track_m),
               "wheel radius, wheelbase and track must be positive");
 
