@@ -148,7 +148,7 @@ inline constexpr float drive_rotor_velocity_kp = 0.08f;
 inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us = 1000000;
 
 // 调参：手动底盘/云台速度上限，单位 m/s 或 rad/s。
-inline constexpr float manual_max_vx_m_s = 1.0f, manual_max_vy_m_s = 1.0f, manual_max_wz_rad_s = 4.0f;
+inline constexpr float manual_max_vx_m_s = 1.0f, manual_max_vy_m_s = 1.0f, manual_max_wz_rad_s = 6.0f;
 inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 3.0f, manual_max_gimbal_pitch_rate_rad_s = 3.0f;
 // 调参：小陀螺边平移的参考倍率；0..1。
 inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_scale = 1.0f;
@@ -161,12 +161,12 @@ inline constexpr float chassis_drive_slew_rad_s2 = 30.0f, chassis_steer_slew_rad
 // heading_kp 作用于航向误差，修正量上限 heading_rate_max_rad_s；
 // rate_kp/rate_ki 作用于“目标世界角速度 - 实测角速度”，积分上限 integral_max_rad_s。
 // release_epsilon_rad_s 是回中断的“零速”判断，只用于松手捕获航向，不是运行许可。
-inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s = 3.0f;
+inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s = 6.0f;
 inline constexpr float big_yaw_heading_rate_kp = 0.0f, big_yaw_heading_rate_ki = 0.0f;
 inline constexpr float big_yaw_heading_integral_max_rad_s = 1.5f;
 inline constexpr float big_yaw_heading_release_epsilon_rad_s = 1e-4f;
 // 调参：大 Yaw 原生速度模式的目标加速度，单位电机轴 rad/s²。
-inline constexpr float big_yaw_native_acceleration_rad_s2 = 4.0f;
+inline constexpr float big_yaw_native_acceleration_rad_s2 = 20.0f;
 static_assert(positive(manual_max_vx_m_s) && positive(manual_max_vy_m_s) && positive(manual_max_wz_rad_s) &&
                   positive(manual_max_gimbal_yaw_rate_rad_s) && positive(manual_max_gimbal_pitch_rate_rad_s),
               "manual speed limits must be positive");

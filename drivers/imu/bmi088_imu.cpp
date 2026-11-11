@@ -9,6 +9,7 @@ int Bmi088Imu::init() {
     if (initialized_)
         return -EALREADY;
     if (!config_.sample_period_us || !config_.temperature_period_us || !config_.max_input_skew_us ||
+        (config_.planar_yaw_enabled && config_.correct_gyro_bias) ||
         (config_.correct_gyro_bias && !estimator_) || !core::normalize(config_.sensor_to_body))
         return -EINVAL;
     if (!accel_ || !gyro_ || !device_is_ready(accel_) || !device_is_ready(gyro_))
@@ -22,7 +23,8 @@ int Bmi088Imu::init() {
         return -ENOTSUP;
 #endif
     }
-    const int ret = state_.init(Accel | Gyro | Temperature | (estimator_ ? Orientation : 0u), config_.reference);
+    const int ret = state_.init(Accel | Gyro | Temperature | (estimator_ ? Orientation : 0u) |
+                                   (config_.planar_yaw_enabled ? PlanarYaw : 0u), config_.reference);
     if (ret < 0)
         return ret;
     if (estimator_)
@@ -77,6 +79,28 @@ int Bmi088Imu::service() {
         gyro_update.sample.gyro_rad_s = g;
         gyro_update.sample.gyro_rad_s.value = core::rotate(config_.sensor_to_body, gyro);
         gyro_update.updated_mask |= Gyro;
+    }
+    if (config_.planar_yaw_enabled) {
+        // Raw gyro is already rotated into the carrier frame. The independent
+        // fixed bias never changes when the diagnostic EKF degrades or resets.
+        const auto &p = planar_yaw_.update(gyro_update.sample.gyro_rad_s, accel_update.sample.accel_m_s2);
+        auto &out = gyro_update.sample.planar_yaw;
+        out.yaw_rad = p.yaw_rad;
+        out.rate_rad_s = p.rate_rad_s;
+        out.bias_rad_s = p.bias_rad_s;
+        out.generation = p.generation;
+        using S = control::PlanarYawIntegrator::State;
+        switch (p.state) {
+        case S::Calibrating: out.state = PlanarYawState::Calibrating; break;
+        case S::Ready: out.state = PlanarYawState::Ready; break;
+        case S::GyroInvalid: out.state = PlanarYawState::GyroInvalid; break;
+        case S::SampleGap: out.state = PlanarYawState::SampleGap; break;
+        case S::TimeReset: out.state = PlanarYawState::TimeReset; break;
+        case S::RateInvalid: out.state = PlanarYawState::RateInvalid; break;
+        }
+        // Also publish invalidity immediately when a gyro read fails, without
+        // renewing the stamp of the previous successful gyro measurement.
+        gyro_update.updated_mask |= PlanarYaw;
     }
     // In the pinned BMI08x driver DIE_TEMP performs its own SPI read, not a cache get.
     if (now >= next_temperature_) {

@@ -9,6 +9,38 @@ float wrap(float a) {
     return std::remainder(a, 2 * pi);
 }
 }
+LocalHeading planarYawHeading(const imu::Snapshot &s, core::TimeUs now) {
+    LocalHeading out{};
+    const auto &p = s.sample.planar_yaw;
+    out.generation = p.generation;
+    if (s.state != imu::State::Running)
+        out.reason = HeadingWaitReason::SourceNotRunning;
+    else if (!(s.capabilities & imu::PlanarYaw))
+        out.reason = HeadingWaitReason::ReferenceInvalid;
+    else if (p.state != imu::PlanarYawState::Ready) {
+        switch (p.state) {
+        case imu::PlanarYawState::GyroInvalid: out.reason = HeadingWaitReason::GyroInvalid; break;
+        case imu::PlanarYawState::SampleGap: out.reason = HeadingWaitReason::SampleGap; break;
+        case imu::PlanarYawState::TimeReset: out.reason = HeadingWaitReason::ReferenceReset; break;
+        case imu::PlanarYawState::RateInvalid: out.reason = HeadingWaitReason::RateInvalid; break;
+        default: out.reason = HeadingWaitReason::Initializing; break;
+        }
+    }
+    else if (!core::fresh(p.yaw_rad.stamp, now, 20000) || !core::fresh(s.sample.gyro_rad_s.stamp, now, 20000))
+        out.reason = HeadingWaitReason::GyroStale;
+    else if (!p.generation)
+        out.reason = HeadingWaitReason::ReferenceInvalid;
+    else if (!std::isfinite(p.yaw_rad.value) || !std::isfinite(p.rate_rad_s) || std::fabs(p.rate_rad_s) > 35)
+        out.reason = HeadingWaitReason::RateInvalid;
+    else {
+        out.yaw_rad = p.yaw_rad.value;
+        out.rate_rad_s = p.rate_rad_s;
+        out.stamp = p.yaw_rad.stamp;
+        out.valid = true;
+        out.reason = HeadingWaitReason::None;
+    }
+    return out;
+}
 LocalHeading ImuHeadingReference::update(const imu::Snapshot &s, bool /*disarmed*/, core::TimeUs now) {
     LocalHeading out{};
     out.generation = initialized_ ? 1 : 0;

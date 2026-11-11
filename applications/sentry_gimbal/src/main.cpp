@@ -68,12 +68,12 @@ int main() {
     static imu::Bmi088Imu onboard_source(DEVICE_DT_GET(DT_ALIAS(accel0)), DEVICE_DT_GET(DT_ALIAS(gyro0)),
                                          {.reference = installed::carrier_reference,
                                           .sensor_to_body = installed::carrier_sensor_to_body,
-                                          .correct_gyro_bias = true},
+                                          .correct_gyro_bias = false,
+                                          .planar_yaw_enabled = true},
                                          &onboard_estimator);
     static imu::ImuReceiver onboard(onboard_source, {.poll_interval_us = 500, .priority = 5});
-    // BMI088 continues gyro prediction when acceleration rejects a gravity
-    // correction. Bridge brief degradation using fresh samples only.
-    static ImuHeadingReference carrier_heading({.max_degraded_prediction_us = 100000});
+    // Near-horizontal carrier: yaw is integrated in the acquisition thread.
+    // The three-dimensional EKF remains diagnostic-only for this application.
     static YawCenteringController centering(centeringConfig());
     static motor::Motor yaw(installed::yawHardware()), pitch(installed::pitchHardware());
     static motor::CanBus yaw_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
@@ -123,6 +123,9 @@ int main() {
     core::TimeUs heading_loss_start_us = 0, heading_loss_duration_us = 0;
     imu::EstimatorDiagnostics loss_estimator{};
     for (;;) {
+        // Snapshot before taking the validation time: a higher-priority IMU
+        // update must not make a new gyro stamp appear to be in our future.
+        const auto carrier_snapshot = onboard.snapshot();
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
         previous_cycle_us = now_us;
@@ -142,8 +145,7 @@ int main() {
         }
         commands.setOperatorGate(operator_state.run_allowed, 0);
         (void)commands.snapshot(frame);
-        const auto carrier_snapshot = onboard.snapshot();
-        const auto heading = carrier_heading.update(carrier_snapshot, !operator_state.run_allowed, now_us);
+        const auto heading = planarYawHeading(carrier_snapshot, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);
         const auto heading_reason = !heading.valid   ? heading.reason
                                     : !heading_fresh ? HeadingWaitReason::ControlStale
@@ -272,7 +274,7 @@ int main() {
         };
         // Fixed channel map documented in docs/dev/大Yaw突发跟转诊断操作指南.md.
         const std::array<float, 27> trace{
-            102,                                                        // I19 schema/board
+            103,                                                        // I19 planar-yaw gimbal schema
             float(unsigned(heading_reason)),                            // I20 live reason
             float(unsigned(carrier_snapshot.sample.attitude_quality)),  // I21 quality
             float(heading_fresh),                                        // I22 heading usable
@@ -309,8 +311,7 @@ int main() {
                             .enabled = status.state == RunState::Active,
                             .target = static_cast<float>(gimbal.yawTargetRad()),
                             .feedback = ys.feedback.position_rad,
-                            .age_ms = std::max(age(carrier_snapshot.sample.orientation.stamp, now_us),
-                                               age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),
+                            .age_ms = age(carrier_snapshot.sample.planar_yaw.yaw_rad.stamp, now_us),
                             .dt_us = float(have_heading_loss ? last_heading_loss_dt_us : dt_us),
                             .effort = gimbal.yawTelemetry().effort_command,
                             .detail = float(unsigned(have_heading_loss ? last_heading_loss_reason : heading_reason)),

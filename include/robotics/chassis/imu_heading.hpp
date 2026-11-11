@@ -27,6 +27,9 @@ struct LocalHeading {
     bool valid = false;
     HeadingWaitReason reason = HeadingWaitReason::Initializing;
 };
+// Read the acquisition-thread planar yaw. Does not consult EKF attitude quality,
+// orientation reference, or accelerometer freshness after calibration.
+LocalHeading planarYawHeading(const imu::Snapshot &, core::TimeUs now);
 // A software zero belongs to one board startup. Transient losses preserve it;
 // a driver reference reset invalidates it until both boards are realigned/rebooted.
 class ImuHeadingReference {

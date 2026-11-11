@@ -29,7 +29,7 @@ struct DiagnosticStatus {
     float dt_us = 0, effort = 0, detail = 0;
     int error = 0;
     float extra0 = 0, extra1 = 0;
-    // I19..I45. I19 identifies schema/board: 101 chassis, 102 gimbal.
+    // I19..I45. I19: 101 chassis, 102 legacy attitude gimbal, 103 planar-yaw gimbal.
     // Legacy callers keep the original 19-channel frame.
     bool extended = false;
     std::array<float, 27> extension = [] {

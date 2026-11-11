@@ -1,4 +1,5 @@
 #pragma once
+#include <control/planar_yaw.hpp>
 #include <drivers/imu/imu.hpp>
 #include <drivers/imu/imu_state.hpp>
 #include <control/attitude_ekf.hpp>
@@ -14,6 +15,9 @@ public:
         // EKF provides attitude and bias. Raw accel/gyro publish independently;
         // before the estimator is initialized, gyro is published without bias.
         bool correct_gyro_bias = false;
+        // Opt-in independent yaw, calibrated/integrated at the gyro acquisition rate.
+        // Mutually exclusive with EKF bias correction of the published raw gyro.
+        bool planar_yaw_enabled = false;
     };
     Bmi088Imu(const device *accel, const device *gyro, const Config &c, control::QuaternionEkf *estimator = nullptr)
         : accel_(accel), gyro_(gyro), config_(c), estimator_(estimator), state_(c.freshness) {
@@ -29,6 +33,7 @@ private:
     Config config_;
     control::QuaternionEkf *estimator_;
     ImuState state_;
+    control::PlanarYawIntegrator planar_yaw_;
     core::TimeUs next_sample_ = 0, next_temperature_ = 0;
     bool initialized_ = false;
 };

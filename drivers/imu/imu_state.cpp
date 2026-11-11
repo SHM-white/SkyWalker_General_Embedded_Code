@@ -5,7 +5,8 @@
 
 namespace skywalker::imu {
 int ImuState::init(std::uint32_t caps, core::OrientationReference ref) {
-    if (!ref.frame_id || !ref.epoch || (caps & ~(Accel | Gyro | Orientation | Temperature)) ||
+    if (!ref.frame_id || !ref.epoch || (caps & ~(Accel | Gyro | Orientation | Temperature | PlanarYaw)) ||
+        ((caps & PlanarYaw) && (!(caps & Gyro) || !freshness_.gyro_us)) ||
         ((caps & Accel) && !freshness_.accel_us) || ((caps & Gyro) && !freshness_.gyro_us) ||
         ((caps & Orientation) && !freshness_.orientation_us) || ((caps & Temperature) && !freshness_.temperature_us))
         return -EINVAL;
@@ -26,7 +27,11 @@ int ImuState::publish(const Update &input) {
     auto &s = u.sample;
     const auto now = core::monotonicTimeUs();
     auto validStamp = [now](const core::Stamp &t) { return t.valid && t.time_us <= now; };
-    if (!mask || (mask & ~(Accel | Gyro | Orientation | Temperature)) ||
+    if (!mask || (mask & ~(Accel | Gyro | Orientation | Temperature | PlanarYaw)) ||
+        ((mask & PlanarYaw) && s.planar_yaw.yaw_rad.stamp.valid &&
+         (!validStamp(s.planar_yaw.yaw_rad.stamp) || !std::isfinite(s.planar_yaw.yaw_rad.value) ||
+          !std::isfinite(s.planar_yaw.rate_rad_s) || !std::isfinite(s.planar_yaw.bias_rad_s) ||
+          !s.planar_yaw.generation || s.planar_yaw.state != PlanarYawState::Ready)) ||
         ((mask & Accel) && (!validStamp(s.accel_m_s2.stamp) || !core::finite(s.accel_m_s2.value))) ||
         ((mask & Gyro) && (!validStamp(s.gyro_rad_s.stamp) || !core::finite(s.gyro_rad_s.value))) ||
         ((mask & Temperature) && (!validStamp(s.temperature_c.stamp) || !std::isfinite(s.temperature_c.value))) ||
@@ -45,6 +50,8 @@ int ImuState::publish(const Update &input) {
     else if (mask & ~value_.capabilities)
         ret = -ENOTSUP;
     else if (((mask & Accel) && stale(s.accel_m_s2, old.accel_m_s2)) ||
+             ((mask & PlanarYaw) && s.planar_yaw.yaw_rad.stamp.valid &&
+              stale(s.planar_yaw.yaw_rad, old.planar_yaw.yaw_rad)) ||
              ((mask & Gyro) && stale(s.gyro_rad_s, old.gyro_rad_s)) ||
              ((mask & Temperature) && stale(s.temperature_c, old.temperature_c)) ||
              ((mask & Orientation) && (stale(s.orientation, old.orientation) || s.reference != old.reference)))
@@ -59,6 +66,8 @@ int ImuState::publish(const Update &input) {
             assign(old.accel_m_s2, s.accel_m_s2);
         if (mask & Gyro)
             assign(old.gyro_rad_s, s.gyro_rad_s);
+        if (mask & PlanarYaw)
+            old.planar_yaw = s.planar_yaw;
         if (mask & Temperature)
             assign(old.temperature_c, s.temperature_c);
         if (mask & Orientation) {
@@ -90,6 +99,8 @@ Snapshot ImuState::snapshot() const {
             out.fresh_mask |= Accel;
         if (core::fresh(s.gyro_rad_s.stamp, now, freshness_.gyro_us))
             out.fresh_mask |= Gyro;
+        if (core::fresh(s.planar_yaw.yaw_rad.stamp, now, freshness_.gyro_us))
+            out.fresh_mask |= PlanarYaw;
         if (core::fresh(s.orientation.stamp, now, freshness_.orientation_us))
             out.fresh_mask |= Orientation;
         if (core::fresh(s.temperature_c.stamp, now, freshness_.temperature_us))
