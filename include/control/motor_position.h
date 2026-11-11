@@ -11,6 +11,18 @@ extern "C" {
 typedef struct {
     control_pid_config position;
     control_motor_velocity_config velocity;
+    /*
+     * Joint reference feedforward: velocity_feedforward_gain * reference velocity
+     * is added to the position-loop velocity request. Zero keeps the legacy
+     * cascade where the position loop alone owns the velocity reference.
+     */
+    float velocity_feedforward_gain;
+    /*
+     * Actuator effort per rad/s^2 (amperes for DJI, N*m for DM MIT mode). Zero
+     * disables acceleration effort feedforward. Enable only after a bench has
+     * identified the direction and the available current margin.
+     */
+    float acceleration_effort_gain;
 } control_motor_position_config;
 
 typedef struct {
@@ -26,6 +38,11 @@ typedef struct {
     /* Optional physical target for feedforward when PID coordinates are rebased. */
     float position_reference_rad;
     bool has_position_reference;
+    /* Optional joint reference from the same feasible trajectory as the target. */
+    float reference_velocity_rad_s;
+    bool has_reference_velocity;
+    float reference_acceleration_rad_s2;
+    bool has_reference_acceleration;
 } control_motor_position_input;
 
 typedef struct {

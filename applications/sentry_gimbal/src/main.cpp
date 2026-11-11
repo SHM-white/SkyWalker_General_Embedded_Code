@@ -18,6 +18,10 @@
 #include <drivers/led/status_led.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
 #include <zephyr/drivers/regulator.h>
+#if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
+#include <communication/vision/ab_protocol.hpp>
+#include <communication/vision/vision_receiver.hpp>
+#endif
 #include "../../../samples/robotics/common/rc_controls.hpp"
 
 namespace {
@@ -54,6 +58,15 @@ int main() {
     static communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma,
                                                 samples::control::receiverConfig());
     static RemoteSource remote_source(remote);
+    // Vision is only instantiated when the board assigns a UART and the build
+    // enables the AB receiver; the arbitration still needs `allow_auto`.
+#if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
+    static communication::AsyncUart::DmaBuffers vision_dma __nocache;
+    static communication::vision::AbProtocol vision_protocol({.command_reference = installed::head_reference});
+    static communication::vision::VisionReceiver vision(DEVICE_DT_GET(DT_ALIAS(vision_uart)), vision_dma,
+                                                        vision_protocol, {});
+    static VisionSource vision_source(vision);
+#endif
     static CommandManager commands(installed::manualCommandConfig());
     // Board IMU moves with big Yaw, not with the small-Yaw head. No external
     // CAN3 IMU or vision receiver is instantiated in this manual application.
@@ -78,6 +91,10 @@ int main() {
                                  installed::pitchMotorConfig(), installed::pitchAxisConfig(),
                                  installed::gimbalExecutionConfig());
     int command_error = commands.registerSource(remote_source);
+#if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
+    if (command_error == 0)
+        command_error = commands.registerSource(vision_source);
+#endif
     if (command_error == 0)
         command_error = commands.start();
     const int onboard_error = onboard.start();
@@ -117,6 +134,8 @@ int main() {
     std::uint64_t last_heading_loss_ms = 0;
     core::TimeUs heading_loss_start_us = 0, heading_loss_duration_us = 0;
     imu::EstimatorDiagnostics loss_estimator{};
+    CarrierAccelerationEstimator carrier_acceleration;
+    std::uint32_t vision_trajectory_sequence = 0;
     for (;;) {
         // Snapshot before taking the validation time: a higher-priority IMU
         // update must not make a new gyro stamp appear to be in our future.
@@ -162,6 +181,12 @@ int main() {
                 heading_loss_start_us = 0;
         }
         heading_was_fresh = heading_fresh;
+        // Accelerations come only from two genuinely new gyro samples; repeated
+        // reads keep the filtered value and gaps disable the feedforward.
+        const auto &carrier_gyro = carrier_snapshot.sample.gyro_rad_s;
+        carrier_acceleration.update(carrier_gyro.stamp.valid ? carrier_gyro.value.z
+                                                             : std::numeric_limits<float>::quiet_NaN(),
+                                    carrier_gyro.stamp, 0.02f, 50.0f);
         GimbalExecutionInputs input{};
         input.command = frame.decision.command.gimbal;
         input.source_stamp = sourceStamp(frame, input.command.source);
@@ -184,6 +209,33 @@ int main() {
         if (peer_feedback_valid != peer_feedback_was_valid)
             dual_yaw.reset();
         peer_feedback_was_valid = peer_feedback_valid;
+        // Only the arbitrated target is ever consumed. `selected_vision` is kept
+        // by the manager exactly while the final gimbal source is Vision.
+        const auto &selected_vision = frame.decision.selected_vision;
+        const bool vision_selected = selected_vision.stamp.valid && input.command.source == ControlSource::Vision &&
+                                     input.command.mode != GimbalMode::Disabled;
+        // The vision trajectory is expressed in the head world frame, so it is
+        // only consumed while the carrier attitude and the joint measurement are
+        // fresh; otherwise the axis holds the measured joint instead of chasing
+        // a world angle in joint space.
+        const bool vision_active = vision_selected && heading_fresh && joint_valid;
+        if (vision_selected && !vision_active)
+            input.command.mode = GimbalMode::Hold;
+        float vision_angle_rad = 0, vision_rate_rad_s = 0, vision_acceleration_rad_s2 = 0;
+        std::uint32_t vision_epoch = 0;
+        if (vision_selected) {
+            const auto &v = selected_vision.value.yaw;
+            // Bounded prediction by the real sample age; the vision producer
+            // timestamps the target it sends.
+            const float age_s = now_us >= selected_vision.stamp.time_us
+                                    ? std::min(float(now_us - selected_vision.stamp.time_us) * 1e-6f, 0.05f)
+                                    : 0.05f;
+            vision_angle_rad = v.angle_rad + v.rate_rad_s * age_s + 0.5f * v.acceleration_rad_s2 * age_s * age_s;
+            vision_rate_rad_s = v.rate_rad_s;
+            vision_acceleration_rad_s2 = v.acceleration_rad_s2;
+            vision_epoch = (static_cast<std::uint32_t>(selected_vision.value.reference.frame_id) << 16) ^
+                           static_cast<std::uint32_t>(selected_vision.value.reference.epoch);
+        }
         const bool big_channel_ready = setup_ready && operator_state.fresh && operator_state.run_allowed &&
                                        peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
                                        joint_valid && yaw_running;
@@ -199,11 +251,45 @@ int main() {
         allocation.joint_stamp = {ys.feedback.timestamp_ms * 1000, ys.feedback.timestamp_ms, joint_valid};
         allocation.source_stamp = input.source_stamp;
         allocation.big_yaw_available = big_channel_ready && peer_feedback_valid;
-        allocation.enabled = input.command.mode == GimbalMode::Rate && operator_state.run_allowed;
+        allocation.enabled =
+            operator_state.run_allowed &&
+            (input.command.mode == GimbalMode::Rate ||
+             (vision_active && input.command.mode != GimbalMode::Disabled));
         allocation.permission_valid =
             operator_state.run_allowed && installed::connections_confirmed && installed::imu_mounting_confirmed;
+        allocation.vision_active = vision_active;
+        allocation.vision_angle_rad = vision_angle_rad;
+        allocation.vision_rate_rad_s = vision_rate_rad_s;
+        allocation.vision_acceleration_rad_s2 = vision_acceleration_rad_s2;
+        allocation.vision_epoch = vision_epoch;
+        // Head world angle in the same frame as the vision target. The two
+        // heading references must be aligned before Auto is enabled.
+        allocation.head_angle_measured_rad =
+            vision_active ? heading.yaw_rad +
+                                installed::small_yaw.direction *
+                                    (ys.feedback.position_rad - installed::yaw_center_rad)
+                          : 0.0f;
+        allocation.carrier_acceleration_valid = carrier_acceleration.valid();
+        allocation.carrier_acceleration_rad_s2 = carrier_acceleration.value_rad_s2();
         const auto alloc = dual_yaw.update(allocation, now_us);
-        if (input.command.mode == GimbalMode::Rate) {
+        if (alloc.enabled && alloc.vision_mode) {
+            // Vision owns the Yaw through the validated joint trajectory. Pitch
+            // keeps a measured joint hold until the separate vision attitude
+            // chain supplies a joint-space pitch target.
+            input.yaw_trajectory.valid = true;
+            input.yaw_trajectory.position_rad = alloc.joint_position_rad;
+            input.yaw_trajectory.rate_rad_s = alloc.joint_rate_rad_s;
+            input.yaw_trajectory.acceleration_rad_s2 = alloc.joint_acceleration_rad_s2;
+            input.yaw_trajectory.stamp = {now_us, ++vision_trajectory_sequence, true};
+            input.command.pitch_target_rad = pitch.snapshot().feedback.position_rad;
+        }
+        else if (vision_selected) {
+            // Vision selected but the allocation was rejected this cycle: hold
+            // the measured joints instead of driving a world angle through the
+            // joint-space rate step.
+            input.command.mode = GimbalMode::Hold;
+        }
+        else if (input.command.mode == GimbalMode::Rate) {
             // Encoder loops own both motors. Coordinated mode consumes the
             // allocated joint rate, which already removed the measured carrier
             // rate; a rejected allocation falls back to the existing local
@@ -323,7 +409,7 @@ int main() {
             alloc.head.rate_rad_s,                                        // I47 feasible head world rate
             float((alloc.enabled ? 1u : 0u) | (alloc.travel_limited ? 2u : 0u) |
                   (alloc.big_saturated ? 4u : 0u) | (alloc.tracking_limited ? 8u : 0u) |
-                  (allocation.big_yaw_available ? 16u : 0u) |
+                  (allocation.big_yaw_available ? 16u : 0u) | (alloc.vision_mode ? 512u : 0u) |
                   (static_cast<unsigned>(alloc.reason) << 5))}; // I48 allocation flags/reason
         diagnostics.status({.reason = reason,
                             .valid = joint_valid,

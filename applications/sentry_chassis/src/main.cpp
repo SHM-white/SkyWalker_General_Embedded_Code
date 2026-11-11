@@ -234,8 +234,8 @@ int main() {
             last_big_stop_dt_us = dt_us;
             ++big_stop_count;
             last_big_stop_ms = now_ms;
-            last_big_stop_drive_status = big_motor.native_drive_status_valid
-                                             ? float(big_motor.native_drive_status) : -1;
+            last_big_stop_drive_status = big_motor.native_drive_status_valid ? float(big_motor.native_drive_status)
+                                                                             : -1;
         }
         big_was_requested = big_status.requested;
         big_was_active = feedback.armed;
@@ -266,39 +266,46 @@ int main() {
                                                                          : installed::DiagnosticReason::Disarmed;
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
         const auto &hd = heading_follower.diagnostics();
-        const std::array<float, 30> trace{
-            105,                                                        // I19 chassis schema
-            float(unsigned(big_gate)),                                  // I20 live gate
-            float(unsigned(big_status.reason)),                         // I21 live execution reason
-            float(rx.gimbal_imu.valid),                                  // I22 peer heading usable
-            rx.gimbal_imu.valid ? rx.gimbal_imu.yaw_rad : unavailable,    // I23 peer world yaw
-            rx.gimbal_imu.valid ? rx.gimbal_imu.yaw_rate_rad_s : unavailable, // I24 peer world rate
-            body_snapshot.state == imu::State::Running &&
-                    core::fresh(body_snapshot.sample.gyro_rad_s.stamp, now_us, 50000)
-                ? body_snapshot.sample.gyro_rad_s.value.z : unavailable, // I25 body gyro z
-            rx.big_yaw_request.target_rate_rad_s,                        // I26 received world intent
-            heading_follower.initialized() ? heading_follower.targetHeadingRad() : unavailable, // I27 target heading
-            heading_follower.initialized() ? heading_follower.headingErrorRad() : unavailable, // I28 error
-            big_axis.nativeVelocityStaged() ? big_axis.stagedJointRateRadS() : unavailable, // I29 post-slew joint rate
-            big_motor.native_position_valid ? big_motor.native_position_rad : unavailable, // I30 raw encoder
-            big_motor.native_unwrapped_position_valid ? float(big_motor.native_unwrapped_position_rad) : unavailable, // I31 unwrapped
-            big_motor.native_unwrapped_position_valid ? float(big_motor.native_wrap_count) : unavailable, // I32 wrap count
-            big_motor.native_drive_status_valid ? float(big_motor.native_drive_status) : unavailable, // I33 DM status
-            float(unsigned(big_motor.last_fault.reason)),               // I34 last motor fault reason
-            float(big_stop_count & 0xffff),                              // I35 stop count
-            float(last_big_stop_ms & 0xffff),                            // I36 stop time low
-            float((last_big_stop_ms >> 16) & 0xffff),                    // I37 stop time high
-            float(hd.capture_count & 0xffff),                            // I38 heading captures
-            float(hd.capture_reason),                                    // I39 last capture cause
-            heading_follower.rateIntegralRadS(),                         // I40 integral
-            last_big_stop_drive_status,                                 // I41 DM status at stop
-            float(hd.capture_ms & 0xffff),                               // I42 capture time low
-            float((hd.capture_ms >> 16) & 0xffff),                       // I43 capture time high
-            float(hd.clamp_count & 0xffff),                              // I44 90-degree clamp entries
-            float(previous_big_commit_error),                           // I45 CAN commit error
-            heading_follower.initialized() ? heading_follower.shapedWorldRateRadS() : unavailable, // I46 shaped world rate
-            float(heading_follower.limitFlags() | (big_axis.nativeSlewLimited() ? 32u : 0u)), // I47 limit flags
-            heading_follower.stopCaptureElapsedMs()};                    // I48 stop-capture dwell
+        const std::array<float, 30>
+            trace{105,                                                              // I19 chassis schema
+                  float(unsigned(big_gate)),                                        // I20 live gate
+                  float(unsigned(big_status.reason)),                               // I21 live execution reason
+                  float(rx.gimbal_imu.valid),                                       // I22 peer heading usable
+                  rx.gimbal_imu.valid ? rx.gimbal_imu.yaw_rad : unavailable,        // I23 peer world yaw
+                  rx.gimbal_imu.valid ? rx.gimbal_imu.yaw_rate_rad_s : unavailable, // I24 peer world rate
+                  body_snapshot.state == imu::State::Running &&
+                          core::fresh(body_snapshot.sample.gyro_rad_s.stamp, now_us, 50000)
+                      ? body_snapshot.sample.gyro_rad_s.value.z
+                      : unavailable,                    // I25 body gyro z
+                  rx.big_yaw_request.target_rate_rad_s, // I26 received world intent
+                  heading_follower.initialized() ? heading_follower.targetHeadingRad()
+                                                 : unavailable, // I27 target heading
+                  heading_follower.initialized() ? heading_follower.headingErrorRad() : unavailable, // I28 error
+                  big_axis.nativeVelocityStaged() ? big_axis.stagedJointRateRadS()
+                                                  : unavailable, // I29 post-slew joint rate
+                  big_motor.native_position_valid ? big_motor.native_position_rad : unavailable, // I30 raw encoder
+                  big_motor.native_unwrapped_position_valid ? float(big_motor.native_unwrapped_position_rad)
+                                                            : unavailable, // I31 unwrapped
+                  big_motor.native_unwrapped_position_valid ? float(big_motor.native_wrap_count)
+                                                            : unavailable, // I32 wrap count
+                  big_motor.native_drive_status_valid ? float(big_motor.native_drive_status)
+                                                      : unavailable, // I33 DM status
+                  float(unsigned(big_motor.last_fault.reason)),      // I34 last motor fault reason
+                  float(big_stop_count & 0xffff),                    // I35 stop count
+                  float(last_big_stop_ms & 0xffff),                  // I36 stop time low
+                  float((last_big_stop_ms >> 16) & 0xffff),          // I37 stop time high
+                  float(hd.capture_count & 0xffff),                  // I38 heading captures
+                  float(hd.capture_reason),                          // I39 last capture cause
+                  heading_follower.rateIntegralRadS(),               // I40 integral
+                  last_big_stop_drive_status,                        // I41 DM status at stop
+                  float(hd.capture_ms & 0xffff),                     // I42 capture time low
+                  float((hd.capture_ms >> 16) & 0xffff),             // I43 capture time high
+                  float(hd.clamp_count & 0xffff),                    // I44 90-degree clamp entries
+                  float(previous_big_commit_error),                  // I45 CAN commit error
+                  heading_follower.initialized() ? heading_follower.shapedWorldRateRadS()
+                                                 : unavailable, // I46 shaped world rate
+                  float(heading_follower.limitFlags() | (big_axis.nativeSlewLimited() ? 32u : 0u)), // I47 limit flags
+                  heading_follower.stopCaptureElapsedMs()}; // I48 stop-capture dwell
         diagnostics.status({.reason = big_reason,
                             .valid = feedback.valid,
                             .enabled = feedback.armed,

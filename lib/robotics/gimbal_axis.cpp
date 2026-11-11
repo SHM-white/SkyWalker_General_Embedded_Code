@@ -290,6 +290,8 @@ int GimbalAxis::updateTrajectory(const GimbalJointTrajectory &trajectory, Safety
     }
     previous_action_ = action;
     previous_mode_ = GimbalMode::AbsoluteAngle;
-    return position_.update(target_angle_rad_, dt);
+    // Position, rate and acceleration all come from the same feasible plan; the
+    // position loop only has to supply the tracking correction.
+    return position_.update(target_angle_rad_, trajectory.rate_rad_s, trajectory.acceleration_rad_s2, dt);
 }
 } // namespace skywalker::robotics

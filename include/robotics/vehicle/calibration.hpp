@@ -11,6 +11,9 @@ namespace skywalker::robotics::vehicle {
 // Keep confirmation flags false until the corresponding bench has passed.
 inline constexpr bool connections_confirmed = true;
 inline constexpr bool imu_mounting_confirmed = true;
+// 调参：视觉执行许可。置 true 且构建启用 AB 接收机、板级提供 vision-uart 别名后，
+// 仲裁才会在 Auto 模式选用视觉；启用前必须完成视觉姿态链、参考系与超时验收。
+inline constexpr bool vision_execute_confirmed = false;
 inline constexpr bool power_model_calibrated = false;
 inline constexpr bool shooter_constraints_confirmed = true;
 

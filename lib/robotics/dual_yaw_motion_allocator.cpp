@@ -11,6 +11,8 @@ float softDeadband(float error, float deadband) {
     return std::copysign(std::max(std::fabs(error) - deadband, 0.0f), error);
 }
 
+constexpr float kTwoPi = 6.28318530717958647692f;
+
 // Conservative stopping distance for an outward rate `v`:
 // one reaction delay with the worst-case outward acceleration, then a full
 // deceleration at the measured worst-case braking capability.
@@ -51,6 +53,9 @@ int DualYawMotionAllocator::validate() const {
                         std::isfinite(c.head_steady_rate_max_rad_s) && std::isfinite(c.big_intent_max_rad_s) &&
                         std::isfinite(c.big_acceleration_max_rad_s2) && std::isfinite(c.big_jerk_max_rad_s3) &&
                         std::isfinite(c.big_track_gain_s_inv) && std::isfinite(c.slow_tau_s) &&
+                        std::isfinite(c.vision_slow_tau_s) && std::isfinite(c.vision_angle_gain_s_inv) &&
+                        std::isfinite(c.joint_acceleration_max_pos_rad_s2) &&
+                        std::isfinite(c.joint_acceleration_max_neg_rad_s2) &&
                         std::isfinite(c.center_deadband_rad) && std::isfinite(c.center_kp_rad_s_per_rad) &&
                         std::isfinite(c.center_rate_max_rad_s) && std::isfinite(c.brake_delay_s) &&
                         std::isfinite(c.brake_outward_acceleration_rad_s2) &&
@@ -63,7 +68,9 @@ int DualYawMotionAllocator::validate() const {
         !(c.head_steady_rate_max_rad_s > 0) || c.head_steady_rate_max_rad_s > c.head_rate_max_rad_s ||
         !(c.joint_rate_max_rad_s > 0) || !(c.big_intent_max_rad_s > 0) || !(c.big_acceleration_max_rad_s2 > 0) ||
         !(c.big_jerk_max_rad_s3 >= 0) ||
-        !(c.big_track_gain_s_inv >= 0) || !(c.slow_tau_s > 0) || !(c.center_deadband_rad >= 0) ||
+        !(c.big_track_gain_s_inv >= 0) || !(c.slow_tau_s > 0) || !(c.vision_slow_tau_s > 0) ||
+        !(c.vision_angle_gain_s_inv > 0) || !(c.joint_acceleration_max_pos_rad_s2 > 0) ||
+        !(c.joint_acceleration_max_neg_rad_s2 > 0) || !(c.center_deadband_rad >= 0) ||
         !(c.center_kp_rad_s_per_rad > 0) || !(c.center_rate_max_rad_s > 0) || !(c.brake_delay_s >= 0) ||
         !(c.brake_outward_acceleration_rad_s2 >= 0) || !(c.brake_deceleration_rad_s2 > 0) ||
         !(c.tracking_error_rad_s > 0) || !(c.tracking_budget_scale_min > 0) ||
@@ -79,6 +86,10 @@ void DualYawMotionAllocator::dropPlans() {
     big_ = {};
     slow_rad_s_ = 0;
     center_error_rad_ = 0;
+    head_angle_plan_rad_ = 0;
+    joint_position_plan_rad_ = 0;
+    vision_epoch_ = 0;
+    vision_seeded_ = false;
     budget_scale_ = 1;
     tracking_limited_ = false;
     still_latched_ = true;
@@ -148,8 +159,33 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
                                c.tracking_budget_scale_min, 1.0f);
     const float steady = std::min(c.head_steady_rate_max_rad_s * budget_scale_, c.head_rate_max_rad_s);
 
+    // --- Vision engagement and reference reseeding --------------------------
+    const bool vision = in.vision_active && std::isfinite(in.vision_angle_rad) &&
+                        std::isfinite(in.vision_rate_rad_s) && std::isfinite(in.vision_acceleration_rad_s2) &&
+                        std::isfinite(in.head_angle_measured_rad);
+    if (vision && (!vision_seeded_ || in.vision_epoch != vision_epoch_)) {
+        // Reseed from the measurement instead of chasing a coordinate from the
+        // previous reference; the measured head angle is the only common point.
+        head_angle_plan_rad_ = in.head_angle_measured_rad;
+        vision_epoch_ = in.vision_epoch;
+        vision_seeded_ = true;
+    }
+    if (!vision)
+        vision_seeded_ = false;
+
     // --- Feasible head rate --------------------------------------------------
-    float head_target = std::clamp(in.head_rate_target_rad_s, -steady, steady);
+    float head_target;
+    if (vision) {
+        // The sustained rate feedforward keeps the verified budget; the angle
+        // correction may use the full head rate and is still bounded by the
+        // travel envelope below.
+        const float feedforward = std::clamp(in.vision_rate_rad_s, -steady, steady);
+        const float error = std::remainder(in.vision_angle_rad - head_angle_plan_rad_, kTwoPi);
+        head_target =
+            std::clamp(feedforward + c.vision_angle_gain_s_inv * error, -c.head_rate_max_rad_s, c.head_rate_max_rad_s);
+    }
+    else
+        head_target = std::clamp(in.head_rate_target_rad_s, -steady, steady);
     // Relative joint rate in encoder coordinates: w_enc = direction*(w_head-carrier).
     float relative = std::clamp(c.joint_direction * (head_target - carrier), -budget_neg, budget_pos);
     bool travel_limited = relative != c.joint_direction * (head_target - carrier);
@@ -166,8 +202,25 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     }
     head_target = std::clamp(carrier + c.joint_direction * relative, -c.head_rate_max_rad_s, c.head_rate_max_rad_s);
 
-    const BoundedRateLimits head_limits{-c.head_rate_max_rad_s, c.head_rate_max_rad_s,
-                                        c.head_acceleration_max_rad_s2, c.head_jerk_max_rad_s3};
+    // --- Head acceleration window -------------------------------------------
+    float acceleration_lo = -c.head_acceleration_max_rad_s2, acceleration_hi = c.head_acceleration_max_rad_s2;
+    if (in.carrier_acceleration_valid && std::isfinite(in.carrier_acceleration_rad_s2)) {
+        const float carrier_acceleration = in.carrier_acceleration_rad_s2;
+        const float lo = std::max(acceleration_lo, carrier_acceleration - c.joint_acceleration_max_neg_rad_s2);
+        const float hi = std::min(acceleration_hi, carrier_acceleration + c.joint_acceleration_max_pos_rad_s2);
+        if (lo < 0.0f && hi > 0.0f) {
+            acceleration_lo = lo;
+            acceleration_hi = hi;
+        }
+        else {
+            // The carrier already accelerates beyond the joint capability. Keep
+            // the nominal head window and let the travel envelope brake rather
+            // than asking for a relative acceleration the joint cannot deliver.
+            travel_limited = true;
+        }
+    }
+    const BoundedRateLimits head_limits{-c.head_rate_max_rad_s, c.head_rate_max_rad_s, acceleration_lo,
+                                        acceleration_hi, c.head_jerk_max_rad_s3};
     bool head_limited = false, head_conflict = false;
     if (!stepBoundedRate(head_, (head_target - head_.rate_rad_s) / dt, dt, head_limits, head_limited, head_conflict)) {
         dropPlans();
@@ -180,9 +233,14 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     if (!initialized_) {
         slow_rad_s_ = head_.rate_rad_s;
         center_error_rad_ = center_error_target;
+        if (!vision_seeded_ && std::isfinite(in.head_angle_measured_rad))
+            head_angle_plan_rad_ = in.head_angle_measured_rad;
+        joint_position_plan_rad_ =
+            std::clamp(in.joint_rad, c.joint_min_rad + c.joint_margin_rad, c.joint_max_rad - c.joint_margin_rad);
         initialized_ = true;
     }
-    const float alpha = 1.0f - std::exp(-dt / c.slow_tau_s);
+    const float tau = vision ? c.vision_slow_tau_s : c.slow_tau_s;
+    const float alpha = 1.0f - std::exp(-dt / tau);
     const float slow_previous = slow_rad_s_;
     slow_rad_s_ += alpha * (head_.rate_rad_s - slow_rad_s_);
     center_error_rad_ += alpha * (center_error_target - center_error_rad_);
@@ -201,7 +259,8 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         out.big_saturated = std::fabs(goal) > c.big_intent_max_rad_s;
         const float acceleration = slow_acceleration + c.big_track_gain_s_inv * (goal - big_.rate_rad_s);
         const BoundedRateLimits big_limits{-c.big_intent_max_rad_s, c.big_intent_max_rad_s,
-                                           c.big_acceleration_max_rad_s2, c.big_jerk_max_rad_s3};
+                                           -c.big_acceleration_max_rad_s2, c.big_acceleration_max_rad_s2,
+                                           c.big_jerk_max_rad_s3};
         bool big_limited = false, big_conflict = false;
         (void)stepBoundedRate(big_, acceleration, dt, big_limits, big_limited, big_conflict);
     }
@@ -228,11 +287,30 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         slow_rad_s_ = 0;
     }
 
+    // --- Planned angles (stage-C trajectory interface) -----------------------
+    head_angle_plan_rad_ = std::remainder(head_angle_plan_rad_ + head_.rate_rad_s * dt, kTwoPi);
+    const float joint_lo = c.joint_min_rad + c.joint_margin_rad;
+    const float joint_hi = c.joint_max_rad - c.joint_margin_rad;
+    float joint_rate = std::clamp(c.joint_direction * (head_.rate_rad_s - carrier), -budget_neg, budget_pos);
+    float joint_next = joint_position_plan_rad_ + joint_rate * dt;
+    if (joint_next > joint_hi || joint_next < joint_lo) {
+        // Never integrate the plan past the soft end, and never replay the
+        // dropped excursion when travel becomes available again.
+        joint_next = std::clamp(joint_next, joint_lo, joint_hi);
+        joint_rate = 0;
+        travel_limited = true;
+    }
+    joint_position_plan_rad_ = joint_next;
+
     // --- Outputs -------------------------------------------------------------
     out.head = head_;
     out.big = big_;
     out.joint_rate_world_rad_s = head_.rate_rad_s - carrier;
-    out.joint_rate_rad_s = std::clamp(c.joint_direction * out.joint_rate_world_rad_s, -budget_neg, budget_pos);
+    out.joint_rate_rad_s = joint_rate;
+    out.joint_position_rad = joint_position_plan_rad_;
+    out.joint_acceleration_rad_s2 =
+        c.joint_direction *
+        (head_.acceleration_rad_s2 - (in.carrier_acceleration_valid ? in.carrier_acceleration_rad_s2 : 0.0f));
     out.center_error_rad = center_error_rad_;
     out.outward_budget_pos_rad_s = budget_pos;
     out.outward_budget_neg_rad_s = budget_neg;
@@ -240,6 +318,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     out.brake_margin_neg_rad = margin_neg;
     out.travel_limited = travel_limited || head_limited;
     out.tracking_limited = tracking_limited_;
+    out.vision_mode = vision;
     out.enabled = true;
     out.reason = WaitReason::None;
     return out;

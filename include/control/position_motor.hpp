@@ -50,6 +50,11 @@ public:
         return motor_;
     }
     [[nodiscard]] int update(double target_position_rad, float dt_s);
+    // Same cascade with the joint reference that produced the target. The
+    // feedforward gains live in `Config::loop`; zero keeps the legacy behavior
+    // bit-identical. `reference_*` are consumed only when this overload is used.
+    [[nodiscard]] int update(double target_position_rad, float reference_velocity_rad_s,
+                             float reference_acceleration_rad_s2, float dt_s);
     [[nodiscard]] int reset();
     Telemetry telemetry() const;
     PositionReference reference() const {
@@ -57,6 +62,8 @@ public:
     }
 
 private:
+    int updateImpl(double target_position_rad, float reference_velocity_rad_s, float reference_acceleration_rad_s2,
+                   bool use_reference, float dt_s);
     int resetFrom(const motor::MotorSnapshot &snapshot, double position);
     int resolveMeasurement(const motor::MotorSnapshot &snapshot, double &position);
     int fail(int error, const motor::MotorSnapshot &snapshot, ControlIssue issue = ControlIssue::OutputRejected);

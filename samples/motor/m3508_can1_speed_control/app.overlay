@@ -1,0 +1,2 @@
+/* Motor ID, limits and mode are configured in src/main.cpp. */
+/ {};

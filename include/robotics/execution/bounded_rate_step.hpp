@@ -16,7 +16,9 @@ struct BoundedRatePlan {
 
 struct BoundedRateLimits {
     float min_rate_rad_s = 0, max_rate_rad_s = 0;
-    float max_acceleration_rad_s2 = 0;
+    // Asymmetric acceleration bounds: the caller may tighten one side only,
+    // e.g. when the carrier already accelerates beyond the joint capability.
+    float min_acceleration_rad_s2 = 0, max_acceleration_rad_s2 = 0;
     // Zero disables jerk shaping. The acceleration is then clamped per cycle
     // only, which is the first-stage bench configuration.
     float max_jerk_rad_s3 = 0;
@@ -43,15 +45,16 @@ inline bool stepBoundedRate(BoundedRatePlan &plan, float target_acceleration_rad
     conflict = false;
     if (!(dt_s > 0) || !std::isfinite(dt_s) || !std::isfinite(target_acceleration_rad_s2) ||
         !std::isfinite(plan.rate_rad_s) || !std::isfinite(plan.acceleration_rad_s2) ||
-        !(limits.max_acceleration_rad_s2 > 0) || limits.max_rate_rad_s <= limits.min_rate_rad_s)
+        !(limits.max_acceleration_rad_s2 > 0) || !(limits.min_acceleration_rad_s2 < 0) ||
+        limits.max_rate_rad_s <= limits.min_rate_rad_s)
         return false;
     constexpr int bisection_steps = 24;
     plan.acceleration_rad_s2 =
-        std::clamp(plan.acceleration_rad_s2, -limits.max_acceleration_rad_s2, limits.max_acceleration_rad_s2);
+        std::clamp(plan.acceleration_rad_s2, limits.min_acceleration_rad_s2, limits.max_acceleration_rad_s2);
     plan.rate_rad_s = std::clamp(plan.rate_rad_s, limits.min_rate_rad_s, limits.max_rate_rad_s);
     if (!(limits.max_jerk_rad_s3 > 0)) {
         const float acceleration =
-            std::clamp(target_acceleration_rad_s2, -limits.max_acceleration_rad_s2, limits.max_acceleration_rad_s2);
+            std::clamp(target_acceleration_rad_s2, limits.min_acceleration_rad_s2, limits.max_acceleration_rad_s2);
         const float requested_rate = plan.rate_rad_s + acceleration * dt_s;
         const float rate = std::clamp(requested_rate, limits.min_rate_rad_s, limits.max_rate_rad_s);
         limited = acceleration != target_acceleration_rad_s2 || rate != requested_rate;
@@ -62,7 +65,7 @@ inline bool stepBoundedRate(BoundedRatePlan &plan, float target_acceleration_rad
         return true;
     }
     const float jerk = limits.max_jerk_rad_s3;
-    const float acceleration_min = std::max(-limits.max_acceleration_rad_s2, plan.acceleration_rad_s2 - jerk * dt_s);
+    const float acceleration_min = std::max(limits.min_acceleration_rad_s2, plan.acceleration_rad_s2 - jerk * dt_s);
     const float acceleration_max = std::min(limits.max_acceleration_rad_s2, plan.acceleration_rad_s2 + jerk * dt_s);
     const float rate0 = plan.rate_rad_s, acceleration0 = plan.acceleration_rad_s2;
     const auto probe = [&](float acceleration1, float &rate1, float &rate_min, float &rate_max) {

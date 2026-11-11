@@ -141,6 +141,7 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
     if (config_.shaping_acceleration_rad_s2 > 0) {
         if (dt > 0) {
             const BoundedRateLimits limits{-config_.world_rate_max_rad_s, config_.world_rate_max_rad_s,
+                                           -config_.shaping_acceleration_rad_s2,
                                            config_.shaping_acceleration_rad_s2, config_.shaping_jerk_rad_s3};
             const float target_acceleration = std::clamp((world_raw - world_plan_.rate_rad_s) / dt,
                                                          -config_.shaping_acceleration_rad_s2,

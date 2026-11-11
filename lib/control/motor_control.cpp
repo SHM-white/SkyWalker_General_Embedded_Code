@@ -279,6 +279,14 @@ int PositionMotor::wait(const motor::MotorSnapshot &s, ControlIssue issue) {
     return fail(0, s, issue);
 }
 int PositionMotor::update(double target, float dt) {
+    return updateImpl(target, 0, 0, false, dt);
+}
+int PositionMotor::update(double target, float reference_velocity_rad_s, float reference_acceleration_rad_s2,
+                          float dt) {
+    return updateImpl(target, reference_velocity_rad_s, reference_acceleration_rad_s2, true, dt);
+}
+int PositionMotor::updateImpl(double target, float reference_velocity_rad_s, float reference_acceleration_rad_s2,
+                              bool use_reference, float dt) {
     const auto snapshot = motor_.snapshot();
     if (!configured_)
         return fail(-EACCES, snapshot, ControlIssue::NotConfigured);
@@ -286,6 +294,9 @@ int PositionMotor::update(double target, float dt) {
         return fail(-EINVAL, snapshot, ControlIssue::InvalidTarget);
     if (config_.reference == PositionReference::AbsoluteNearest && !finiteFloat(target))
         return fail(-ERANGE, snapshot, ControlIssue::InvalidTarget);
+    if (use_reference &&
+        (!std::isfinite(reference_velocity_rad_s) || !std::isfinite(reference_acceleration_rad_s2)))
+        return fail(-EINVAL, snapshot, ControlIssue::InvalidTarget);
     if (!std::isfinite(dt) || dt < 0)
         return fail(-EINVAL, snapshot, ControlIssue::InvalidPeriod);
     if (target_sequence_ == std::numeric_limits<std::uint64_t>::max())
@@ -348,7 +359,11 @@ int PositionMotor::update(double target, float dt) {
                                                  snapshot.feedback.velocity_rad_s,
                                                  dt,
                                                  static_cast<float>(resolved),
-                                                 true};
+                                                 true,
+                                                 use_reference ? reference_velocity_rad_s : 0.0f,
+                                                 use_reference,
+                                                 use_reference ? reference_acceleration_rad_s2 : 0.0f,
+                                                 use_reference};
         ret = control_motor_position_step(&next, &config_.loop, &input, &output);
         if (ret < 0)
             return fail(ret, snapshot);

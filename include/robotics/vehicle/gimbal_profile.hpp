@@ -94,6 +94,11 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     // 调参：内环速度/电流上限；与硬件能力协调，鼠标灵敏度独立设置。
     c.loop.velocity.requested_velocity_abs_max_rad_s = 8.0f;
     c.loop.velocity.effort_abs_max = 1.2f;
+    // 调参：轨迹前馈。位置环输出作为速度修正，受限轨迹的参考速度直接加到
+    // 速度请求（增益 1）；加速度电流前馈先为 0，台架确认同方向电流响应与
+    // 限幅余量后再填 K_a（A/(rad/s²)）。
+    c.loop.velocity_feedforward_gain = 1.0f;
+    c.loop.acceleration_effort_gain = 0.0f;
     return c;
 }
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
@@ -149,7 +154,8 @@ inline constexpr CommandManager::Config gimbalCommandConfig() {
     c.require_referee_for_gimbal = false;
     c.require_referee_for_shooter = false;
     c.enable_shooter = false;
-    c.allow_auto = false;
+    c.allow_auto = vision_execute_confirmed && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER) &&
+                   DT_HAS_ALIAS(vision_uart);
     c.expected_vision_reference = head_reference;
     return c;
 }
@@ -184,6 +190,12 @@ inline constexpr DualYawAllocatorConfig dualYawAllocatorConfig() {
     c.big_track_gain_s_inv = 2.0f;
     // 一阶低通时间常数；视觉阶段再单独放宽到 0.18–0.30 s。
     c.slow_tau_s = 0.10f;
+    c.vision_slow_tau_s = 0.24f;
+    c.vision_angle_gain_s_inv = 8.0f;
+    // 调参：小 Yaw 可达角加速度上下限（rad/s²）；实测前先按位置环速度斜率
+    // 20 rad/s² 的同一量级占位，用于收紧视觉阶段的枪头加速度区间。
+    c.joint_acceleration_max_pos_rad_s2 = 20.0f;
+    c.joint_acceleration_max_neg_rad_s2 = 20.0f;
     c.center_deadband_rad = 0.0087f; // 0.5°
     c.center_kp_rad_s_per_rad = 6.0f;
     c.center_rate_max_rad_s = 1.0f;
