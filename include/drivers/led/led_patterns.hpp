@@ -4,15 +4,16 @@
 
 namespace skywalker::led::patterns {
 
-// Deliberately dim: one indicator pixel on the MC02, not a lighting strip.
+// Full-scale palette: single indicator pixel, driven at 8-bit maximum.
+// Hues follow the former ratios; the strongest channel of each colour is 255.
 inline constexpr Color off{0, 0, 0};
-inline constexpr Color red{22, 0, 0};
-inline constexpr Color green{0, 16, 0};
-inline constexpr Color blue{0, 0, 20};
-inline constexpr Color cyan{0, 15, 15};
-inline constexpr Color amber{22, 9, 0};
-inline constexpr Color purple{12, 0, 18};
-inline constexpr Color white{16, 16, 16};
+inline constexpr Color red{255, 0, 0};
+inline constexpr Color green{0, 255, 0};
+inline constexpr Color blue{0, 0, 255};
+inline constexpr Color cyan{0, 255, 255};
+inline constexpr Color amber{255, 104, 0};
+inline constexpr Color purple{170, 0, 255};
+inline constexpr Color white{255, 255, 255};
 
 inline constexpr LedStep off_steps[] = {{off, 1000}};
 inline constexpr LedPattern Off{off_steps, false};
