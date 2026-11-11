@@ -11,6 +11,7 @@
 #include <robotics/command/receiver_sources.hpp>
 #include <robotics/chassis/imu_heading.hpp>
 #include <core/attitude.hpp>
+#include <robotics/gimbal/dual_yaw_motion_allocator.hpp>
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/vehicle/led_status.hpp>
@@ -35,20 +36,12 @@ std::uint32_t age(const core::Stamp &stamp, core::TimeUs now_us) {
                ? static_cast<std::uint32_t>(std::min<std::uint64_t>((now_us - stamp.time_us) / 1000, UINT32_MAX))
                : UINT32_MAX;
 }
-YawCenteringController::Config centeringConfig() {
-    auto c = installed::manualCenteringConfig();
-    c.kp_rad_s_per_rad = 6.0f;
-    c.max_rate_rad_s = 1.0f; // Unmodified reference chassis clamps world intent here.
-    c.acceleration_rad_s2 = 4.0f;
-    c.deadband_rad = 0.003f;
-    c.hysteresis_rad = 0.002f;
-    return c;
-}
 } // namespace
 
 int main() {
     static installed::Diagnostics diagnostics;
-    diagnostics.start("sentry_gimbal", "gimbal", "encoder_manual; yaw=1rad/s; pitch=0.8rad/s; big_world<=1rad/s");
+    diagnostics.start("sentry_gimbal", "gimbal",
+                      "encoder_manual; yaw<=3rad/s; pitch<=3rad/s; dual-yaw steady<=0.8rad/s; big_world<=1rad/s");
     static led::StatusLed status_led;
     const int status_led_error = status_led.start();
     if constexpr (led::StatusLed::available)
@@ -74,7 +67,9 @@ int main() {
     static imu::ImuReceiver onboard(onboard_source, {.poll_interval_us = 500, .priority = 5});
     // Near-horizontal carrier: yaw is integrated in the acquisition thread.
     // The three-dimensional EKF remains diagnostic-only for this application.
-    static YawCenteringController centering(centeringConfig());
+    // The allocator splits one head world-rate target between the big Yaw
+    // carrier and the small Yaw joint; it owns no motor and no CAN frame.
+    static DualYawMotionAllocator dual_yaw(installed::dualYawAllocatorConfig());
     static motor::Motor yaw(installed::yawHardware()), pitch(installed::pitchHardware());
     static motor::CanBus yaw_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
     static motor::CanBus pitch_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
@@ -170,21 +165,15 @@ int main() {
         GimbalExecutionInputs input{};
         input.command = frame.decision.command.gimbal;
         input.source_stamp = sourceStamp(frame, input.command.source);
-        if (input.command.mode == GimbalMode::Rate) {
-            // Encoder loops own both motors. Counter measured carrier rotation
-            // so recentering actually reduces the relative small-Yaw angle.
-            input.command.yaw_rate_rad_s = installed::small_yaw.direction *
-                                           (input.command.yaw_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
-            input.command.pitch_rate_rad_s *= installed::pitch.direction;
-        }
-        if (!operator_state.run_allowed)
-            input.command.mode = GimbalMode::Disabled;
-        input.transport_ready = setup_ready;
-        auto status = control_error == 0 ? gimbal.update(input, now_us)
-                                         : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
+        const float raw_head_rate_rad_s = input.command.yaw_rate_rad_s;
+        // Allocation runs on the pre-update snapshot: one measured joint state
+        // and one carrier gyro sample produce the plan that this cycle's single
+        // gimbal.update() consumes.
         const auto ys = yaw.snapshot();
         const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
+        // Last completed Yaw telemetry: the request below is gated on it and the
+        // freshly computed plan is applied by the update that follows.
         const bool yaw_running = gimbal.yawTelemetry().output_valid;
         const auto &feedback = peer_state.big_yaw_feedback;
         const bool peer_feedback_valid = peer_state.online && feedback.valid &&
@@ -193,20 +182,41 @@ int main() {
                                          std::fabs(feedback.actual_rate_rad_s) <=
                                              installed::big_yaw.velocity_limit_rad_s;
         if (peer_feedback_valid != peer_feedback_was_valid)
-            centering.reset();
+            dual_yaw.reset();
         peer_feedback_was_valid = peer_feedback_valid;
         const bool big_channel_ready = setup_ready && operator_state.fresh && operator_state.run_allowed &&
                                        peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
                                        joint_valid && yaw_running;
-        YawCenteringInputs follow{};
-        follow.joint_yaw_rad = ys.feedback.position_rad;
-        follow.joint_stamp = {ys.feedback.timestamp_ms * 1000, ys.feedback.timestamp_ms, ys.feedback_fresh};
-        follow.source_stamp = input.source_stamp;
-        follow.enabled = big_channel_ready && peer_feedback_valid && input.command.mode != GimbalMode::Disabled;
-        follow.head_stable = yaw_running && heading_fresh;
-        follow.permission_valid = operator_state.run_allowed && installed::connections_confirmed &&
-                                  installed::imu_mounting_confirmed;
-        const auto centered = centering.update(follow, now_us);
+        DualYawAllocatorInputs allocation{};
+        allocation.head_rate_target_rad_s = raw_head_rate_rad_s;
+        allocation.joint_rad = ys.feedback.position_rad;
+        const bool joint_rate_valid =
+            (ys.feedback.valid & motor::FeedbackVelocity) != 0 && std::isfinite(ys.feedback.velocity_rad_s);
+        allocation.joint_rate_rad_s = joint_rate_valid ? ys.feedback.velocity_rad_s : 0.0f;
+        allocation.carrier_rate_rad_s = heading_fresh ? heading.rate_rad_s : 0.0f;
+        allocation.carrier_stamp = heading.stamp;
+        allocation.carrier_valid = heading_fresh;
+        allocation.joint_stamp = {ys.feedback.timestamp_ms * 1000, ys.feedback.timestamp_ms, joint_valid};
+        allocation.source_stamp = input.source_stamp;
+        allocation.big_yaw_available = big_channel_ready && peer_feedback_valid;
+        allocation.enabled = input.command.mode == GimbalMode::Rate && operator_state.run_allowed;
+        allocation.permission_valid =
+            operator_state.run_allowed && installed::connections_confirmed && installed::imu_mounting_confirmed;
+        const auto alloc = dual_yaw.update(allocation, now_us);
+        if (input.command.mode == GimbalMode::Rate) {
+            // Encoder loops own both motors. Coordinated mode consumes the
+            // allocated joint rate, which already removed the measured carrier
+            // rate; a rejected allocation falls back to the existing local
+            // encoder/manual path instead of freezing the axis.
+            input.command.yaw_rate_rad_s = alloc.enabled ? alloc.joint_rate_rad_s
+                                                         : installed::small_yaw.direction * raw_head_rate_rad_s;
+            input.command.pitch_rate_rad_s *= installed::pitch.direction;
+        }
+        if (!operator_state.run_allowed)
+            input.command.mode = GimbalMode::Disabled;
+        input.transport_ready = setup_ready;
+        auto status = control_error == 0 ? gimbal.update(input, now_us)
+                                         : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
         if (now_ms >= next_send_ms) {
             next_send_ms = now_ms + 10;
             BigYawRequest request{};
@@ -217,8 +227,10 @@ int main() {
             // Reference v4 world intent: the peer applies motor sign/gyro control.
             // Zero enable obtains initial real feedback before any nonzero follow.
             request.mode = big_channel_ready ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-            request.target_rate_rad_s = big_channel_ready && peer_feedback_valid && centered.enabled
-                                            ? centered.velocity_rad_s
+            // Allocated world intent. Zero whenever the carrier channel is not
+            // authorized or the allocation itself was rejected this cycle.
+            request.target_rate_rad_s = big_channel_ready && peer_feedback_valid && alloc.enabled
+                                            ? alloc.big.rate_rad_s
                                             : 0;
             if (peer_state.online && peer_state.peer.sender_boot_id) {
                 GimbalImuYaw sample{};
@@ -272,9 +284,10 @@ int main() {
         const auto elapsed_ms = [now_us](core::TimeUs stamp) {
             return stamp && now_us >= stamp ? float(now_us - stamp) * .001f : -1.0f;
         };
-        // Fixed channel map documented in docs/dev/大Yaw突发跟转诊断操作指南.md.
-        const std::array<float, 27> trace{
-            103,                                                        // I19 planar-yaw gimbal schema
+        // Fixed channel map documented in docs/dev/大Yaw突发跟转诊断操作指南.md
+        // (schema 104, I19..I48).
+        const std::array<float, 30> trace{
+            104,                                                        // I19 dual-Yaw planar gimbal schema
             float(unsigned(heading_reason)),                            // I20 live reason
             float(unsigned(carrier_snapshot.sample.attitude_quality)),  // I21 quality
             float(heading_fresh),                                        // I22 heading usable
@@ -298,14 +311,20 @@ int main() {
                   (!operator_state.run_allowed ? 4u : 0u) | (!peer_state.online ? 8u : 0u) |
                   (!installed::imu_mounting_confirmed ? 16u : 0u) | (!heading_fresh ? 32u : 0u) |
                   (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u)), // I37 disabled prerequisites; zero=ready
-            big_channel_ready && peer_feedback_valid && centered.enabled ? centered.velocity_rad_s : 0, // I38 world intent
+            alloc.big.rate_rad_s,                                        // I38 big-Yaw world intent
             peer_feedback_valid ? float(feedback.armed) : unavailable,   // I39 peer armed
             float(age(carrier_snapshot.sample.orientation.stamp, now_us)), // I40 orientation age
             float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)), // I41 gyro age
             elapsed_ms(ed.last_tracking_us),                             // I42 last Tracking age
-            elapsed_ms(ed.time_us),                                      // I43 estimator diagnostic age
+            std::min(alloc.brake_margin_pos_rad, alloc.brake_margin_neg_rad), // I43 tightest outward travel
             float(heading_loss_duration_us) * .001f,                     // I44 current/last loss duration
-            float(dt_us)};                                              // I45 current cycle
+            float(dt_us),                                                // I45 current cycle
+            raw_head_rate_rad_s,                                          // I46 raw head world-rate target
+            alloc.head.rate_rad_s,                                        // I47 feasible head world rate
+            float((alloc.enabled ? 1u : 0u) | (alloc.travel_limited ? 2u : 0u) |
+                  (alloc.big_saturated ? 4u : 0u) | (alloc.tracking_limited ? 8u : 0u) |
+                  (allocation.big_yaw_available ? 16u : 0u) |
+                  (static_cast<unsigned>(alloc.reason) << 5))}; // I48 allocation flags/reason
         diagnostics.status({.reason = reason,
                             .valid = joint_valid,
                             .enabled = status.state == RunState::Active,
@@ -316,7 +335,7 @@ int main() {
                             .effort = gimbal.yawTelemetry().effort_command,
                             .detail = float(unsigned(have_heading_loss ? last_heading_loss_reason : heading_reason)),
                             .error = status.error ? status.error : onboard_error,
-                            .extra0 = installed::small_yaw.direction * centered.center_error_rad,
+                            .extra0 = alloc.center_error_rad,
                             .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
                             .extended = true,
                             .extension = trace});

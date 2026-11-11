@@ -83,16 +83,24 @@ RunStatus GimbalExecutor::update(const GimbalExecutionInputs &in, core::TimeUs n
         return publish(now, RunState::Recovering, WaitReason::Cycle, error);
     }
 
-    const bool yaw_input_ok = in.command.mode == GimbalMode::Rate     ? std::isfinite(in.command.yaw_rate_rad_s)
-                              : in.command.mode == GimbalMode::AbsoluteAngle
-                                  ? std::isfinite(in.command.yaw_target_rad)
-                                  : true;
+    const bool yaw_trajectory_ok = in.yaw_trajectory.valid && std::isfinite(in.yaw_trajectory.position_rad) &&
+                                   std::isfinite(in.yaw_trajectory.rate_rad_s) &&
+                                   std::isfinite(in.yaw_trajectory.acceleration_rad_s2) &&
+                                   core::fresh(in.yaw_trajectory.stamp, now,
+                                               static_cast<core::TimeUs>(config_.command_timeout_ms) * 1000ULL);
+    const bool yaw_input_ok = yaw_trajectory_ok ||
+                              (in.command.mode == GimbalMode::Rate ? std::isfinite(in.command.yaw_rate_rad_s)
+                               : in.command.mode == GimbalMode::AbsoluteAngle
+                                   ? std::isfinite(in.command.yaw_target_rad)
+                                   : true);
     const bool pitch_input_ok = in.command.mode == GimbalMode::Rate   ? std::isfinite(in.command.pitch_rate_rad_s)
                                 : in.command.mode == GimbalMode::AbsoluteAngle
                                     ? std::isfinite(in.command.pitch_target_rad)
                                     : true;
     int yr = 0, pr = 0;
-    if (yaw_input_ok)
+    if (yaw_trajectory_ok)
+        yr = yaw_.updateTrajectory(in.yaw_trajectory, SafetyAction::Active, in.yaw_output_valid ? dt : 0);
+    else if (yaw_input_ok)
         yr = yaw_.update({in.command.mode, in.command.yaw_target_rad, in.command.yaw_rate_rad_s},
                          SafetyAction::Active, in.yaw_output_valid ? dt : 0);
     else if (!error)

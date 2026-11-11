@@ -1,0 +1,118 @@
+#pragma once
+
+#include <core/measurement.hpp>
+#include <robotics/execution/bounded_rate_step.hpp>
+#include <robotics/execution/run_status.hpp>
+
+namespace skywalker::robotics {
+
+// Cloud-board dual-Yaw allocation.
+//
+// The operator (or, later, the arbitrated vision target) expresses one head
+// world rate. This class splits it between the big-Yaw carrier and the small
+// Yaw joint:
+//
+//   w_head = w_big + direction_s * qdot_small   (all at the head, CCW positive)
+//
+// The feasible head rate is bounded by the (brake-distance limited) small-Yaw
+// travel around the carrier measurement. A low-passed copy of that rate drives
+// the big-Yaw world intent, so the carrier takes the sustained component while
+// the small Yaw keeps the high-frequency residual. A centre term biases the
+// big-Yaw intent towards bringing the small Yaw back to its mechanical centre.
+//
+// Coordinates: angles in rad, rates in rad/s, accelerations in rad/s^2, jerk in
+// rad/s^3. The joint angle/rate are encoder coordinates; the world values are
+// counter-clockwise positive. `joint_direction` is applied exactly once.
+struct DualYawAllocatorConfig {
+    // Small-Yaw joint geometry in encoder coordinates.
+    float joint_center_rad = 0;
+    float joint_min_rad = -0.6f, joint_max_rad = 0.6f;
+    float joint_direction = 1;          // encoder -> head-relative world sign, exactly +1 or -1
+    float joint_margin_rad = 0.0175f;   // kept clear of each measured mechanical end
+    float joint_tolerance_rad = 0.012f; // position-loop deadband and calibration allowance
+    float joint_rate_max_rad_s = 8.0f;  // executable small-Yaw joint speed, encoder coordinates
+    // Head (world) rate budget.
+    float head_rate_max_rad_s = 1.0f;
+    float head_acceleration_max_rad_s2 = 4.0f;
+    float head_jerk_max_rad_s3 = 0; // zero disables jerk shaping
+    // Sustained budget; the initial bench stage limits every manual rate here.
+    float head_steady_rate_max_rad_s = 0.8f;
+    // Big-Yaw carrier world intent.
+    float big_intent_max_rad_s = 1.0f;
+    float big_acceleration_max_rad_s2 = 4.0f;
+    float big_jerk_max_rad_s3 = 0;
+    float big_track_gain_s_inv = 2.0f;
+    // First-order low pass on the feasible head rate.
+    float slow_tau_s = 0.1f;
+    // Centering of the small Yaw around its mechanical centre.
+    float center_deadband_rad = 0.0087f;
+    float center_kp_rad_s_per_rad = 6.0f;
+    float center_rate_max_rad_s = 1.0f;
+    // Outward braking envelope of the small-Yaw travel.
+    float brake_delay_s = 0.02f;
+    float brake_outward_acceleration_rad_s2 = 4.0f;
+    float brake_deceleration_rad_s2 = 10.0f;
+    // Carrier tracking supervision.
+    float tracking_error_rad_s = 0.35f;
+    float tracking_budget_scale_min = 0.4f;
+    float tracking_budget_slew_per_s = 0.5f;
+    // Standstill latch thresholds.
+    float still_rate_epsilon_rad_s = 0.01f;
+    float still_acceleration_epsilon_rad_s2 = 0.05f;
+    core::TimeUs feedback_timeout_us = 50000, source_timeout_us = 100000, max_cycle_us = 20000;
+};
+
+struct DualYawAllocatorInputs {
+    // Raw head world-rate target before any carrier compensation.
+    float head_rate_target_rad_s = 0;
+    // Small-Yaw joint measurement, encoder coordinates.
+    float joint_rad = 0, joint_rate_rad_s = 0;
+    // Measured big-Yaw carrier world rate.
+    float carrier_rate_rad_s = 0;
+    core::Stamp joint_stamp{}, source_stamp{}, carrier_stamp{};
+    bool carrier_valid = false;
+    // Big-Yaw execution channel authorized and its feedback fresh.
+    bool big_yaw_available = false;
+    bool enabled = false, permission_valid = false;
+};
+
+struct DualYawAllocatorOutput {
+    bool enabled = false;
+    BoundedRatePlan head{}; // feasible head world rate that the small Yaw can still realize
+    BoundedRatePlan big{};  // big-Yaw world intent
+    // Small-Yaw joint rate in encoder coordinates, direction applied once.
+    float joint_rate_rad_s = 0;
+    // Head world rate left to the small Yaw (head plan minus measured carrier).
+    float joint_rate_world_rad_s = 0;
+    float center_error_rad = 0;
+    float outward_budget_pos_rad_s = 0, outward_budget_neg_rad_s = 0;
+    float brake_margin_pos_rad = 0, brake_margin_neg_rad = 0;
+    bool big_saturated = false, travel_limited = false, tracking_limited = false;
+    WaitReason reason = WaitReason::Command;
+};
+
+// Single execution-thread owner. Fixed-size state, no allocation, no clocks:
+// the caller supplies the monotonic time and its own calibrated geometry.
+class DualYawMotionAllocator {
+public:
+    explicit DualYawMotionAllocator(const DualYawAllocatorConfig &config) : config_(config) {
+    }
+    int validate() const;
+    // Drop every plan, filter state and the previous cycle time.
+    void reset();
+    DualYawAllocatorOutput update(const DualYawAllocatorInputs &, core::TimeUs now_us);
+    const DualYawAllocatorConfig &config() const {
+        return config_;
+    }
+
+private:
+    void dropPlans();
+    DualYawAllocatorConfig config_{};
+    BoundedRatePlan head_{}, big_{};
+    core::TimeUs previous_us_ = 0;
+    float slow_rad_s_ = 0, center_error_rad_ = 0;
+    float budget_scale_ = 1;
+    bool tracking_limited_ = false, still_latched_ = true, initialized_ = false;
+};
+
+} // namespace skywalker::robotics

@@ -53,6 +53,11 @@ public:
     float stagedJointRateRadS() const {
         return native_last_rate_rad_s_ * config_.direction / config_.motor_to_joint_ratio;
     }
+    // True when the native motor-shaft slew limit clipped the staged request in
+    // the last cycle. Diagnostic only; it never feeds back into the follower.
+    bool nativeSlewLimited() const {
+        return native_slew_limited_;
+    }
 
 private:
     RunStatus publish(core::TimeUs, RunState, WaitReason, int error = 0);
@@ -64,6 +69,7 @@ private:
     std::uint64_t heading_enable_generation_ = 0;
     std::uint64_t native_enable_generation_ = 0;
     float native_last_rate_rad_s_ = 0;
+    bool native_slew_limited_ = false;
     RunStatus status_{};
     core::TimeUs previous_us_ = 0;
     std::uint32_t production_sequence_ = 0;

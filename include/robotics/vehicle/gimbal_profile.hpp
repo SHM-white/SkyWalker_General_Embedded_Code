@@ -10,6 +10,7 @@
 #if defined(CONFIG_SKYWALKER_COMMAND_SERVICE)
 #include <robotics/command/command_manager.hpp>
 #endif
+#include <robotics/gimbal/dual_yaw_motion_allocator.hpp>
 #include <robotics/gimbal/gimbal_axis.hpp>
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/vehicle/calibration.hpp>
@@ -159,6 +160,47 @@ inline GimbalExecutor::Config gimbalExecutionConfig() {
             .permission_timeout_ms = 300,
             .max_cycle_us = 20000};
 }
+// 调参：双 Yaw 加速度协同分配。手动阶段先按 ≤0.8 rad/s 的枪头持续预算验证
+// 低速居中，再按台架波形放开速度、加速度与 jerk；大 Yaw 世界意图保持
+// 参考底盘的 ≤1 rad/s 起步预算。数值全部为“世界坐标”量，编码器方向只在
+// 分配器内部乘一次。
+inline constexpr DualYawAllocatorConfig dualYawAllocatorConfig() {
+    DualYawAllocatorConfig c{};
+    c.joint_center_rad = yaw_center_rad;
+    c.joint_min_rad = yaw_min_rad;
+    c.joint_max_rad = yaw_max_rad;
+    c.joint_direction = small_yaw.direction;
+    // 软边界在现有硬裁剪内各留 1°，另扣位置环死区与标定误差。
+    c.joint_margin_rad = 0.0175f;
+    c.joint_tolerance_rad = 0.012f;
+    c.joint_rate_max_rad_s = small_yaw.velocity_limit_rad_s;
+    c.head_rate_max_rad_s = manual_max_gimbal_yaw_rate_rad_s;
+    c.head_acceleration_max_rad_s2 = 6.0f;
+    c.head_jerk_max_rad_s3 = 0; // 第一阶段先关 jerk，只验证实际斜率
+    c.head_steady_rate_max_rad_s = 0.8f;
+    c.big_intent_max_rad_s = 1.0f;
+    c.big_acceleration_max_rad_s2 = 4.0f;
+    c.big_jerk_max_rad_s3 = 0;
+    c.big_track_gain_s_inv = 2.0f;
+    // 一阶低通时间常数；视觉阶段再单独放宽到 0.18–0.30 s。
+    c.slow_tau_s = 0.10f;
+    c.center_deadband_rad = 0.0087f; // 0.5°
+    c.center_kp_rad_s_per_rad = 6.0f;
+    c.center_rate_max_rad_s = 1.0f;
+    // 制动包络：20 ms 采样+CAN 建立时间、4 rad/s² 向外余量、10 rad/s² 保证制动。
+    c.brake_delay_s = 0.02f;
+    c.brake_outward_acceleration_rad_s2 = 4.0f;
+    c.brake_deceleration_rad_s2 = 10.0f;
+    c.tracking_error_rad_s = 0.35f;
+    c.tracking_budget_scale_min = 0.4f;
+    c.tracking_budget_slew_per_s = 0.5f;
+    c.still_rate_epsilon_rad_s = 0.01f;
+    c.still_acceleration_epsilon_rad_s2 = 0.05f;
+    return c;
+}
+static_assert(dualYawAllocatorConfig().joint_min_rad < dualYawAllocatorConfig().joint_center_rad &&
+                  dualYawAllocatorConfig().joint_center_rad < dualYawAllocatorConfig().joint_max_rad,
+              "dual-Yaw allocator geometry must contain the small-Yaw centre");
 inline imu::DmImuCanSource::Config headSensorConfig() {
     imu::DmImuCanSource::Config c{};
 #if DT_NODE_HAS_STATUS(DT_ALIAS(imu_can), okay)

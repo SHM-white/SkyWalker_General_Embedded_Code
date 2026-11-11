@@ -225,4 +225,71 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
 int GimbalAxis::updateRate(float rate_rad_s, float dt_s) {
     return update({GimbalMode::Rate, 0, rate_rad_s}, SafetyAction::Active, dt_s);
 }
+int GimbalAxis::updateTrajectory(const GimbalJointTrajectory &trajectory, SafetyAction action, float dt) {
+    if (!configured_)
+        return -EACCES;
+    if (action > SafetyAction::Active || !std::isfinite(trajectory.position_rad) ||
+        !std::isfinite(trajectory.rate_rad_s) || !std::isfinite(trajectory.acceleration_rad_s2) ||
+        !std::isfinite(dt) || dt < 0)
+        return -EINVAL;
+    if (action == SafetyAction::Disable) {
+        withdraw();
+        return position_.update(target_angle_rad_, 0);
+    }
+    (void)poll(drive_.snapshot().feedback.timestamp_ms);
+    const auto snapshot = drive_.snapshot();
+    const int feedback_error = feedbackError(snapshot);
+    if (feedback_error < 0 || snapshot.state != motor::MotorState::Active || !snapshot.output_permitted) {
+        withdraw();
+        target_status_ = {};
+        target_status_.feedback_healthy = feedback_error == 0;
+        target_status_.last_dt_s = dt;
+        if (!feedback_error)
+            target_status_.measured_rad = config_.topology == AxisTopology::Continuous
+                                              ? snapshot.feedback.absolute_position_rad
+                                              : snapshot.feedback.position_rad;
+        const int ret = position_.update(target_angle_rad_, 0);
+        return feedback_error < 0 ? feedback_error : ret;
+    }
+    if (initialized_ && (snapshot.enable_generation != observed_enable_generation_ ||
+                         snapshot.reference_generation != observed_reference_generation_))
+        withdraw();
+    target_status_ = {};
+    target_status_.feedback_healthy = true;
+    target_status_.last_dt_s = dt;
+    target_status_.measured_rad = config_.topology == AxisTopology::Continuous ? snapshot.feedback.absolute_position_rad
+                                                                               : snapshot.feedback.position_rad;
+    const float integration_dt = initialized_ && dt <= 0.02f ? dt : 0;
+    double target = config_.topology == AxisTopology::Continuous
+                        ? std::remainder(double(trajectory.position_rad), 6.283185307179586)
+                        : std::clamp(double(trajectory.position_rad), double(config_.min_angle_rad),
+                                     double(config_.max_angle_rad));
+    if (config_.topology == AxisTopology::Limited) {
+        const auto clamped = target;
+        target_status_.mechanical_limited = clamped != double(trajectory.position_rad);
+        if (config_.max_lead_rad > 0) {
+            const auto before_lead = target;
+            target = std::clamp(target, target_status_.measured_rad - double(config_.max_lead_rad),
+                                target_status_.measured_rad + double(config_.max_lead_rad));
+            target_status_.lead_limited = target != before_lead;
+            target = std::clamp(target, double(config_.min_angle_rad), double(config_.max_angle_rad));
+        }
+    }
+    target_angle_rad_ = target;
+    target_status_.target_rad = target_angle_rad_;
+    target_status_.target_valid = true;
+    target_status_.requested_rate_rad_s = trajectory.rate_rad_s;
+    target_status_.limited_rate_rad_s = std::clamp(trajectory.rate_rad_s, -config_.max_rate_rad_s,
+                                                   config_.max_rate_rad_s);
+    target_status_.rate_limited = target_status_.limited_rate_rad_s != trajectory.rate_rad_s;
+    target_status_.integration_dt_s = integration_dt;
+    if (!initialized_) {
+        observed_enable_generation_ = snapshot.enable_generation;
+        observed_reference_generation_ = snapshot.reference_generation;
+        initialized_ = true;
+    }
+    previous_action_ = action;
+    previous_mode_ = GimbalMode::AbsoluteAngle;
+    return position_.update(target_angle_rad_, dt);
+}
 } // namespace skywalker::robotics

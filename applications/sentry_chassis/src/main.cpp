@@ -178,6 +178,9 @@ int main() {
                 // A missed interval stages no motor output this cycle; do not
                 // integrate a heading step over it either.
                 follow.dt_s = cycle_valid ? static_cast<float>(dt_us) * 1e-6f : 0;
+                // Stop capture counts distinct wire requests; a cached payload
+                // read by several cycles must not look like new frames.
+                follow.request_sequence = big_input.request.stamp.sequence;
                 follow_error = heading_follower.step(follow, joint_rate);
             }
             if (follow_error < 0) {
@@ -263,8 +266,8 @@ int main() {
                                                                          : installed::DiagnosticReason::Disarmed;
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
         const auto &hd = heading_follower.diagnostics();
-        const std::array<float, 27> trace{
-            101,                                                        // I19 schema/board
+        const std::array<float, 30> trace{
+            105,                                                        // I19 chassis schema
             float(unsigned(big_gate)),                                  // I20 live gate
             float(unsigned(big_status.reason)),                         // I21 live execution reason
             float(rx.gimbal_imu.valid),                                  // I22 peer heading usable
@@ -292,7 +295,10 @@ int main() {
             float(hd.capture_ms & 0xffff),                               // I42 capture time low
             float((hd.capture_ms >> 16) & 0xffff),                       // I43 capture time high
             float(hd.clamp_count & 0xffff),                              // I44 90-degree clamp entries
-            float(previous_big_commit_error)};                          // I45 CAN commit error
+            float(previous_big_commit_error),                           // I45 CAN commit error
+            heading_follower.initialized() ? heading_follower.shapedWorldRateRadS() : unavailable, // I46 shaped world rate
+            float(heading_follower.limitFlags() | (big_axis.nativeSlewLimited() ? 32u : 0u)), // I47 limit flags
+            heading_follower.stopCaptureElapsedMs()};                    // I48 stop-capture dwell
         diagnostics.status({.reason = big_reason,
                             .valid = feedback.valid,
                             .enabled = feedback.armed,

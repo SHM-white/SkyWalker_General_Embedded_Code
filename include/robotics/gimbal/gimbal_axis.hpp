@@ -1,6 +1,7 @@
 #pragma once
 
 #include <control/position_motor.hpp>
+#include <core/measurement.hpp>
 #include <drivers/motor/motor.hpp>
 #include <robotics/messages/command.hpp>
 
@@ -25,6 +26,16 @@ struct AxisCommand {
     GimbalMode mode = GimbalMode::Disabled;
     float target_rad = 0;
     float rate_rad_s = 0;
+};
+
+// Validated joint trajectory for the small Yaw, in encoder coordinates.
+// The allocator produces position/rate/acceleration from one feasible plan; the
+// existing position loop enforces the position, while the rate and acceleration
+// are carried for diagnostics and for the stage-C velocity/effort feedforward.
+struct GimbalJointTrajectory {
+    bool valid = false;
+    float position_rad = 0, rate_rad_s = 0, acceleration_rad_s2 = 0;
+    core::Stamp stamp{};
 };
 
 // Call control methods from one execution thread. Motor must outlive this object.
@@ -67,6 +78,10 @@ public:
     void withdraw();
     int update(const AxisCommand &, SafetyAction, float dt_s);
     int updateRate(float rate_rad_s, float dt_s); // Convenience for an already authorized Active path.
+    // Absolute joint target from a validated trajectory. Soft limits and the
+    // optional lead guard are applied to the target; no rate is integrated, so a
+    // rejected cycle can never leave a deferred position target behind.
+    int updateTrajectory(const GimbalJointTrajectory &, SafetyAction, float dt_s);
     double targetAngleRad() const {
         return target_angle_rad_;
     }

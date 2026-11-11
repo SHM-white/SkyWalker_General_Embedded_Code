@@ -21,7 +21,10 @@ using namespace skywalker::robotics::vehicle;
 const device *const diagnostic_uart = DEVICE_DT_GET(DT_ALIAS(diagnostic_uart));
 struct Packet {
     std::uint16_t size = 0;
-    std::uint8_t data[192]{};
+    // 49 float channels plus the four-byte JustFloat tail are 200 bytes. The
+    // buffer keeps a little slack for a future channel once the baud budget is
+    // re-verified.
+    std::uint8_t data[208]{};
 };
 K_MSGQ_DEFINE(diagnostic_queue, sizeof(Packet), 16, 4);
 atomic_t dropped_packets = 0;

@@ -29,11 +29,13 @@ struct DiagnosticStatus {
     float dt_us = 0, effort = 0, detail = 0;
     int error = 0;
     float extra0 = 0, extra1 = 0;
-    // I19..I45. I19: 101 chassis, 102 legacy attitude gimbal, 103 planar-yaw gimbal.
-    // Legacy callers keep the original 19-channel frame.
+    // I19..I48. I19: 101/105 chassis, 102 legacy attitude gimbal, 103 legacy
+    // planar-yaw gimbal, 104 dual-Yaw planar gimbal.
+    // Legacy callers keep the original 19-channel frame. The extension length is
+    // a multiple of three so the text output can group three channels per line.
     bool extended = false;
-    std::array<float, 27> extension = [] {
-        std::array<float, 27> values{};
+    std::array<float, 30> extension = [] {
+        std::array<float, 30> values{};
         values.fill(std::numeric_limits<float>::quiet_NaN());
         return values;
     }();

@@ -11,6 +11,12 @@ namespace skywalker::robotics {
 
 struct GimbalExecutionInputs {
     GimbalCommand command{};
+    // Optional small-Yaw joint trajectory in encoder coordinates, produced by the
+    // dual-Yaw allocator. When valid and fresh it owns the Yaw target for this
+    // cycle; the pitch command keeps its normal path. Position is enforced by the
+    // existing position loop, rate/acceleration are carried for diagnostics and
+    // the stage-C velocity/effort feedforward.
+    GimbalJointTrajectory yaw_trajectory{};
     // Source production time, preserved independently of arbitration time.
     core::Stamp source_stamp{};
     OutputPermission permission{};

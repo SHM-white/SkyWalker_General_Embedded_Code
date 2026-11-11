@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <robotics/execution/bounded_rate_step.hpp>
 #include <robotics/messages/interboard.hpp>
 
 namespace skywalker::robotics {
@@ -25,6 +26,9 @@ struct BigYawWorldHeadingInputs {
     // Measured control-cycle interval; zero, repeated or over-long intervals
     // never integrate.
     float dt_s = 0;
+    // Wire request sequence of this cycle. Only distinct sequences count as new
+    // frames for the stop-capture dwell; a cached payload does not.
+    std::uint32_t request_sequence = 0;
 };
 
 class BigYawWorldHeadingFollower {
@@ -42,6 +46,20 @@ public:
         // Operator-release zero detection; avoids recapturing on float noise.
         float release_epsilon_rad_s = 1e-4f;
         float max_sample_age_s = 0.05f, max_dt_s = 0.02f;
+        // World-motion shaping of the total intent (operator rate + heading
+        // correction). shaping_acceleration <= 0 disables shaping.
+        float world_rate_max_rad_s = 10.0f;
+        float shaping_acceleration_rad_s2 = 0, shaping_jerk_rad_s3 = 0;
+        // Achievable world rate around the measured body rate, i.e. the joint
+        // speed capability. The executor still applies sign, ratio and native
+        // slew after this stage.
+        float joint_rate_max_rad_s = 10.0f;
+        // Stop capture: a dwell of fresh, distinct low-speed requests captures
+        // the measured heading once. Zero keeps the immediate zero-crossing
+        // capture above.
+        float stop_capture_dwell_s = 0;
+        float stop_capture_enter_rad_s = 0.05f, stop_capture_exit_rad_s = 0.1f;
+        std::uint32_t stop_capture_min_sequences = 2;
     };
     BigYawWorldHeadingFollower() = default;
     explicit BigYawWorldHeadingFollower(const Config &config) : config_(config) {
@@ -69,6 +87,17 @@ public:
     float rateIntegralRadS() const {
         return rate_integral_rad_s_;
     }
+    float shapedWorldRateRadS() const {
+        return world_plan_.rate_rad_s;
+    }
+    // 1 world-speed clamp, 2 world acceleration shaped, 4 joint capacity clamp,
+    // 8 joint rate clamp, 16 stop-capture candidate active.
+    std::uint32_t limitFlags() const {
+        return limit_flags_;
+    }
+    float stopCaptureElapsedMs() const {
+        return stop_capture_flag_ ? static_cast<float>(stop_capture_last_ms_ - stop_capture_start_ms_) : 0.0f;
+    }
     struct Diagnostics {
         std::uint32_t capture_count = 0, clamp_count = 0;
         std::uint64_t capture_ms = 0;
@@ -89,5 +118,10 @@ private:
     // Retained across control resets to expose otherwise invisible recaptures.
     Diagnostics diagnostics_{};
     bool diagnostic_clamping_ = false;
+    BoundedRatePlan world_plan_{};
+    std::uint32_t limit_flags_ = 0;
+    bool stop_capture_flag_ = false;
+    std::uint64_t stop_capture_start_ms_ = 0, stop_capture_last_ms_ = 0;
+    std::uint32_t stop_capture_sequences_ = 0, last_stop_sequence_ = 0;
 };
 } // namespace skywalker::robotics

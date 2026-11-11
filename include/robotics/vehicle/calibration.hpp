@@ -165,6 +165,15 @@ inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s
 inline constexpr float big_yaw_heading_rate_kp = 0.0f, big_yaw_heading_rate_ki = 0.0f;
 inline constexpr float big_yaw_heading_integral_max_rad_s = 1.5f;
 inline constexpr float big_yaw_heading_release_epsilon_rad_s = 1e-4f;
+// 调参：大 Yaw 世界运动整形加速度/jerk（世界坐标 rad/s²、rad/s³）。
+// 在原请求+航向修正叠加之后再整形，jerk=0 表示只限制加速度。
+// 参考底盘阶段先从 4 rad/s² 起步；配套 Zephyr 底盘实测有余量后按 8→12→16 逐级试。
+inline constexpr float big_yaw_world_acceleration_rad_s2 = 8.0f;
+inline constexpr float big_yaw_world_jerk_rad_s3 = 0.0f;
+// 调参：正常停车的航向捕获停留时间与进入/退出阈值（s、rad/s）。
+// 停留 0 表示沿用旧的“请求穿越零速即捕获”；配套底盘先按 60 ms 试验。
+inline constexpr float big_yaw_stop_capture_dwell_s = 0.06f;
+inline constexpr float big_yaw_stop_capture_enter_rad_s = 0.05f, big_yaw_stop_capture_exit_rad_s = 0.10f;
 // 调参：大 Yaw 原生速度模式的目标加速度，单位电机轴 rad/s²。
 inline constexpr float big_yaw_native_acceleration_rad_s2 = 20.0f;
 static_assert(positive(manual_max_vx_m_s) && positive(manual_max_vy_m_s) && positive(manual_max_wz_rad_s) &&
@@ -182,6 +191,10 @@ static_assert(big_yaw_heading_kp >= 0 && big_yaw_heading_rate_max_rad_s > 0 && b
                   big_yaw_heading_rate_ki >= 0 && big_yaw_heading_integral_max_rad_s > 0 &&
                   big_yaw_heading_release_epsilon_rad_s >= 0 && positive(big_yaw_native_acceleration_rad_s2),
               "big-Yaw heading follower gains and acceleration must be valid");
+static_assert(positive(big_yaw_world_acceleration_rad_s2) && big_yaw_world_jerk_rad_s3 >= 0 &&
+                  big_yaw_stop_capture_dwell_s >= 0 &&
+                  big_yaw_stop_capture_exit_rad_s >= big_yaw_stop_capture_enter_rad_s,
+              "big-Yaw world shaping and stop capture must be valid");
 
 inline constexpr float two_pi = 6.2831853071795864769f;
 // 调参：小 Yaw 原始编码器上下限，ticks（8192 ticks/转）；当前为全量程，非实测机械安全端点。
