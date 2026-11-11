@@ -15,12 +15,14 @@
 | `samples/hello` | 最小启动、UART/VOFA 单通道 | 任一已支持板卡 |
 | `samples/control` | PID、前馈、角度、斜坡等控制算法自检 | 任一已支持板卡 |
 | `samples/imu_test` | 新接口的单板载 BMI088、EKF、温控、VOFA | MC02 板载传感器与 TIM3 CH4 加热 |
+| `samples/status_led` | MC02 板载 WS2812 状态灯自检、满亮度与白色阶梯 | MC02 板载 SPI6 WS2812 |
 | [samples/imu/dual_imu](../../samples/imu/dual_imu/README.md) | 底盘/载体/头部安装位置观测，原始时间、质量、参考代次及 VOFA | MC02；云台配置另需 DM-IMU-L1 |
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx -d build/hello samples/hello
 west build -p -b dm_mc02/stm32h723xx -d build/control samples/control
 west build -p -b dm_mc02/stm32h723xx -d build/imu samples/imu_test
+west build -p -b dm_mc02/stm32h723xx -d build/status_led samples/status_led
 ```
 
 ## 2. 通信样例

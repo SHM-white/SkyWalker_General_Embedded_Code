@@ -148,10 +148,10 @@ inline constexpr float drive_rotor_velocity_kp = 0.08f;
 inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us = 1000000;
 
 // 调参：手动底盘/云台速度上限，单位 m/s 或 rad/s。
-inline constexpr float manual_max_vx_m_s = 0.3f, manual_max_vy_m_s = 0.3f, manual_max_wz_rad_s = 0.5f;
+inline constexpr float manual_max_vx_m_s = 5.0f, manual_max_vy_m_s = 5.0f, manual_max_wz_rad_s = 5.0f;
 inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 1.0f, manual_max_gimbal_pitch_rate_rad_s = 0.8f;
 // 调参：小陀螺边平移的参考倍率；0..1。
-inline constexpr float chassis_spin_forward_scale = 0.3f, chassis_spin_lateral_scale = 0.4f;
+inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_scale = 1.0f;
 // 调参：舵轮启停迟滞，单位 m/s；与轮轴角度/线速度无关。
 inline constexpr float chassis_zero_speed_epsilon_m_s = 0.01f, chassis_resume_speed_m_s = 0.02f;
 // 调参：底盘运动适配器的车体 wz 上限、舵向目标速率和驱动/舵向参考斜率。
