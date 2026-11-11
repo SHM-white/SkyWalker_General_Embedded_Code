@@ -92,6 +92,16 @@ struct MotorSnapshot {
     bool native_temperatures_valid = false;
     float native_position_rad = 0.0f;
     bool native_position_valid = false;
+    /*
+     * Native protocol angle extended across every ±position_max_rad boundary.
+     * Unlike Feedback::position_rad the first frame keeps the raw angle, so a
+     * calibrated raw zero stays meaningful. Disable/enable and reseedPosition()
+     * never restart this coordinate; only a motor/board reboot does.
+     */
+    double native_unwrapped_position_rad = 0.0;
+    bool native_unwrapped_position_valid = false;
+    /* Signed count of protocol spans added to the raw angle (diagnostic). */
+    std::int64_t native_wrap_count = 0;
     MotorState state = MotorState::Offline;
     bool feedback_fresh = false;
     bool output_permitted = false;
@@ -192,6 +202,11 @@ private:
         double accumulated_native_rad = 0.0;
         float last_native_position_rad = 0.0f;
         bool has_native_position = false;
+        // Fixed protocol coordinate, independent of the relative Feedback
+        // position: the span count survives gaps, re-enable and reseeding.
+        float last_native_unwrap_raw_rad = 0.0f;
+        std::int64_t native_wrap_count = 0;
+        bool native_unwrap_initialized = false;
     };
 
     std::variant<dji::Config, dm::Config> config_;

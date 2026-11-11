@@ -123,12 +123,14 @@ int main() {
         // Unlike our old Body-frame v4 implementation, the reference sends
         // gimbal-relative translation. The absolute encoder zero is fixed.
         const auto yaw_feedback = big_drive.snapshot();
-        // The native drive angle shares the calibrated forward-zero coordinate
-        // and recovers after an RX gap without reseeding a continuous reference.
-        const bool encoder_valid = yaw_feedback.feedback_fresh && yaw_feedback.native_position_valid &&
-                                   std::isfinite(yaw_feedback.native_position_rad) &&
+        // Use the continuous native protocol coordinate, not the raw +-PMAX
+        // value: a J4310 wraps every 25 rad, which is not a multiple of 2*pi.
+        // It keeps the calibrated forward zero and survives an RX gap.
+        const bool encoder_valid = yaw_feedback.feedback_fresh && yaw_feedback.native_unwrapped_position_valid &&
+                                   std::isfinite(yaw_feedback.native_unwrapped_position_rad) &&
                                    isFresh({yaw_feedback.feedback.timestamp_ms, 1, true}, now_ms, 100);
-        input.command = referenceV4ChassisToBody(input.command, encoder_valid, yaw_feedback.native_position_rad,
+        input.command = referenceV4ChassisToBody(input.command, encoder_valid,
+                                                 yaw_feedback.native_unwrapped_position_rad,
                                                  installed::reference_big_yaw_forward_zero_rad,
                                                  installed::reference_big_yaw.direction,
                                                  installed::reference_big_yaw.gear_ratio,

@@ -686,7 +686,9 @@ int Motor::acceptDjiFeedback(const dji::RawFeedback &raw, std::uint64_t received
 
 int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t received_ms,
                             std::uint64_t callback_order) {
-    if (received_ms == 0u || callback_order == 0u || !std::holds_alternative<dm::Config>(config_))
+    if (received_ms == 0u || callback_order == 0u || !std::holds_alternative<dm::Config>(config_) ||
+        !std::isfinite(decoded.position_rad) || !std::isfinite(decoded.velocity_rad_s) ||
+        !std::isfinite(decoded.torque_nm))
         return -EINVAL;
     const dm::Config &config = std::get<dm::Config>(config_);
     if (decoded.raw.motor_id != config.id)
@@ -747,6 +749,31 @@ int Motor::acceptDmFeedback(const dm::DecodedFeedback &decoded, std::uint64_t re
     snapshot_.native_temperatures_valid = true;
     snapshot_.native_position_rad = decoded.position_rad;
     snapshot_.native_position_valid = true;
+    // The protocol wraps at ±PMAX (25 rad for J4310), which is not a multiple
+    // of 2*pi. Extend the raw angle with a span counter so a calibrated raw
+    // zero stays a continuous direction reference across any number of wraps.
+    const double p_max = static_cast<double>(config.limits.position_max_rad);
+    if (std::isfinite(p_max) && p_max > 0.0) {
+        const double span = 2.0 * p_max;
+        if (!state.native_unwrap_initialized) {
+            state.native_unwrap_initialized = true;
+            state.native_wrap_count = 0;
+        }
+        else {
+            const double delta = static_cast<double>(decoded.position_rad) -
+                                 static_cast<double>(state.last_native_unwrap_raw_rad);
+            // raw falls from +PMAX to -PMAX when travelling upwards.
+            if (delta < -0.5 * span && state.native_wrap_count < std::numeric_limits<std::int64_t>::max())
+                ++state.native_wrap_count;
+            else if (delta > 0.5 * span && state.native_wrap_count > std::numeric_limits<std::int64_t>::min())
+                --state.native_wrap_count;
+        }
+        state.last_native_unwrap_raw_rad = decoded.position_rad;
+        snapshot_.native_unwrapped_position_rad = static_cast<double>(decoded.position_rad) +
+                                                  static_cast<double>(state.native_wrap_count) * span;
+        snapshot_.native_unwrapped_position_valid = true;
+        snapshot_.native_wrap_count = state.native_wrap_count;
+    }
     snapshot_.native_drive_status = static_cast<std::uint32_t>(decoded.raw.status);
     snapshot_.native_drive_status_valid = true;
     if (decoded.raw.status == dm::DriveStatus::Disabled && stop_tx_done_ && stop_tx_completed_order_ != 0u &&
