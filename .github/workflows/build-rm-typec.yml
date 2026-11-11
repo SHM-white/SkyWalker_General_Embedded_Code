@@ -1,0 +1,177 @@
+name: Build RM Type-C
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'applications/**'
+      - 'samples/**'
+      - 'config/**'
+      - 'tests/**'
+      - 'boards/**'
+      - 'drivers/**'
+      - 'dts/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/build-rm-typec.yml'
+      - '.github/ci/**'
+  pull_request:
+    paths:
+      - 'applications/**'
+      - 'samples/**'
+      - 'config/**'
+      - 'tests/**'
+      - 'boards/**'
+      - 'drivers/**'
+      - 'dts/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'zephyr/**'
+      - 'west.yml'
+      - 'CMakeLists.txt'
+      - 'Kconfig'
+      - '.github/workflows/build-rm-typec.yml'
+      - '.github/ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rm-typec-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-image:
+    name: Resolve pinned ARM toolchain image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: skywalker_code
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select immutable toolchain version
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest=$(sha256sum skywalker_code/west.yml skywalker_code/.github/ci/zephyr-arm.Dockerfile | sha256sum | cut -c1-20)
+          image="ghcr.io/shm-white/skywalker-zephyr-arm-ci:$digest"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Untrusted fork PRs can use an existing immutable tag, but must not
+      # publish arbitrary Dockerfile changes with the base repository token.
+      - name: Reject unpublished image from fork PR
+        if: steps.image.outputs.present != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        shell: bash
+        run: |
+          echo 'ARM image for this manifest is not published yet. Run the trusted workflow on main first.' >&2
+          exit 1
+
+      - name: Set up Docker Buildx
+        if: steps.image.outputs.present != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and publish missing ARM image
+        if: steps.image.outputs.present != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: skywalker_code
+          file: skywalker_code/.github/ci/zephyr-arm.Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+          cache-from: type=gha,scope=skywalker-zephyr-arm
+          cache-to: type=gha,mode=max,scope=skywalker-zephyr-arm
+
+  rm-typec-motor:
+    name: RM Type-C / DJI motor smoke
+    needs: prepare-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: ${{ needs.prepare-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user 0
+    env:
+      ZEPHYR_BASE: /opt/skywalker-zephyr/zephyr
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: skywalker_code
+
+      - name: Link prebuilt Zephyr modules
+        run: bash skywalker_code/.github/ci/link-prebuilt-workspace.sh
+
+      - name: Build RM Type-C motor smoke
+        run: |
+          set -euo pipefail
+          west build -p always -b rm_typec \
+            -d build/ci/rm_typec_dji_position \
+            skywalker_code/samples/motor/dji_position_control \
+            -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code"
+
+
+  rm-typec-usb:
+    name: RM Type-C / USB CDC ACM smoke
+    needs: prepare-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: ${{ needs.prepare-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user 0
+    env:
+      ZEPHYR_BASE: /opt/skywalker-zephyr/zephyr
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: skywalker_code
+
+      - name: Link prebuilt Zephyr modules
+        run: bash skywalker_code/.github/ci/link-prebuilt-workspace.sh
+
+      - name: Build RM Type-C USB CDC ACM smoke
+        run: |
+          set -euo pipefail
+          west build -p always -b rm_typec \
+            -d build/ci/rm_typec_usb_cdc \
+            "$ZEPHYR_BASE/samples/subsys/usb/cdc_acm" \
+            -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code"

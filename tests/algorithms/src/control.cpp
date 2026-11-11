@@ -534,6 +534,23 @@ ZTEST(control_angle, test_benchmark_nearest_target) {
     zassert_true(std::fabs(target - 20.0f) <= pi);
 }
 
+ZTEST(control_motor_velocity, test_post_slew_scale_preserves_nominal_reference) {
+    auto config = velocityConfig();
+    config.reference_slew = {2.0f, 2.0f};
+    control_motor_velocity_state state{};
+    control_motor_velocity_output output{};
+    zassert_ok(control_motor_velocity_reset(&state, 0.0f, 0.0f));
+    const control_motor_velocity_input input{10.0f, 0.0f, 0.0f, 0.25f, false};
+    for (int i = 0; i < 4; ++i) {
+        zassert_ok(control_motor_velocity_step_scaled(&state, &config, &input, 0.0f, &output));
+        zassert_within(output.velocity_reference_rad_s, 0.0f, tolerance);
+        zassert_within(output.effort_command, 0.0f, tolerance);
+    }
+    zassert_ok(control_motor_velocity_step_scaled(&state, &config, &input, 1.0f, &output));
+    zassert_within(output.velocity_reference_rad_s, 2.5f, tolerance);
+    zassert_equal(control_motor_velocity_step_scaled(&state, &config, &input, -1.0f, &output), -EINVAL);
+}
+
 ZTEST(control_motor_velocity, test_known_proportional_velocity_output) {
     const auto config = velocityConfig();
     control_motor_velocity_state state{};

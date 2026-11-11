@@ -107,7 +107,9 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
     static const CommandManager::Config policy = [] {
         auto c = board_config::shooterCommandPolicy();
         c.allow_auto = false;
-        c.require_referee_for_motion = false;
+        c.require_referee_for_chassis = false;
+        c.require_referee_for_gimbal = false;
+        c.require_referee_for_shooter = false;
         c.requested_fire_rate_hz = vehicle::requested_fire_rate_hz; // RC、快速连点、长按共用一个 Hz 参数。
         return c;
     }();
@@ -122,7 +124,7 @@ inline int run(bool with_gimbal, bool unloaded_feed) {
     const int setup = hardware.start(with_gimbal);
     printk("shared DJI CAN yaw/friction/dial; setup=%d; unloaded_feed=%d\n", setup, unloaded_feed);
     printk(
-        "left Down=Safe; neutral Down/Down 500ms then Middle=arm, Up=manual RC; right Middle=keyboard/mouse; right Up=continuous, right Down=spin\n");
+        "left Down=Safe; centered Down then Middle=arm (no 500ms hold), Up=manual RC; right Middle=keyboard/mouse; right Up=continuous, right Down=spin\n");
     printk("mouse: hold right=friction, left click=single, rapid gap<500ms/hold>=250ms=continuous; rate=%.2f Hz\n",
            double(policy.requested_fire_rate_hz));
     CommandSnapshot frame{};

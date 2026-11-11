@@ -18,7 +18,8 @@ public:
     // -ENOSPC: capacity, -EBUSY: startup already attempted.
     [[nodiscard]] int registerSource(ICommandSource &source);
     [[nodiscard]] int bindPermissions(IPermissionSource &source);
-    // -EINVAL: config/missing operator; -ENODEV: required permission missing;
+    // -EINVAL: config/missing operator; an unbound optional referee source
+    // leaves permissions unknown/allowed rather than blocking startup.
     // -EALREADY: repeated attempt; otherwise propagates source startup errors.
     [[nodiscard]] int start();
     // 0 copies the current value, possibly the same sequence as a previous read.
@@ -44,7 +45,7 @@ private:
     void publish(const CommandSnapshot &value);
     int failStart(int error, std::uint32_t reason);
     CommandArbiter arbiter_;
-    const bool require_permissions_;
+    const bool require_gimbal_permissions_, require_shooter_permissions_;
     const std::uint32_t permission_timeout_ms_;
     const bool require_external_gate_;
     struct OperatorGate {

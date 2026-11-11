@@ -121,7 +121,9 @@ private:
 
 CommandManager::Config noPermission() {
     CommandManager::Config config{};
-    config.require_referee_for_motion = false;
+    config.require_referee_for_chassis = false;
+    config.require_referee_for_gimbal = false;
+    config.require_referee_for_shooter = false;
     return config;
 }
 
@@ -261,11 +263,11 @@ ZTEST(command_service, test_registration_startup_and_failed_lifetime) {
     static Source needs_permission;
     static Permission too_late;
     zassert_ok(missing_permission.registerSource(needs_permission));
-    zassert_equal(missing_permission.start(), -ENODEV);
-    zassert_equal(needs_permission.starts, 0);
+    // No bound referee source is not a reason to prevent RC startup.
+    zassert_ok(missing_permission.start());
+    zassert_equal(needs_permission.starts, 1);
     failed = awaitSnapshot(missing_permission, [](const auto &) { return true; });
-    disabled(failed.decision.command);
-    zassert_true(failed.decision.reasons() & PermissionMissing);
+    zassert_false(failed.decision.reasons() & PermissionMissing);
     zassert_equal(missing_permission.bindPermissions(too_late), -EBUSY);
 
     static CommandManager invalid{invalidConfig()};
@@ -382,29 +384,33 @@ ZTEST(command_service, test_background_cache_consumers_expiry_and_recovery) {
         return s.observed.remote.stamp.sequence == 14 && s.decision.command.gimbal.mode == GimbalMode::Rate;
     });
     const auto permission_stamp = value.observed.referee.robot.gimbal_output.stamp;
-    value = awaitSnapshot(manager, [](const auto &s) { return s.decision.gimbal_reasons & PermissionStale; });
-    zassert_equal(value.decision.command.gimbal.mode, GimbalMode::Disabled);
+    k_sleep(K_MSEC(serviceConfig().permission_timeout_ms + 20));
+    operator_source.publish(remote(15));
+    value = awaitSnapshot(manager, [](const auto &s) {
+        return s.observed.remote.stamp.sequence == 15 && s.decision.command.gimbal.mode == GimbalMode::Rate;
+    });
+    // A stale referee permission is absent, not an explicit motion veto.
+    zassert_false(value.decision.gimbal_reasons & PermissionStale);
     zassert_equal(value.decision.requested.gimbal.mode, GimbalMode::Rate);
-    zassert_false(value.decision.gimbal_reasons & RcUnavailable);
     zassert_equal(value.permission.sample_error, -EAGAIN);
     zassert_equal(value.observed.referee.robot.gimbal_output.stamp.timestamp_ms, permission_stamp.timestamp_ms);
     zassert_equal(value.observed.referee.robot.gimbal_output.stamp.sequence, permission_stamp.sequence);
 
-    operator_source.publish(remote(15));
+    operator_source.publish(remote(16));
     permission_source.publish(25);
     awaitSnapshot(manager, [](const auto &s) {
-        return s.observed.remote.stamp.sequence == 15 && s.decision.command.gimbal.mode == GimbalMode::Rate;
+        return s.observed.remote.stamp.sequence == 16 && s.decision.command.gimbal.mode == GimbalMode::Rate;
     });
     permission_source.fail(-EPROTO);
     value = awaitSnapshot(manager, [](const auto &s) { return s.permission.sample_error == -EPROTO; });
-    disabled(value.decision.command);
+    zassert_equal(value.decision.command.gimbal.mode, GimbalMode::Rate);
     zassert_false(value.observed.referee.robot.gimbal_output.stamp.valid);
     zassert_equal(value.permission.state, 91);
-    zassert_true(value.decision.gimbal_reasons & PermissionMissing);
-    operator_source.publish(remote(16));
+    zassert_false(value.decision.gimbal_reasons & PermissionMissing);
+    operator_source.publish(remote(17));
     permission_source.publish(26);
     awaitSnapshot(manager, [](const auto &s) {
-        return s.observed.remote.stamp.sequence == 16 && s.decision.command.gimbal.mode == GimbalMode::Rate;
+        return s.observed.remote.stamp.sequence == 17 && s.decision.command.gimbal.mode == GimbalMode::Rate;
     });
     zassert_equal(manager.start(), -EALREADY);
     zassert_equal(manager.registerSource(operator_source), -EBUSY);

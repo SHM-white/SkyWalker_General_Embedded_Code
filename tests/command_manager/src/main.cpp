@@ -233,14 +233,20 @@ ZTEST(command_manager, test_operator_safety_and_timeout_boundaries) {
 ZTEST(command_manager, test_permission_boundaries_and_individual_veto) {
     Scenario s;
     s.manual();
-    s.input.referee.robot.chassis_output.stamp.timestamp_ms = s.now / 1000 - 300;
+    s.input.remote.analog.left_y = 330;
+    s.input.referee.robot.chassis_output.stamp.timestamp_ms = s.now / 1000 - 301;
     s.step();
     zassert_equal(s.out.command.chassis.mode, ChassisMode::BodyVelocity);
-    s.input.referee.robot.chassis_output.stamp.timestamp_ms -= 1;
+    zassert_false(s.out.chassis_reasons & PermissionStale);
+    zassert_true(s.out.command.chassis.vx_m_s > 0);
+    // Fresh explicit chassis denial zeros motion, retaining holding/steering mode.
+    s.refresh();
+    s.input.referee.robot.chassis_output.enabled = false;
     s.step();
-    zassert_equal(s.out.command.chassis.mode, ChassisMode::Disabled);
-    zassert_true(s.out.chassis_reasons & PermissionStale);
-    zassert_equal(s.out.requested.chassis.mode, ChassisMode::BodyVelocity);
+    zassert_equal(s.out.command.chassis.mode, ChassisMode::BodyVelocity);
+    near(s.out.command.chassis.vx_m_s, 0);
+    zassert_true(s.out.requested.chassis.vx_m_s > 0);
+    zassert_true(s.out.chassis_reasons & PermissionDenied);
     zassert_equal(s.out.command.gimbal.mode, GimbalMode::Rate);
     s.refresh();
     s.input.referee.robot.gimbal_output.enabled = false;
@@ -249,11 +255,37 @@ ZTEST(command_manager, test_permission_boundaries_and_individual_veto) {
     zassert_equal(s.out.command.chassis.mode, ChassisMode::BodyVelocity);
     zassert_equal(s.out.command.gimbal.mode, GimbalMode::Disabled);
     zassert_true(s.out.gimbal_reasons & PermissionDenied);
-    zassert_true(s.out.shooter_reasons & PermissionMissing);
-    s.refresh();
-    s.input.referee.robot.chassis_output.stamp.timestamp_ms += 1;
-    s.step();
-    zassert_true(s.out.chassis_reasons & PermissionStale);
+    zassert_false(s.out.shooter_reasons & PermissionMissing);
+}
+ZTEST(command_manager, test_only_enabled_functions_validate_configuration_and_permissions) {
+    CommandArbiter::Config c{};
+    c.allow_auto = false;
+    c.enable_shooter = false;
+    c.mapper.input_profile = RemoteInputProfile::PhysicalRemote;
+    c.requested_fire_rate_hz = 0;
+    c.mouse_gesture.hold_to_auto_ms = 0;
+    c.mapper.mouse_yaw_scale = std::numeric_limits<float>::quiet_NaN();
+    c.require_referee_for_chassis = false;
+    c.require_referee_for_gimbal = true;
+    c.require_referee_for_shooter = false;
+    c.permission_timeout_ms = 300;
+    CommandArbiter arbiter(c);
+    zassert_ok(arbiter.configError());
+    Scenario s;
+    s.manual();
+    s.input.now_us = s.now;
+    s.input.remote.analog.left_y = 330;
+    s.input.referee.robot.chassis_output.enabled = false;
+    s.input.referee.robot.gimbal_output.enabled = false;
+    s.input.referee.robot.shooter_output.enabled = false;
+    const auto result = arbiter.update(s.input);
+    zassert_ok(result.error);
+    zassert_true(result.command.chassis.vx_m_s > 0);
+    zassert_equal(result.command.gimbal.mode, GimbalMode::Disabled);
+    zassert_equal(result.command.shooter.mode, ShooterMode::Disabled);
+    zassert_false(result.chassis_reasons & PermissionDenied);
+    zassert_true(result.gimbal_reasons & PermissionDenied);
+    zassert_false(result.shooter_reasons & PermissionDenied);
 }
 
 ZTEST(command_manager, test_vision_new_frame_and_value_limits) {
@@ -447,7 +479,7 @@ ZTEST(command_manager, test_complete_arbitration_scenario) {
     s.input.referee.online = true;
     s.input.referee.stamp = {s.now / 1000, 99, true};
     s.step();
-    zassert_true(s.out.chassis_reasons & PermissionStale);
+    zassert_false(s.out.chassis_reasons & PermissionStale);
     s.input.remote.online = false;
     s.step();
     disabled(s.out);
@@ -531,6 +563,25 @@ ZTEST(command_manager, test_rc_rearm_neutral_and_preselected_spin_fire_blocked) 
     zassert_false(update(10, 1508).run_allowed);
     r.online = true;
     zassert_false(update(11, 1509).run_allowed);
+}
+
+ZTEST(command_manager, test_rc_old_candidate_does_not_revoke_fresh_accepted_input) {
+    using skywalker::samples::control::RcControlAdapter;
+    RcControlAdapter rc;
+    RemoteState sample{};
+    sample.online = true;
+    sample.left_switch = RcSwitch::Up;
+    sample.right_switch = RcSwitch::Middle;
+    sample.stamp = {1000, 4, true};
+    zassert_true(rc.update(sample, 1000).run_allowed);
+    sample.stamp = {800, 3, true};
+    const auto &kept = rc.update(sample, 1010);
+    zassert_true(kept.fresh);
+    zassert_true(kept.run_allowed);
+    zassert_equal(kept.remote.stamp.timestamp_ms, 1000);
+    // Neither replays nor dropped candidates extend the accepted lease.
+    zassert_false(rc.update(sample, 1101).run_allowed);
+    zassert_false(rc.update(sample, 1101).fresh);
 }
 
 ZTEST_SUITE(command_manager, nullptr, nullptr, nullptr, nullptr, nullptr);

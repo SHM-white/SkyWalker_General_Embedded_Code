@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cfloat>
 #include <cstdint>
 #include <core/measurement.hpp>
 
@@ -28,8 +29,11 @@ struct MotorCalibration {
 constexpr bool validDirection(float direction) {
     return direction == 1.0f || direction == -1.0f;
 }
+constexpr bool finiteConstant(float value) {
+    return value == value && value >= -FLT_MAX && value <= FLT_MAX;
+}
 constexpr bool positive(float value) {
-    return value > 0.0f;
+    return finiteConstant(value) && value > 0.0f;
 }
 template <std::size_t N> constexpr bool validMotorSet(const std::array<MotorCalibration, N> &motors) {
     for (std::size_t i = 0; i < N; ++i) {
@@ -149,7 +153,7 @@ inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 1.0f, manual_max_gimba
 // 调参：小陀螺边平移的参考倍率；0..1。
 inline constexpr float chassis_spin_forward_scale = 0.3f, chassis_spin_lateral_scale = 0.4f;
 // 调参：舵轮启停迟滞，单位 m/s；与轮轴角度/线速度无关。
-inline constexpr float chassis_zero_speed_epsilon_m_s = 0.1f, chassis_resume_speed_m_s = 0.2f;
+inline constexpr float chassis_zero_speed_epsilon_m_s = 0.01f, chassis_resume_speed_m_s = 0.02f;
 // 调参：底盘运动适配器的车体 wz 上限、舵向目标速率和驱动/舵向参考斜率。
 inline constexpr float chassis_max_wz_rad_s = 1.0f, chassis_steer_speed_rad_s = 4.0f;
 inline constexpr float chassis_drive_slew_rad_s2 = 10.0f, chassis_steer_slew_rad_s2 = 100.0f;

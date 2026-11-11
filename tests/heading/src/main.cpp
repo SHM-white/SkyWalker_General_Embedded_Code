@@ -47,6 +47,17 @@ imu::Snapshot imuSample(std::uint64_t seq, std::uint64_t now, float yaw = 0) {
     return s;
 }
 }
+ZTEST(heading, test_armed_startup_still_captures_stationary_heading) {
+    ImuHeadingReference heading;
+    LocalHeading result{};
+    // The RC may already be in Manual at first valid IMU sample.
+    for (unsigned i = 1; i <= 20; ++i) {
+        const auto now = 1000000ULL + i * 2000ULL;
+        result = heading.update(imuSample(i, now, 1.2f), false, now);
+    }
+    zassert_true(result.valid);
+    zassert_within(result.yaw_rad, 0, 1e-6f);
+}
 ZTEST(heading, test_zero_capture_gap_recovery_and_reference_change) {
     ImuHeadingReference r;
     LocalHeading h{};
@@ -210,7 +221,9 @@ ZTEST(heading, test_big_yaw_executor_mit_authority_timeout_and_recovery) {
     zassert_false(drive.snapshot().enabled_requested);
     in.head.valid = true;
     in.request.permission.enabled = false;
-    zassert_equal(e.update(in, 108000).reason, WaitReason::Power);
+    // A stale/duplicate wire permission is no longer a second control veto.
+    // After the head fault the motor may still be re-enabling this cycle.
+    zassert_true(e.update(in, 108000).reason != WaitReason::Power);
     in.request.permission.enabled = true;
     in.request.receiver_boot_id = 21;
     zassert_equal(e.update(in, 110000).reason, WaitReason::Transport);
