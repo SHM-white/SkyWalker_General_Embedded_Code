@@ -12,7 +12,9 @@
 #include <drivers/motor/can_bus.hpp>
 #undef private
 #include <robotics/vehicle/chassis_profile.hpp>
+#include <robotics/chassis/reference_v4_motion.hpp>
 #include <robotics/execution/big_yaw_executor.hpp>
+#include <robotics/execution/big_yaw_heading_follower.hpp>
 using namespace skywalker;
 using namespace skywalker::robotics;
 namespace {
@@ -408,4 +410,319 @@ ZTEST(sentry, test_native_big_yaw_slew_expiry_and_recovery) {
     zassert_true(executor.update(in, 1008000).ready);
     zassert_true(drive.copyStaged().valid);
 }
+namespace {
+constexpr double twoPi = 6.2831853071795864769;
+float wrapRad(float a) {
+    return std::remainder(a, 2 * pi);
+}
+// Map a continuous native angle onto the J4310 feedback range [-PMAX, +PMAX).
+float protocolRaw(float continuous_rad) {
+    constexpr float span = 25.0f;
+    float wrapped = std::fmod(continuous_rad + span / 2, span);
+    if (wrapped < 0)
+        wrapped += span;
+    return wrapped - span / 2;
+}
+BigYawWorldHeadingInputs headingSample(float yaw, float rate, float desired, std::uint64_t now_ms, float body_rate = 0,
+                                       std::uint64_t boot = 11, std::uint32_t generation = 1) {
+    BigYawWorldHeadingInputs in{};
+    in.head.valid = true;
+    in.head.yaw_rad = yaw;
+    in.head.yaw_rate_rad_s = rate;
+    in.head.source_age_ms = 0;
+    in.head.sample_sequence = 1;
+    in.head.zero_generation = generation;
+    in.head.receiver_boot_id = 17;
+    in.head.sender_boot_id = boot;
+    in.head.stamp = {now_ms, 1, true};
+    in.now_ms = now_ms;
+    in.body_rate_rad_s = body_rate;
+    in.desired_world_rate_rad_s = desired;
+    in.dt_s = 0.002f;
+    return in;
+}
+BigYawWorldHeadingFollower::Config followerConfig() {
+    return BigYawWorldHeadingFollower::Config{};
+}
+// testBigYawMotor uses CAN ID 6 and PMAX 12.5 rad.
+motor::dm::DecodedFeedback dmFrame(float position_rad) {
+    motor::dm::DecodedFeedback d{};
+    d.raw.motor_id = 6;
+    d.position_rad = position_rad;
+    return d;
+}
+} // namespace
+
+ZTEST(sentry, test_encoder_frame_zero_quadrants_and_spin_scaling) {
+    constexpr double zero = -1.132792, halfPi = 1.5707963267948966;
+    ChassisCommand c{.mode = ChassisMode::BodyVelocity, .vx_m_s = 1.0f};
+    auto out = referenceV4ChassisToBody(c, true, zero, zero, -1, 1);
+    zassert_within(out.vx_m_s, 1, 1e-6f);
+    zassert_within(out.vy_m_s, 0, 1e-6f);
+    // Joint rotated +90 deg from the body: forward becomes body +Y.
+    out = referenceV4ChassisToBody(c, true, zero - halfPi, zero, -1, 1);
+    zassert_within(out.vx_m_s, 0, 1e-6f);
+    zassert_within(out.vy_m_s, 1, 1e-6f);
+    out = referenceV4ChassisToBody(c, true, zero + halfPi, zero, -1, 1);
+    zassert_within(out.vy_m_s, -1, 1e-6f);
+    // direction=+1 flips the mechanical sign exactly once.
+    out = referenceV4ChassisToBody(c, true, zero + halfPi, zero, 1, 1);
+    zassert_within(out.vy_m_s, 1, 1e-6f);
+    // gear_ratio divides the joint angle before wrapping.
+    out = referenceV4ChassisToBody(c, true, zero + 2 * halfPi, zero, -1, 2);
+    zassert_within(out.vx_m_s, 0, 1e-6f);
+    zassert_within(out.vy_m_s, -1, 1e-6f);
+    // Spin scaling changes magnitude only; the rotation command is untouched.
+    c.wz_rad_s = 0.5f;
+    out = referenceV4ChassisToBody(c, true, zero, zero, -1, 1);
+    zassert_within(out.vx_m_s, .3f, 1e-6f);
+    zassert_equal(out.wz_rad_s, .5f);
+    c.vx_m_s = 0;
+    c.vy_m_s = 1;
+    out = referenceV4ChassisToBody(c, true, zero, zero, -1, 1);
+    zassert_within(out.vy_m_s, .4f, 1e-6f);
+    zassert_equal(out.wz_rad_s, .5f);
+    // An invalid encoder zeroes translation but preserves the spin command.
+    out = referenceV4ChassisToBody(c, false, zero, zero, -1, 1);
+    zassert_equal(out.vx_m_s, 0);
+    zassert_equal(out.vy_m_s, 0);
+    zassert_equal(out.wz_rad_s, .5f);
+}
+
+ZTEST(sentry, test_dm_native_unwrap_stays_continuous_across_25_rad_spans) {
+    motor::Motor drive(testBigYawMotor(true));
+    constexpr double zero = -1.132792;
+    std::uint64_t stamp = 1, order = 1;
+    double previous_unwrapped = 0;
+    float previous_new_theta = 0, previous_old_theta = 0;
+    float worst_new_step = 0, worst_old_step = 0;
+    bool first = true;
+    // 80 rad of continuous travel, crossing both protocol boundaries twice per span.
+    for (int i = 0; i <= 1600; ++i) {
+        const float continuous = -40.0f + 0.05f * i;
+        zassert_ok(drive.acceptDmFeedback(dmFrame(protocolRaw(continuous)), stamp++, order++));
+        const auto view = drive.snapshot();
+        zassert_true(view.native_unwrapped_position_valid);
+        const double unwrapped = view.native_unwrapped_position_rad;
+        // reference_big_yaw: direction=-1, ratio=1, forward zero at `zero`.
+        const float new_theta = static_cast<float>(std::remainder(-(unwrapped - zero), twoPi));
+        const float old_theta = static_cast<float>(
+            std::remainder(-(static_cast<double>(view.native_position_rad) - zero), twoPi));
+        if (!first) {
+            zassert_within(unwrapped - previous_unwrapped, 0.05, 1e-3, "index %d", i);
+            worst_new_step = std::max(worst_new_step, std::fabs(wrapRad(new_theta - previous_new_theta)));
+            worst_old_step = std::max(worst_old_step, std::fabs(wrapRad(old_theta - previous_old_theta)));
+        }
+        first = false;
+        previous_unwrapped = unwrapped;
+        previous_new_theta = new_theta;
+        previous_old_theta = old_theta;
+    }
+    // One 25 rad span is |25 - 4*2*pi| = 0.1327 rad in direction space; the
+    // unwrapped coordinate keeps the per-step change at the commanded 0.05 rad.
+    zassert_true(worst_new_step < 0.06f, "new step %f", static_cast<double>(worst_new_step));
+    zassert_true(worst_old_step > 0.12f, "raw step %f", static_cast<double>(worst_old_step));
+    zassert_true(drive.snapshot().native_wrap_count >= 2);
+}
+
+ZTEST(sentry, test_dm_native_unwrap_ignores_invalid_and_stale_frames) {
+    motor::Motor drive(testBigYawMotor(true));
+    zassert_ok(drive.acceptDmFeedback(dmFrame(1.0f), 10, 1));
+    const auto baseline = drive.snapshot();
+    zassert_true(baseline.native_unwrapped_position_valid);
+    zassert_equal(drive.acceptDmFeedback(dmFrame(NAN), 11, 2), -EINVAL);
+    auto bad_velocity = dmFrame(2.0f);
+    bad_velocity.velocity_rad_s = INFINITY;
+    zassert_equal(drive.acceptDmFeedback(bad_velocity, 12, 3), -EINVAL);
+    // An older timestamp or a repeated callback order must not move history.
+    zassert_equal(drive.acceptDmFeedback(dmFrame(-12.4f), 9, 4), -ESTALE);
+    zassert_equal(drive.acceptDmFeedback(dmFrame(-12.4f), 13, 1), -ESTALE);
+    const auto after = drive.snapshot();
+    zassert_equal(after.native_unwrapped_position_rad, baseline.native_unwrapped_position_rad);
+    zassert_equal(after.native_wrap_count, baseline.native_wrap_count);
+    zassert_equal(after.native_position_rad, baseline.native_position_rad);
+    // The next accepted frame continues from the last angle, not from zero.
+    zassert_ok(drive.acceptDmFeedback(dmFrame(-5.0f), 14, 2));
+    zassert_equal(drive.snapshot().native_wrap_count, baseline.native_wrap_count);
+    zassert_within(drive.snapshot().native_unwrapped_position_rad, -5.0, 1e-5);
+    zassert_within(drive.snapshot().native_position_rad, -5.0f, 1e-6f);
+}
+
+ZTEST(sentry, test_dm_native_unwrap_is_independent_of_position_reseed) {
+    motor::Motor drive(testBigYawMotor(true));
+    auto now = static_cast<std::uint64_t>(k_uptime_get());
+    if (!now) {
+        k_sleep(K_MSEC(1));
+        now = k_uptime_get();
+    }
+    zassert_ok(drive.acceptDmFeedback(dmFrame(3.0f), now, 1));
+    zassert_within(drive.snapshot().native_unwrapped_position_rad, 3.0, 1e-6);
+    zassert_ok(drive.reseedPosition(100.0));
+    // Reseeding owns the relative Feedback::position_rad only.
+    zassert_within(drive.snapshot().feedback.position_rad, 100.0f, 1e-6f);
+    zassert_within(drive.snapshot().native_position_rad, 3.0f, 1e-6f);
+    zassert_within(drive.snapshot().native_unwrapped_position_rad, 3.0, 1e-6);
+    zassert_ok(drive.acceptDmFeedback(dmFrame(3.5f), now + 1, 2));
+    zassert_within(drive.snapshot().native_unwrapped_position_rad, 3.5, 1e-6);
+    zassert_within(drive.snapshot().feedback.position_rad, 100.5f, 1e-5f);
+}
+
+ZTEST(sentry, test_follower_capture_feedforward_and_heading_sign) {
+    BigYawWorldHeadingFollower follower(followerConfig());
+    zassert_ok(follower.validate());
+    float out = 1;
+    // The first usable sample only captures the measured heading.
+    zassert_ok(follower.step(headingSample(0, 0, 0, 1000), out));
+    zassert_equal(out, 0);
+    zassert_true(follower.initialized());
+    zassert_ok(follower.step(headingSample(0, 0, 0, 1002), out));
+    zassert_within(out, 0, 1e-6f);
+    // A rotating body needs the opposite joint rate to hold the world heading.
+    zassert_ok(follower.step(headingSample(0, 0, 0, 1004, .5f), out));
+    zassert_within(out, -.5f, 1e-3f);
+    // Measured heading above the captured target commands a negative rate.
+    zassert_ok(follower.step(headingSample(.1f, 0, 0, 1006), out));
+    zassert_true(out < -.1f, "out %f", static_cast<double>(out));
+    // World intent and an opposing body rate add in the same direction.
+    follower.reset();
+    zassert_ok(follower.step(headingSample(0, 0, 1.0f, 1010), out));
+    zassert_equal(out, 0);
+    zassert_ok(follower.step(headingSample(.002f, 1.0f, 1.0f, 1012, -.4f), out));
+    zassert_within(out, 1.4f, .01f);
+}
+
+ZTEST(sentry, test_follower_holds_world_heading_against_body_bias) {
+    BigYawWorldHeadingFollower follower(followerConfig());
+    constexpr float dt = .002f, body_bias = .03f, plant_gain = 1.1f;
+    constexpr unsigned delay_steps = 10; // 20 ms at a 2 ms cycle
+    std::array<float, delay_steps> pipeline{};
+    float heading = 0, joint = 0, out = 0, peak = 0;
+    std::uint64_t now_ms = 5000;
+    // Two minutes: body gyro bias, 10% velocity gain error and 20 ms delay.
+    for (unsigned i = 0; i < 60000; ++i) {
+        const float delayed = pipeline[delay_steps - 1];
+        for (unsigned k = delay_steps - 1; k > 0; --k)
+            pipeline[k] = pipeline[k - 1];
+        pipeline[0] = joint;
+        const float head_rate = plant_gain * delayed + body_bias;
+        heading = wrapRad(heading + head_rate * dt);
+        zassert_ok(follower.step(headingSample(heading, head_rate, 0, now_ms, body_bias), out));
+        joint = out;
+        if (i > 5000)
+            peak = std::max(peak, std::fabs(heading));
+        now_ms += 2;
+    }
+    zassert_true(std::fabs(heading) < .01f, "heading %f", static_cast<double>(heading));
+    zassert_true(peak < .01f, "peak %f", static_cast<double>(peak));
+    // The integral absorbs the plant gain error: -0.03 / 1.1.
+    zassert_within(joint, -body_bias / plant_gain, 5e-3f);
+}
+
+ZTEST(sentry, test_follower_pi_wrap_rotation_and_release_capture) {
+    BigYawWorldHeadingFollower follower(followerConfig());
+    float out = 0;
+    // Continuous rotation across +/-pi must not flip the correction sign.
+    float yaw = 3.10f;
+    zassert_ok(follower.step(headingSample(yaw, 1.0f, 1.0f, 6000), out));
+    zassert_equal(out, 0);
+    float worst = 0;
+    for (unsigned i = 1; i <= 100; ++i) {
+        yaw = wrapRad(yaw + .002f);
+        zassert_ok(follower.step(headingSample(yaw, 1.0f, 1.0f, 6000 + 2 * i), out));
+        worst = std::max(worst, std::fabs(out - 1.0f));
+    }
+    zassert_true(worst < .05f, "tracking error %f", static_cast<double>(worst));
+    // Releasing the stick captures the current heading instead of chasing it.
+    follower.reset();
+    zassert_ok(follower.step(headingSample(.50f, 0, 1.0f, 7000), out));
+    zassert_ok(follower.step(headingSample(.52f, 0, 1.0f, 7002), out));
+    zassert_true(out > .5f);
+    zassert_ok(follower.step(headingSample(.60f, 0, 0, 7004), out));
+    zassert_within(follower.headingErrorRad(), 0, 1e-6f);
+    zassert_within(follower.rateIntegralRadS(), 0, 1e-6f);
+    zassert_within(out, 0, 1e-6f);
+}
+
+ZTEST(sentry, test_follower_rejects_unusable_sample_and_recaptures) {
+    BigYawWorldHeadingFollower follower(followerConfig());
+    float out = 1;
+    auto in = headingSample(0, 0, 0, 8000);
+    in.head.valid = false;
+    zassert_equal(follower.step(in, out), -ESTALE);
+    zassert_equal(out, 0);
+    zassert_false(follower.initialized());
+    in = headingSample(0, 0, 0, 8000);
+    in.head.stamp.timestamp_ms = 7900;
+    zassert_equal(follower.step(in, out), -ESTALE);
+    in = headingSample(0, 0, 0, 8000, 0, 11, 0);
+    zassert_equal(follower.step(in, out), -ESTALE);
+    in = headingSample(NAN, 0, 0, 8000);
+    zassert_equal(follower.step(in, out), -ESTALE);
+    in = headingSample(0, 0, 0, 8000);
+    in.body_rate_rad_s = NAN;
+    zassert_equal(follower.step(in, out), -ESTALE);
+    in = headingSample(0, 0, 0, 8000);
+    in.dt_s = -1;
+    zassert_equal(follower.step(in, out), -ESTALE);
+    // A usable sample recaptures instead of stepping from the failed session.
+    zassert_ok(follower.step(headingSample(.3f, 0, 0, 8002), out));
+    zassert_equal(out, 0);
+    zassert_true(follower.initialized());
+    // Gimbal software-zero regeneration and a gimbal reboot recapture too.
+    zassert_ok(follower.step(headingSample(.5f, 0, 0, 8004, 0, 11, 2), out));
+    zassert_equal(out, 0);
+    zassert_ok(follower.step(headingSample(.5f, 0, 0, 8006, 0, 12, 2), out));
+    zassert_equal(out, 0);
+}
+
+ZTEST(sentry, test_follower_anti_windup_at_output_limit) {
+    BigYawWorldHeadingFollower follower(followerConfig());
+    float out = 0;
+    zassert_ok(follower.step(headingSample(0, 0, 0, 2000), out));
+    zassert_ok(follower.step(headingSample(0, 0, 0, 2002, 20.0f), out));
+    zassert_within(out, -10.0f, 1e-5f);
+    for (unsigned i = 0; i < 100; ++i) {
+        zassert_ok(follower.step(headingSample(0, 0, 0, 2004 + 2 * i, 20.0f), out));
+        zassert_within(out, -10.0f, 1e-5f);
+    }
+    zassert_within(follower.rateIntegralRadS(), 0, 1e-6f);
+}
+
+ZTEST(sentry, test_follower_rate_reaches_native_motor_sign_and_ratio_once) {
+    motor::Motor drive(testBigYawMotor(true));
+    BigYawExecutor::Config c{};
+    c.native_velocity_mode_confirmed = true;
+    c.native_velocity_acceleration_rad_s2 = 1000.0f;
+    c.motor_to_joint_ratio = 2.0f;
+    c.direction = -1.0f;
+    c.rate_abs_max_rad_s = 10.0f;
+    BigYawExecutor executor(drive, {}, c);
+    zassert_ok(executor.begin());
+    auto in = freshBigYawInput(1000);
+    // Seed cycle timing; the first update never stages a motor command.
+    zassert_false(executor.update(in, 1000000).ready);
+    drive.markStarted();
+    zassert_ok(drive.enable());
+    auto &view = drive.snapshot_;
+    const auto now = k_uptime_get();
+    view.feedback.timestamp_ms = now > 0 ? static_cast<std::uint64_t>(now) : 1U;
+    view.feedback.valid = motor::FeedbackVelocity;
+    view.feedback.velocity_rad_s = 0;
+    view.state = motor::MotorState::Active;
+    view.output_permitted = true;
+    view.enable_generation = 4;
+    BigYawWorldHeadingFollower follower(followerConfig());
+    float joint = 0;
+    zassert_ok(follower.step(headingSample(0, 0, 0, 1002), joint));
+    zassert_ok(follower.step(headingSample(0, 0, 0, 1004, .5f), joint));
+    zassert_within(joint, -.5f, 1e-3f);
+    in.request.target_rate_rad_s = joint;
+    in.request.stamp.timestamp_ms = 1004;
+    in.request.permission.stamp.timestamp_ms = 1004;
+    zassert_true(executor.update(in, 1004000).ready);
+    // The executor applies direction=-1 and ratio=2 exactly once.
+    zassert_equal(drive.copyStaged().command.kind, motor::CommandKind::Velocity);
+    zassert_within(drive.copyStaged().command.primary, 1.0f, 1e-3f);
+}
+
 ZTEST_SUITE(sentry, nullptr, nullptr, nullptr, nullptr, nullptr);
