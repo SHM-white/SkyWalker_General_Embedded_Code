@@ -69,6 +69,15 @@ public:
     float rateIntegralRadS() const {
         return rate_integral_rad_s_;
     }
+    struct Diagnostics {
+        std::uint32_t capture_count = 0, clamp_count = 0;
+        std::uint64_t capture_ms = 0;
+        // 1: initialize/session capture; 2: incoming world-rate request returned to zero.
+        std::uint8_t capture_reason = 0;
+    };
+    const Diagnostics &diagnostics() const {
+        return diagnostics_;
+    }
 
 private:
     Config config_{};
@@ -77,5 +86,8 @@ private:
     float rate_integral_rad_s_ = 0, heading_error_rad_ = 0, world_rate_rad_s_ = 0;
     std::uint64_t last_peer_boot_id_ = 0;
     std::uint32_t last_zero_generation_ = 0;
+    // Retained across control resets to expose otherwise invisible recaptures.
+    Diagnostics diagnostics_{};
+    bool diagnostic_clamping_ = false;
 };
 } // namespace skywalker::robotics

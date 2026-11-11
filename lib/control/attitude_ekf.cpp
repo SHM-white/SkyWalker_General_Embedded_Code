@@ -50,6 +50,7 @@ void QuaternionEkf::reset() {
         ++generation_;
 }
 int QuaternionEkf::update(const Input &in) {
+    diagnostics_ = {};
     if (!configured_)
         return -EACCES;
     if (!core::finite(in.accel_m_s2) || !core::finite(in.gyro_rad_s))
@@ -73,6 +74,7 @@ int QuaternionEkf::update(const Input &in) {
         return -ERANGE;
     }
     const bool gravity_ok = std::fabs(an - c.gravity_m_s2) <= c.accel_gate_m_s2;
+    diagnostics_.gravity_error_m_s2 = std::fabs(an - c.gravity_m_s2);
     const bool stationary = gravity_ok && gn < c.stationary_gyro_rad_s;
     if (!initialized_) {
         if (!stationary) {
@@ -96,6 +98,7 @@ int QuaternionEkf::update(const Input &in) {
         q_ = core::fromEuler({std::atan2(v.y, v.z), std::atan2(-v.x, std::hypot(v.y, v.z)), 0});
         initialized_ = true;
         quality_ = Quality::Tracking;
+        diagnostics_.correction = Correction::Accepted;
         return 0;
     }
     if (stationary && c.adapt_gyro_bias) {
@@ -133,6 +136,7 @@ int QuaternionEkf::update(const Input &in) {
     filtered_.z += alpha * (a.z - filtered_.z);
     const float fn = core::norm(filtered_);
     quality_ = Quality::Degraded;
+    diagnostics_.correction = !gravity_ok ? Correction::AccelMagnitude : Correction::FilteredNorm;
     float result_p[4][4];
     std::memcpy(result_p, pp, sizeof(pp));
     if (gravity_ok && fn > 0.1f) {
@@ -166,6 +170,8 @@ int QuaternionEkf::update(const Input &in) {
             reset();
             return -ERANGE;
         }
+        diagnostics_.innovation_nis = nis;
+        diagnostics_.correction = Correction::Innovation;
         if (nis <= c.innovation_gate) {
             float gain[4][3]{}, correction[4]{}, aij[4][4]{}, ap[4][4]{};
             for (int r = 0; r < 4; ++r)
@@ -203,6 +209,7 @@ int QuaternionEkf::update(const Input &in) {
                         result_p[r][col] += gain[r][k] * c.measurement_noise * gain[col][k];
                 }
             quality_ = Quality::Tracking;
+            diagnostics_.correction = Correction::Accepted;
         }
     }
     for (int r = 0; r < 4; ++r)

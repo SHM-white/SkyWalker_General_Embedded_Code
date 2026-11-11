@@ -103,6 +103,15 @@ int Bmi088Imu::service() {
         if (skew <= config_.max_input_skew_us) {
             const auto generation = estimator_->generation();
             const int er = estimator_->update({a.value, g.value, std::max(a.stamp.time_us, g.stamp.time_us)});
+            const auto &ed = estimator_->diagnostics();
+            const EstimatorDiagnostics estimator_diagnostic{
+                .time_us = std::max(a.stamp.time_us, g.stamp.time_us),
+                .result = er,
+                .correction = static_cast<std::uint8_t>(ed.correction),
+                .gravity_error_m_s2 = ed.gravity_error_m_s2,
+                .innovation_nis = ed.innovation_nis};
+            if (er)
+                state_.estimatorDiagnostics(estimator_diagnostic);
             if (generation != estimator_->generation()) {
                 if (++config_.reference.epoch == 0)
                     ++config_.reference.epoch;
@@ -111,6 +120,8 @@ int Bmi088Imu::service() {
             if (!er) {
                 Update attitude{};
                 attitude.updated_mask = Orientation;
+                attitude.estimator_updated = true;
+                attitude.estimator = estimator_diagnostic;
                 attitude.sample.reference = config_.reference;
                 attitude.sample.orientation = {
                     core::multiply(estimator_->attitude(), core::conjugate(config_.sensor_to_body)),

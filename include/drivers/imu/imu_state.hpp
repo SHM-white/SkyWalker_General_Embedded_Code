@@ -5,6 +5,8 @@ namespace skywalker::imu {
 struct Update {
     Sample sample{};
     std::uint32_t updated_mask = 0;
+    bool estimator_updated = false;
+    EstimatorDiagnostics estimator{};
 };
 // Shared concrete publisher, not an additional virtual source layer.
 // Writers are serialized by their owning source; snapshot supports many readers.
@@ -18,6 +20,7 @@ public:
     int publish(const Update &);
     Snapshot snapshot() const;
     void error(int code, bool io = false);
+    void estimatorDiagnostics(const EstimatorDiagnostics &);
     void transportGap();
     void setState(State);
     void resetOrientation(core::OrientationReference, AttitudeQuality = AttitudeQuality::Initializing);

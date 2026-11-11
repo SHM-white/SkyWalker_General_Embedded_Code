@@ -141,15 +141,15 @@ static_assert(validDirection(reference_big_yaw.direction) && positive(reference_
               "reference big-Yaw calibration must be valid");
 // Calibrated encoder forward zero in the reference firmware, 2026-10-28.
 // Confirm that the installed J4310 and CAN identity match before motor operation.
-inline constexpr float reference_big_yaw_forward_zero_rad = -1.132792f;
+inline constexpr float reference_big_yaw_forward_zero_rad = -2.62f;
 inline constexpr float steer_position_kp = 40, steer_velocity_kp = 0.20f;
 // A/(motor-shaft rad/s); swerve_profile converts once to wheel-shaft units.
 inline constexpr float drive_rotor_velocity_kp = 0.08f;
 inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us = 1000000;
 
 // 调参：手动底盘/云台速度上限，单位 m/s 或 rad/s。
-inline constexpr float manual_max_vx_m_s = 1.0f, manual_max_vy_m_s = 1.0f, manual_max_wz_rad_s = 1.0f;
-inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 1.0f, manual_max_gimbal_pitch_rate_rad_s = 0.8f;
+inline constexpr float manual_max_vx_m_s = 1.0f, manual_max_vy_m_s = 1.0f, manual_max_wz_rad_s = 4.0f;
+inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 3.0f, manual_max_gimbal_pitch_rate_rad_s = 3.0f;
 // 调参：小陀螺边平移的参考倍率；0..1。
 inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_scale = 1.0f;
 // 调参：舵轮启停迟滞，单位 m/s；与轮轴角度/线速度无关。

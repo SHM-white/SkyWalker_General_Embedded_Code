@@ -64,6 +64,12 @@ int ImuState::publish(const Update &input) {
         if (mask & Orientation) {
             assign(old.orientation, s.orientation);
             old.attitude_quality = s.attitude_quality;
+            if (u.estimator_updated) {
+                const auto tracking = value_.diagnostics.estimator.last_tracking_us;
+                value_.diagnostics.estimator = u.estimator;
+                value_.diagnostics.estimator.last_tracking_us =
+                    u.estimator.result == 0 && u.estimator.correction == 1 ? u.estimator.time_us : tracking;
+            }
         }
     }
     else {
@@ -98,6 +104,14 @@ void ImuState::error(int code, bool io) {
         ++value_.diagnostics.io_errors;
     else
         ++value_.diagnostics.invalid_updates;
+    k_spin_unlock(&lock_, key);
+}
+void ImuState::estimatorDiagnostics(const EstimatorDiagnostics &sample) {
+    const auto key = k_spin_lock(&lock_);
+    const auto tracking = value_.diagnostics.estimator.last_tracking_us;
+    value_.diagnostics.estimator = sample;
+    value_.diagnostics.estimator.last_tracking_us = sample.result == 0 && sample.correction == 1
+                                                       ? sample.time_us : tracking;
     k_spin_unlock(&lock_, key);
 }
 void ImuState::transportGap() {

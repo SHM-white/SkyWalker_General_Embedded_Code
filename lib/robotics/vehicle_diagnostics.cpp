@@ -145,15 +145,25 @@ void Diagnostics::status(const DiagnosticStatus &sample) {
                                 float(dropped >> 16),
                                 sample.extra0,
                                 sample.extra1};
-        std::uint8_t bytes[sizeof(values) + 4];
+        std::uint8_t bytes[sizeof(values) + sizeof(sample.extension) + 4];
         static_assert(sizeof(float) == 4);
+        static_assert(sizeof(bytes) <= sizeof(Packet{}.data));
         for (unsigned i = 0; i < ARRAY_SIZE(values); ++i) {
             std::uint32_t bits;
             std::memcpy(&bits, &values[i], sizeof(bits));
             sys_put_le32(bits, bytes + 4 * i);
         }
-        sys_put_le32(0x7f800000, bytes + sizeof(values));
-        enqueue(bytes, sizeof(bytes));
+        std::size_t size = sizeof(values);
+        if (sample.extended) {
+            for (const float value : sample.extension) {
+                std::uint32_t bits;
+                std::memcpy(&bits, &value, sizeof(bits));
+                sys_put_le32(bits, bytes + size);
+                size += sizeof(float);
+            }
+        }
+        sys_put_le32(0x7f800000, bytes + size);
+        enqueue(bytes, size + 4);
     }
     else if (changed || now >= next_log_ms_) {
         next_log_ms_ = now + 1000;
@@ -163,6 +173,11 @@ void Diagnostics::status(const DiagnosticStatus &sample) {
         textLine("target=%f feedback=%f effort=%f dt_us=%f detail=%f extra=%f,%f\n", double(sample.target),
                  sample.valid ? double(sample.feedback) : double(NAN), double(sample.effort), double(sample.dt_us),
                  double(sample.detail), double(sample.extra0), double(sample.extra1));
+        if (sample.extended)
+            for (std::size_t i = 0; i < sample.extension.size(); i += 3)
+                textLine("diag I%u=%f I%u=%f I%u=%f\n", unsigned(19 + i), double(sample.extension[i]),
+                         unsigned(20 + i), double(sample.extension[i + 1]),
+                         unsigned(21 + i), double(sample.extension[i + 2]));
     }
 }
 } // namespace skywalker::robotics::vehicle

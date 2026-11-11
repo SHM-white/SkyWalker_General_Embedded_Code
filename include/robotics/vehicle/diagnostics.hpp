@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <array>
+#include <limits>
 #include <robotics/vehicle/diagnostics_config.hpp>
 
 namespace skywalker::robotics::vehicle {
@@ -27,6 +29,14 @@ struct DiagnosticStatus {
     float dt_us = 0, effort = 0, detail = 0;
     int error = 0;
     float extra0 = 0, extra1 = 0;
+    // I19..I45. I19 identifies schema/board: 101 chassis, 102 gimbal.
+    // Legacy callers keep the original 19-channel frame.
+    bool extended = false;
+    std::array<float, 27> extension = [] {
+        std::array<float, 27> values{};
+        values.fill(std::numeric_limits<float>::quiet_NaN());
+        return values;
+    }();
 };
 // One application/telemetry thread owns each instance. Output copies into a
 // fixed queue; UART transmission runs in a separate low-priority worker.

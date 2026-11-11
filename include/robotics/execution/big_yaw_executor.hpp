@@ -45,6 +45,14 @@ public:
     const RunStatus &status() const {
         return status_;
     }
+    // Last successfully staged native velocity, converted to physical joint units.
+    // This is not a CAN acknowledgement; callers must also inspect motor/commit status.
+    bool nativeVelocityStaged() const {
+        return config_.native_velocity_mode_confirmed && native_enable_generation_ && status_.ready;
+    }
+    float stagedJointRateRadS() const {
+        return native_last_rate_rad_s_ * config_.direction / config_.motor_to_joint_ratio;
+    }
 
 private:
     RunStatus publish(core::TimeUs, RunState, WaitReason, int error = 0);

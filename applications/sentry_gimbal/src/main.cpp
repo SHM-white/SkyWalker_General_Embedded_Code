@@ -10,6 +10,7 @@
 #include <drivers/motor/can_bus.hpp>
 #include <robotics/command/receiver_sources.hpp>
 #include <robotics/chassis/imu_heading.hpp>
+#include <core/attitude.hpp>
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/vehicle/led_status.hpp>
@@ -117,6 +118,10 @@ int main() {
     core::TimeUs previous_cycle_us = 0, last_heading_loss_dt_us = 0;
     bool heading_was_fresh = false, have_heading_loss = false;
     HeadingWaitReason last_heading_loss_reason = HeadingWaitReason::None;
+    std::uint32_t heading_loss_count = 0;
+    std::uint64_t last_heading_loss_ms = 0;
+    core::TimeUs heading_loss_start_us = 0, heading_loss_duration_us = 0;
+    imu::EstimatorDiagnostics loss_estimator{};
     for (;;) {
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
@@ -149,6 +154,15 @@ int main() {
             have_heading_loss = true;
             last_heading_loss_reason = heading_reason;
             last_heading_loss_dt_us = dt_us;
+            ++heading_loss_count;
+            last_heading_loss_ms = now_ms;
+            heading_loss_start_us = now_us;
+            loss_estimator = carrier_snapshot.diagnostics.estimator;
+        }
+        if (heading_loss_start_us) {
+            heading_loss_duration_us = now_us - heading_loss_start_us;
+            if (heading_fresh)
+                heading_loss_start_us = 0;
         }
         heading_was_fresh = heading_fresh;
         GimbalExecutionInputs input{};
@@ -251,6 +265,45 @@ int main() {
                                                                          : installed::DiagnosticReason::CommandStale;
         (void)status_led.setStatus(
             installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
+        const auto &ed = carrier_snapshot.diagnostics.estimator;
+        const float unavailable = std::numeric_limits<float>::quiet_NaN();
+        const auto elapsed_ms = [now_us](core::TimeUs stamp) {
+            return stamp && now_us >= stamp ? float(now_us - stamp) * .001f : -1.0f;
+        };
+        // Fixed channel map documented in docs/dev/大Yaw突发跟转诊断操作指南.md.
+        const std::array<float, 27> trace{
+            102,                                                        // I19 schema/board
+            float(unsigned(heading_reason)),                            // I20 live reason
+            float(unsigned(carrier_snapshot.sample.attitude_quality)),  // I21 quality
+            float(heading_fresh),                                        // I22 heading usable
+            heading_fresh ? heading.yaw_rad : unavailable,               // I23 world yaw
+            carrier_snapshot.sample.gyro_rad_s.stamp.valid
+                ? carrier_snapshot.sample.gyro_rad_s.value.z : unavailable, // I24 gyro z
+            carrier_snapshot.sample.accel_m_s2.stamp.valid
+                ? core::norm(carrier_snapshot.sample.accel_m_s2.value) : unavailable, // I25 accel norm
+            float(ed.correction),                                        // I26 correction outcome
+            ed.gravity_error_m_s2,                                       // I27 |a|-g absolute error
+            ed.innovation_nis,                                           // I28 innovation NIS
+            ed.time_us ? float(ed.result) : unavailable,                 // I29 estimator result
+            float(carrier_snapshot.diagnostics.io_errors & 0xffff),     // I30 I/O error count
+            float(heading_loss_count & 0xffff),                          // I31 loss count
+            float(last_heading_loss_ms & 0xffff),                        // I32 event time low
+            float((last_heading_loss_ms >> 16) & 0xffff),                // I33 event time high
+            have_heading_loss ? float(loss_estimator.correction) : unavailable, // I34 event correction
+            loss_estimator.gravity_error_m_s2,                           // I35 event accel error
+            loss_estimator.innovation_nis,                               // I36 event NIS
+            float((!setup_ready ? 1u : 0u) | (!operator_state.fresh ? 2u : 0u) |
+                  (!operator_state.run_allowed ? 4u : 0u) | (!peer_state.online ? 8u : 0u) |
+                  (!installed::imu_mounting_confirmed ? 16u : 0u) | (!heading_fresh ? 32u : 0u) |
+                  (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u)), // I37 disabled prerequisites; zero=ready
+            big_channel_ready && peer_feedback_valid && centered.enabled ? centered.velocity_rad_s : 0, // I38 world intent
+            peer_feedback_valid ? float(feedback.armed) : unavailable,   // I39 peer armed
+            float(age(carrier_snapshot.sample.orientation.stamp, now_us)), // I40 orientation age
+            float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)), // I41 gyro age
+            elapsed_ms(ed.last_tracking_us),                             // I42 last Tracking age
+            elapsed_ms(ed.time_us),                                      // I43 estimator diagnostic age
+            float(heading_loss_duration_us) * .001f,                     // I44 current/last loss duration
+            float(dt_us)};                                              // I45 current cycle
         diagnostics.status({.reason = reason,
                             .valid = joint_valid,
                             .enabled = status.state == RunState::Active,
@@ -263,7 +316,9 @@ int main() {
                             .detail = float(unsigned(have_heading_loss ? last_heading_loss_reason : heading_reason)),
                             .error = status.error ? status.error : onboard_error,
                             .extra0 = installed::small_yaw.direction * centered.center_error_rad,
-                            .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN()});
+                            .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
+                            .extended = true,
+                            .extension = trace});
         deadline += period;
         const auto ticks = k_uptime_ticks();
         if (deadline <= ticks)

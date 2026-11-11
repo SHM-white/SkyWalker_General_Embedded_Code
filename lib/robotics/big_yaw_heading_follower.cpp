@@ -21,6 +21,7 @@ int BigYawWorldHeadingFollower::validate() const {
                : -EINVAL;
 }
 void BigYawWorldHeadingFollower::reset() {
+    diagnostic_clamping_ = false;
     initialized_ = false;
     target_heading_rad_ = previous_requested_rate_rad_s_ = 0;
     rate_integral_rad_s_ = heading_error_rad_ = world_rate_rad_s_ = 0;
@@ -53,6 +54,9 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
         last_peer_boot_id_ = h.sender_boot_id;
         last_zero_generation_ = h.zero_generation;
         target_heading_rad_ = heading;
+        ++diagnostics_.capture_count;
+        diagnostics_.capture_reason = 1;
+        diagnostics_.capture_ms = in.now_ms;
         return 0;
     }
     const float requested = in.desired_world_rate_rad_s;
@@ -62,10 +66,17 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
         std::fabs(previous_requested_rate_rad_s_) > config_.release_epsilon_rad_s) {
         target_heading_rad_ = heading;
         rate_integral_rad_s_ = 0;
+        ++diagnostics_.capture_count;
+        diagnostics_.capture_reason = 2;
+        diagnostics_.capture_ms = in.now_ms;
     }
     previous_requested_rate_rad_s_ = requested;
     const float dt = std::min(in.dt_s, config_.max_dt_s);
     float error = wrap(target_heading_rad_ + requested * dt - heading);
+    const bool clamping = std::fabs(error) > config_.heading_error_max_rad;
+    if (clamping && !diagnostic_clamping_)
+        ++diagnostics_.clamp_count;
+    diagnostic_clamping_ = clamping;
     error = std::clamp(error, -config_.heading_error_max_rad, config_.heading_error_max_rad);
     // Keep the target at most 90 degrees ahead so a following failure cannot
     // flip the correction sign after the error wraps through pi.

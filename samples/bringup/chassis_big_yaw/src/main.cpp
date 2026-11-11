@@ -94,8 +94,19 @@ int main() {
              .effort = snapshot.feedback.torque_nm,
              .detail = float(unsigned(status.reason)),
              .error = error ? error : status.error,
-             .extra0 = float(unsigned(snapshot.state)),
-             .extra1 = float(peer.operator_control_valid)});
+             // 通道 17：大 Yaw 原始编码器角度，rad
+             .extra0 = snapshot.native_position_valid ? snapshot.native_position_rad : NAN,
+
+             // 通道 18：云台相对底盘的换系角，单位：度
+             .extra1 = snapshot.native_unwrapped_position_valid
+                           ? static_cast<float>(
+                                 std::remainder(static_cast<double>(installed::reference_big_yaw.direction) *
+                                                    (snapshot.native_unwrapped_position_rad -
+                                                     installed::reference_big_yaw_forward_zero_rad) /
+                                                    installed::reference_big_yaw.gear_ratio,
+                                                6.2831853071795864769) *
+                                 180.0 / 3.14159265358979323846)
+                           : NAN});
         k_sleep(K_USEC(installed::chassis_period_us));
     }
 }
