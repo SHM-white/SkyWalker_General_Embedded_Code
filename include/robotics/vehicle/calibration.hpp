@@ -198,6 +198,8 @@ inline constexpr float chassis_drive_slew_rad_s2 = 30.0f, chassis_steer_slew_rad
 // 调参：大 Yaw 世界航向闭环（航向 P + 角速度 PI），单位 rad/s；仅作实车整定起点，新硬件上未验证。
 // heading_kp 作用于航向误差，修正量上限 heading_rate_max_rad_s；
 // rate_kp/rate_ki 作用于“目标世界角速度 - 实测角速度”，积分上限 integral_max_rad_s。
+// 实车首次打开 0.25/0.5 时关节速度反复顶到 ±要求上限且掉帧变多，先保留 0；
+// 待确认头部角速度反馈符号/刻度后，从 rate_kp=0.15、rate_ki=0 逐级加。
 // release_epsilon_rad_s 是回中断的“零速”判断，只用于松手捕获航向，不是运行许可。
 inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s = 6.0f;
 inline constexpr float big_yaw_heading_rate_kp = 0.0f, big_yaw_heading_rate_ki = 0.0f;
@@ -240,8 +242,8 @@ inline constexpr std::uint16_t yaw_low_ticks = 5770, yaw_high_ticks = 7340;
 inline constexpr float yaw_min_rad = (yaw_low_ticks - small_yaw.encoder_zero_ticks) * two_pi / 8192;
 inline constexpr float yaw_max_rad = (yaw_high_ticks - small_yaw.encoder_zero_ticks) * two_pi / 8192;
 // TODO(calibration): measure this independently; encoder zero is not joint center.
-// inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
-inline constexpr float yaw_center_rad = 0.35f;
+inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
+// inline constexpr float yaw_center_rad = 0.35f;
 // 调参：Pitch 驱动坐标的软件限位，rad；沿用现值，须与实测机械端点确认后再修改。
 inline constexpr float pitch_min_rad = 2.60f, pitch_max_rad = 3.40f;
 // 自瞄几何：枪口水平时的 Pitch 编码器位置，rad；3.00 为待实测的初值。

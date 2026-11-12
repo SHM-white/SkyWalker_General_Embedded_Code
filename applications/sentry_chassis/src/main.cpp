@@ -52,10 +52,12 @@ int main() {
     static communication::InterBoardEndpoint endpoint(transport, {BoardRole::ChassisController});
     static communication::AsyncUart::DmaBuffers referee_dma __nocache;
     static communication::RefereeReceiver referee(DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma);
-    referee.setFrameHandler([](const std::uint8_t *bytes, std::size_t size, void *context) {
-        auto &link = *static_cast<communication::InterBoardEndpoint *>(context);
-        (void)link.submitRefereeFrame(bytes, size, core::monotonicTimeUs() / 1000);
-    }, &endpoint);
+    referee.setFrameHandler(
+        [](const std::uint8_t *bytes, std::size_t size, void *context) {
+            auto &link = *static_cast<communication::InterBoardEndpoint *>(context);
+            (void)link.submitRefereeFrame(bytes, size, core::monotonicTimeUs() / 1000);
+        },
+        &endpoint);
     static motor::Motor s0(installed::steerHardware(0)), s1(installed::steerHardware(1)),
         s2(installed::steerHardware(2)), s3(installed::steerHardware(3));
     static motor::Motor d0(installed::wheelHardware(0)), d1(installed::wheelHardware(1)),
@@ -106,6 +108,8 @@ int main() {
     diagnostics.event("motor_rail", power_error);
     std::uint64_t peer_boot = 0;
     int previous_big_commit_error = 0;
+    BigYawRequest held_big_request{};
+    core::TimeUs held_big_request_us = 0;
     core::TimeUs previous_cycle_us = 0, last_big_stop_dt_us = 0;
     bool big_was_requested = false, big_was_active = false, have_big_stop = false;
     WaitReason last_big_stop_reason = WaitReason::None;
@@ -165,8 +169,20 @@ int main() {
         auto status = chassis_error == 0 ? chassis.update(input, now_us)
                                          : chassis.suspend(now_us, WaitReason::Configuration, chassis_error, true);
         BigYawExecutionInputs big_input{};
-        big_input.request = rx.big_yaw_request;
-        auto big_gate = !rx.big_yaw_request.stamp.valid                  ? BigYawGate::MissingRequest
+        // 短时链路间隙不能停机也不能丢已保持的航向：复用最后一个有效请求最多 80 ms，
+        // 并重新盖章，使执行器的时效判定只看发送时记录的命令/来源年龄。
+        if (rx.big_yaw_request.stamp.valid) {
+            held_big_request = rx.big_yaw_request;
+            held_big_request_us = now_us;
+        }
+        const bool big_request_held = !rx.big_yaw_request.stamp.valid && held_big_request.stamp.valid &&
+                                      now_us - held_big_request_us <= 80000;
+        big_input.request = rx.big_yaw_request.stamp.valid ? rx.big_yaw_request
+                            : big_request_held             ? held_big_request
+                                                           : BigYawRequest{};
+        if (big_request_held)
+            big_input.request.stamp = {now_ms, held_big_request.stamp.sequence, true};
+        auto big_gate = !big_input.request.stamp.valid                   ? BigYawGate::MissingRequest
                         : big_input.request.mode == BigYawMode::Disabled ? BigYawGate::PeerDisabled
                                                                          : BigYawGate::None;
         bool heading_follow_active = false;
