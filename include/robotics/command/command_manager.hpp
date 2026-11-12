@@ -55,7 +55,7 @@ private:
     };
     OperatorGate operator_gate_{};
     mutable k_spinlock operator_gate_lock_{};
-    std::array<Slot, 2> sources_{};
+    std::array<Slot, 3> sources_{};
     std::size_t source_count_ = 0;
     IPermissionSource *permissions_ = nullptr;
     RefereeState permission_cache_{};

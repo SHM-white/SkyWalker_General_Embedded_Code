@@ -50,7 +50,8 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     // 统一键位：左 Up 为手动档；只有视觉执行样例（auto_on_up）保留 Up=Auto。
     n.mode = shooter_selectable ? (r.left_switch == RcSwitch::Down ? OperatorMode::Safe : OperatorMode::Manual)
              : r.left_switch == RcSwitch::Down   ? OperatorMode::Safe
-             : r.left_switch == RcSwitch::Middle ? OperatorMode::Manual
+             : r.left_switch == RcSwitch::Middle ? (config_.navigation_on_middle ? OperatorMode::Navigation
+                                                                                : OperatorMode::Manual)
              : config_.auto_on_up                ? OperatorMode::Auto
                                                  : OperatorMode::Manual;
     const bool physical = config_.input_profile == RemoteInputProfile::PhysicalRemote;
@@ -102,6 +103,8 @@ void CommandArbiter::reset() {
     auto_entry_us_ = last_step_us_ = override_quiet_since_us_ = 0;
     auto_baseline_sequence_ = last_seen_vision_sequence_ = 0;
     have_vision_sequence_ = have_step_time_ = manual_override_ = have_override_quiet_time_ = false;
+    navigation_active_ = false;
+    navigation_entry_us_ = navigation_baseline_sequence_ = 0;
     withdrawMouseShooter();
 }
 void CommandArbiter::withdrawMouseShooter() {
@@ -112,6 +115,7 @@ ManualCommandMapper::Config CommandArbiter::mapperConfig() const {
     auto c = config_.mapper;
     // 视觉执行样例保留左 Up=自动；其余样例由适配层把左 Up 作为手动档。
     c.auto_on_up = c.auto_on_up || config_.allow_auto;
+    c.navigation_on_middle = c.navigation_on_middle || config_.allow_navigation;
     return c;
 }
 int CommandArbiter::observeRemoteFrame(const RemoteState &remote, bool run_allowed, std::uint64_t now_ms) {
@@ -151,6 +155,7 @@ int CommandArbiter::validateConfig() const {
         (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0))
         return -EINVAL;
     if (!config_.input_timeout_ms ||
+        (config_.allow_navigation && !config_.navigation_timeout_us) ||
         ((config_.require_referee_for_chassis || config_.require_referee_for_gimbal ||
           config_.require_referee_for_shooter) && !config_.permission_timeout_ms))
         return -EINVAL;
@@ -212,6 +217,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         withdrawMouseShooter();
         n.mouse_fire = {};
         previous_mode_ = OperatorMode::Safe;
+        navigation_active_ = false;
         manual_override_ = have_override_quiet_time_ = false;
         n.chassis_reasons = n.gimbal_reasons = n.shooter_reasons = reason;
         return finish(ret);
@@ -259,6 +265,47 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         return disable(SafeRequested, 0);
     if (i.mode == OperatorMode::Auto && !config_.allow_auto)
         return disable(AutoUnavailable, 0);
+    if (i.mode == OperatorMode::Navigation) {
+        if (!config_.allow_navigation)
+            return disable(NavigationUnavailable, 0);
+        withdrawMouseShooter();
+        n.mouse_fire = {};
+        manual_override_ = have_override_quiet_time_ = false;
+        previous_mode_ = i.mode;
+        if (!navigation_active_) {
+            navigation_active_ = true;
+            navigation_entry_us_ = now;
+            navigation_baseline_sequence_ = in.navigation.stamp.sequence;
+        }
+        const auto &nav = in.navigation;
+        if (!nav.stamp.valid)
+            n.chassis_reasons |= NavigationMissing;
+        else if (!core::fresh(nav.stamp, now, config_.navigation_timeout_us))
+            n.chassis_reasons |= NavigationStale;
+        else if (!std::isfinite(nav.value.vx_m_s) || !std::isfinite(nav.value.vy_m_s) ||
+                 !std::isfinite(nav.value.wz_rad_s))
+            n.chassis_reasons |= InvalidNavigation;
+        else if (nav.stamp.sequence <= navigation_baseline_sequence_ || nav.stamp.time_us < navigation_entry_us_)
+            n.chassis_reasons |= WaitNewNavigation;
+        else {
+            auto &chassis = n.requested.chassis;
+            chassis.mode = ChassisMode::BodyVelocity;
+            chassis.source = ControlSource::Autonomous;
+            chassis.vx_m_s = std::clamp(nav.value.vx_m_s, -config_.max_chassis_vx_m_s, config_.max_chassis_vx_m_s);
+            chassis.vy_m_s = std::clamp(nav.value.vy_m_s, -config_.max_chassis_vy_m_s, config_.max_chassis_vy_m_s);
+            chassis.wz_rad_s = std::clamp(nav.value.wz_rad_s, -config_.max_chassis_wz_rad_s,
+                                         config_.max_chassis_wz_rad_s);
+            if (chassis.vx_m_s != nav.value.vx_m_s || chassis.vy_m_s != nav.value.vy_m_s ||
+                chassis.wz_rad_s != nav.value.wz_rad_s)
+                n.chassis_reasons |= ValueLimited;
+        }
+        n.command = n.requested;
+        n.chassis_reasons |= cr;
+        if (cr)
+            n.command.chassis.vx_m_s = n.command.chassis.vy_m_s = n.command.chassis.wz_rad_s = 0;
+        return finish(0);
+    }
+    navigation_active_ = false;
     if (i.mode == OperatorMode::Auto) {
         if (previous_mode_ != OperatorMode::Auto) {
             auto_entry_us_ = now;

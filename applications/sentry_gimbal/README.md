@@ -1,6 +1,6 @@
 # 哨兵云台应用
 
-固定手动编码器双轴云台、大 Yaw 回中和底盘行走发送入口，配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。本地小 Yaw/Pitch 由 CAN1/CAN2 电机编码器闭环；板载 BMI088 随大 Yaw 转动。当前不启动 CAN3 外置头部 IMU、视觉、裁判或发射机构。
+固定手动编码器双轴云台、大 Yaw 回中、底盘手动行走与串口导航入口，配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。本地小 Yaw/Pitch 由 CAN1/CAN2 电机编码器闭环；板载 BMI088 随大 Yaw 转动。当前不启动 CAN3 外置头部 IMU、视觉、裁判或发射机构。
 
 ```sh
 west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d ../build/applications/sentry_gimbal
@@ -32,6 +32,7 @@ west flash -d ../build/applications/sentry_gimbal
 | 资源 | 当前用途 |
 | --- | --- |
 | UART5 | DR16 遥控 |
+| USART1 PA9(TX)/PA10(RX)，115200 8N1 | 导航速度接收；上位机 TX 接 PA10，共地 |
 | USART10 PE3/PE2，460800 8N1 | 对参考底盘的 v4 板间链路 |
 | UART7 PE8/PE7，115200 8N1 | 唯一诊断串口，不能同时给视觉 |
 | CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
@@ -40,9 +41,32 @@ west flash -d ../build/applications/sentry_gimbal
 
 共享配置仍可能编译外置 IMU 驱动，但没有实例化或启动它，不会因 CAN3 无回传而阻止手动控制。不在本次修改共享接线或其他惯性实验入口。
 
-上电保持未解锁、静止约 3 秒，并等待诊断 I22=1（实际标定完成才允许大 Yaw）。左 Down、右 Middle，摇杆/拨轮归中保持至少 500 ms，左 Down→Middle 建立解锁，再拨 Up 手动。右杆控制小 Yaw/Pitch，左杆控制云台坐标内前后/横移，速度由当前 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp) 决定；进入手动后右拨杆先经过 Middle，再主动切 Down 才请求小陀螺。拨轮不再叠加大 Yaw 速度，以免打断自动回中。左 Down 停止；当前没有导航、自动视觉或发射执行。
+上电保持未解锁、静止约 3 秒，并等待诊断 I22=1（实际标定完成才允许大 Yaw）。左 Down、右 Middle，摇杆/拨轮归中保持至少 500 ms，左 Down→Middle 建立解锁，再拨 Up 手动。右杆控制小 Yaw/Pitch，左杆控制云台坐标内前后/横移，速度由当前 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp) 决定；进入手动后右拨杆先经过 Middle，再主动切 Down 才请求小陀螺。拨轮不再叠加大 Yaw 速度，以免打断自动回中。左 Down 停止；左 Middle 解锁后选择串口导航，详见下节。
 
 应用每 5 ms 控制，每 10 ms 发布大 Yaw 与行走请求。先确认小幅输入和撤权停止，再从中心两侧验证回中方向；编码器中心和 IMU 安装方向仍须实测，不能以候选标定或编译结果代替。
+
+## 串口导航
+
+应用配置启用 `CONFIG_SKYWALKER_NAVIGATION_RECEIVER`，接收器独占 USART1，复用 `AsyncUart` 的 DMA 接收与恢复机制。无需修改参考底盘或板间协议。导航只控制底盘，小 Yaw、Pitch 和大 Yaw 跟随请求在导航档关闭，右拨杆和拨轮不覆盖导航速度。
+
+帧固定为 9 字节：
+
+| 偏移 | 字段 | 编码 |
+| --- | --- | --- |
+| 0 | 帧头 | `AA` |
+| 1 | 数据长度 | `06`，仅计三个速度的 6 字节 |
+| 2–3 | vx | 小端有符号 int16，实际 m/s × 1000 |
+| 4–5 | vy | 小端有符号 int16，实际 m/s × 1000 |
+| 6–7 | wz | 小端有符号 int16，实际 rad/s × 1000 |
+| 8 | 校验 | 字节 0 至 7 逐字节 XOR |
+
+图片没有定义字节序和速度参考系；当前明确采用小端，平移沿用既有 v4 的**云台坐标系**（前 +X、左 +Y、逆时针 +wz），由底盘按大 Yaw 编码器转换到车体系。如果上位机输出的是车体或世界坐标速度，应先转换再发送。导航速度受应用已有速度上限约束，当前 vx/vy 各 ±1 m/s，wz ±6 rad/s；配置入口为 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp)。
+
+例如 `AA 06 E8 03 0C FE F4 01 40` 表示 vx=1.000 m/s、vy=-0.500 m/s、wz=0.500 rad/s；停止帧为 `AA 06 00 00 00 00 00 00 AC`。图片只定义接收命令，没有定义 ACK，因此本实现不发送应答帧。
+
+操作流程：先归中并按现有流程解锁，左 Middle 为导航，左 Up 为手动，左 Down 为停止。进入导航档后必须收到一帧新的有效导航命令才运行，进入前缓存的命令不会启动底盘。上位机应持续发送，例如 50 Hz；超过 100 ms 未收到有效帧、遥控失联、左 Down 或板间链路撤权均停止导航。重新解锁或重新进入导航仍需新帧。
+
+接收器支持拆包、连续帧和错误后的滑动重同步，未完成的帧在字节间隔超过 20 ms 后丢弃；长度错误或 XOR 错误不刷新命令时间。传输溢出/故障立即使缓存命令失效。接收统计可从 `NavigationReceiver::snapshot()` 读取；命令快照中的 `navigation` 保留串口状态、丢包信息，`decision.chassis_reasons` 给出未收到、超时、等待新帧及限幅原因。
 
 ## 诊断
 

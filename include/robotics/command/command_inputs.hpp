@@ -1,4 +1,5 @@
 #pragma once
+#include <communication/navigation/navigation_protocol.hpp>
 #include <communication/vision/vision_types.hpp>
 #include <robotics/messages/command.hpp>
 #include <robotics/messages/referee.hpp>
@@ -11,6 +12,7 @@ struct CommandInputs {
     core::TimeUs now_us = 0; // Arbitration time, independent of source stamps.
     RemoteState remote{};
     core::Measurement<communication::vision::AimCommand> vision{};
+    communication::navigation::Command navigation{};
     RefereeState referee{};
     // 外部执行线程提供已解锁/无故障状态；未启用外部门控的应用维持 true。
     bool run_allowed = true;
@@ -38,6 +40,11 @@ enum ArbitrationReason : std::uint32_t {
     OverrideQuiet = 1u << 18,
     AutoUnavailable = 1u << 19,
     OperatorGateDenied = 1u << 20,
+    NavigationMissing = 1u << 21,
+    NavigationStale = 1u << 22,
+    WaitNewNavigation = 1u << 23,
+    InvalidNavigation = 1u << 24,
+    NavigationUnavailable = 1u << 25,
 };
 
 struct CommandDecision {

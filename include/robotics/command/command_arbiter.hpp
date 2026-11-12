@@ -17,6 +17,8 @@ public:
         bool require_referee_for_shooter = true;
         bool enable_shooter = true;
         bool allow_auto = true;
+        bool allow_navigation = false;
+        core::TimeUs navigation_timeout_us = 100000;
         core::TimeUs vision_timeout_us = 100000;
         core::OrientationReference expected_vision_reference{1, 1};
         float max_vision_yaw_acceleration_rad_s2 = 30, max_vision_pitch_acceleration_rad_s2 = 20;
@@ -53,6 +55,9 @@ private:
     std::uint64_t auto_baseline_sequence_ = 0, last_seen_vision_sequence_ = 0;
     bool have_vision_sequence_ = false, have_step_time_ = false;
     bool manual_override_ = false, have_override_quiet_time_ = false;
+    bool navigation_active_ = false;
+    core::TimeUs navigation_entry_us_ = 0;
+    std::uint64_t navigation_baseline_sequence_ = 0;
     void updateAutoOverride(OperatorIntent &, const CommandInputs &, core::TimeUs);
 };
 }

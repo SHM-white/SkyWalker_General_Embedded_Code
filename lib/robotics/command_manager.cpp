@@ -10,11 +10,16 @@ using AimMeasurement = core::Measurement<communication::vision::AimCommand>;
 SourceValue emptyValue(SourceRole role) {
     if (role == SourceRole::Aim)
         return AimMeasurement{};
+    if (role == SourceRole::Navigation)
+        return communication::navigation::Command{};
     return RemoteState{};
 }
 bool matches(SourceRole role, const SourceValue &value) {
-    return role == SourceRole::Operator ? std::holds_alternative<RemoteState>(value)
-                                        : std::holds_alternative<AimMeasurement>(value);
+    if (role == SourceRole::Operator)
+        return std::holds_alternative<RemoteState>(value);
+    if (role == SourceRole::Navigation)
+        return std::holds_alternative<communication::navigation::Command>(value);
+    return std::holds_alternative<AimMeasurement>(value);
 }
 }
 CommandManager::CommandManager(const Config &config)
@@ -41,7 +46,7 @@ int CommandManager::registerSource(ICommandSource &source) {
     if (start_attempted_)
         return -EBUSY;
     const auto role = source.role();
-    if (role != SourceRole::Operator && role != SourceRole::Aim)
+    if (role != SourceRole::Operator && role != SourceRole::Aim && role != SourceRole::Navigation)
         return -EINVAL;
     for (std::size_t i = 0; i < source_count_; ++i)
         if (sources_[i].source == &source || sources_[i].role == role)
@@ -70,7 +75,8 @@ int CommandManager::failStart(int error, std::uint32_t reason) {
     failed.decision.chassis_reasons = failed.decision.gimbal_reasons = failed.decision.shooter_reasons = reason;
     for (std::size_t i = 0; i < source_count_; ++i) {
         const auto &slot = sources_[i];
-        (slot.role == SourceRole::Operator ? failed.remote : failed.vision) = slot.cached.diagnostics;
+        (slot.role == SourceRole::Operator ? failed.remote
+         : slot.role == SourceRole::Navigation ? failed.navigation : failed.vision) = slot.cached.diagnostics;
     }
     failed.permission = permission_diagnostics_;
     publish(failed); // Disabled, invalid stamps; already-started sources stay alive.
@@ -162,6 +168,10 @@ void CommandManager::run() {
             if (slot.role == SourceRole::Operator) {
                 next.observed.remote = *std::get_if<RemoteState>(&slot.cached.value);
                 next.remote = slot.cached.diagnostics;
+            }
+            else if (slot.role == SourceRole::Navigation) {
+                next.observed.navigation = *std::get_if<communication::navigation::Command>(&slot.cached.value);
+                next.navigation = slot.cached.diagnostics;
             }
             else {
                 next.observed.vision = *std::get_if<AimMeasurement>(&slot.cached.value);

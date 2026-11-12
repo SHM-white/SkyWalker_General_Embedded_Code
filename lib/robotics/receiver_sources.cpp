@@ -1,6 +1,21 @@
 #include <cerrno>
 #include <robotics/command/receiver_sources.hpp>
 namespace skywalker::robotics {
+#ifdef CONFIG_SKYWALKER_NAVIGATION_RECEIVER
+int NavigationSource::start() {
+    return receiver_.start();
+}
+int NavigationSource::sample(SourceSample &out) {
+    const auto value = receiver_.snapshot();
+    out.value = value.protocol.command;
+    out.diagnostics = {};
+    out.diagnostics.error = value.uart_error;
+    out.diagnostics.state = static_cast<std::uint32_t>(value.state);
+    out.diagnostics.dropped = value.dropped;
+    out.diagnostics.dropped_available = true;
+    return 0;
+}
+#endif
 #ifdef CONFIG_SKYWALKER_REMOTE_RECEIVER
 int RemoteSource::start() {
     return receiver_.start();

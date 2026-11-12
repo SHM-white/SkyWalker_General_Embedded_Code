@@ -4,8 +4,9 @@
 #include <robotics/command/command_inputs.hpp>
 
 namespace skywalker::robotics {
-enum class SourceRole : std::uint8_t { Operator, Aim };
-using SourceValue = std::variant<RemoteState, core::Measurement<communication::vision::AimCommand>>;
+enum class SourceRole : std::uint8_t { Operator, Aim, Navigation };
+using SourceValue = std::variant<RemoteState, core::Measurement<communication::vision::AimCommand>,
+                                 communication::navigation::Command>;
 struct SourceDiagnostics {
     int error = 0, sample_error = 0;
     std::uint32_t state = 0, dropped = 0;
@@ -42,7 +43,7 @@ public:
 struct CommandSnapshot {
     CommandInputs observed{};
     CommandDecision decision{};
-    SourceDiagnostics remote{}, vision{}, permission{};
+    SourceDiagnostics remote{}, vision{}, navigation{}, permission{};
 };
 // Preserve the selected producer stamp rather than arbitration/poll time.
 inline core::Stamp sourceStamp(const CommandSnapshot &frame, ControlSource source) {
@@ -52,6 +53,8 @@ inline core::Stamp sourceStamp(const CommandSnapshot &frame, ControlSource sourc
     }
     if (source == ControlSource::Vision)
         return frame.decision.selected_vision.stamp;
+    if (source == ControlSource::Autonomous)
+        return frame.observed.navigation.stamp;
     return {};
 }
 }

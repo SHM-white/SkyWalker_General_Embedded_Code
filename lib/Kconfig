@@ -199,6 +199,25 @@ config SKYWALKER_ATTITUDE_EKF
     depends on CPP
     select SKYWALKER_LIB_CONTROL
 
+config SKYWALKER_NAVIGATION_RECEIVER
+    bool "Threaded AA/06 navigation velocity receiver"
+    depends on SKYWALKER_UART_TRANSPORT
+    help
+        Receive 9-byte AA 06 vx vy wz XOR frames. Velocities are signed
+        little-endian int16 values scaled by 1000. This is an RX-only link.
+
+config SKYWALKER_NAVIGATION_RX_STACK_SIZE
+    int "Navigation receiver stack bytes"
+    depends on SKYWALKER_NAVIGATION_RECEIVER
+    default 2048
+    range 2048 16384
+
+config SKYWALKER_NAVIGATION_RX_PRIORITY
+    int "Navigation receiver thread priority"
+    depends on SKYWALKER_NAVIGATION_RECEIVER
+    default 6
+    range 0 15
+
 config SKYWALKER_VISION
     bool "Independent vision link"
     depends on SKYWALKER_LIB_COMMUNICATION

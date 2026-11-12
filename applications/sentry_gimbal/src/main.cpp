@@ -67,7 +67,20 @@ int main() {
                                                         vision_protocol, {});
     static VisionSource vision_source(vision);
 #endif
-    static CommandManager commands(installed::manualCommandConfig());
+#if DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER)
+    static communication::AsyncUart::DmaBuffers navigation_dma __nocache;
+    static communication::navigation::NavigationReceiver navigation(DEVICE_DT_GET(DT_ALIAS(navigation_uart)),
+                                                                    navigation_dma);
+    static NavigationSource navigation_source(navigation);
+#endif
+    static CommandManager commands([] {
+        auto config = installed::manualCommandConfig();
+        config.allow_navigation = DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER);
+        // Up remains the installed manual position even if visual auto is enabled.
+        if (config.allow_navigation)
+            config.allow_auto = false;
+        return config;
+    }());
     // Board IMU moves with big Yaw, not with the small-Yaw head. No external
     // CAN3 IMU or vision receiver is instantiated in this manual application.
     static control::QuaternionEkf onboard_estimator({.initialization_samples = 800, .adapt_gyro_bias = false});
@@ -93,6 +106,10 @@ int main() {
                                  installed::pitchMotorConfig(), installed::pitchAxisConfig(),
                                  installed::gimbalExecutionConfig());
     int command_error = commands.registerSource(remote_source);
+#if DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER)
+    if (command_error == 0)
+        command_error = commands.registerSource(navigation_source);
+#endif
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
     if (command_error == 0)
         command_error = commands.registerSource(vision_source);
@@ -159,8 +176,11 @@ int main() {
         if (peer_revoked) {
             controls.withdraw();
             operator_state.run_allowed = false;
+            operator_state.navigation_active = false;
         }
-        commands.setOperatorGate(operator_state.run_allowed, 0);
+        const bool navigation_allowed = operator_state.navigation_active && operator_state.fresh && setup_ready;
+        commands.setOperatorGate(operator_state.run_allowed || navigation_allowed,
+                                  static_cast<std::uint32_t>(operator_state.start_event_id));
         // The DR16 dial (spring-centred wheel) is the analog spin control. It
         // only scales and signs the chassis spin rate: translation still comes
         // from the sticks and the gimbal command is untouched.
@@ -385,9 +405,14 @@ int main() {
             request.stamp = {now_ms, ++request_sequence, true};
             endpoint.submitBigYaw(request);
             auto wheel_command = frame.decision.command.chassis;
-            if (!operator_state.run_allowed)
+            // Reject a cached command from the previous RC mode. In navigation
+            // wz is supplied by the navigation frame, never by the spin profile.
+            const bool navigation_command = navigation_allowed && wheel_command.source == ControlSource::Autonomous;
+            const bool manual_command = operator_state.run_allowed &&
+                                        wheel_command.source != ControlSource::Autonomous;
+            if (!navigation_command && !manual_command)
                 wheel_command.mode = ChassisMode::Disabled;
-            if (wheel_command.mode != ChassisMode::Disabled)
+            if (manual_command && wheel_command.mode != ChassisMode::Disabled)
                 wheel_command.wz_rad_s = spin_out.applied_rad_s;
             endpoint.submit(wheel_command);
         }

@@ -46,7 +46,7 @@ struct RemoteState {
     // 遥控器数据当前是否在线且未超时。
     bool online = false;
 };
-enum class OperatorMode : std::uint8_t { Safe, Manual, Auto };
+enum class OperatorMode : std::uint8_t { Safe, Manual, Auto, Navigation };
 struct OperatorIntent {
     // 操作员请求的安全、手动或自动模式。
     OperatorMode mode = OperatorMode::Safe;

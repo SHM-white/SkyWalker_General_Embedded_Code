@@ -17,6 +17,7 @@ public:
         RemoteInputProfile input_profile = RemoteInputProfile::KeyboardMouseSelectable;
         // 视觉执行样例（allow_auto）把左 Up 保留给自动；其余样例左 Up 为手动档。
         bool auto_on_up = false;
+        bool navigation_on_middle = false;
     };
     explicit ManualCommandMapper(const Config &config) : config_(config) {
     }

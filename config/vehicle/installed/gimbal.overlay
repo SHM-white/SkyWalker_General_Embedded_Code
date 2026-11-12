@@ -6,9 +6,8 @@
         /* Vision link: USB CDC ACM on PA11/PA12 (full speed), declared by the
          * board DTS. No DMA and no separate UART pin is consumed. */
         vision-uart = &cdc_acm_uart0;
-        /* Only UART left after diagnostic/interboard/remote/referee: USART1 on
-         * PA9/PA10. Its DMA1 3/4 belong to USART10, so this port runs in
-         * interrupt-driven mode and keeps the board default 115200 baud. */
+        /* Navigation: USART1 PA9/PA10, 115200 8N1. DMA is reassigned below
+         * because the board's default channels belong to USART10. */
         navigation-uart = &usart1;
     };
     external_5v: regulator-external-5v {
@@ -30,6 +29,11 @@
  * fixed: USART1_TX = 42, USART1_RX = 41.
  */
 &usart1 {
+    status = "okay";
+    current-speed = <115200>;
+    data-bits = <8>;
+    parity = "none";
+    stop-bits = "1";
     dmas = <&dmamux1 5 42 STM32_DMA_PERIPH_TX>,
            <&dmamux1 7 41 STM32_DMA_PERIPH_RX>;
     dma-names = "tx", "rx";

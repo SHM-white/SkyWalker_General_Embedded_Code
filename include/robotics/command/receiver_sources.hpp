@@ -1,5 +1,8 @@
 #pragma once
 #include <robotics/command/command_source.hpp>
+#ifdef CONFIG_SKYWALKER_NAVIGATION_RECEIVER
+#include <communication/navigation/navigation_receiver.hpp>
+#endif
 #ifdef CONFIG_SKYWALKER_REMOTE_RECEIVER
 #include <communication/remote/remote_receiver.hpp>
 #endif
@@ -11,6 +14,21 @@
 #endif
 
 namespace skywalker::robotics {
+#ifdef CONFIG_SKYWALKER_NAVIGATION_RECEIVER
+class NavigationSource final : public ICommandSource {
+public:
+    explicit NavigationSource(communication::navigation::NavigationReceiver &receiver) : receiver_(receiver) {
+    }
+    SourceRole role() const override {
+        return SourceRole::Navigation;
+    }
+    int start() override;
+    int sample(SourceSample &out) override;
+
+private:
+    communication::navigation::NavigationReceiver &receiver_;
+};
+#endif
 #ifdef CONFIG_SKYWALKER_REMOTE_RECEIVER
 class RemoteSource final : public ICommandSource {
 public:
