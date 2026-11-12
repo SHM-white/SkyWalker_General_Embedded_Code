@@ -86,6 +86,7 @@ int main() {
 #endif
     static CommandManager commands([] {
         auto config = installed::manualCommandConfig();
+        config.mapper.input_profile = RemoteInputProfile::KeyboardMouseSelectable;
         config.allow_navigation = DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER);
         config.allow_auto = DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER);
         config.mapper.auto_on_up = false;
@@ -206,6 +207,9 @@ int main() {
         const auto spin_out =
             spin.update(operator_state.spin_requested, operator_state.run_allowed, spin_dial, now_us);
         (void)commands.snapshot(frame);
+        const auto expected_manual_source = operator_state.remote.right_switch == RcSwitch::Up
+                                                ? ControlSource::KeyboardMouse
+                                                : ControlSource::Remote;
         const auto heading = planarYawHeading(carrier_snapshot, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);
         const auto heading_reason = !heading.valid   ? heading.reason
@@ -245,6 +249,9 @@ int main() {
         const bool gimbal_mode_matches = navigation_allowed
                                              ? frame.decision.operator_mode == OperatorMode::Navigation
                                              : frame.decision.operator_mode == OperatorMode::Manual;
+        if (!gimbal_allowed || !gimbal_mode_matches ||
+            (operator_state.run_allowed && input.command.source != expected_manual_source))
+            input.command.mode = GimbalMode::Disabled;
         const float raw_head_rate_rad_s = input.command.yaw_rate_rad_s;
         // Allocation runs on the pre-update snapshot: one measured joint state
         // and one carrier gyro sample produce the plan that this cycle's single
@@ -388,8 +395,6 @@ int main() {
             input.command.pitch_rate_rad_s *= installed::pitch.direction;
         }
         vision_pitch_was_active = alloc.enabled && alloc.vision_mode;
-        if (!gimbal_allowed || !gimbal_mode_matches)
-            input.command.mode = GimbalMode::Disabled;
         input.transport_ready = setup_ready;
         // The travel envelope rejected this cycle's outward command: drop the
         // accumulated Rate lead so the position loop cannot keep pulling the
@@ -458,8 +463,7 @@ int main() {
             // Reject a cached command from the previous RC mode. In navigation
             // wz is supplied by the navigation frame, never by the spin profile.
             const bool navigation_command = navigation_allowed && wheel_command.source == ControlSource::Autonomous;
-            const bool manual_command = operator_state.run_allowed &&
-                                        wheel_command.source != ControlSource::Autonomous;
+            const bool manual_command = operator_state.run_allowed && wheel_command.source == expected_manual_source;
             if (!navigation_command && !manual_command)
                 wheel_command.mode = ChassisMode::Disabled;
             if (manual_command && wheel_command.mode != ChassisMode::Disabled &&
