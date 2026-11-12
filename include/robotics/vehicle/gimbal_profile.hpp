@@ -199,6 +199,9 @@ inline constexpr DualYawAllocatorConfig dualYawAllocatorConfig() {
     // 枪头持续世界速度预算，单位 rad/s；限制手动目标和视觉速度前馈。
     // 大 Yaw 跟踪不足时还会乘 tracking_budget_scale_min 到 1 之间的预算比例。
     c.head_steady_rate_max_rad_s = 6.0f;
+    // 外置头部 IMU 闭环的世界 Yaw 目标最大超前角，单位 rad；0.25 约为 14.3°。
+    // 跟踪不足时丢弃超出部分，避免触限/恢复后追赶积累的目标；0 禁用此保护。
+    c.head_angle_lead_max_rad = 0.25f;
 
     // 发给底盘的大 Yaw 世界速度意图上限，单位 rad/s，包含慢分量和回中修正。
     // 持续跟随能力需与枪头持续预算匹配；底盘会另行叠加车体补偿并限制关节速度。

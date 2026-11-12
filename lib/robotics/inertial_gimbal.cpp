@@ -76,7 +76,8 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
         c.gyro_damping < 0 || std::fabs(c.yaw_direction) != 1 || std::fabs(c.pitch_direction) != 1 ||
         !std::isfinite(c.max_inertial_pitch_rad) || c.max_inertial_pitch_rad <= 0 || c.max_inertial_pitch_rad >= 1.4f ||
         !std::isfinite(c.stable_yaw_error_rad) || !std::isfinite(c.stable_pitch_error_rad) ||
-        c.stable_yaw_error_rad < 0 || c.stable_pitch_error_rad < 0)
+        c.stable_yaw_error_rad < 0 || c.stable_pitch_error_rad < 0 ||
+        !std::isfinite(c.max_goal_lead_rad) || c.max_goal_lead_rad < 0 || c.max_goal_lead_rad > 3.14159265f)
         return suspend(now, WaitReason::Configuration, -EINVAL);
     output_.yaw_output_valid = output_.pitch_output_valid = false;
     output_.stabilization_valid = false;
@@ -91,7 +92,10 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
     }
     if (in.command.mode > GimbalMode::AbsoluteAngle || !std::isfinite(in.command.yaw_target_rad) ||
         !std::isfinite(in.command.pitch_target_rad) || !std::isfinite(in.command.yaw_rate_rad_s) ||
-        !std::isfinite(in.command.pitch_rate_rad_s))
+        !std::isfinite(in.command.pitch_rate_rad_s) ||
+        (in.yaw_reference_valid && (!std::isfinite(in.yaw_reference_rad) ||
+                                    !std::isfinite(in.yaw_reference_rate_rad_s))) ||
+        (in.pitch_rate_feedforward_valid && !std::isfinite(in.pitch_rate_feedforward_rad_s)))
         return suspend(now, WaitReason::Command, -EINVAL);
     if (!isFresh(in.command.stamp, now / 1000, c.command_timeout_ms) ||
         !core::fresh(in.source_stamp, now, c.source_timeout_us))
@@ -138,9 +142,25 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
         desired_pitch_rate = c.pitch_locked ? 0
                                             : std::clamp(in.command.pitch_rate_rad_s, -c.pitch.max_rate_rad_s,
                                                          c.pitch.max_rate_rad_s);
-        yaw_goal_rad_ = wrap(yaw_goal_rad_ + desired_yaw_rate * dt);
+        if (!in.yaw_reference_valid)
+            yaw_goal_rad_ = wrap(yaw_goal_rad_ + desired_yaw_rate * dt);
         pitch_goal_rad_ = std::clamp(pitch_goal_rad_ + desired_pitch_rate * dt, -c.max_inertial_pitch_rad,
                                      c.max_inertial_pitch_rad);
+    }
+    if (in.yaw_reference_valid) {
+        yaw_goal_rad_ = wrap(in.yaw_reference_rad);
+        desired_yaw_rate = std::clamp(in.yaw_reference_rate_rad_s, -c.yaw.max_rate_rad_s, c.yaw.max_rate_rad_s);
+    }
+    if (in.command.mode == GimbalMode::AbsoluteAngle && in.pitch_rate_feedforward_valid && !c.pitch_locked)
+        desired_pitch_rate = std::clamp(in.pitch_rate_feedforward_rad_s, -c.pitch.max_rate_rad_s,
+                                        c.pitch.max_rate_rad_s);
+    if (c.max_goal_lead_rad > 0) {
+        // 机械受限或跟踪不足时丢弃超前目标，避免恢复后追赶此前积累的转角。
+        yaw_goal_rad_ = wrap(e.yaw + std::clamp(wrap(yaw_goal_rad_ - e.yaw),
+                                               -c.max_goal_lead_rad, c.max_goal_lead_rad));
+        pitch_goal_rad_ = std::clamp(e.pitch + std::clamp(pitch_goal_rad_ - e.pitch,
+                                                        -c.max_goal_lead_rad, c.max_goal_lead_rad),
+                                     -c.max_inertial_pitch_rad, c.max_inertial_pitch_rad);
     }
     output_.yaw_error_rad = wrap(yaw_goal_rad_ - e.yaw);
     output_.pitch_error_rad = pitch_goal_rad_ - e.pitch;

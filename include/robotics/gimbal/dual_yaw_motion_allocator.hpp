@@ -71,6 +71,9 @@ struct DualYawAllocatorConfig {
     float still_rate_epsilon_rad_s = 0.01f;
     float still_acceleration_epsilon_rad_s2 = 0.05f;
     core::TimeUs feedback_timeout_us = 50000, source_timeout_us = 100000, max_cycle_us = 20000;
+    // World-angle lead ahead of a valid measured head angle, rad. Zero keeps
+    // the legacy behavior without this additional lead guard.
+    float head_angle_lead_max_rad = 0;
 };
 
 struct DualYawAllocatorInputs {
@@ -96,6 +99,8 @@ struct DualYawAllocatorInputs {
     float head_angle_measured_rad = 0;
     bool carrier_acceleration_valid = false;
     float carrier_acceleration_rad_s2 = 0;
+    // A measured head angle can seed and constrain the manual plan as well as vision.
+    bool head_angle_valid = false;
 };
 
 struct DualYawAllocatorOutput {
@@ -122,6 +127,10 @@ struct DualYawAllocatorOutput {
     bool big_saturated = false, travel_limited = false, tracking_limited = false;
     bool vision_mode = false;
     WaitReason reason = WaitReason::Command;
+    // Feasible world reference for a head-IMU attitude loop. The rate reflects
+    // the final protected joint command, including unavoidable passive motion.
+    bool head_reference_valid = false;
+    float head_angle_rad = 0, head_reference_rate_rad_s = 0;
 };
 
 // Differentiates the carrier gyro rate only between two genuinely new samples.

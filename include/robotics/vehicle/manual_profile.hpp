@@ -30,6 +30,19 @@ inline InertialGimbalAdapter::Config manualInertialConfig() {
     c.allow_unknown_quality = true;
     return c;
 }
+// 整车头部 CAN IMU 姿态外环；机械限位与电机 PID 仍由共享两轴配置负责。
+inline InertialGimbalAdapter::Config sentryInertialConfig() {
+    auto c = manualInertialConfig();
+    // 姿态误差转关节速度的增益，单位 1/s；Yaw/Pitch 独立于电机位置环 P。
+    c.yaw_kp = 3.0f;
+    c.pitch_kp = 3.0f;
+    // 头部实测角速度误差的阻尼系数，抑制惯性外环超调。
+    c.gyro_damping = 0.1f;
+    c.pitch.max_rate_rad_s = manual_max_gimbal_pitch_rate_rad_s;
+    // 世界目标最大超前角，单位 rad；失能/断流另外通过应用清除旧目标。
+    c.max_goal_lead_rad = dualYawAllocatorConfig().head_angle_lead_max_rad;
+    return c;
+}
 // 调参：变速小陀螺。曲线本身在 calibration.hpp 的 spinRateCurveRadS()。
 inline constexpr SpinSpeedProfile::Config spinProfileConfig() {
     SpinSpeedProfile::Config c{};

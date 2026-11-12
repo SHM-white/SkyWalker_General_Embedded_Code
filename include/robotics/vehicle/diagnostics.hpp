@@ -30,7 +30,7 @@ struct DiagnosticStatus {
     int error = 0;
     float extra0 = 0, extra1 = 0;
     // I19..I48. I19: 101/105 chassis, 102 legacy attitude gimbal, 103 legacy
-    // planar-yaw gimbal, 104 dual-Yaw planar gimbal.
+    // planar-yaw gimbal, 104 dual-Yaw planar gimbal, 106 head-IMU inertial dual-Yaw.
     // Legacy callers keep the original 19-channel frame. The extension length is
     // a multiple of three so the text output can group three channels per line.
     bool extended = false;

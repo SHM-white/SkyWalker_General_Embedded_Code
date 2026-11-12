@@ -14,6 +14,13 @@ struct InertialGimbalInputs {
     GimbalCommand command{};
     core::Stamp source_stamp{};
     bool prerequisites_ready = false;
+    // Optional feasible world-Yaw reference from a dual-Yaw allocator. Its angle
+    // and rate replace local Yaw goal integration; Pitch keeps its normal path.
+    bool yaw_reference_valid = false;
+    float yaw_reference_rad = 0, yaw_reference_rate_rad_s = 0;
+    // Optional world-Pitch velocity feedforward for an absolute vision target.
+    bool pitch_rate_feedforward_valid = false;
+    float pitch_rate_feedforward_rad_s = 0;
 };
 
 struct InertialGimbalOutput {
@@ -43,6 +50,9 @@ public:
         float stable_yaw_error_rad = 0.05f, stable_pitch_error_rad = 0.05f;
         bool pitch_locked = true;
         bool allow_unknown_quality = false;
+        // Maximum target lead relative to measured head attitude, rad. Zero
+        // preserves legacy behavior; a positive value discards tracking debt.
+        float max_goal_lead_rad = 0;
     };
 
     explicit InertialGimbalAdapter(const Config &config) : config_(config) {

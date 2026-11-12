@@ -62,7 +62,8 @@ int DualYawMotionAllocator::validate() const {
                         std::isfinite(c.brake_deceleration_rad_s2) && std::isfinite(c.tracking_error_rad_s) &&
                         std::isfinite(c.tracking_budget_scale_min) && std::isfinite(c.tracking_budget_slew_per_s) &&
                         std::isfinite(c.still_rate_epsilon_rad_s) &&
-                        std::isfinite(c.still_acceleration_epsilon_rad_s2);
+                        std::isfinite(c.still_acceleration_epsilon_rad_s2) &&
+                        std::isfinite(c.head_angle_lead_max_rad);
     if (!finite || std::fabs(c.joint_direction) != 1 || !(c.joint_margin_rad >= 0) || !(c.joint_tolerance_rad >= 0) ||
         !(c.head_rate_max_rad_s > 0) || !(c.head_acceleration_max_rad_s2 > 0) || !(c.head_jerk_max_rad_s3 >= 0) ||
         !(c.head_steady_rate_max_rad_s > 0) || c.head_steady_rate_max_rad_s > c.head_rate_max_rad_s ||
@@ -76,6 +77,7 @@ int DualYawMotionAllocator::validate() const {
         !(c.tracking_error_rad_s > 0) || !(c.tracking_budget_scale_min > 0) ||
         c.tracking_budget_scale_min > 1 || !(c.tracking_budget_slew_per_s > 0) ||
         !(c.still_rate_epsilon_rad_s >= 0) || !(c.still_acceleration_epsilon_rad_s2 >= 0) ||
+        c.head_angle_lead_max_rad < 0 || c.head_angle_lead_max_rad > kTwoPi * 0.5f ||
         !c.feedback_timeout_us || !c.source_timeout_us || !c.max_cycle_us)
         return -EINVAL;
     return c.joint_center_rad > c.joint_min_rad && c.joint_center_rad < c.joint_max_rad ? 0 : -EINVAL;
@@ -120,6 +122,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         return out;
     }
     if (!std::isfinite(in.joint_rad) || !std::isfinite(in.joint_rate_rad_s) ||
+        (in.head_angle_valid && !std::isfinite(in.head_angle_measured_rad)) ||
         !core::fresh(in.joint_stamp, now, c.feedback_timeout_us)) {
         // Without a joint measurement neither the travel envelope nor the
         // degraded path can be protected.
@@ -342,7 +345,6 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     }
 
     // --- Planned angles (stage-C trajectory interface) -----------------------
-    head_angle_plan_rad_ = std::remainder(head_angle_plan_rad_ + head_.rate_rad_s * dt, kTwoPi);
     float joint_rate = std::clamp(c.joint_direction * (head_.rate_rad_s - carrier), -budget_neg, budget_pos);
     if (over_pos || over_neg) {
         // Out of the braking envelope: forbid the outward direction at the final
@@ -364,6 +366,13 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         travel_limited = true;
     }
     joint_position_plan_rad_ = joint_next;
+    const float reference_rate = carrier + c.joint_direction * joint_rate;
+    head_angle_plan_rad_ = std::remainder(head_angle_plan_rad_ + reference_rate * dt, kTwoPi);
+    if ((in.head_angle_valid || vision) && c.head_angle_lead_max_rad > 0) {
+        const float lead = std::clamp(std::remainder(head_angle_plan_rad_ - in.head_angle_measured_rad, kTwoPi),
+                                      -c.head_angle_lead_max_rad, c.head_angle_lead_max_rad);
+        head_angle_plan_rad_ = std::remainder(in.head_angle_measured_rad + lead, kTwoPi);
+    }
 
     // --- Outputs -------------------------------------------------------------
     out.head = head_;
@@ -379,6 +388,9 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     out.travel_limited = travel_limited || head_limited || head_.conflict;
     out.tracking_limited = tracking_limited_;
     out.vision_mode = vision;
+    out.head_reference_valid = in.head_angle_valid || vision;
+    out.head_angle_rad = head_angle_plan_rad_;
+    out.head_reference_rate_rad_s = reference_rate;
     out.enabled = true;
     out.reason = WaitReason::None;
     return out;
