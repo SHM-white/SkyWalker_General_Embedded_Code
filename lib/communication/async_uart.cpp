@@ -12,15 +12,85 @@ int AsyncUart::init() {
         return -ENODEV;
     k_msgq_init(&queue_, queue_storage_, sizeof(RxChunk), 8);
     const int ret = uart_callback_set(uart_, callback, this);
+    if (ret == -ENOSYS || ret == -ENOTSUP) {
+        // USB CDC ACM and DMA-less UARTs only implement the interrupt API.
+        const int irq_ret = enterIrqMode();
+        if (irq_ret < 0)
+            return irq_ret;
+        initialized_ = true;
+        return 0;
+    }
     if (ret < 0)
         return ret;
     initialized_ = true;
     return startRx();
 }
+int AsyncUart::enterIrqMode() {
+    const int ret = uart_irq_callback_user_data_set(uart_, irqCallback, this);
+    if (ret < 0)
+        return ret;
+    irq_mode_ = true;
+    atomic_clear(&in_use_);
+    atomic_clear(&rx_disabled_);
+    uart_irq_rx_enable(uart_);
+    uart_irq_update(uart_);
+    return 0;
+}
+void AsyncUart::irqCallback(const device *dev, void *self) {
+    auto *uart = static_cast<AsyncUart *>(self);
+    uart_irq_update(dev);
+    if (uart_irq_rx_ready(dev))
+        uart->drainIrq();
+}
+void AsyncUart::drainIrq() {
+    if (!atomic_cas(&rx_draining_, 0, 1))
+        return;
+    RxChunk chunk{};
+    std::uint8_t bytes[sizeof(RxChunk::bytes)];
+    for (;;) {
+        const int read = uart_fifo_read(uart_, bytes, sizeof(bytes));
+        if (read <= 0)
+            break;
+        chunk = RxChunk{};
+        chunk.size = static_cast<std::uint16_t>(read);
+        chunk.timestamp_ms = k_uptime_get();
+        chunk.generation = atomic_get(&generation_);
+        std::memcpy(chunk.bytes, bytes, static_cast<std::size_t>(read));
+        if (k_msgq_put(&queue_, &chunk, K_NO_WAIT) < 0) {
+            atomic_inc(&generation_);
+            atomic_inc(&dropped_);
+        }
+    }
+    atomic_clear(&rx_draining_);
+}
+int AsyncUart::sendIrq(const std::uint8_t *p, std::size_t n, std::uint32_t timeout_ms) {
+    uart_irq_tx_enable(uart_);
+    const std::uint64_t deadline = static_cast<std::uint64_t>(k_uptime_get()) + timeout_ms;
+    std::size_t sent = 0;
+    while (sent < n) {
+        const int filled = uart_fifo_fill(uart_, p + sent, static_cast<int>(n - sent));
+        if (filled > 0) {
+            sent += static_cast<std::size_t>(filled);
+            continue;
+        }
+        if (static_cast<std::uint64_t>(k_uptime_get()) >= deadline) {
+            uart_irq_tx_disable(uart_);
+            return -EAGAIN;
+        }
+        k_yield();
+    }
+    return 0;
+}
 int AsyncUart::startRx() {
     atomic_set(&in_use_, 1);
     atomic_clear(&rx_disabled_);
     const int ret = uart_rx_enable(uart_, dma_.rx[0], sizeof(dma_.rx[0]), 1000);
+    if (ret == -ENOSYS || ret == -ENOTSUP) {
+        // The callback registration succeeded but this instance cannot do async
+        // RX (for example a UART with its DMA channels removed).
+        atomic_clear(&in_use_);
+        return enterIrqMode();
+    }
     if (ret < 0) {
         atomic_clear(&in_use_);
         atomic_set(&rx_disabled_, 1);
@@ -30,6 +100,12 @@ int AsyncUart::startRx() {
 int AsyncUart::service(std::uint64_t now) {
     if (!initialized_)
         return -EACCES;
+    if (irq_mode_) {
+        // The interrupt handler owns the FIFO; a periodic drain only covers a
+        // missed callback.
+        drainIrq();
+        return 0;
+    }
     if (atomic_get(&tx_busy_) && now >= tx_deadline_ms_) {
         tx_deadline_ms_ = now + 100;
         uart_tx_abort(uart_); // Only the completion/abort callback releases dma_.tx.
@@ -117,6 +193,8 @@ int AsyncUart::read(RxChunk &out) {
 int AsyncUart::send(const std::uint8_t *p, std::size_t n, std::uint32_t timeout) {
     if (!initialized_ || !p || !n || n > sizeof(dma_.tx) || !timeout || timeout > 1000)
         return -EINVAL;
+    if (irq_mode_)
+        return sendIrq(p, n, timeout);
     if (!atomic_cas(&tx_busy_, 0, 1))
         return -EAGAIN;
     atomic_clear(&tx_error_);

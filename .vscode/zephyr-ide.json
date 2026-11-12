@@ -1909,7 +1909,7 @@
         "runner": "openocd",
         "extraArgs": [
           "--cmd-pre-init",
-          "adapter serial 288485685614"
+          "\"adapter serial 288485685614\""
         ]
       },
       "debug": {
@@ -1928,7 +1928,7 @@
         "runner": "openocd",
         "extraArgs": [
           "--cmd-pre-init",
-          "adapter serial 134244834173"
+          "\"adapter serial 134244834173\""
         ]
       },
       "debug": {

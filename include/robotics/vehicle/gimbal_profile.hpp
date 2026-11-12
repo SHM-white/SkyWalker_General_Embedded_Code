@@ -183,8 +183,8 @@ inline constexpr DualYawAllocatorConfig dualYawAllocatorConfig() {
     c.head_rate_max_rad_s = manual_max_gimbal_yaw_rate_rad_s;
     c.head_acceleration_max_rad_s2 = 6.0f;
     c.head_jerk_max_rad_s3 = 0; // 第一阶段先关 jerk，只验证实际斜率
-    c.head_steady_rate_max_rad_s = 0.8f;
-    c.big_intent_max_rad_s = 1.0f;
+    c.head_steady_rate_max_rad_s = 5.0f;
+    c.big_intent_max_rad_s = 5.0f;
     c.big_acceleration_max_rad_s2 = 4.0f;
     c.big_jerk_max_rad_s3 = 0;
     c.big_track_gain_s_inv = 2.0f;
@@ -197,7 +197,7 @@ inline constexpr DualYawAllocatorConfig dualYawAllocatorConfig() {
     c.joint_acceleration_max_pos_rad_s2 = 20.0f;
     c.joint_acceleration_max_neg_rad_s2 = 20.0f;
     c.center_deadband_rad = 0.0087f; // 0.5°
-    c.center_kp_rad_s_per_rad = 6.0f;
+    c.center_kp_rad_s_per_rad = 1.5f;
     c.center_rate_max_rad_s = 1.0f;
     // 制动包络：20 ms 采样+CAN 建立时间、4 rad/s² 向外余量、10 rad/s² 保证制动。
     c.brake_delay_s = 0.02f;

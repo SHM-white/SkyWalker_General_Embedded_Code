@@ -3,6 +3,13 @@
     aliases {
         interboard-uart = &usart10;
         imu-can = &can3;
+        /* Vision link: USB CDC ACM on PA11/PA12 (full speed), declared by the
+         * board DTS. No DMA and no separate UART pin is consumed. */
+        vision-uart = &cdc_acm_uart0;
+        /* Only UART left after diagnostic/interboard/remote/referee: USART1 on
+         * PA9/PA10. Its DMA1 3/4 belong to USART10, so this port runs in
+         * interrupt-driven mode and keeps the board default 115200 baud. */
+        navigation-uart = &usart1;
     };
     external_5v: regulator-external-5v {
         compatible = "regulator-fixed";
@@ -13,10 +20,19 @@
         regulator-boot-on;
     };
 };
-/* DMA1 1/2 are reserved for the board IMU. USART1 must release 3/4. */
+/*
+ * DMA inventory on this board (DMAMUX1 channels are the scarce resource):
+ *   ch1/ch2  SPI2  (BMI088)          ch3/ch4  USART10 (interboard 460800)
+ *   ch6      UART5 (DBUS RX)         ch9/ch10 USART3  (referee)
+ *   ch5/ch7  USART1 (navigation)     ch0, 8, 11..15 free
+ * The board default gave USART1 ch3/ch4, which belong to USART10 here, so its
+ * DMA is reassigned to free channels instead of being dropped. Request IDs stay
+ * fixed: USART1_TX = 42, USART1_RX = 41.
+ */
 &usart1 {
-    /delete-property/ dmas;
-    /delete-property/ dma-names;
+    dmas = <&dmamux1 5 42 STM32_DMA_PERIPH_TX>,
+           <&dmamux1 7 41 STM32_DMA_PERIPH_RX>;
+    dma-names = "tx", "rx";
 };
 &usart10 {
     status = "okay";

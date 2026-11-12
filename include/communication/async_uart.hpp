@@ -48,6 +48,12 @@ private:
     static void callback(const device *, uart_event *, void *);
     void event(uart_event &);
     int startRx();
+    // Drivers without the async UART API (USB CDC ACM, DMA-less UARTs) fall back
+    // to the interrupt-driven API; the public surface stays identical.
+    static void irqCallback(const device *, void *);
+    int enterIrqMode();
+    void drainIrq();
+    int sendIrq(const std::uint8_t *, std::size_t, std::uint32_t);
     const device *uart_;
     DmaBuffers &dma_;
     alignas(4) char queue_storage_[8 * sizeof(RxChunk)]{};
@@ -55,7 +61,8 @@ private:
     atomic_t in_use_ = 0, rx_disabled_ = 1, tx_busy_ = 0, generation_ = 0, dropped_ = 0;
     atomic_t tx_error_ = 0;
     atomic_val_t observed_generation_ = 0;
+    atomic_t rx_draining_ = 0;
     std::uint64_t retry_ms_ = 0, tx_deadline_ms_ = 0;
-    bool initialized_ = false;
+    bool initialized_ = false, irq_mode_ = false;
 };
 }
