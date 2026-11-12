@@ -68,15 +68,6 @@ inline BigYawWorldHeadingFollower::Config bigYawHeadingFollowerConfig() {
     c.rate_integral_max_rad_s = big_yaw_heading_integral_max_rad_s;
     c.output_max_rad_s = cal.velocity_limit_rad_s;
     c.release_epsilon_rad_s = big_yaw_heading_release_epsilon_rad_s;
-    // The world envelope and the joint capability both come from the installed
-    // calibration; the executor still applies sign, ratio and the native slew.
-    c.world_rate_max_rad_s = cal.velocity_limit_rad_s;
-    c.shaping_acceleration_rad_s2 = big_yaw_world_acceleration_rad_s2;
-    c.shaping_jerk_rad_s3 = big_yaw_world_jerk_rad_s3;
-    c.joint_rate_max_rad_s = cal.velocity_limit_rad_s;
-    c.stop_capture_dwell_s = big_yaw_stop_capture_dwell_s;
-    c.stop_capture_enter_rad_s = big_yaw_stop_capture_enter_rad_s;
-    c.stop_capture_exit_rad_s = big_yaw_stop_capture_exit_rad_s;
     return c;
 }
 } // namespace skywalker::robotics::vehicle

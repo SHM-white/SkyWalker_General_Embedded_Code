@@ -86,15 +86,19 @@ int AbProtocol::encodeFeedback(const Feedback &f, core::TimeUs, std::uint8_t *ds
         return -EINVAL;
     if (cap < FeedbackSize)
         return -EMSGSIZE;
-    // AB has no validity bits: refuse incomplete feedback instead of inventing measurements.
-    if (!f.orientation.stamp.valid || !f.gyro_rad_s.stamp.valid || !f.bullet_speed_m_s.stamp.valid ||
-        !f.bullet_count.stamp.valid)
+    // Attitude must always be real. Only an explicit aiming-only agreement may
+    // substitute zero (unknown) for unavailable ballistics on AB's fixed layout.
+    if (!f.orientation.stamp.valid || !f.gyro_rad_s.stamp.valid ||
+        (!config_.allow_unknown_ballistics &&
+         (!f.bullet_speed_m_s.stamp.valid || !f.bullet_count.stamp.valid)))
         return -ENODATA;
+    const float bullet_speed = f.bullet_speed_m_s.stamp.valid ? f.bullet_speed_m_s.value : 0;
+    const auto bullet_count = f.bullet_count.stamp.valid ? f.bullet_count.value : std::uint16_t{0};
     if (f.reference != config_.command_reference)
         return -ESTALE; // AB cannot convey a changed reference/session on the wire.
     auto q = f.orientation.value;
-    if (!core::normalize(q) || !core::finite(f.gyro_rad_s.value) || !std::isfinite(f.bullet_speed_m_s.value) ||
-        f.bullet_speed_m_s.value < 0 || static_cast<unsigned>(f.mode) > 3)
+    if (!core::normalize(q) || !core::finite(f.gyro_rad_s.value) || !std::isfinite(bullet_speed) ||
+        bullet_speed < 0 || static_cast<unsigned>(f.mode) > 3)
         return -EINVAL;
     const auto e = core::euler(q);
     const float cp = std::cos(e.pitch);
@@ -108,10 +112,10 @@ int AbProtocol::encodeFeedback(const Feedback &f, core::TimeUs, std::uint8_t *ds
     dst[0] = 'A';
     dst[1] = 'B';
     dst[2] = static_cast<std::uint8_t>(f.mode);
-    const float values[] = {q.w, q.x, q.y, q.z, e.yaw, yaw_rate, e.pitch, pitch_rate, f.bullet_speed_m_s.value};
+    const float values[] = {q.w, q.x, q.y, q.z, e.yaw, yaw_rate, e.pitch, pitch_rate, bullet_speed};
     for (unsigned i = 0; i < 9; ++i)
         core::wire::putFloat(dst + 3 + 4 * i, values[i]);
-    core::wire::put16(dst + 39, f.bullet_count.value);
+    core::wire::put16(dst + 39, bullet_count);
     core::wire::put16(dst + 41, crc16(dst, 41));
     return FeedbackSize;
 }

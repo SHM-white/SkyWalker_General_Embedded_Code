@@ -8,6 +8,9 @@ public:
         // AB carries no reference/session metadata; this is an explicit local agreement.
         core::OrientationReference command_reference{1, 1};
         core::TimeUs assembly_timeout_us = 20000;
+        // Explicit aiming-only bringup agreement: unknown speed/count encode as
+        // zero. Their measurement stamps stay invalid; attitude is always required.
+        bool allow_unknown_ballistics = false;
     };
     static constexpr std::size_t CommandSize = 29, FeedbackSize = 43;
     explicit AbProtocol(const Config &c) : config_(c) {

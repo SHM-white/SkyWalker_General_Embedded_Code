@@ -57,7 +57,7 @@ template <std::size_t N> constexpr bool validMotorSet(const std::array<MotorCali
 }
 
 // TODO(calibration): ID/mode, current-mode firmware, output-shaft units and signs.
-inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 15.0f, 5670};
+inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
 inline constexpr MotorCalibration pitch{1, 0x00, 1, 1, 10.0f, 10, 0};
 inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 10.0f, 10, 0};
 inline constexpr std::array<MotorCalibration, 2> friction{{
@@ -157,7 +157,7 @@ inline constexpr core::TimeUs chassis_period_us = 2000, bench_command_lease_us =
 
 // 调参：手动底盘/云台速度上限，单位 m/s 或 rad/s。
 inline constexpr float manual_max_vx_m_s = 1.0f, manual_max_vy_m_s = 1.0f, manual_max_wz_rad_s = 6.0f;
-inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 6.0f, manual_max_gimbal_pitch_rate_rad_s = 3.0f;
+inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 3.0f, manual_max_gimbal_pitch_rate_rad_s = 3.0f;
 // 调参：小陀螺边平移的参考倍率；0..1。
 inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_scale = 1.0f;
 
@@ -205,15 +205,6 @@ inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s
 inline constexpr float big_yaw_heading_rate_kp = 0.0f, big_yaw_heading_rate_ki = 0.0f;
 inline constexpr float big_yaw_heading_integral_max_rad_s = 1.5f;
 inline constexpr float big_yaw_heading_release_epsilon_rad_s = 1e-4f;
-// 调参：大 Yaw 世界运动整形加速度/jerk（世界坐标 rad/s²、rad/s³）。
-// 在原请求+航向修正叠加之后再整形，jerk=0 表示只限制加速度。
-// 参考底盘阶段先从 4 rad/s² 起步；配套 Zephyr 底盘实测有余量后按 8→12→16 逐级试。
-inline constexpr float big_yaw_world_acceleration_rad_s2 = 20.0f;
-inline constexpr float big_yaw_world_jerk_rad_s3 = 0.0f;
-// 调参：正常停车的航向捕获停留时间与进入/退出阈值（s、rad/s）。
-// 停留 0 表示沿用旧的“请求穿越零速即捕获”；配套底盘先按 60 ms 试验。
-inline constexpr float big_yaw_stop_capture_dwell_s = 0.06f;
-inline constexpr float big_yaw_stop_capture_enter_rad_s = 0.05f, big_yaw_stop_capture_exit_rad_s = 0.10f;
 // 调参：大 Yaw 原生速度模式的目标加速度，单位电机轴 rad/s²。
 inline constexpr float big_yaw_native_acceleration_rad_s2 = 20.0f;
 static_assert(positive(manual_max_vx_m_s) && positive(manual_max_vy_m_s) && positive(manual_max_wz_rad_s) &&
@@ -231,10 +222,6 @@ static_assert(big_yaw_heading_kp >= 0 && big_yaw_heading_rate_max_rad_s > 0 && b
                   big_yaw_heading_rate_ki >= 0 && big_yaw_heading_integral_max_rad_s > 0 &&
                   big_yaw_heading_release_epsilon_rad_s >= 0 && positive(big_yaw_native_acceleration_rad_s2),
               "big-Yaw heading follower gains and acceleration must be valid");
-static_assert(positive(big_yaw_world_acceleration_rad_s2) && big_yaw_world_jerk_rad_s3 >= 0 &&
-                  big_yaw_stop_capture_dwell_s >= 0 &&
-                  big_yaw_stop_capture_exit_rad_s >= big_yaw_stop_capture_enter_rad_s,
-              "big-Yaw world shaping and stop capture must be valid");
 
 inline constexpr float two_pi = 6.2831853071795864769f;
 // 调参：小 Yaw 原始编码器上下限，ticks（8192 ticks/转）；当前为全量程，非实测机械安全端点。
@@ -243,7 +230,6 @@ inline constexpr float yaw_min_rad = (yaw_low_ticks - small_yaw.encoder_zero_tic
 inline constexpr float yaw_max_rad = (yaw_high_ticks - small_yaw.encoder_zero_ticks) * two_pi / 8192;
 // TODO(calibration): measure this independently; encoder zero is not joint center.
 inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
-// inline constexpr float yaw_center_rad = 0.35f;
 // 调参：Pitch 驱动坐标的软件限位，rad；沿用现值，须与实测机械端点确认后再修改。
 inline constexpr float pitch_min_rad = 2.60f, pitch_max_rad = 3.40f;
 // 自瞄几何：枪口水平时的 Pitch 编码器位置，rad；3.00 为待实测的初值。
