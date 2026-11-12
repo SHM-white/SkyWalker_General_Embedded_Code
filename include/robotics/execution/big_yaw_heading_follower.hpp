@@ -29,6 +29,11 @@ struct BigYawWorldHeadingInputs {
     // Wire request sequence of this cycle. Only distinct sequences count as new
     // frames for the stop-capture dwell; a cached payload does not.
     std::uint32_t request_sequence = 0;
+    // Previous cycle's staged physical joint rate (direction, ratio and native
+    // slew already applied). When valid, the heading target advances by what the
+    // actuator actually received instead of the raw request.
+    bool achieved_rate_valid = false;
+    float achieved_joint_rate_rad_s = 0;
 };
 
 class BigYawWorldHeadingFollower {
@@ -120,8 +125,9 @@ private:
     bool diagnostic_clamping_ = false;
     BoundedRatePlan world_plan_{};
     std::uint32_t limit_flags_ = 0;
-    bool stop_capture_flag_ = false;
+    bool stop_capture_flag_ = false, stop_capture_latched_ = false;
     std::uint64_t stop_capture_start_ms_ = 0, stop_capture_last_ms_ = 0;
     std::uint32_t stop_capture_sequences_ = 0, last_stop_sequence_ = 0;
+    float world_applied_rad_s_ = 0;
 };
 } // namespace skywalker::robotics

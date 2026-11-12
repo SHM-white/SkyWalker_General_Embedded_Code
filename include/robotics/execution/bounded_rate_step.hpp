@@ -45,7 +45,8 @@ inline bool stepBoundedRate(BoundedRatePlan &plan, float target_acceleration_rad
     conflict = false;
     if (!(dt_s > 0) || !std::isfinite(dt_s) || !std::isfinite(target_acceleration_rad_s2) ||
         !std::isfinite(plan.rate_rad_s) || !std::isfinite(plan.acceleration_rad_s2) ||
-        !(limits.max_acceleration_rad_s2 > 0) || !(limits.min_acceleration_rad_s2 < 0) ||
+        !std::isfinite(limits.min_acceleration_rad_s2) || !std::isfinite(limits.max_acceleration_rad_s2) ||
+        limits.min_acceleration_rad_s2 > limits.max_acceleration_rad_s2 ||
         limits.max_rate_rad_s <= limits.min_rate_rad_s)
         return false;
     constexpr int bisection_steps = 24;
@@ -134,9 +135,21 @@ inline bool stepBoundedRate(BoundedRatePlan &plan, float target_acceleration_rad
         acceleration = std::clamp(target_acceleration_rad_s2, acceleration_lower, acceleration_upper);
         limited = acceleration != target_acceleration_rad_s2;
     }
-    const float rate = std::clamp(rate0 + (acceleration0 + acceleration) * 0.5f * dt_s, limits.min_rate_rad_s,
-                                  limits.max_rate_rad_s);
-    plan.acceleration_rad_s2 = (rate - rate0) / dt_s;
+    const float integrated = rate0 + (acceleration0 + acceleration) * 0.5f * dt_s;
+    const float rate = std::clamp(integrated, limits.min_rate_rad_s, limits.max_rate_rad_s);
+    if (rate != integrated) {
+        // The rate bound clipped the integrated trajectory. Report the conflict
+        // and fall back to the mean acceleration that was actually achieved so
+        // the next cycle does not restart from an acceleration the joint never
+        // produced.
+        plan.acceleration_rad_s2 = (rate - rate0) / dt_s;
+        conflict = true;
+        limited = true;
+    }
+    else
+        // Constant jerk over the cycle: the end-of-cycle acceleration, not the
+        // mean, is the correct state for the next step.
+        plan.acceleration_rad_s2 = acceleration;
     plan.rate_rad_s = rate;
     plan.limited = limited;
     plan.conflict = conflict;

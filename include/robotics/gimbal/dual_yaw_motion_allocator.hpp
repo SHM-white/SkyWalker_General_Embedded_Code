@@ -103,6 +103,13 @@ struct DualYawAllocatorOutput {
     BoundedRatePlan big{};  // big-Yaw world intent
     // Small-Yaw joint rate in encoder coordinates, direction applied once.
     float joint_rate_rad_s = 0;
+    // True whenever the joint rate above already carries the travel protection,
+    // including the degraded local path. The caller may use it directly.
+    bool joint_rate_valid = false;
+    // The accumulated joint lead must be dropped and reseeded from the measured
+    // position: an over-envelope excursion, a projected target or a vision
+    // hand-over invalidated the previous plan.
+    bool joint_reseed_requested = false;
     // Planned joint position/acceleration that produced the rate, encoder
     // coordinates. The position is the one the trajectory interface consumes.
     float joint_position_rad = 0, joint_acceleration_rad_s2 = 0;

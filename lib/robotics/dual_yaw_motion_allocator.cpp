@@ -118,39 +118,57 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         out.reason = WaitReason::Command;
         return out;
     }
-    if (!in.permission_valid) {
-        dropPlans();
-        out.reason = WaitReason::Power;
-        return out;
-    }
     if (!std::isfinite(in.joint_rad) || !std::isfinite(in.joint_rate_rad_s) ||
         !core::fresh(in.joint_stamp, now, c.feedback_timeout_us)) {
+        // Without a joint measurement neither the travel envelope nor the
+        // degraded path can be protected.
         dropPlans();
         out.reason = WaitReason::Feedback;
         return out;
     }
-    if (!std::isfinite(in.head_rate_target_rad_s) || !core::fresh(in.source_stamp, now, c.source_timeout_us)) {
-        dropPlans();
-        out.reason = WaitReason::Command;
-        return out;
-    }
-    if (!previous || now <= previous || now - previous > c.max_cycle_us) {
-        dropPlans();
-        out.reason = WaitReason::Cycle;
-        return out;
-    }
-    const float dt = static_cast<float>(now - previous) * 1e-6f;
-    const bool carrier_valid = in.carrier_valid && std::isfinite(in.carrier_rate_rad_s);
-    const float carrier = carrier_valid ? in.carrier_rate_rad_s : 0;
 
     // --- Small-Yaw travel envelope, each side independently -----------------
     const float usable_min = c.joint_min_rad + c.joint_margin_rad + c.joint_tolerance_rad;
     const float usable_max = c.joint_max_rad - c.joint_margin_rad - c.joint_tolerance_rad;
+    const float joint_lo = c.joint_min_rad + c.joint_margin_rad;
+    const float joint_hi = c.joint_max_rad - c.joint_margin_rad;
     const float margin_pos = std::max(usable_max - in.joint_rad, 0.0f);
     const float margin_neg = std::max(in.joint_rad - usable_min, 0.0f);
     const float capability = std::min(c.head_rate_max_rad_s, c.joint_rate_max_rad_s);
     const float budget_pos = safeOutwardRate(margin_pos, c, capability);
     const float budget_neg = safeOutwardRate(margin_neg, c, capability);
+    const float measured = in.joint_rate_rad_s;
+    out.outward_budget_pos_rad_s = budget_pos;
+    out.outward_budget_neg_rad_s = budget_neg;
+    out.brake_margin_pos_rad = margin_pos;
+    out.brake_margin_neg_rad = margin_neg;
+
+    const bool source_ok =
+        std::isfinite(in.head_rate_target_rad_s) && core::fresh(in.source_stamp, now, c.source_timeout_us);
+    const bool cycle_ok = previous && now > previous && now - previous <= c.max_cycle_us;
+    if (!in.permission_valid || !source_ok || !cycle_ok) {
+        // Degraded local path: the application keeps its encoder/manual loop,
+        // but the same outward envelope and over-envelope rule still apply, so a
+        // rejected allocation can never command motion toward a soft end.
+        dropPlans();
+        out.reason = !in.permission_valid ? WaitReason::Power : (!source_ok ? WaitReason::Command : WaitReason::Cycle);
+        float rate = std::clamp(c.joint_direction * in.head_rate_target_rad_s, -budget_neg, budget_pos);
+        if (measured > budget_pos) {
+            rate = std::min(rate, 0.0f);
+            out.travel_limited = true;
+        }
+        if (measured < -budget_neg) {
+            rate = std::max(rate, 0.0f);
+            out.travel_limited = true;
+        }
+        out.joint_rate_rad_s = rate;
+        out.joint_position_rad = std::clamp(in.joint_rad, joint_lo, joint_hi);
+        out.joint_rate_valid = true;
+        return out;
+    }
+    const float dt = static_cast<float>(now - previous) * 1e-6f;
+    const bool carrier_valid = in.carrier_valid && std::isfinite(in.carrier_rate_rad_s);
+    const float carrier = carrier_valid ? in.carrier_rate_rad_s : 0;
 
     // --- Carrier tracking supervision ---------------------------------------
     tracking_limited_ = carrier_valid && std::fabs(carrier - big_.rate_rad_s) > c.tracking_error_rad_s;
@@ -166,7 +184,11 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     if (vision && (!vision_seeded_ || in.vision_epoch != vision_epoch_)) {
         // Reseed from the measurement instead of chasing a coordinate from the
         // previous reference; the measured head angle is the only common point.
+        // The joint plan is realigned too, otherwise a manual lead built before
+        // the hand-over would still be executed as the first vision target.
         head_angle_plan_rad_ = in.head_angle_measured_rad;
+        joint_position_plan_rad_ = std::clamp(in.joint_rad, joint_lo, joint_hi);
+        out.joint_reseed_requested = true;
         vision_epoch_ = in.vision_epoch;
         vision_seeded_ = true;
     }
@@ -189,14 +211,14 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     // Relative joint rate in encoder coordinates: w_enc = direction*(w_head-carrier).
     float relative = std::clamp(c.joint_direction * (head_target - carrier), -budget_neg, budget_pos);
     bool travel_limited = relative != c.joint_direction * (head_target - carrier);
-    const float measured = in.joint_rate_rad_s;
-    if (measured > budget_pos) {
+    const bool over_pos = measured > budget_pos, over_neg = measured < -budget_neg;
+    if (over_pos) {
         // Already faster outward than the braking envelope allows: command at
         // most standstill and let the inward path stay available.
         relative = std::min(relative, 0.0f);
         travel_limited = true;
     }
-    if (measured < -budget_neg) {
+    if (over_neg) {
         relative = std::max(relative, 0.0f);
         travel_limited = true;
     }
@@ -208,7 +230,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         const float carrier_acceleration = in.carrier_acceleration_rad_s2;
         const float lo = std::max(acceleration_lo, carrier_acceleration - c.joint_acceleration_max_neg_rad_s2);
         const float hi = std::min(acceleration_hi, carrier_acceleration + c.joint_acceleration_max_pos_rad_s2);
-        if (lo < 0.0f && hi > 0.0f) {
+        if (lo <= hi) {
             acceleration_lo = lo;
             acceleration_hi = hi;
         }
@@ -221,8 +243,13 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     }
     const BoundedRateLimits head_limits{-c.head_rate_max_rad_s, c.head_rate_max_rad_s, acceleration_lo,
                                         acceleration_hi, c.head_jerk_max_rad_s3};
+    // The arbitrated vision acceleration is a bounded feedforward; the tracking
+    // term still closes the angle error inside the same window.
+    const float acceleration_feedforward =
+        vision ? std::clamp(in.vision_acceleration_rad_s2, acceleration_lo, acceleration_hi) : 0.0f;
     bool head_limited = false, head_conflict = false;
-    if (!stepBoundedRate(head_, (head_target - head_.rate_rad_s) / dt, dt, head_limits, head_limited, head_conflict)) {
+    if (!stepBoundedRate(head_, acceleration_feedforward + (head_target - head_.rate_rad_s) / dt, dt, head_limits,
+                         head_limited, head_conflict)) {
         dropPlans();
         out.reason = WaitReason::Configuration;
         return out;
@@ -289,9 +316,18 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
 
     // --- Planned angles (stage-C trajectory interface) -----------------------
     head_angle_plan_rad_ = std::remainder(head_angle_plan_rad_ + head_.rate_rad_s * dt, kTwoPi);
-    const float joint_lo = c.joint_min_rad + c.joint_margin_rad;
-    const float joint_hi = c.joint_max_rad - c.joint_margin_rad;
     float joint_rate = std::clamp(c.joint_direction * (head_.rate_rad_s - carrier), -budget_neg, budget_pos);
+    if (over_pos || over_neg) {
+        // Out of the braking envelope: forbid the outward direction at the final
+        // joint command, drop the accumulated lead and clear the same-direction
+        // head plan so the next cycle cannot rebuild it through the ramp.
+        joint_rate = over_pos ? std::min(joint_rate, 0.0f) : std::max(joint_rate, 0.0f);
+        joint_position_plan_rad_ = std::clamp(in.joint_rad, joint_lo, joint_hi);
+        out.joint_reseed_requested = true;
+        head_.rate_rad_s = over_pos ? std::min(head_.rate_rad_s, carrier) : std::max(head_.rate_rad_s, carrier);
+        head_.acceleration_rad_s2 = 0;
+        travel_limited = true;
+    }
     float joint_next = joint_position_plan_rad_ + joint_rate * dt;
     if (joint_next > joint_hi || joint_next < joint_lo) {
         // Never integrate the plan past the soft end, and never replay the
@@ -312,11 +348,8 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         c.joint_direction *
         (head_.acceleration_rad_s2 - (in.carrier_acceleration_valid ? in.carrier_acceleration_rad_s2 : 0.0f));
     out.center_error_rad = center_error_rad_;
-    out.outward_budget_pos_rad_s = budget_pos;
-    out.outward_budget_neg_rad_s = budget_neg;
-    out.brake_margin_pos_rad = margin_pos;
-    out.brake_margin_neg_rad = margin_neg;
-    out.travel_limited = travel_limited || head_limited;
+    out.joint_rate_valid = true;
+    out.travel_limited = travel_limited || head_limited || head_.conflict;
     out.tracking_limited = tracking_limited_;
     out.vision_mode = vision;
     out.enabled = true;

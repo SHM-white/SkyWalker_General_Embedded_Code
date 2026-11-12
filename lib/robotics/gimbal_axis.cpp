@@ -276,12 +276,22 @@ int GimbalAxis::updateTrajectory(const GimbalJointTrajectory &trajectory, Safety
         }
     }
     target_angle_rad_ = target;
+    // The feedforward must describe the same motion as the applied target. When
+    // the soft limit or the lead guard projected it, or the rate exceeds the axis
+    // capability, the inconsistent part is dropped instead of being handed to the
+    // position loop.
+    float reference_rate = std::clamp(trajectory.rate_rad_s, -config_.max_rate_rad_s, config_.max_rate_rad_s);
+    float reference_acceleration = trajectory.acceleration_rad_s2;
+    const bool projected = target_status_.mechanical_limited || target_status_.lead_limited;
+    if (projected) {
+        reference_rate = 0;
+        reference_acceleration = 0;
+    }
     target_status_.target_rad = target_angle_rad_;
     target_status_.target_valid = true;
-    target_status_.requested_rate_rad_s = trajectory.rate_rad_s;
-    target_status_.limited_rate_rad_s = std::clamp(trajectory.rate_rad_s, -config_.max_rate_rad_s,
-                                                   config_.max_rate_rad_s);
-    target_status_.rate_limited = target_status_.limited_rate_rad_s != trajectory.rate_rad_s;
+    target_status_.requested_rate_rad_s = reference_rate;
+    target_status_.limited_rate_rad_s = reference_rate;
+    target_status_.rate_limited = reference_rate != trajectory.rate_rad_s;
     target_status_.integration_dt_s = integration_dt;
     if (!initialized_) {
         observed_enable_generation_ = snapshot.enable_generation;
@@ -292,6 +302,12 @@ int GimbalAxis::updateTrajectory(const GimbalJointTrajectory &trajectory, Safety
     previous_mode_ = GimbalMode::AbsoluteAngle;
     // Position, rate and acceleration all come from the same feasible plan; the
     // position loop only has to supply the tracking correction.
-    return position_.update(target_angle_rad_, trajectory.rate_rad_s, trajectory.acceleration_rad_s2, dt);
+    return position_.update(target_angle_rad_, reference_rate, reference_acceleration, dt);
+}
+int GimbalAxis::reseedTargetFromFeedback() {
+    if (!configured_)
+        return -EACCES;
+    target_status_ = {};
+    return seed(drive_.snapshot());
 }
 } // namespace skywalker::robotics

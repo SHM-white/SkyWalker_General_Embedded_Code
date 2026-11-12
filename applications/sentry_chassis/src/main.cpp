@@ -181,6 +181,11 @@ int main() {
                 // Stop capture counts distinct wire requests; a cached payload
                 // read by several cycles must not look like new frames.
                 follow.request_sequence = big_input.request.stamp.sequence;
+                // The previous cycle's staged joint rate already contains the
+                // direction, ratio and native slew, so the heading target only
+                // advances by what the drive actually received.
+                follow.achieved_rate_valid = big_axis.nativeVelocityStaged();
+                follow.achieved_joint_rate_rad_s = big_axis.stagedJointRateRadS();
                 follow_error = heading_follower.step(follow, joint_rate);
             }
             if (follow_error < 0) {

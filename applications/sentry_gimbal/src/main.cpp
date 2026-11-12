@@ -135,7 +135,8 @@ int main() {
     core::TimeUs heading_loss_start_us = 0, heading_loss_duration_us = 0;
     imu::EstimatorDiagnostics loss_estimator{};
     CarrierAccelerationEstimator carrier_acceleration;
-    std::uint32_t vision_trajectory_sequence = 0;
+    std::uint32_t vision_trajectory_sequence = 0, last_heading_generation = 0;
+    std::uint64_t last_yaw_sequence = 0;
     for (;;) {
         // Snapshot before taking the validation time: a higher-priority IMU
         // update must not make a new gyro stamp appear to be in our future.
@@ -184,6 +185,11 @@ int main() {
         // Accelerations come only from two genuinely new gyro samples; repeated
         // reads keep the filtered value and gaps disable the feedforward.
         const auto &carrier_gyro = carrier_snapshot.sample.gyro_rad_s;
+        if (heading.generation != last_heading_generation) {
+            // A new software zero invalidates every derivative taken across it.
+            last_heading_generation = heading.generation;
+            carrier_acceleration.reset();
+        }
         carrier_acceleration.update(carrier_gyro.stamp.valid ? carrier_gyro.value.z
                                                              : std::numeric_limits<float>::quiet_NaN(),
                                     carrier_gyro.stamp, 0.02f, 50.0f);
@@ -225,11 +231,14 @@ int main() {
         std::uint32_t vision_epoch = 0;
         if (vision_selected) {
             const auto &v = selected_vision.value.yaw;
-            // Bounded prediction by the real sample age; the vision producer
-            // timestamps the target it sends.
-            const float age_s = now_us >= selected_vision.stamp.time_us
-                                    ? std::min(float(now_us - selected_vision.stamp.time_us) * 1e-6f, 0.05f)
-                                    : 0.05f;
+            // AB carries no sample timestamp: the decoder stamps the local byte
+            // reception time. Prediction is therefore limited to the measured
+            // local age plus the separately verified capture/transport latency;
+            // it must not be treated as the vision-side sample age.
+            const float local_age_s = now_us >= selected_vision.stamp.time_us
+                                          ? float(now_us - selected_vision.stamp.time_us) * 1e-6f
+                                          : 0.0f;
+            const float age_s = std::min(local_age_s + installed::vision_capture_latency_s, 0.05f);
             vision_angle_rad = v.angle_rad + v.rate_rad_s * age_s + 0.5f * v.acceleration_rad_s2 * age_s * age_s;
             vision_rate_rad_s = v.rate_rad_s;
             vision_acceleration_rad_s2 = v.acceleration_rad_s2;
@@ -294,15 +303,45 @@ int main() {
             // allocated joint rate, which already removed the measured carrier
             // rate; a rejected allocation falls back to the existing local
             // encoder/manual path instead of freezing the axis.
-            input.command.yaw_rate_rad_s = alloc.enabled ? alloc.joint_rate_rad_s
-                                                         : installed::small_yaw.direction * raw_head_rate_rad_s;
+            // The allocator also returns a protected rate on its degraded path,
+            // which keeps the outward envelope and the over-envelope rule.
+            input.command.yaw_rate_rad_s = alloc.joint_rate_valid
+                                               ? alloc.joint_rate_rad_s
+                                               : installed::small_yaw.direction * raw_head_rate_rad_s;
             input.command.pitch_rate_rad_s *= installed::pitch.direction;
         }
         if (!operator_state.run_allowed)
             input.command.mode = GimbalMode::Disabled;
         input.transport_ready = setup_ready;
+        // The travel envelope rejected this cycle's outward command: drop the
+        // accumulated Rate lead so the position loop cannot keep pulling the
+        // joint toward the soft end while the inward path stays available.
+        if (alloc.joint_reseed_requested && control_error == 0)
+            (void)gimbal.reseedYawTarget();
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
+        // One commit per physical bus, before the inter-board request is built:
+        // this cycle's Yaw execution and its CAN result decide whether a nonzero
+        // carrier intent may be published at all.
+        int yaw_commit_error = 0;
+        if (yaw_started) {
+            yaw_commit_error = yaw_bus.commit().error;
+            if (yaw_commit_error < 0)
+                status.error = yaw_commit_error;
+        }
+        if (pitch_started) {
+            const int error = pitch_bus.commit().error;
+            if (error < 0)
+                status.error = error;
+        }
+        const auto yaw_telemetry = gimbal.yawTelemetry();
+        const bool yaw_updated = yaw_telemetry.target_sequence != last_yaw_sequence;
+        last_yaw_sequence = yaw_telemetry.target_sequence;
+        // `RunStatus::Active` may come from Pitch alone, so the carrier request
+        // needs its own Yaw evidence: executed this cycle, output valid, CAN
+        // committed and the joint measurement still usable.
+        const bool yaw_cycle_ok =
+            control_error == 0 && yaw_updated && yaw_telemetry.output_valid && yaw_commit_error == 0 && joint_valid;
         if (now_ms >= next_send_ms) {
             next_send_ms = now_ms + 10;
             BigYawRequest request{};
@@ -312,10 +351,11 @@ int main() {
             request.permission = {operator_state.fresh, big_channel_ready, operator_state.remote.stamp};
             // Reference v4 world intent: the peer applies motor sign/gyro control.
             // Zero enable obtains initial real feedback before any nonzero follow.
-            request.mode = big_channel_ready ? BigYawMode::FollowCenter : BigYawMode::Disabled;
+            request.mode = big_channel_ready && yaw_cycle_ok ? BigYawMode::FollowCenter : BigYawMode::Disabled;
             // Allocated world intent. Zero whenever the carrier channel is not
-            // authorized or the allocation itself was rejected this cycle.
-            request.target_rate_rad_s = big_channel_ready && peer_feedback_valid && alloc.enabled
+            // authorized, the allocation was rejected, or this cycle's Yaw did
+            // not execute and commit.
+            request.target_rate_rad_s = big_channel_ready && yaw_cycle_ok && peer_feedback_valid && alloc.enabled
                                             ? alloc.big.rate_rad_s
                                             : 0;
             if (peer_state.online && peer_state.peer.sender_boot_id) {
@@ -342,16 +382,6 @@ int main() {
             if (wheel_command.mode != ChassisMode::Disabled)
                 wheel_command.wz_rad_s = operator_state.spin_requested ? installed::manual_max_wz_rad_s : 0;
             endpoint.submit(wheel_command);
-        }
-        if (yaw_started) {
-            const int error = yaw_bus.commit().error;
-            if (error < 0)
-                status.error = error;
-        }
-        if (pitch_started) {
-            const int error = pitch_bus.commit().error;
-            if (error < 0)
-                status.error = error;
         }
         endpoint.setStatus(status);
         const auto reason = !setup_ready || onboard_error                ? installed::DiagnosticReason::InitFailed
@@ -410,6 +440,7 @@ int main() {
             float((alloc.enabled ? 1u : 0u) | (alloc.travel_limited ? 2u : 0u) |
                   (alloc.big_saturated ? 4u : 0u) | (alloc.tracking_limited ? 8u : 0u) |
                   (allocation.big_yaw_available ? 16u : 0u) | (alloc.vision_mode ? 512u : 0u) |
+                  (alloc.joint_reseed_requested ? 1024u : 0u) |
                   (static_cast<unsigned>(alloc.reason) << 5))}; // I48 allocation flags/reason
         diagnostics.status({.reason = reason,
                             .valid = joint_valid,

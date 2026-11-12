@@ -61,6 +61,10 @@ public:
     control::PositionMotor::Telemetry pitchTelemetry() const {
         return pitch_.telemetry();
     }
+    // Drop the accumulated Yaw lead and reseed it from the current feedback.
+    int reseedYawTarget() {
+        return yaw_.reseedTargetFromFeedback();
+    }
     const GimbalAxis::TargetStatus &yawTargetDiagnostics() const {
         return yaw_.targetStatus();
     }

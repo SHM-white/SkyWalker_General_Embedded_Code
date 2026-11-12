@@ -82,6 +82,10 @@ public:
     // optional lead guard are applied to the target; no rate is integrated, so a
     // rejected cycle can never leave a deferred position target behind.
     int updateTrajectory(const GimbalJointTrajectory &, SafetyAction, float dt_s);
+    // Drop the accumulated Rate/trajectory lead and reseed the joint target from
+    // the current feedback. Used when the travel envelope rejects an outward
+    // command so the position loop cannot keep pulling toward the soft end.
+    int reseedTargetFromFeedback();
     double targetAngleRad() const {
         return target_angle_rad_;
     }

@@ -35,8 +35,10 @@ void BigYawWorldHeadingFollower::reset() {
     world_plan_ = {};
     limit_flags_ = 0;
     stop_capture_flag_ = false;
+    stop_capture_latched_ = false;
     stop_capture_start_ms_ = stop_capture_last_ms_ = 0;
     stop_capture_sequences_ = last_stop_sequence_ = 0;
+    world_applied_rad_s_ = 0;
 }
 int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &joint_rate_rad_s) {
     joint_rate_rad_s = 0;
@@ -65,6 +67,7 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
         last_peer_boot_id_ = h.sender_boot_id;
         last_zero_generation_ = h.zero_generation;
         target_heading_rad_ = heading;
+        world_applied_rad_s_ = 0;
         ++diagnostics_.capture_count;
         diagnostics_.capture_reason = 1;
         diagnostics_.capture_ms = in.now_ms;
@@ -75,10 +78,15 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
     // watch the joint chase a target that lagged behind the measurement.
     if (config_.stop_capture_dwell_s > 0) {
         // Dwell form: only a sustained low-speed intent carried by new request
-        // frames counts. A slow zero-band crossing exits before the dwell.
+        // frames counts, and the capture happens once per stop. The latch holds
+        // until the request leaves the zero band or the session/reference changes.
         const float magnitude = std::fabs(requested);
-        if (magnitude > config_.stop_capture_exit_rad_s)
+        if (magnitude > config_.stop_capture_exit_rad_s) {
             stop_capture_flag_ = false;
+            stop_capture_latched_ = false;
+        }
+        else if (stop_capture_latched_)
+            limit_flags_ |= 16;
         else if (magnitude <= config_.stop_capture_enter_rad_s) {
             if (!stop_capture_flag_) {
                 stop_capture_flag_ = true;
@@ -96,26 +104,37 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
                 stop_capture_sequences_ >= config_.stop_capture_min_sequences) {
                 target_heading_rad_ = heading;
                 rate_integral_rad_s_ = 0;
+                world_applied_rad_s_ = 0;
                 ++diagnostics_.capture_count;
                 diagnostics_.capture_reason = 3;
                 diagnostics_.capture_ms = in.now_ms;
                 stop_capture_flag_ = false;
+                stop_capture_latched_ = true;
             }
+            else
+                limit_flags_ |= 16;
         }
-        if (stop_capture_flag_)
-            limit_flags_ |= 16;
     }
     else if (std::fabs(requested) <= config_.release_epsilon_rad_s &&
              std::fabs(previous_requested_rate_rad_s_) > config_.release_epsilon_rad_s) {
         target_heading_rad_ = heading;
         rate_integral_rad_s_ = 0;
+        world_applied_rad_s_ = 0;
         ++diagnostics_.capture_count;
         diagnostics_.capture_reason = 2;
         diagnostics_.capture_ms = in.now_ms;
     }
     previous_requested_rate_rad_s_ = requested;
     const float dt = std::min(in.dt_s, config_.max_dt_s);
-    float error = wrap(target_heading_rad_ + requested * dt - heading);
+    // Advance the heading target by the world rate the actuator actually got:
+    // the shuttle, the joint capability and the native slew are already inside
+    // that value, so a saturated axis cannot accumulate a target debt.
+    const float applied_world_rate =
+        in.achieved_rate_valid && std::isfinite(in.achieved_joint_rate_rad_s)
+            ? in.achieved_joint_rate_rad_s + in.body_rate_rad_s
+            : world_applied_rad_s_;
+    target_heading_rad_ = wrap(target_heading_rad_ + applied_world_rate * dt);
+    float error = wrap(target_heading_rad_ - heading);
     const bool clamping = std::fabs(error) > config_.heading_error_max_rad;
     if (clamping && !diagnostic_clamping_)
         ++diagnostics_.clamp_count;
@@ -179,6 +198,9 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
     // The world window already contains the joint capability, so this final
     // clamp only protects against a rounding excursion.
     joint_rate_rad_s = std::clamp(world_capped - in.body_rate_rad_s, -joint_capacity, joint_capacity);
+    // Remember what this cycle asked for; the next cycle integrates it unless the
+    // caller supplies the executor's staged joint rate.
+    world_applied_rad_s_ = world_capped;
     heading_error_rad_ = error;
     world_rate_rad_s_ = world;
     return 0;
