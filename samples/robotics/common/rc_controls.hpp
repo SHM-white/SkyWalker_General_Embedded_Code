@@ -23,6 +23,8 @@ inline communication::RemoteReceiver::Config receiverConfig() {
 
 // 统一键位：左 Down=安全、Middle=导航、Up=手动；右 Down=小陀螺、
 // Middle=不请求机构（键鼠样例选择键鼠）、Up=摩擦轮与拨弹。
+// 右侧波轮（弹簧回中）不映射到云台/平移：在 sentry_gimbal 中作为小陀螺的
+// 模拟强度输入（符号决定转向，幅度缩放速度曲线），回中时退回开关的满速曲线。
 enum class RcMode : std::uint8_t { Safe, Navigation, Manual };
 
 struct RcControlState {

@@ -161,7 +161,12 @@ int main() {
             operator_state.run_allowed = false;
         }
         commands.setOperatorGate(operator_state.run_allowed, 0);
-        const auto spin_out = spin.update(operator_state.spin_requested, operator_state.run_allowed, now_us);
+        // The DR16 dial (spring-centred wheel) is the analog spin control. It
+        // only scales and signs the chassis spin rate: translation still comes
+        // from the sticks and the gimbal command is untouched.
+        const float spin_dial = samples::control::RcControlAdapter::normalize(operator_state.remote.analog.wheel);
+        const auto spin_out =
+            spin.update(operator_state.spin_requested, operator_state.run_allowed, spin_dial, now_us);
         (void)commands.snapshot(frame);
         const auto heading = planarYawHeading(carrier_snapshot, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);

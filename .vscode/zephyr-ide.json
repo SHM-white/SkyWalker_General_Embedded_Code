@@ -1,0 +1,1972 @@
+{
+  "projects": {
+    "can_smoke": {
+      "relPath": "samples/motor/can_smoke",
+      "name": "can_smoke",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dji_unified": {
+      "relPath": "samples/motor/dji_unified",
+      "name": "dji_unified",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        },
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "Profile"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "control": {
+      "relPath": "samples/control",
+      "name": "control",
+      "buildConfigs": {
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          }
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dji_speed_control": {
+      "relPath": "samples/motor/dji_speed_control",
+      "name": "dji_speed_control",
+      "buildConfigs": {
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "Profile"
+        },
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dji_position_control": {
+      "relPath": "samples/motor/dji_position_control",
+      "name": "dji_position_control",
+      "buildConfigs": {
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "Profile"
+        },
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dm_mit_control": {
+      "relPath": "samples/motor/dm_mit_control",
+      "name": "dm_mit_control",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "m2006_speed_control": {
+      "relPath": "samples/motor/m2006_speed_control",
+      "name": "m2006_speed_control",
+      "buildConfigs": {
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "Profile"
+        },
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dm_position_control": {
+      "relPath": "samples/motor/dm_position_control",
+      "name": "dm_position_control",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dm_mit_position_control": {
+      "relPath": "samples/motor/dm_mit_position_control",
+      "name": "dm_mit_position_control",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dm_mit_velocity_control": {
+      "relPath": "samples/motor/dm_mit_velocity_control",
+      "name": "dm_mit_velocity_control",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dr16": {
+      "relPath": "samples/communication/dr16",
+      "name": "dr16",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        },
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "STLink"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "sentry_chassis": {
+      "relPath": "applications/sentry_chassis",
+      "name": "sentry_chassis",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 Chassis DAPLink"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "sentry_gimbal": {
+      "relPath": "applications/sentry_gimbal",
+      "name": "sentry_gimbal",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 Gimbal DAPLink"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_control": {
+      "relPath": "samples/robotics/gimbal_control",
+      "name": "gimbal_control",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "recovery": {
+      "relPath": "samples/motor/recovery",
+      "name": "recovery",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "swerve": {
+      "relPath": "samples/robotics/swerve",
+      "name": "swerve",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "yaw_gimbal": {
+      "relPath": "samples/robotics/yaw_gimbal",
+      "name": "yaw_gimbal",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_shared_can": {
+      "relPath": "samples/robotics/gimbal_shared_can",
+      "name": "gimbal_shared_can",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dual_imu": {
+      "relPath": "samples/imu/dual_imu",
+      "name": "dual_imu",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          }
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dm_velocity_control": {
+      "relPath": "samples/motor/dm_velocity_control",
+      "name": "dm_velocity_control",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "four_swerve": {
+      "relPath": "samples/robotics/four_swerve",
+      "name": "four_swerve",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "dual_yaw_centering": {
+      "relPath": "samples/robotics/dual_yaw_centering",
+      "name": "dual_yaw_centering",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_big_yaw": {
+      "relPath": "samples/bringup/chassis_big_yaw",
+      "name": "chassis_big_yaw",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_drive_link": {
+      "relPath": "samples/bringup/chassis_drive_link",
+      "name": "chassis_drive_link",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_four_modules": {
+      "relPath": "samples/bringup/chassis_four_modules",
+      "name": "chassis_four_modules",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_io": {
+      "relPath": "samples/bringup/chassis_io",
+      "name": "chassis_io",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_link_observe": {
+      "relPath": "samples/bringup/chassis_link_observe",
+      "name": "chassis_link_observe",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_module_fl": {
+      "relPath": "samples/bringup/chassis_module_fl",
+      "name": "chassis_module_fl",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_module_fr": {
+      "relPath": "samples/bringup/chassis_module_fr",
+      "name": "chassis_module_fr",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_module_rl": {
+      "relPath": "samples/bringup/chassis_module_rl",
+      "name": "chassis_module_rl",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_module_rr": {
+      "relPath": "samples/bringup/chassis_module_rr",
+      "name": "chassis_module_rr",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_big_yaw_command": {
+      "relPath": "samples/bringup/gimbal_big_yaw_command",
+      "name": "gimbal_big_yaw_command",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_drive_command": {
+      "relPath": "samples/bringup/gimbal_drive_command",
+      "name": "gimbal_drive_command",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_dual_yaw": {
+      "relPath": "samples/bringup/gimbal_dual_yaw",
+      "name": "gimbal_dual_yaw",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_head_imu": {
+      "relPath": "samples/bringup/gimbal_head_imu",
+      "name": "gimbal_head_imu",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_inertial_pair": {
+      "relPath": "samples/bringup/gimbal_inertial_pair",
+      "name": "gimbal_inertial_pair",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_inertial_yaw": {
+      "relPath": "samples/bringup/gimbal_inertial_yaw",
+      "name": "gimbal_inertial_yaw",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_io": {
+      "relPath": "samples/bringup/gimbal_io",
+      "name": "gimbal_io",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_joint_pair": {
+      "relPath": "samples/bringup/gimbal_joint_pair",
+      "name": "gimbal_joint_pair",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_link_observe": {
+      "relPath": "samples/bringup/gimbal_link_observe",
+      "name": "gimbal_link_observe",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_pitch_encoder": {
+      "relPath": "samples/bringup/gimbal_pitch_encoder",
+      "name": "gimbal_pitch_encoder",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_remote": {
+      "relPath": "samples/bringup/gimbal_remote",
+      "name": "gimbal_remote",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "gimbal_yaw_encoder": {
+      "relPath": "samples/bringup/gimbal_yaw_encoder",
+      "name": "gimbal_yaw_encoder",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "interboard": {
+      "relPath": "samples/communication/interboard",
+      "name": "interboard",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "referee": {
+      "relPath": "samples/communication/referee",
+      "name": "referee",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "vision": {
+      "relPath": "samples/communication/vision",
+      "name": "vision",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "cpp_test": {
+      "relPath": "samples/cpp_test",
+      "name": "cpp_test",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "hello": {
+      "relPath": "samples/hello",
+      "name": "hello",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "imu_test": {
+      "relPath": "samples/imu_test",
+      "name": "imu_test",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "m2006_position_control": {
+      "relPath": "samples/motor/m2006_position_control",
+      "name": "m2006_position_control",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        },
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "STLink"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "mixed_topology": {
+      "relPath": "samples/motor/mixed_topology",
+      "name": "mixed_topology",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "big_yaw": {
+      "relPath": "samples/robotics/big_yaw",
+      "name": "big_yaw",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "big_yaw_interboard": {
+      "relPath": "samples/robotics/big_yaw_interboard",
+      "name": "big_yaw_interboard",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "chassis_power": {
+      "relPath": "samples/robotics/chassis_power",
+      "name": "chassis_power",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "command_gimbal": {
+      "relPath": "samples/robotics/command_gimbal",
+      "name": "command_gimbal",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "command_manager": {
+      "relPath": "samples/robotics/command_manager",
+      "name": "command_manager",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "command_safety": {
+      "relPath": "samples/robotics/command_safety",
+      "name": "command_safety",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        },
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "STLink"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "execution_skeleton": {
+      "relPath": "samples/robotics/execution_skeleton",
+      "name": "execution_skeleton",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        },
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "STLink"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "inertial_gimbal": {
+      "relPath": "samples/robotics/inertial_gimbal",
+      "name": "inertial_gimbal",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "shooter_bench": {
+      "relPath": "samples/robotics/shooter_bench",
+      "name": "shooter_bench",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "vehicle_integration": {
+      "relPath": "samples/robotics/vehicle_integration",
+      "name": "vehicle_integration",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    },
+    "status_led": {
+      "relPath": "samples/status_led",
+      "name": "status_led",
+      "buildConfigs": {
+        "build/dm_mc02/stm32h723xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "damiao/dm_mc02",
+          "board": "dm_mc02/stm32h723xx",
+          "name": "build/dm_mc02/stm32h723xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "DM MC02 OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
+    }
+  },
+  "runnerProfiles": [
+    {
+      "name": "DM MC02 OpenOCD",
+      "flash": {
+        "kind": "west-flash",
+        "runner": "openocd"
+      },
+      "debug": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      },
+      "attach": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      }
+    },
+    {
+      "name": "STLink",
+      "flash": {
+        "kind": "west-flash",
+        "runner": "stlink"
+      },
+      "debug": {
+        "kind": "cortex-debug",
+        "runner": "stlink"
+      },
+      "attach": {
+        "kind": "cortex-debug",
+        "runner": "stlink"
+      }
+    },
+    {
+      "name": "DM MC02 Chassis DAPLink",
+      "flash": {
+        "kind": "west-flash",
+        "runner": "openocd",
+        "extraArgs": [
+          "--cmd-pre-init",
+          "adapter serial 288485685614"
+        ]
+      },
+      "debug": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      },
+      "attach": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      }
+    },
+    {
+      "name": "DM MC02 Gimbal DAPLink",
+      "flash": {
+        "kind": "west-flash",
+        "runner": "openocd",
+        "extraArgs": [
+          "--cmd-pre-init",
+          "adapter serial 134244834173"
+        ]
+      },
+      "debug": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      },
+      "attach": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      }
+    }
+  ],
+  "toolchains": [
+    "aarch64-zephyr-elf",
+    "arc-zephyr-elf",
+    "arc64-zephyr-elf",
+    "arm-zephyr-eabi",
+    "microblazeel-zephyr-elf",
+    "mips-zephyr-elf",
+    "or1k-zephyr-elf",
+    "riscv64-zephyr-elf",
+    "rx-zephyr-elf",
+    "sparc-zephyr-elf",
+    "x86_64-zephyr-elf",
+    "xtensa-amd_acp_6_0_adsp_zephyr-elf",
+    "xtensa-amd_acp_7_0_adsp_zephyr-elf",
+    "xtensa-amd_acp_7_3_adsp_zephyr-elf",
+    "xtensa-dc233c_zephyr-elf",
+    "xtensa-espressif_esp32_zephyr-elf",
+    "xtensa-espressif_esp32s2_zephyr-elf",
+    "xtensa-espressif_esp32s3_zephyr-elf",
+    "xtensa-intel_ace15_mtpm_zephyr-elf",
+    "xtensa-intel_ace30_ptl_zephyr-elf",
+    "xtensa-intel_ace40_zephyr-elf",
+    "xtensa-intel_tgl_adsp_zephyr-elf",
+    "xtensa-mtk_mt8195_adsp_zephyr-elf"
+  ],
+  "blobs": [
+    "hal_stm32"
+  ]
+}
