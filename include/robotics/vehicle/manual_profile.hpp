@@ -1,5 +1,6 @@
 #pragma once
 
+#include <robotics/chassis/spin_speed_profile.hpp>
 #include <robotics/command/command_manager.hpp>
 #include <robotics/gimbal/inertial_gimbal.hpp>
 #include <robotics/gimbal/yaw_centering.hpp>
@@ -29,6 +30,16 @@ inline InertialGimbalAdapter::Config manualInertialConfig() {
     c.allow_unknown_quality = true;
     return c;
 }
+// 调参：变速小陀螺。曲线本身在 calibration.hpp 的 spinRateCurveRadS()。
+inline constexpr SpinSpeedProfile::Config spinProfileConfig() {
+    SpinSpeedProfile::Config c{};
+    c.max_rate_rad_s = spin_rate_max_rad_s;
+    c.acceleration_limit_rad_s2 = spin_acceleration_limit_rad_s2;
+    c.deceleration_rad_s2 = spin_deceleration_rad_s2;
+    c.stop_epsilon_rad_s = spin_stop_epsilon_rad_s;
+    return c;
+}
+static_assert(spinProfileConfig().max_rate_rad_s > 0);
 inline YawCenteringController::Config manualCenteringConfig() {
     YawCenteringController::Config c{};
     c.center_rad = yaw_center_rad;

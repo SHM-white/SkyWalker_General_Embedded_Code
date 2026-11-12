@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cfloat>
+#include <cmath>
 #include <cstdint>
 #include <core/measurement.hpp>
 
@@ -158,6 +160,32 @@ inline constexpr float manual_max_vx_m_s = 1.0f, manual_max_vy_m_s = 1.0f, manua
 inline constexpr float manual_max_gimbal_yaw_rate_rad_s = 3.0f, manual_max_gimbal_pitch_rate_rad_s = 3.0f;
 // 调参：小陀螺边平移的参考倍率；0..1。
 inline constexpr float chassis_spin_forward_scale = 1.0f, chassis_spin_lateral_scale = 1.0f;
+
+// ======================= 变速小陀螺 =======================
+// 调参入口就是下面的 spinRateCurveRadS()：它是纯函数，输入“本次开启小陀螺后的
+// 时间”，输出该时刻的目标车体世界自转角速度（rad/s，逆时针为正）。想改成
+// 分段、正弦摆动或反向都只改这一个函数，其它逻辑（开关、松手回零、撤销停机）
+// 由 SpinSpeedProfile 负责。
+// 平台速度上限；曲线返回值的绝对值也会被夹到这个范围。
+inline constexpr float spin_rate_max_rad_s = manual_max_wz_rad_s;
+// 曲线默认斜坡时间：从 0 平滑升到平台速度所需时间。
+inline constexpr float spin_ramp_up_s = 1.2f;
+// 开启过程中对“目标幅值变大”的斜率限制；0 表示完全跟随曲线本身。
+inline constexpr float spin_acceleration_limit_rad_s2 = 0.0f;
+// 松手后回零的减速度上限，避免 6 rad/s 直接阶跃到 0。
+inline constexpr float spin_deceleration_rad_s2 = 6.0f;
+// 回零判定阈值：低于该速率直接锁存为 0。
+inline constexpr float spin_stop_epsilon_rad_s = 0.01f;
+
+inline float spinRateCurveRadS(float elapsed_s) {
+    // 默认曲线：smoothstep 起步 → 平台。elapsed_s 小于 0 视为 0。
+    const float ramp = spin_ramp_up_s > 0 ? std::clamp(elapsed_s / spin_ramp_up_s, 0.0f, 1.0f) : 1.0f;
+    const float shaped = ramp * ramp * (3.0f - 2.0f * ramp);
+    return spin_rate_max_rad_s * shaped;
+}
+static_assert(positive(spin_rate_max_rad_s) && spin_ramp_up_s >= 0 && spin_acceleration_limit_rad_s2 >= 0 &&
+                  spin_deceleration_rad_s2 > 0 && spin_stop_epsilon_rad_s >= 0,
+              "variable-speed spin profile must be valid");
 // 调参：舵轮启停迟滞，单位 m/s；与轮轴角度/线速度无关。
 inline constexpr float chassis_zero_speed_epsilon_m_s = 0.01f, chassis_resume_speed_m_s = 0.02f;
 // 调参：底盘运动适配器的车体 wz 上限、舵向目标速率和驱动/舵向参考斜率。

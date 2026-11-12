@@ -83,6 +83,8 @@ int main() {
     // The allocator splits one head world-rate target between the big Yaw
     // carrier and the small Yaw joint; it owns no motor and no CAN frame.
     static DualYawMotionAllocator dual_yaw(installed::dualYawAllocatorConfig());
+    // Variable-speed top spin: the curve is vehicle::spinRateCurveRadS().
+    static SpinSpeedProfile spin(installed::spinProfileConfig());
     static motor::Motor yaw(installed::yawHardware()), pitch(installed::pitchHardware());
     static motor::CanBus yaw_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
     static motor::CanBus pitch_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
@@ -159,6 +161,7 @@ int main() {
             operator_state.run_allowed = false;
         }
         commands.setOperatorGate(operator_state.run_allowed, 0);
+        const auto spin_out = spin.update(operator_state.spin_requested, operator_state.run_allowed, now_us);
         (void)commands.snapshot(frame);
         const auto heading = planarYawHeading(carrier_snapshot, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);
@@ -380,7 +383,7 @@ int main() {
             if (!operator_state.run_allowed)
                 wheel_command.mode = ChassisMode::Disabled;
             if (wheel_command.mode != ChassisMode::Disabled)
-                wheel_command.wz_rad_s = operator_state.spin_requested ? installed::manual_max_wz_rad_s : 0;
+                wheel_command.wz_rad_s = spin_out.applied_rad_s;
             endpoint.submit(wheel_command);
         }
         endpoint.setStatus(status);
@@ -397,9 +400,6 @@ int main() {
             installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
         const auto &ed = carrier_snapshot.diagnostics.estimator;
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
-        const auto elapsed_ms = [now_us](core::TimeUs stamp) {
-            return stamp && now_us >= stamp ? float(now_us - stamp) * .001f : -1.0f;
-        };
         // Fixed channel map documented in docs/dev/大Yaw突发跟转诊断操作指南.md
         // (schema 104, I19..I48).
         const std::array<float, 30> trace{
@@ -431,7 +431,7 @@ int main() {
             peer_feedback_valid ? float(feedback.armed) : unavailable,   // I39 peer armed
             float(age(carrier_snapshot.sample.orientation.stamp, now_us)), // I40 orientation age
             float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)), // I41 gyro age
-            elapsed_ms(ed.last_tracking_us),                             // I42 last Tracking age
+            spin_out.applied_rad_s,                                      // I42 applied variable spin rate
             std::min(alloc.brake_margin_pos_rad, alloc.brake_margin_neg_rad), // I43 tightest outward travel
             float(heading_loss_duration_us) * .001f,                     // I44 current/last loss duration
             float(dt_us),                                                // I45 current cycle
