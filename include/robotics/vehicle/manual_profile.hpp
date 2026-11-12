@@ -39,8 +39,12 @@ inline InertialGimbalAdapter::Config sentryInertialConfig() {
     // 头部实测角速度误差的阻尼系数，抑制惯性外环超调。
     c.gyro_damping = 0.1f;
     c.pitch.max_rate_rad_s = manual_max_gimbal_pitch_rate_rad_s;
-    // 世界目标最大超前角，单位 rad；失能/断流另外通过应用清除旧目标。
+    // 世界 Yaw 目标最大超前角，单位 rad；失能/断流另外通过应用清除旧目标。
     c.max_goal_lead_rad = dualYawAllocatorConfig().head_angle_lead_max_rad;
+    // Pitch 不套用同一超前角：Rate 模式的 Pitch 目标是积分器，钳制会把它
+    // 钉在“实测+超前角”上，松杆后持续朝限位爬行并在端点锁死。绝对视觉目标
+    // 也先保持不钳制，等 Pitch 方向与机械端点实测后再单独评估。
+    c.pitch_max_goal_lead_rad = 0;
     return c;
 }
 // 调参：变速小陀螺。曲线本身在 calibration.hpp 的 spinRateCurveRadS()。

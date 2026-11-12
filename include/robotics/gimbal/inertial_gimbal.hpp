@@ -50,9 +50,15 @@ public:
         float stable_yaw_error_rad = 0.05f, stable_pitch_error_rad = 0.05f;
         bool pitch_locked = true;
         bool allow_unknown_quality = false;
-        // Maximum target lead relative to measured head attitude, rad. Zero
-        // preserves legacy behavior; a positive value discards tracking debt.
+        // Maximum world-Yaw goal lead relative to measured head attitude, rad.
+        // Zero preserves legacy behavior. The Yaw goal is an absolute world
+        // reference, so this only caps the correction this cycle.
         float max_goal_lead_rad = 0;
+        // Same cap for an absolute world-Pitch target. The Rate-mode Pitch goal
+        // is an integrator and is never re-clamped here, because pinning it to
+        // the measurement would keep the error one lead ahead forever. Zero
+        // (default) disables the cap.
+        float pitch_max_goal_lead_rad = 0;
     };
 
     explicit InertialGimbalAdapter(const Config &config) : config_(config) {
