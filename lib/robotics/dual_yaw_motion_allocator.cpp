@@ -82,6 +82,7 @@ int DualYawMotionAllocator::validate() const {
 }
 
 void DualYawMotionAllocator::dropPlans() {
+    head_intent_ = {};
     head_ = {};
     big_ = {};
     slow_rad_s_ = 0;
@@ -195,7 +196,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     if (!vision)
         vision_seeded_ = false;
 
-    // --- Feasible head rate --------------------------------------------------
+    // --- Active head intent --------------------------------------------------
     float head_target;
     if (vision) {
         // The sustained rate feedforward keeps the verified budget; the angle
@@ -208,6 +209,27 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     }
     else
         head_target = std::clamp(in.head_rate_target_rad_s, -steady, steady);
+
+    // 独立保存主动目标：触限保护可能把可行枪头速度推到载体当前速度，
+    // 但这种被动随动不能反馈成大 Yaw 的新意图，否则松杆后仍会持续转动。
+    // 主动计划只使用世界速度/加速度/jerk 预算，不使用载体引起的关节约束窗口。
+    const float intent_target = head_target;
+    const BoundedRateLimits intent_limits{-c.head_rate_max_rad_s, c.head_rate_max_rad_s,
+                                          -c.head_acceleration_max_rad_s2, c.head_acceleration_max_rad_s2,
+                                          c.head_jerk_max_rad_s3};
+    const float intent_feedforward = vision ? std::clamp(in.vision_acceleration_rad_s2,
+                                                         -c.head_acceleration_max_rad_s2,
+                                                         c.head_acceleration_max_rad_s2)
+                                             : 0.0f;
+    bool intent_limited = false, intent_conflict = false;
+    if (!stepBoundedRate(head_intent_, intent_feedforward + (intent_target - head_intent_.rate_rad_s) / dt,
+                         dt, intent_limits, intent_limited, intent_conflict)) {
+        dropPlans();
+        out.reason = WaitReason::Configuration;
+        return out;
+    }
+
+    // --- Feasible head rate --------------------------------------------------
     // Relative joint rate in encoder coordinates: w_enc = direction*(w_head-carrier).
     float relative = std::clamp(c.joint_direction * (head_target - carrier), -budget_neg, budget_pos);
     bool travel_limited = relative != c.joint_direction * (head_target - carrier);
@@ -258,7 +280,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     // --- Slow component and centering ---------------------------------------
     const float center_error_target = c.joint_direction * (in.joint_rad - c.joint_center_rad);
     if (!initialized_) {
-        slow_rad_s_ = head_.rate_rad_s;
+        slow_rad_s_ = head_intent_.rate_rad_s;
         center_error_rad_ = center_error_target;
         if (!vision_seeded_ && std::isfinite(in.head_angle_measured_rad))
             head_angle_plan_rad_ = in.head_angle_measured_rad;
@@ -269,7 +291,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     const float tau = vision ? c.vision_slow_tau_s : c.slow_tau_s;
     const float alpha = 1.0f - std::exp(-dt / tau);
     const float slow_previous = slow_rad_s_;
-    slow_rad_s_ += alpha * (head_.rate_rad_s - slow_rad_s_);
+    slow_rad_s_ += alpha * (head_intent_.rate_rad_s - slow_rad_s_);
     center_error_rad_ += alpha * (center_error_target - center_error_rad_);
     const float slow_acceleration = (slow_rad_s_ - slow_previous) / dt;
     const float center_rate = std::clamp(c.center_kp_rad_s_per_rad * softDeadband(center_error_rad_, c.center_deadband_rad),
@@ -293,14 +315,18 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     }
 
     // --- Standstill latch ----------------------------------------------------
-    const bool still = std::fabs(head_target) <= c.still_rate_epsilon_rad_s &&
+    const bool still = std::fabs(intent_target) <= c.still_rate_epsilon_rad_s &&
+                       std::fabs(head_intent_.rate_rad_s) <= c.still_rate_epsilon_rad_s &&
+                       std::fabs(head_target) <= c.still_rate_epsilon_rad_s &&
                        std::fabs(head_.rate_rad_s) <= c.still_rate_epsilon_rad_s &&
                        std::fabs(slow_rad_s_) <= c.still_rate_epsilon_rad_s &&
                        std::fabs(center_rate) <= c.still_rate_epsilon_rad_s &&
                        std::fabs(big_.rate_rad_s) <= c.still_rate_epsilon_rad_s &&
                        std::fabs(big_.acceleration_rad_s2) <= c.still_acceleration_epsilon_rad_s2 &&
-                       std::fabs(head_.acceleration_rad_s2) <= c.still_acceleration_epsilon_rad_s2;
-    const bool release = std::fabs(head_target) > c.still_rate_epsilon_rad_s ||
+                       std::fabs(head_.acceleration_rad_s2) <= c.still_acceleration_epsilon_rad_s2 &&
+                       std::fabs(head_intent_.acceleration_rad_s2) <= c.still_acceleration_epsilon_rad_s2;
+    const bool release = std::fabs(intent_target) > c.still_rate_epsilon_rad_s ||
+                         std::fabs(head_target) > c.still_rate_epsilon_rad_s ||
                          std::fabs(center_rate) > c.still_rate_epsilon_rad_s;
     if (still)
         still_latched_ = true;
@@ -309,6 +335,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     if (still_latched_) {
         // Latch an exact zero request so a sub-threshold command cannot leak a
         // non-zero world rate into the peer every 10 ms.
+        head_intent_ = {};
         head_ = {};
         big_ = {};
         slow_rad_s_ = 0;

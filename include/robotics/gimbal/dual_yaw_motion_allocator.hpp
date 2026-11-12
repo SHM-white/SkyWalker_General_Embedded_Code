@@ -16,11 +16,12 @@ namespace skywalker::robotics {
 //
 //   w_head = w_big + direction_s * qdot_small   (all at the head, CCW positive)
 //
-// The feasible head rate is bounded by the (brake-distance limited) small-Yaw
-// travel around the carrier measurement. A low-passed copy of that rate drives
-// the big-Yaw world intent, so the carrier takes the sustained component while
-// the small Yaw keeps the high-frequency residual. A centre term biases the
-// big-Yaw intent towards bringing the small Yaw back to its mechanical centre.
+// The active head intent has its own bounded rate plan. A low-passed copy of
+// that intent drives the big Yaw, with a centre term bringing the small Yaw
+// back to its mechanical centre. Separately, the feasible head rate is bounded
+// by the small-Yaw braking/travel envelope around the measured carrier rate.
+// This protection may force the head to follow a moving carrier temporarily;
+// that passive motion must never become a new active big-Yaw request.
 //
 // Coordinates: angles in rad, rates in rad/s, accelerations in rad/s^2, jerk in
 // rad/s^3. The joint angle/rate are encoder coordinates; the world values are
@@ -44,7 +45,7 @@ struct DualYawAllocatorConfig {
     float big_acceleration_max_rad_s2 = 4.0f;
     float big_jerk_max_rad_s3 = 0;
     float big_track_gain_s_inv = 2.0f;
-    // First-order low pass on the feasible head rate.
+    // First-order low pass on the bounded active head intent, before travel protection.
     float slow_tau_s = 0.1f;
     // Vision keeps more of the carrier motion in the big Yaw, so its slow filter
     // is deliberately longer than the manual one.
@@ -196,7 +197,8 @@ public:
 private:
     void dropPlans();
     DualYawAllocatorConfig config_{};
-    BoundedRatePlan head_{}, big_{};
+    // Active intent stays independent of carrier-induced travel protection.
+    BoundedRatePlan head_intent_{}, head_{}, big_{};
     core::TimeUs previous_us_ = 0;
     float slow_rad_s_ = 0, center_error_rad_ = 0;
     float head_angle_plan_rad_ = 0, joint_position_plan_rad_ = 0;

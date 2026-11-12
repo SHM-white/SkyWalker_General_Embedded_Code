@@ -166,47 +166,96 @@ inline GimbalExecutor::Config gimbalExecutionConfig() {
             .permission_timeout_ms = 300,
             .max_cycle_us = 20000};
 }
-// 调参：双 Yaw 加速度协同分配。手动阶段先按 ≤0.8 rad/s 的枪头持续预算验证
-// 低速居中，再按台架波形放开速度、加速度与 jerk；大 Yaw 世界意图保持
-// 参考底盘的 ≤1 rad/s 起步预算。数值全部为“世界坐标”量，编码器方向只在
-// 分配器内部乘一次。
+// 双 Yaw 协同分配：把枪头世界运动拆成大 Yaw 载体运动和小 Yaw 相对运动。
+// 关节位置/速度使用小 Yaw 编码器坐标；枪头和大 Yaw 意图使用世界坐标，逆时针为正。
+// 关系：枪头世界速度 = 载体世界速度 + joint_direction × 小 Yaw 关节速度。
+// 这里配置的是运动预算与参考整形，电机 PID、电流/力矩限制和底盘旋转补偿另行配置。
 inline constexpr DualYawAllocatorConfig dualYawAllocatorConfig() {
     DualYawAllocatorConfig c{};
+    // 小 Yaw 机械中心，单位 rad；回中以此为目标，不一定等于编码器零位。
     c.joint_center_rad = yaw_center_rad;
+    // c.joint_center_rad = 0.0f;
+    // 小 Yaw 编码器坐标下的位置下限/上限，单位 rad；应来自实际机械行程标定。
     c.joint_min_rad = yaw_min_rad;
     c.joint_max_rad = yaw_max_rad;
+    // 编码器正转到枪头相对载体正转的方向，只能为 +1 或 -1，在分配器内使用一次。
     c.joint_direction = small_yaw.direction;
-    // 软边界在现有硬裁剪内各留 1°，另扣位置环死区与标定误差。
+    // 两端各预留的软边界，单位 rad；0.0175 约为 1°，位置计划限制在此边界内。
     c.joint_margin_rad = 0.0175f;
+    // 估算向外剩余行程时额外扣除的位置误差余量，单位 rad，覆盖死区/标定误差。
+    // 正向可用行程 = joint_max_rad - joint_margin_rad - joint_tolerance_rad - 实测位置。
     c.joint_tolerance_rad = 0.012f;
+    // 小 Yaw 可执行的关节速度上限，单位 rad/s；制动包络还会按剩余行程收紧它。
     c.joint_rate_max_rad_s = small_yaw.velocity_limit_rad_s;
+
+    // 枪头世界速度总上限，单位 rad/s；来自共享手动速度配置。
+    // 必须满足 0 < head_steady_rate_max_rad_s <= head_rate_max_rad_s，否则分配被拒绝。
     c.head_rate_max_rad_s = manual_max_gimbal_yaw_rate_rad_s;
-    c.head_acceleration_max_rad_s2 = 6.0f;
-    c.head_jerk_max_rad_s3 = 0; // 第一阶段先关 jerk，只验证实际斜率
-    c.head_steady_rate_max_rad_s = 5.0f;
-    c.big_intent_max_rad_s = 5.0f;
-    c.big_acceleration_max_rad_s2 = 4.0f;
+    // 枪头世界速度计划的加速度绝对值上限，单位 rad/s²；越大，起停/反向越快。
+    // 实际加速度窗口还会结合载体实测加速度和小 Yaw 关节加速度能力进一步收紧。
+    c.head_acceleration_max_rad_s2 = 30.0f;
+    // 枪头加速度变化率（jerk）上限，单位 rad/s³；0 表示只限加速度，不限 jerk。
+    c.head_jerk_max_rad_s3 = 0;
+    // 枪头持续世界速度预算，单位 rad/s；限制手动目标和视觉速度前馈。
+    // 大 Yaw 跟踪不足时还会乘 tracking_budget_scale_min 到 1 之间的预算比例。
+    c.head_steady_rate_max_rad_s = 6.0f;
+
+    // 发给底盘的大 Yaw 世界速度意图上限，单位 rad/s，包含慢分量和回中修正。
+    // 持续跟随能力需与枪头持续预算匹配；底盘会另行叠加车体补偿并限制关节速度。
+    c.big_intent_max_rad_s = 6.0f;
+    // 大 Yaw 意图的加速度绝对值上限，单位 rad/s²；底盘/电机侧还有独立整形限制。
+    c.big_acceleration_max_rad_s2 = 20.0f;
+    // 大 Yaw 意图的 jerk 上限，单位 rad/s³；0 表示不限制加速度变化率。
     c.big_jerk_max_rad_s3 = 0;
-    c.big_track_gain_s_inv = 2.0f;
-    // 一阶低通时间常数；视觉阶段再单独放宽到 0.18–0.30 s。
+    // 大 Yaw 意图追踪“枪头慢分量 + 回中速度”的增益，单位 1/s。
+    // 未触及加速度/jerk 限制时，近似时间常数为 1/增益；3 对应约 0.33 s。
+    // 增大可减少意图滞后，但需结合回中增益观察超调和振荡。
+    c.big_track_gain_s_inv = 5.0f;
+
+    // 手动模式的一阶低通时间常数，单位 s；同时滤波主动枪头速度计划和小 Yaw 回中误差。
+    // 主动计划已限速/限加速度，不含触限保护产生的被动随动，避免松杆后继续驱动大 Yaw。
+    // 越大越平滑、滞后越明显；滤出的主动运动慢分量交由大 Yaw 承担。
     c.slow_tau_s = 0.10f;
+    // 视觉模式使用的同类滤波时间常数，单位 s；仅视觉轨迹分配生效。
     c.vision_slow_tau_s = 0.24f;
+    // 视觉目标角与枪头计划角之间的误差转速度增益，单位 1/s；仅视觉模式生效。
+    // 该角度修正可使用 head_rate_max_rad_s 总预算，仍受行程和加速度限制。
     c.vision_angle_gain_s_inv = 8.0f;
-    // 调参：小 Yaw 可达角加速度上下限（rad/s²）；实测前先按位置环速度斜率
-    // 20 rad/s² 的同一量级占位，用于收紧视觉阶段的枪头加速度区间。
+
+    // 小 Yaw 正向/负向可达的关节加速度幅值，单位 rad/s²；两者均填写正数。
+    // 载体加速度有效时，用它们收紧枪头加速度窗口；应根据机构实测能力设置。
     c.joint_acceleration_max_pos_rad_s2 = 20.0f;
     c.joint_acceleration_max_neg_rad_s2 = 20.0f;
-    c.center_deadband_rad = 0.0087f; // 0.5°
-    c.center_kp_rad_s_per_rad = 1.5f;
-    c.center_rate_max_rad_s = 1.0f;
-    // 制动包络：20 ms 采样+CAN 建立时间、4 rad/s² 向外余量、10 rad/s² 保证制动。
+
+    // 回中误差的连续软死区，单位 rad；0.0087 约为 0.5°。
+    // 死区内回中修正为零，死区外只对超出部分计算修正，减少中心附近来回摆动。
+    c.center_deadband_rad = 0.0087f;
+    // 过滤后的回中偏角转大 Yaw 世界速度的增益，单位 (rad/s)/rad，即 1/s。
+    // 增大可加快回中，也可能因滤波和跟随滞后产生振荡；它不改变手动速度上限。
+    c.center_kp_rad_s_per_rad = 1.0f;
+    // 回中修正速度的绝对值上限，单位 rad/s；不单独限制枪头慢分量。
+    c.center_rate_max_rad_s = 5.0f;
+
+    // 制动距离估算中的反应延迟，单位 s，覆盖采样/传输/执行建立时间。
+    // 延迟期间按最坏向外加速计算，之后按可保证的减速度制动，得到向外速度预算。
     c.brake_delay_s = 0.02f;
+    // 反应延迟期间可能出现的最坏向外加速度，单位 rad/s²；需覆盖实际可能值。
     c.brake_outward_acceleration_rad_s2 = 4.0f;
+    // 机构可保证的制动减速度幅值，单位 rad/s²，必须大于零。
+    // 填得越大，估计的制动距离越短、放行速度越高，应依据实测制动能力设置。
     c.brake_deceleration_rad_s2 = 10.0f;
+
+    // 载体实测世界速度与大 Yaw 意图的偏差阈值，单位 rad/s；超出时降低持续预算。
     c.tracking_error_rad_s = 0.35f;
+    // 跟踪不足时持续速度预算最多降到原值的此比例，范围 (0, 1]；0.4 表示 40%。
     c.tracking_budget_scale_min = 0.4f;
+    // 持续预算比例每秒的下降/恢复速度，单位 1/s；0.5 表示每秒变化 0.5。
     c.tracking_budget_slew_per_s = 0.5f;
+
+    // 停稳锁零的速度阈值，单位 rad/s；枪头目标/计划、慢分量、回中和大 Yaw 意图
+    // 等速率同时足够小，且计划加速度满足下一项时，才将速度计划精确归零。
     c.still_rate_epsilon_rad_s = 0.01f;
+    // 停稳锁零的计划加速度阈值，单位 rad/s²；配合速度阈值抑制残余微小运动。
     c.still_acceleration_epsilon_rad_s2 = 0.05f;
     return c;
 }
