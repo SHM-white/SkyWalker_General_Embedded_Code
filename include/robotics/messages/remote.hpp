@@ -64,6 +64,7 @@ struct OperatorIntent {
     float gimbal_pitch_rate_norm = 0;
     // 独立灵敏度计算的鼠标角速度，避免机构限速改变未饱和区灵敏度。
     float mouse_yaw_rate_rad_s = 0, mouse_pitch_rate_rad_s = 0;
+    // 台架合同：置位时执行层直接用上面的 rad/s，不再乘机构限速。
     bool mouse_rate_mapping = false;
     // 是否请求启动摩擦轮。
     bool friction_requested = false;

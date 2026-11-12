@@ -56,40 +56,51 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
                                                  : OperatorMode::Manual;
     const bool physical = config_.input_profile == RemoteInputProfile::PhysicalRemote;
     // 台架右 Middle 选择键鼠；旧键鼠配置仍使用右 Up，避免与物理遥控的发射拨杆抢同一位置。
-    n.source = shooter_selectable
-                   ? (r.right_switch == RcSwitch::Middle ? ControlSource::KeyboardMouse : ControlSource::Remote)
-                   : (!physical && r.right_switch == RcSwitch::Up ? ControlSource::KeyboardMouse
-                                                                  : ControlSource::Remote);
+    // merge_keyboard_mouse 打开后手动档始终合并键鼠，拨杆只保留其它含义。
+    const bool keyboard_mouse =
+        !physical && (config_.merge_keyboard_mouse ||
+                      (shooter_selectable ? r.right_switch == RcSwitch::Middle : r.right_switch == RcSwitch::Up));
+    n.source = keyboard_mouse ? ControlSource::KeyboardMouse : ControlSource::Remote;
     auto norm = [&](float x) {
         x = std::clamp(x / config_.channel_range, -1.0f, 1.0f);
         return std::fabs(x) <= config_.analog_deadband
                    ? 0.0f
                    : std::copysign((std::fabs(x) - config_.analog_deadband) / (1 - config_.analog_deadband), x);
     };
-    if (n.source == ControlSource::Remote) {
-        n.chassis_vx_norm = norm(r.analog.left_y);
-        n.chassis_vy_norm = -norm(r.analog.left_x);
-        // 拨轮不再映射底盘或大 Yaw；右 Down 在手动档请求固定小陀螺。
-        n.chassis_wz_norm = n.mode == OperatorMode::Manual && r.right_switch == RcSwitch::Down ? 1.0f : 0.0f;
-        n.gimbal_yaw_rate_norm = -norm(r.analog.right_x);
-        n.gimbal_pitch_rate_norm = norm(r.analog.right_y);
-        n.friction_requested = r.right_switch == RcSwitch::Up;
-        n.fire_requested = r.right_switch == RcSwitch::Up;
-    }
-    else {
-        auto key = [&](unsigned bit) { return (r.keyboard.bits >> bit) & 1u; };
-        n.chassis_vx_norm = float(key(0)) - float(key(1));
-        n.chassis_vy_norm = float(key(2)) - float(key(3));
-        n.gimbal_yaw_rate_norm = std::clamp(-r.mouse.x * config_.mouse_yaw_scale, -1.0f, 1.0f);
-        n.gimbal_pitch_rate_norm = std::clamp(-r.mouse.y * config_.mouse_pitch_scale, -1.0f, 1.0f);
+    const float analog_vx = norm(r.analog.left_y);
+    const float analog_vy = -norm(r.analog.left_x);
+    const float analog_yaw = -norm(r.analog.right_x);
+    const float analog_pitch = norm(r.analog.right_y);
+    // 拨轮不再映射底盘或大 Yaw；右 Down 在手动档请求固定小陀螺。
+    n.chassis_wz_norm = n.mode == OperatorMode::Manual && r.right_switch == RcSwitch::Down ? 1.0f : 0.0f;
+    auto key = [&](unsigned bit) { return (r.keyboard.bits >> bit) & 1u; };
+    // 键盘是开关量：摇杆离开死区时该轴听摇杆，回中时交给 W/S/A/D。
+    const auto pick = [](float analog, float alternative) { return analog != 0.0f ? analog : alternative; };
+    const float mouse_yaw_norm = std::clamp(-float(r.mouse.x) * config_.mouse_yaw_scale, -1.0f, 1.0f);
+    const float mouse_pitch_norm = std::clamp(-float(r.mouse.y) * config_.mouse_pitch_scale, -1.0f, 1.0f);
+    // 云台两轴独立比较：鼠标与摇杆都换算成同一归一化角速度后取幅值更大的一个，
+    // 相等时保留摇杆。键盘是开关量，仍按“摇杆离开死区优先”处理。
+    const auto stronger = [](float analog, float mouse) {
+        return std::fabs(mouse) > std::fabs(analog) ? mouse : analog;
+    };
+    n.chassis_vx_norm = keyboard_mouse ? pick(analog_vx, float(key(0)) - float(key(1))) : analog_vx;
+    n.chassis_vy_norm = keyboard_mouse ? pick(analog_vy, float(key(2)) - float(key(3))) : analog_vy;
+    n.gimbal_yaw_rate_norm = keyboard_mouse ? stronger(analog_yaw, mouse_yaw_norm) : analog_yaw;
+    n.gimbal_pitch_rate_norm = keyboard_mouse ? stronger(analog_pitch, mouse_pitch_norm) : analog_pitch;
+    if (keyboard_mouse) {
+        // 台架合同：ShooterSelectable 保留独立 (rad/s)/原始单位 灵敏度，避免机构限速
+        // 改变未饱和区灵敏度；整车合并档位走上面的归一化比较，维持原手动灵敏度。
         if (shooter_selectable) {
-            // 速度只由云台 Rate 通路使用真实 dt 积分，鼠标上游不乘采样周期。
             n.mouse_rate_mapping = true;
-            n.mouse_yaw_rate_rad_s = -r.mouse.x * config_.mouse_yaw_rate_per_unit;
-            n.mouse_pitch_rate_rad_s = -r.mouse.y * config_.mouse_pitch_rate_per_unit;
+            n.mouse_yaw_rate_rad_s = -float(r.mouse.x) * config_.mouse_yaw_rate_per_unit;
+            n.mouse_pitch_rate_rad_s = -float(r.mouse.y) * config_.mouse_pitch_rate_per_unit;
         }
         n.friction_requested = r.mouse.right;
         n.fire_requested = r.mouse.left;
+    }
+    else {
+        n.friction_requested = r.right_switch == RcSwitch::Up;
+        n.fire_requested = r.right_switch == RcSwitch::Up;
     }
     out = n;
     return 0;

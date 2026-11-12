@@ -18,6 +18,9 @@ public:
         // 视觉执行样例（allow_auto）把左 Up 保留给自动；其余样例左 Up 为手动档。
         bool auto_on_up = false;
         bool navigation_on_middle = false;
+        // 手动档始终合并键鼠：不再要求右拨杆选择键鼠来源。每轴独立，
+        // 物理摇杆离开死区时该轴听摇杆，回中时交给键盘/鼠标。
+        bool merge_keyboard_mouse = false;
     };
     explicit ManualCommandMapper(const Config &config) : config_(config) {
     }

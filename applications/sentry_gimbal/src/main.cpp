@@ -19,6 +19,7 @@
 #include <robotics/vehicle/led_status.hpp>
 #include <drivers/led/status_led.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
+#include <robotics/vehicle/shooter_profile.hpp>
 #include <zephyr/drivers/regulator.h>
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
 #include <communication/vision/ab_protocol.hpp>
@@ -91,6 +92,8 @@ int main() {
     static CommandManager commands([] {
         auto config = installed::manualCommandConfig();
         config.mapper.input_profile = RemoteInputProfile::KeyboardMouseSelectable;
+        // 解锁即合并键鼠：不再要求右拨杆上拨选择来源，摇杆离开死区时按轴优先。
+        config.mapper.merge_keyboard_mouse = true;
         config.allow_navigation = DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER);
         config.allow_auto = DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER);
         config.mapper.auto_on_up = false;
@@ -126,6 +129,14 @@ int main() {
     static GimbalExecutor gimbal(yaw, pitch, group, installed::yawMotorConfig(), installed::yawAxisConfig(),
                                  installed::pitchMotorConfig(), installed::pitchAxisConfig(),
                                  installed::gimbalExecutionConfig());
+    // 发射机构与 GM6020 小 Yaw 共用 CAN1：GM6020 走 0x1FF，M3508/M2006 走 0x200，
+    // 反馈 0x207 与 0x201/0x202/0x204 互不冲突。摩擦轮与拨盘各自成组，共用一次 commit。
+    static motor::Motor friction_left(installed::frictionHardware(0)),
+        friction_right(installed::frictionHardware(1)), dial(installed::dialHardware());
+    static motor::Group friction_group(friction_left, friction_right), dial_group(dial);
+    static ShooterExecutor shooter(friction_left, friction_right, dial, friction_group, dial_group,
+                                   installed::frictionMotorConfig(), installed::dialMotorConfig(),
+                                   installed::shooterExecutionConfig());
     int command_error = commands.registerSource(remote_source);
 #if DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER)
     if (command_error == 0)
@@ -143,7 +154,8 @@ int main() {
         command_error = commands.start();
     const int onboard_error = onboard.start();
     const int head_error = head.start();
-    int yaw_error = installed::connections_confirmed ? yaw_bus.attach(yaw) : -ENODEV;
+    int yaw_error = installed::connections_confirmed ? yaw_bus.attach(yaw, friction_left, friction_right, dial)
+                                                   : -ENODEV;
     int pitch_error = installed::connections_confirmed ? pitch_bus.attach(pitch) : -ENODEV;
     if (yaw_error == 0)
         yaw_error = yaw_bus.start();
@@ -151,6 +163,7 @@ int main() {
         pitch_error = pitch_bus.start();
     const bool yaw_started = yaw_error == 0, pitch_started = pitch_error == 0;
     const int control_error = yaw_started && pitch_started ? gimbal.begin() : -ENODEV;
+    const int shooter_error = yaw_started ? shooter.begin() : -ENODEV;
     const int power_error = installed::connections_confirmed ? regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)))
                                                              : -ENODEV;
     diagnostics.event("command", command_error);
@@ -159,6 +172,7 @@ int main() {
     diagnostics.event("yaw_bus", yaw_error);
     diagnostics.event("pitch_bus", pitch_error);
     diagnostics.event("gimbal", control_error);
+    diagnostics.event("shooter", shooter_error);
     diagnostics.event("motor_rail", power_error);
     // 载体 IMU 单独门控大 Yaw；头部 IMU 无效时撤销本地惯性输出和大 Yaw 请求。
     const bool setup_ready = command_error == 0 && yaw_error == 0 && pitch_error == 0 && control_error == 0 &&
@@ -182,6 +196,7 @@ int main() {
     std::uint64_t last_yaw_sequence = 0;
     std::uint32_t vision_trajectory_sequence = 0;
     bool vision_pitch_was_active = false;
+    bool keyboard_spin_latched = false, shift_was_down = false;
     core::OrientationReference last_head_reference{};
     bool head_reference_known = false, head_was_ready = false;
     ControlSource last_head_source = ControlSource::None;
@@ -214,12 +229,24 @@ int main() {
         // The DR16 dial (spring-centred wheel) is the analog spin control. It
         // only scales and signs the chassis spin rate: translation still comes
         // from the sticks and the gimbal command is untouched.
-        const float spin_dial = samples::control::RcControlAdapter::normalize(operator_state.remote.analog.wheel);
-        const auto spin_out = spin.update(operator_state.spin_requested, operator_state.run_allowed, spin_dial, now_us);
+        // 键鼠：Shift 单点锁存小陀螺开关，Q/E 充当拨轮方向（按住即满幅，E 正转、Q 反转）；
+        // 拨轮回中的语义不变。解锁撤销时锁存清零，避免下次解锁自动起转。
+        const std::uint16_t keyboard_bits = operator_state.remote.keyboard.bits;
+        const bool shift_down = ((keyboard_bits >> 4) & 1u) != 0;
+        if (shift_down && !shift_was_down && operator_state.run_allowed)
+            keyboard_spin_latched = !keyboard_spin_latched;
+        if (!operator_state.run_allowed)
+            keyboard_spin_latched = false;
+        shift_was_down = shift_down;
+        const float wheel_dial = samples::control::RcControlAdapter::normalize(operator_state.remote.analog.wheel);
+        const float keyboard_dial = ((keyboard_bits >> 7) & 1u) ? 1.0f : ((keyboard_bits >> 6) & 1u) ? -1.0f : 0.0f;
+        const auto spin_out = spin.update(operator_state.spin_requested || keyboard_spin_latched,
+                                          operator_state.run_allowed,
+                                          keyboard_dial != 0.0f ? keyboard_dial : wheel_dial, now_us);
         (void)commands.snapshot(frame);
-        const auto expected_manual_source = operator_state.remote.right_switch == RcSwitch::Up
-                                                ? ControlSource::KeyboardMouse
-                                                : ControlSource::Remote;
+        // 手动档已始终合并键鼠，命令来源固定为 KeyboardMouse。来源必须稳定：
+        // 忽 Remote 忽 KeyboardMouse 会让分配器和惯性外环每帧复位。
+        constexpr auto expected_manual_source = ControlSource::KeyboardMouse;
         const auto heading = planarYawHeading(carrier_snapshot, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);
         const auto heading_reason = !heading.valid   ? heading.reason
@@ -470,6 +497,19 @@ int main() {
             (void)gimbal.reseedYawTarget();
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
+        // 发射机构：命令来自仲裁器的 ShooterCommand（鼠标右键摩擦轮、左键发射）。
+        // 尚未接入裁判热量模型，先关闭热量与许可门控；摩擦轮/供弹仍受执行器自身的
+        // 反馈就绪、云台 Active 和拨盘参考约束，初始化失败时直接停机。
+        ShooterExecutionInputs shooter_input{};
+        shooter_input.command = frame.decision.command.shooter;
+        shooter_input.source_stamp = sourceStamp(frame, shooter_input.command.source);
+        shooter_input.transport_ready = setup_ready && shooter_error == 0;
+        shooter_input.gimbal = status;
+        shooter_input.allow_feed = installed::shooter_constraints_confirmed;
+        shooter_input.require_permission = false;
+        shooter_input.require_heat = false;
+        shooter_input.emergency_stop = !setup_ready;
+        (void)shooter.update(shooter_input, now_us);
         // One commit per physical bus, before the inter-board request is built:
         // this cycle's Yaw execution and its CAN result decide whether a nonzero
         // carrier intent may be published at all.

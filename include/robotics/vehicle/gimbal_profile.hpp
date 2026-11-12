@@ -153,7 +153,9 @@ inline constexpr CommandManager::Config gimbalCommandConfig() {
     c.require_referee_for_chassis = false;
     c.require_referee_for_gimbal = false;
     c.require_referee_for_shooter = false;
-    c.enable_shooter = false;
+    // 发射机构先接线：手动档允许键鼠产生摩擦轮/发射请求，仲裁器据此产出
+    // ShooterCommand（含单发事件戳）。摩擦轮/拨盘执行端与热量门控另行接入。
+    c.enable_shooter = true;
     c.allow_auto = vision_execute_confirmed && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER) &&
                    DT_HAS_ALIAS(vision_uart);
     c.expected_vision_reference = head_reference;
