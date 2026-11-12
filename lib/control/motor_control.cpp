@@ -294,8 +294,7 @@ int PositionMotor::updateImpl(double target, float reference_velocity_rad_s, flo
         return fail(-EINVAL, snapshot, ControlIssue::InvalidTarget);
     if (config_.reference == PositionReference::AbsoluteNearest && !finiteFloat(target))
         return fail(-ERANGE, snapshot, ControlIssue::InvalidTarget);
-    if (use_reference &&
-        (!std::isfinite(reference_velocity_rad_s) || !std::isfinite(reference_acceleration_rad_s2)))
+    if (use_reference && (!std::isfinite(reference_velocity_rad_s) || !std::isfinite(reference_acceleration_rad_s2)))
         return fail(-EINVAL, snapshot, ControlIssue::InvalidTarget);
     if (!std::isfinite(dt) || dt < 0)
         return fail(-EINVAL, snapshot, ControlIssue::InvalidPeriod);

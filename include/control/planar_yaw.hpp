@@ -15,8 +15,7 @@ public:
         State state = State::Calibrating;
     };
     // No runtime bias adaptation: slow real turns must not become learned bias.
-    const Output &update(const core::Measurement<core::Vec3> &gyro,
-                         const core::Measurement<core::Vec3> &accel) {
+    const Output &update(const core::Measurement<core::Vec3> &gyro, const core::Measurement<core::Vec3> &accel) {
         if (blocked_)
             return output_;
         if (!gyro.stamp.valid || !gyro.stamp.time_us || !core::finite(gyro.value))
@@ -39,8 +38,8 @@ public:
             first_us_ = time;
         if (!calibrated_) {
             const auto skew = time >= accel.stamp.time_us ? time - accel.stamp.time_us : accel.stamp.time_us - time;
-            const bool stationary = time - first_us_ >= settling_us && accel.stamp.valid &&
-                                    skew <= max_gap_us && core::finite(accel.value) &&
+            const bool stationary = time - first_us_ >= settling_us && accel.stamp.valid && skew <= max_gap_us &&
+                                    core::finite(accel.value) &&
                                     std::fabs(core::norm(accel.value) - 9.80665f) <= 1.0f &&
                                     core::norm(gyro.value) < .05f;
             if (!stationary) {

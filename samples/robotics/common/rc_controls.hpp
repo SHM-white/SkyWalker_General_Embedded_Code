@@ -102,9 +102,9 @@ public:
         const bool newer = remote.stamp.valid &&
                            (!have_sequence_ || robotics::sequenceAfter(remote.stamp.sequence, last_sequence_)) &&
                            (!have_input_time_ || remote.stamp.timestamp_ms >= last_input_ms_);
-        const bool candidate_valid = newer &&
-                                     robotics::isFresh(remote.stamp, now_ms, config_.input_timeout_ms) &&
-                                     remote.left_switch != RcSwitch::Unknown && remote.right_switch != RcSwitch::Unknown;
+        const bool candidate_valid = newer && robotics::isFresh(remote.stamp, now_ms, config_.input_timeout_ms) &&
+                                     remote.left_switch != RcSwitch::Unknown &&
+                                     remote.right_switch != RcSwitch::Unknown;
         if (!candidate_valid) {
             if (!have_input_time_ || !robotics::isFresh(state_.remote.stamp, now_ms, config_.input_timeout_ms)) {
                 state_.fresh = false;
@@ -164,8 +164,7 @@ public:
                 startup_consumed_ = true;
             }
             if (left == RcSwitch::Middle && previous_left_ == RcSwitch::Down && neutral_ready_ && neutral &&
-                arm_switch_ready && !armed_ &&
-                state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
+                arm_switch_ready && !armed_ && state_.start_event_id != std::numeric_limits<std::uint64_t>::max()) {
                 ++state_.start_event_id;
                 armed_ = true;
             }

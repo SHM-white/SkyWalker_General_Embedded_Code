@@ -6,9 +6,9 @@
 namespace skywalker::imu {
 int ImuState::init(std::uint32_t caps, core::OrientationReference ref) {
     if (!ref.frame_id || !ref.epoch || (caps & ~(Accel | Gyro | Orientation | Temperature | PlanarYaw)) ||
-        ((caps & PlanarYaw) && (!(caps & Gyro) || !freshness_.gyro_us)) ||
-        ((caps & Accel) && !freshness_.accel_us) || ((caps & Gyro) && !freshness_.gyro_us) ||
-        ((caps & Orientation) && !freshness_.orientation_us) || ((caps & Temperature) && !freshness_.temperature_us))
+        ((caps & PlanarYaw) && (!(caps & Gyro) || !freshness_.gyro_us)) || ((caps & Accel) && !freshness_.accel_us) ||
+        ((caps & Gyro) && !freshness_.gyro_us) || ((caps & Orientation) && !freshness_.orientation_us) ||
+        ((caps & Temperature) && !freshness_.temperature_us))
         return -EINVAL;
     auto key = k_spin_lock(&lock_);
     if (value_.state != State::Uninitialized) {
@@ -76,8 +76,9 @@ int ImuState::publish(const Update &input) {
             if (u.estimator_updated) {
                 const auto tracking = value_.diagnostics.estimator.last_tracking_us;
                 value_.diagnostics.estimator = u.estimator;
-                value_.diagnostics.estimator.last_tracking_us =
-                    u.estimator.result == 0 && u.estimator.correction == 1 ? u.estimator.time_us : tracking;
+                value_.diagnostics.estimator.last_tracking_us = u.estimator.result == 0 && u.estimator.correction == 1
+                                                                    ? u.estimator.time_us
+                                                                    : tracking;
             }
         }
     }
@@ -121,8 +122,8 @@ void ImuState::estimatorDiagnostics(const EstimatorDiagnostics &sample) {
     const auto key = k_spin_lock(&lock_);
     const auto tracking = value_.diagnostics.estimator.last_tracking_us;
     value_.diagnostics.estimator = sample;
-    value_.diagnostics.estimator.last_tracking_us = sample.result == 0 && sample.correction == 1
-                                                       ? sample.time_us : tracking;
+    value_.diagnostics.estimator.last_tracking_us = sample.result == 0 && sample.correction == 1 ? sample.time_us
+                                                                                                 : tracking;
     k_spin_unlock(&lock_, key);
 }
 void ImuState::transportGap() {

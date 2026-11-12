@@ -49,17 +49,17 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
     const bool shooter_selectable = config_.input_profile == RemoteInputProfile::ShooterSelectable;
     // 统一键位：左 Up 为手动档；只有视觉执行样例（auto_on_up）保留 Up=Auto。
     n.mode = shooter_selectable ? (r.left_switch == RcSwitch::Down ? OperatorMode::Safe : OperatorMode::Manual)
-             : r.left_switch == RcSwitch::Down   ? OperatorMode::Safe
-             : r.left_switch == RcSwitch::Middle ? (config_.navigation_on_middle ? OperatorMode::Navigation
-                                                                                : OperatorMode::Manual)
-             : config_.auto_on_up                ? OperatorMode::Auto
-                                                 : OperatorMode::Manual;
+             : r.left_switch == RcSwitch::Down ? OperatorMode::Safe
+             : r.left_switch == RcSwitch::Middle
+                 ? (config_.navigation_on_middle ? OperatorMode::Navigation : OperatorMode::Manual)
+             : config_.auto_on_up ? OperatorMode::Auto
+                                  : OperatorMode::Manual;
     const bool physical = config_.input_profile == RemoteInputProfile::PhysicalRemote;
     // 台架右 Middle 选择键鼠；旧键鼠配置仍使用右 Up，避免与物理遥控的发射拨杆抢同一位置。
     // merge_keyboard_mouse 打开后手动档始终合并键鼠，拨杆只保留其它含义。
-    const bool keyboard_mouse =
-        !physical && (config_.merge_keyboard_mouse ||
-                      (shooter_selectable ? r.right_switch == RcSwitch::Middle : r.right_switch == RcSwitch::Up));
+    const bool keyboard_mouse = !physical && (config_.merge_keyboard_mouse ||
+                                              (shooter_selectable ? r.right_switch == RcSwitch::Middle
+                                                                  : r.right_switch == RcSwitch::Up));
     n.source = keyboard_mouse ? ControlSource::KeyboardMouse : ControlSource::Remote;
     auto norm = [&](float x) {
         x = std::clamp(x / config_.channel_range, -1.0f, 1.0f);
@@ -166,10 +166,10 @@ int CommandArbiter::validateConfig() const {
     if (config_.enable_shooter &&
         (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0))
         return -EINVAL;
-    if (!config_.input_timeout_ms ||
-        (config_.allow_navigation && !config_.navigation_timeout_us) ||
+    if (!config_.input_timeout_ms || (config_.allow_navigation && !config_.navigation_timeout_us) ||
         ((config_.require_referee_for_chassis || config_.require_referee_for_gimbal ||
-          config_.require_referee_for_shooter) && !config_.permission_timeout_ms))
+          config_.require_referee_for_shooter) &&
+         !config_.permission_timeout_ms))
         return -EINVAL;
     // Vision and auto-override parameters are only meaningful when the auto
     // source is actually enabled; manual startup must not fail on unused tuning.
@@ -187,8 +187,8 @@ int CommandArbiter::validateConfig() const {
     const int ret = ManualCommandMapper(config_.mapper).map(RemoteState{}, unused);
     if (ret < 0)
         return ret;
-    const bool mouse_shooter_enabled =
-        config_.enable_shooter && config_.mapper.input_profile != RemoteInputProfile::PhysicalRemote;
+    const bool mouse_shooter_enabled = config_.enable_shooter &&
+                                       config_.mapper.input_profile != RemoteInputProfile::PhysicalRemote;
     return mouse_shooter_enabled ? MouseShooterGesture(gestureConfig(config_)).configError() : 0;
 }
 void CommandArbiter::updateAutoOverride(OperatorIntent &i, const CommandInputs &in, core::TimeUs now) {
@@ -307,7 +307,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
             chassis.vx_m_s = std::clamp(nav.value.vx_m_s, -config_.max_chassis_vx_m_s, config_.max_chassis_vx_m_s);
             chassis.vy_m_s = std::clamp(nav.value.vy_m_s, -config_.max_chassis_vy_m_s, config_.max_chassis_vy_m_s);
             chassis.wz_rad_s = std::clamp(nav.value.wz_rad_s, -config_.max_chassis_wz_rad_s,
-                                         config_.max_chassis_wz_rad_s);
+                                          config_.max_chassis_wz_rad_s);
             if (chassis.vx_m_s != nav.value.vx_m_s || chassis.vy_m_s != nav.value.vy_m_s ||
                 chassis.wz_rad_s != nav.value.wz_rad_s)
                 n.chassis_reasons |= ValueLimited;

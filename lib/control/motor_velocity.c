@@ -70,7 +70,8 @@ int control_motor_velocity_reset(control_motor_velocity_state *state, float meas
 }
 
 int control_motor_velocity_step_scaled(control_motor_velocity_state *state, const control_motor_velocity_config *config,
-                                const control_motor_velocity_input *input, float reference_scale, control_motor_velocity_output *output) {
+                                       const control_motor_velocity_input *input, float reference_scale,
+                                       control_motor_velocity_output *output) {
     if (state == NULL || input == NULL || output == NULL) {
         return -EINVAL;
     }

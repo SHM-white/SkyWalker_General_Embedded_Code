@@ -129,10 +129,9 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
     // Advance the heading target by the world rate the actuator actually got:
     // the shuttle, the joint capability and the native slew are already inside
     // that value, so a saturated axis cannot accumulate a target debt.
-    const float applied_world_rate =
-        in.achieved_rate_valid && std::isfinite(in.achieved_joint_rate_rad_s)
-            ? in.achieved_joint_rate_rad_s + in.body_rate_rad_s
-            : world_applied_rad_s_;
+    const float applied_world_rate = in.achieved_rate_valid && std::isfinite(in.achieved_joint_rate_rad_s)
+                                         ? in.achieved_joint_rate_rad_s + in.body_rate_rad_s
+                                         : world_applied_rad_s_;
     target_heading_rad_ = wrap(target_heading_rad_ + applied_world_rate * dt);
     float error = wrap(target_heading_rad_ - heading);
     const bool clamping = std::fabs(error) > config_.heading_error_max_rad;
@@ -160,8 +159,8 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
     if (config_.shaping_acceleration_rad_s2 > 0) {
         if (dt > 0) {
             const BoundedRateLimits limits{-config_.world_rate_max_rad_s, config_.world_rate_max_rad_s,
-                                           -config_.shaping_acceleration_rad_s2,
-                                           config_.shaping_acceleration_rad_s2, config_.shaping_jerk_rad_s3};
+                                           -config_.shaping_acceleration_rad_s2, config_.shaping_acceleration_rad_s2,
+                                           config_.shaping_jerk_rad_s3};
             const float target_acceleration = std::clamp((world_raw - world_plan_.rate_rad_s) / dt,
                                                          -config_.shaping_acceleration_rad_s2,
                                                          config_.shaping_acceleration_rad_s2);

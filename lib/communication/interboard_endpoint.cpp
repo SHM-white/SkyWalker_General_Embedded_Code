@@ -81,8 +81,8 @@ int InterBoardEndpoint::readRefereeFrame(RefereeRelayFrame &out) {
         referee_rx_head_ = (referee_rx_head_ + 1) % referee_rx_.size();
         --referee_rx_count_;
         if (!published_.online || frame.sender_boot_id != published_.peer.sender_boot_id ||
-            frame.receiver_boot_id != published_.local_boot_id || now < frame.receive_ms ||
-            frame.source_age_ms > 300 || now - frame.receive_ms > 300 - frame.source_age_ms)
+            frame.receiver_boot_id != published_.local_boot_id || now < frame.receive_ms || frame.source_age_ms > 300 ||
+            now - frame.receive_ms > 300 - frame.source_age_ms)
             continue;
         out = frame;
         result = 0;
@@ -104,9 +104,9 @@ void InterBoardEndpoint::receiveRefereeFragment(const RefereeFragment &fragment)
         referee_assembly_start_ms_ = fragment.receive_ms;
     }
     if (fragment.transfer_id != referee_assembly_.transfer_id ||
-        fragment.sender_boot_id != referee_assembly_.sender_boot_id ||
-        fragment.total_size != referee_assembly_.size || fragment.offset != referee_rx_offset_ ||
-        fragment.receive_ms < referee_assembly_start_ms_ || fragment.receive_ms - referee_assembly_start_ms_ > 100) {
+        fragment.sender_boot_id != referee_assembly_.sender_boot_id || fragment.total_size != referee_assembly_.size ||
+        fragment.offset != referee_rx_offset_ || fragment.receive_ms < referee_assembly_start_ms_ ||
+        fragment.receive_ms - referee_assembly_start_ms_ > 100) {
         referee_assembly_.size = 0;
         referee_rx_offset_ = 0;
         return;
@@ -324,10 +324,11 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 });
             append(MessageId::BigYawRequest, [&](auto seq, auto *bytes, auto cap) {
                 auto request = outgoing.big_yaw_request;
-                const bool current =
-                    forwardedFresh(request.stamp, std::max(request.source_age_ms, request.command_age_ms), now,
-                                   config_.command_timeout_ms) &&
-                    (!have_big_yaw_baseline_ || sequenceAfter(request.stamp.sequence, big_yaw_baseline_sequence_));
+                const bool current = forwardedFresh(request.stamp,
+                                                    std::max(request.source_age_ms, request.command_age_ms), now,
+                                                    config_.command_timeout_ms) &&
+                                     (!have_big_yaw_baseline_ ||
+                                      sequenceAfter(request.stamp.sequence, big_yaw_baseline_sequence_));
                 const auto elapsed = age(request.stamp, now);
                 request.source_age_ms = addAge(request.source_age_ms, elapsed);
                 request.command_age_ms = addAge(request.command_age_ms, elapsed);
@@ -383,8 +384,9 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 return InterBoardCodec::encodeBigYawFeedback(feedback, seq, bytes, cap);
             });
             // Referee traffic uses only space left after heartbeat/control feedback.
-            if (referee_pending_valid_ && (!next.online || referee_pending_.receiver_boot_id != peer_boot_ ||
-                now < referee_pending_.receive_ms || now - referee_pending_.receive_ms > 300))
+            if (referee_pending_valid_ &&
+                (!next.online || referee_pending_.receiver_boot_id != peer_boot_ || now < referee_pending_.receive_ms ||
+                 now - referee_pending_.receive_ms > 300))
                 referee_pending_valid_ = false;
             if (next.online && !referee_pending_valid_) {
                 const auto key = k_spin_lock(&lock_);
@@ -411,7 +413,8 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                     fragment.total_size = referee_pending_.size;
                     fragment.offset = static_cast<std::uint16_t>(referee_tx_offset_);
                     fragment.size = std::min(kRefereeFragmentCapacity, referee_pending_.size - referee_tx_offset_);
-                    std::memcpy(fragment.bytes.data(), referee_pending_.bytes.data() + referee_tx_offset_, fragment.size);
+                    std::memcpy(fragment.bytes.data(), referee_pending_.bytes.data() + referee_tx_offset_,
+                                fragment.size);
                     referee_fragment_size = fragment.size;
                     return InterBoardCodec::encodeRefereeFragment(fragment, seq, bytes, cap);
                 });

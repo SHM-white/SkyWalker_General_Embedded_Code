@@ -178,9 +178,8 @@ void Diagnostics::status(const DiagnosticStatus &sample) {
                  double(sample.detail), double(sample.extra0), double(sample.extra1));
         if (sample.extended)
             for (std::size_t i = 0; i < sample.extension.size(); i += 3)
-                textLine("diag I%u=%f I%u=%f I%u=%f\n", unsigned(19 + i), double(sample.extension[i]),
-                         unsigned(20 + i), double(sample.extension[i + 1]),
-                         unsigned(21 + i), double(sample.extension[i + 2]));
+                textLine("diag I%u=%f I%u=%f I%u=%f\n", unsigned(19 + i), double(sample.extension[i]), unsigned(20 + i),
+                         double(sample.extension[i + 1]), unsigned(21 + i), double(sample.extension[i + 2]));
     }
 }
 } // namespace skywalker::robotics::vehicle

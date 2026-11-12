@@ -50,12 +50,12 @@ inline bool stepBoundedRate(BoundedRatePlan &plan, float target_acceleration_rad
         limits.max_rate_rad_s <= limits.min_rate_rad_s)
         return false;
     constexpr int bisection_steps = 24;
-    plan.acceleration_rad_s2 =
-        std::clamp(plan.acceleration_rad_s2, limits.min_acceleration_rad_s2, limits.max_acceleration_rad_s2);
+    plan.acceleration_rad_s2 = std::clamp(plan.acceleration_rad_s2, limits.min_acceleration_rad_s2,
+                                          limits.max_acceleration_rad_s2);
     plan.rate_rad_s = std::clamp(plan.rate_rad_s, limits.min_rate_rad_s, limits.max_rate_rad_s);
     if (!(limits.max_jerk_rad_s3 > 0)) {
-        const float acceleration =
-            std::clamp(target_acceleration_rad_s2, limits.min_acceleration_rad_s2, limits.max_acceleration_rad_s2);
+        const float acceleration = std::clamp(target_acceleration_rad_s2, limits.min_acceleration_rad_s2,
+                                              limits.max_acceleration_rad_s2);
         const float requested_rate = plan.rate_rad_s + acceleration * dt_s;
         const float rate = std::clamp(requested_rate, limits.min_rate_rad_s, limits.max_rate_rad_s);
         limited = acceleration != target_acceleration_rad_s2 || rate != requested_rate;

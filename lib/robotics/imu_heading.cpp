@@ -19,11 +19,21 @@ LocalHeading planarYawHeading(const imu::Snapshot &s, core::TimeUs now) {
         out.reason = HeadingWaitReason::ReferenceInvalid;
     else if (p.state != imu::PlanarYawState::Ready) {
         switch (p.state) {
-        case imu::PlanarYawState::GyroInvalid: out.reason = HeadingWaitReason::GyroInvalid; break;
-        case imu::PlanarYawState::SampleGap: out.reason = HeadingWaitReason::SampleGap; break;
-        case imu::PlanarYawState::TimeReset: out.reason = HeadingWaitReason::ReferenceReset; break;
-        case imu::PlanarYawState::RateInvalid: out.reason = HeadingWaitReason::RateInvalid; break;
-        default: out.reason = HeadingWaitReason::Initializing; break;
+        case imu::PlanarYawState::GyroInvalid:
+            out.reason = HeadingWaitReason::GyroInvalid;
+            break;
+        case imu::PlanarYawState::SampleGap:
+            out.reason = HeadingWaitReason::SampleGap;
+            break;
+        case imu::PlanarYawState::TimeReset:
+            out.reason = HeadingWaitReason::ReferenceReset;
+            break;
+        case imu::PlanarYawState::RateInvalid:
+            out.reason = HeadingWaitReason::RateInvalid;
+            break;
+        default:
+            out.reason = HeadingWaitReason::Initializing;
+            break;
         }
     }
     else if (!core::fresh(p.yaw_rad.stamp, now, 20000) || !core::fresh(s.sample.gyro_rad_s.stamp, now, 20000))

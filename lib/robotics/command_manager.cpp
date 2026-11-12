@@ -24,7 +24,7 @@ bool matches(SourceRole role, const SourceValue &value) {
 }
 CommandManager::CommandManager(const Config &config)
     : arbiter_(config), require_gimbal_permissions_(config.require_referee_for_gimbal),
-       require_shooter_permissions_(config.require_referee_for_shooter),
+      require_shooter_permissions_(config.require_referee_for_shooter),
       permission_timeout_ms_(config.permission_timeout_ms), require_external_gate_(config.require_external_run_gate) {
 }
 void CommandManager::setOperatorGate(bool allowed, std::uint32_t session) {
@@ -75,8 +75,9 @@ int CommandManager::failStart(int error, std::uint32_t reason) {
     failed.decision.chassis_reasons = failed.decision.gimbal_reasons = failed.decision.shooter_reasons = reason;
     for (std::size_t i = 0; i < source_count_; ++i) {
         const auto &slot = sources_[i];
-        (slot.role == SourceRole::Operator ? failed.remote
-         : slot.role == SourceRole::Navigation ? failed.navigation : failed.vision) = slot.cached.diagnostics;
+        (slot.role == SourceRole::Operator     ? failed.remote
+         : slot.role == SourceRole::Navigation ? failed.navigation
+                                               : failed.vision) = slot.cached.diagnostics;
     }
     failed.permission = permission_diagnostics_;
     publish(failed); // Disabled, invalid stamps; already-started sources stay alive.

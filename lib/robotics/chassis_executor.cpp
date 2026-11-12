@@ -165,8 +165,8 @@ int ChassisExecutor::power(const ChassisExecutionInputs &inputs, core::TimeUs no
     if (!have_power_limit_ || !buffer_fresh || !valid_measurement())
         return 0;
     ChassisPowerDecision decision{};
-    const int ret =
-        limiter_.step({selected_power_.power_w, last_power_limit_w_, budget.buffer_energy_j}, dt_s, decision);
+    const int ret = limiter_.step({selected_power_.power_w, last_power_limit_w_, budget.buffer_energy_j}, dt_s,
+                                  decision);
     if (ret == 0 && std::isfinite(decision.effort_scale))
         last_power_scale_ = std::clamp(decision.effort_scale, 0.0f, 1.0f);
     effort_scale_ = steer_effort_scale_ = last_power_scale_;

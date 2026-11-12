@@ -9,8 +9,8 @@ int Bmi088Imu::init() {
     if (initialized_)
         return -EALREADY;
     if (!config_.sample_period_us || !config_.temperature_period_us || !config_.max_input_skew_us ||
-        (config_.planar_yaw_enabled && config_.correct_gyro_bias) ||
-        (config_.correct_gyro_bias && !estimator_) || !core::normalize(config_.sensor_to_body))
+        (config_.planar_yaw_enabled && config_.correct_gyro_bias) || (config_.correct_gyro_bias && !estimator_) ||
+        !core::normalize(config_.sensor_to_body))
         return -EINVAL;
     if (!accel_ || !gyro_ || !device_is_ready(accel_) || !device_is_ready(gyro_))
         return -ENODEV;
@@ -24,7 +24,8 @@ int Bmi088Imu::init() {
 #endif
     }
     const int ret = state_.init(Accel | Gyro | Temperature | (estimator_ ? Orientation : 0u) |
-                                   (config_.planar_yaw_enabled ? PlanarYaw : 0u), config_.reference);
+                                    (config_.planar_yaw_enabled ? PlanarYaw : 0u),
+                                config_.reference);
     if (ret < 0)
         return ret;
     if (estimator_)
@@ -91,12 +92,24 @@ int Bmi088Imu::service() {
         out.generation = p.generation;
         using S = control::PlanarYawIntegrator::State;
         switch (p.state) {
-        case S::Calibrating: out.state = PlanarYawState::Calibrating; break;
-        case S::Ready: out.state = PlanarYawState::Ready; break;
-        case S::GyroInvalid: out.state = PlanarYawState::GyroInvalid; break;
-        case S::SampleGap: out.state = PlanarYawState::SampleGap; break;
-        case S::TimeReset: out.state = PlanarYawState::TimeReset; break;
-        case S::RateInvalid: out.state = PlanarYawState::RateInvalid; break;
+        case S::Calibrating:
+            out.state = PlanarYawState::Calibrating;
+            break;
+        case S::Ready:
+            out.state = PlanarYawState::Ready;
+            break;
+        case S::GyroInvalid:
+            out.state = PlanarYawState::GyroInvalid;
+            break;
+        case S::SampleGap:
+            out.state = PlanarYawState::SampleGap;
+            break;
+        case S::TimeReset:
+            out.state = PlanarYawState::TimeReset;
+            break;
+        case S::RateInvalid:
+            out.state = PlanarYawState::RateInvalid;
+            break;
         }
         // Also publish invalidity immediately when a gyro read fails, without
         // renewing the stamp of the previous successful gyro measurement.
@@ -128,12 +141,11 @@ int Bmi088Imu::service() {
             const auto generation = estimator_->generation();
             const int er = estimator_->update({a.value, g.value, std::max(a.stamp.time_us, g.stamp.time_us)});
             const auto &ed = estimator_->diagnostics();
-            const EstimatorDiagnostics estimator_diagnostic{
-                .time_us = std::max(a.stamp.time_us, g.stamp.time_us),
-                .result = er,
-                .correction = static_cast<std::uint8_t>(ed.correction),
-                .gravity_error_m_s2 = ed.gravity_error_m_s2,
-                .innovation_nis = ed.innovation_nis};
+            const EstimatorDiagnostics estimator_diagnostic{.time_us = std::max(a.stamp.time_us, g.stamp.time_us),
+                                                            .result = er,
+                                                            .correction = static_cast<std::uint8_t>(ed.correction),
+                                                            .gravity_error_m_s2 = ed.gravity_error_m_s2,
+                                                            .innovation_nis = ed.innovation_nis};
             if (er)
                 state_.estimatorDiagnostics(estimator_diagnostic);
             if (generation != estimator_->generation()) {
@@ -147,9 +159,9 @@ int Bmi088Imu::service() {
                 attitude.estimator_updated = true;
                 attitude.estimator = estimator_diagnostic;
                 attitude.sample.reference = config_.reference;
-                attitude.sample.orientation = {
-                    core::multiply(estimator_->attitude(), core::conjugate(config_.sensor_to_body)),
-                    {std::max(a.stamp.time_us, g.stamp.time_us), 0, true}};
+                attitude.sample.orientation = {core::multiply(estimator_->attitude(),
+                                                              core::conjugate(config_.sensor_to_body)),
+                                               {std::max(a.stamp.time_us, g.stamp.time_us), 0, true}};
                 attitude.sample.attitude_quality = estimator_->quality() == control::QuaternionEkf::Quality::Tracking
                                                        ? AttitudeQuality::Tracking
                                                        : AttitudeQuality::Degraded;

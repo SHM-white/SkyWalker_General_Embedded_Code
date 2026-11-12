@@ -152,8 +152,8 @@ public:
             reset();
             return;
         }
-        const bool same_sample =
-            initialized_ && stamp.time_us == last_stamp_.time_us && stamp.sequence == last_stamp_.sequence;
+        const bool same_sample = initialized_ && stamp.time_us == last_stamp_.time_us &&
+                                 stamp.sequence == last_stamp_.sequence;
         if (same_sample)
             return;
         const bool epoch = !initialized_ || stamp.time_us <= last_stamp_.time_us ||

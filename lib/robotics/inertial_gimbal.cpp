@@ -76,10 +76,9 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
         c.gyro_damping < 0 || std::fabs(c.yaw_direction) != 1 || std::fabs(c.pitch_direction) != 1 ||
         !std::isfinite(c.max_inertial_pitch_rad) || c.max_inertial_pitch_rad <= 0 || c.max_inertial_pitch_rad >= 1.4f ||
         !std::isfinite(c.stable_yaw_error_rad) || !std::isfinite(c.stable_pitch_error_rad) ||
-        c.stable_yaw_error_rad < 0 || c.stable_pitch_error_rad < 0 ||
-        !std::isfinite(c.max_goal_lead_rad) || c.max_goal_lead_rad < 0 || c.max_goal_lead_rad > 3.14159265f ||
-        !std::isfinite(c.pitch_max_goal_lead_rad) || c.pitch_max_goal_lead_rad < 0 ||
-        c.pitch_max_goal_lead_rad > 3.14159265f)
+        c.stable_yaw_error_rad < 0 || c.stable_pitch_error_rad < 0 || !std::isfinite(c.max_goal_lead_rad) ||
+        c.max_goal_lead_rad < 0 || c.max_goal_lead_rad > 3.14159265f || !std::isfinite(c.pitch_max_goal_lead_rad) ||
+        c.pitch_max_goal_lead_rad < 0 || c.pitch_max_goal_lead_rad > 3.14159265f)
         return suspend(now, WaitReason::Configuration, -EINVAL);
     output_.yaw_output_valid = output_.pitch_output_valid = false;
     output_.stabilization_valid = false;
@@ -95,8 +94,8 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
     if (in.command.mode > GimbalMode::AbsoluteAngle || !std::isfinite(in.command.yaw_target_rad) ||
         !std::isfinite(in.command.pitch_target_rad) || !std::isfinite(in.command.yaw_rate_rad_s) ||
         !std::isfinite(in.command.pitch_rate_rad_s) ||
-        (in.yaw_reference_valid && (!std::isfinite(in.yaw_reference_rad) ||
-                                    !std::isfinite(in.yaw_reference_rate_rad_s))) ||
+        (in.yaw_reference_valid &&
+         (!std::isfinite(in.yaw_reference_rad) || !std::isfinite(in.yaw_reference_rate_rad_s))) ||
         (in.pitch_rate_feedforward_valid && !std::isfinite(in.pitch_rate_feedforward_rad_s)))
         return suspend(now, WaitReason::Command, -EINVAL);
     if (!isFresh(in.command.stamp, now / 1000, c.command_timeout_ms) ||
@@ -158,13 +157,12 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
                                         c.pitch.max_rate_rad_s);
     // Yaw 目标每周期都由分配器的绝对世界角重建，钳制只限制本周期修正量。
     if (c.max_goal_lead_rad > 0)
-        yaw_goal_rad_ = wrap(e.yaw + std::clamp(wrap(yaw_goal_rad_ - e.yaw), -c.max_goal_lead_rad,
-                                               c.max_goal_lead_rad));
+        yaw_goal_rad_ = wrap(e.yaw +
+                             std::clamp(wrap(yaw_goal_rad_ - e.yaw), -c.max_goal_lead_rad, c.max_goal_lead_rad));
     // Pitch 在 Rate 模式下是积分器：每周期重写会把误差钉死在超前角上，
     // 松杆后仍以固定速度朝限位爬行。因此只对绝对 Pitch 目标启用该钳制。
     if (c.pitch_max_goal_lead_rad > 0 && in.command.mode == GimbalMode::AbsoluteAngle)
-        pitch_goal_rad_ = std::clamp(e.pitch + std::clamp(pitch_goal_rad_ - e.pitch,
-                                                          -c.pitch_max_goal_lead_rad,
+        pitch_goal_rad_ = std::clamp(e.pitch + std::clamp(pitch_goal_rad_ - e.pitch, -c.pitch_max_goal_lead_rad,
                                                           c.pitch_max_goal_lead_rad),
                                      -c.max_inertial_pitch_rad, c.max_inertial_pitch_rad);
     output_.yaw_error_rad = wrap(yaw_goal_rad_ - e.yaw);
@@ -189,14 +187,13 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
                                          : 0;
     // Pitch 目标是积分器：只有关节真正顶在限位、命令仍朝外时才丢弃姿态债，
     // 保证反向指令立即生效，同时不改变正常跟踪时的目标。
-    const float pitch_raw_rate = c.pitch_direction * (desired_pitch_rate +
-                                                      c.pitch_kp * output_.pitch_error_rad - carrier_pitch_rate -
-                                                      c.gyro_damping * (pitch_rate - desired_pitch_rate));
+    const float pitch_raw_rate = c.pitch_direction *
+                                 (desired_pitch_rate + c.pitch_kp * output_.pitch_error_rad - carrier_pitch_rate -
+                                  c.gyro_damping * (pitch_rate - desired_pitch_rate));
     output_.command.pitch_rate_rad_s = c.pitch_locked || !pitch_available || !cycle
                                            ? 0
                                            : stopAtLimits(pitch_raw_rate, in.pitch.feedback.position_rad, c.pitch);
-    if (!c.pitch_locked && pitch_available && cycle && pitch_raw_rate != 0 &&
-        output_.command.pitch_rate_rad_s == 0)
+    if (!c.pitch_locked && pitch_available && cycle && pitch_raw_rate != 0 && output_.command.pitch_rate_rad_s == 0)
         pitch_goal_rad_ = e.pitch;
     output_.source_stamp = in.source_stamp;
     output_.status.last_command_sequence = in.command.stamp.sequence;

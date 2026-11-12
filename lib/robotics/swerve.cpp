@@ -188,7 +188,7 @@ int SwerveModule::drive(const ModuleFeedback &f, float dt, ModuleOutput &out) {
     // Slew the nominal requested rate before cos^3 so zero alignment scale
     // reaches the drive PID immediately without abandoning its speed history.
     const control_motor_velocity_input input{out.optimized_wheel_velocity_m_s / config_.wheel_radius_m,
-                                              f.drive_velocity_rad_s, 0, dt, false};
+                                             f.drive_velocity_rad_s, 0, dt, false};
     control_motor_velocity_output output{};
     const int ret = control_motor_velocity_step_scaled(&next, &config_.drive, &input, out.cosine_scale, &output);
     if (ret < 0) {

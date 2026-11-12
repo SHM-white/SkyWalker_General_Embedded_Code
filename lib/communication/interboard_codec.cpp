@@ -103,8 +103,8 @@ int InterBoardCodec::decodeRefereeFragment(const FrameMeta &m, const std::uint8_
     out = value;
     return 0;
 }
-int InterBoardCodec::encodeRefereeFragment(const RefereeFragment &value, std::uint32_t sequence,
-                                           std::uint8_t *out, std::size_t cap) {
+int InterBoardCodec::encodeRefereeFragment(const RefereeFragment &value, std::uint32_t sequence, std::uint8_t *out,
+                                           std::size_t cap) {
     if (!value.size || value.size > kRefereeFragmentCapacity)
         return -EINVAL;
     std::uint8_t payload[kMaxPayload]{};
@@ -118,8 +118,9 @@ int InterBoardCodec::encodeRefereeFragment(const RefereeFragment &value, std::ui
     RefereeFragment decoded{};
     const int result = decodeRefereeFragment({BoardRole::ChassisController, MessageId::RefereeData, sequence, 0},
                                              payload, value.size + 28, decoded);
-    return result < 0 ? result : frame(BoardRole::ChassisController, MessageId::RefereeData, sequence,
-                                       payload, value.size + 28, out, cap);
+    return result < 0 ? result
+                      : frame(BoardRole::ChassisController, MessageId::RefereeData, sequence, payload, value.size + 28,
+                              out, cap);
 }
 int InterBoardCodec::encodeHeartbeat(const BoardHeartbeat &t, std::uint32_t seq, std::uint8_t *out, std::size_t cap) {
     std::uint8_t p[20]{};

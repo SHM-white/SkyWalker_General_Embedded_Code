@@ -93,8 +93,7 @@ int GimbalAxis::seed(const motor::MotorSnapshot &snapshot) {
     target_angle_rad_ = config_.topology == AxisTopology::Continuous ? double(snapshot.feedback.absolute_position_rad)
                                                                      : double(snapshot.feedback.position_rad);
     if (config_.topology == AxisTopology::Limited)
-        target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad),
-                                       double(config_.max_angle_rad));
+        target_angle_rad_ = std::clamp(target_angle_rad_, double(config_.min_angle_rad), double(config_.max_angle_rad));
     observed_enable_generation_ = snapshot.enable_generation;
     observed_reference_generation_ = snapshot.reference_generation;
     initialized_ = true;
@@ -229,8 +228,8 @@ int GimbalAxis::updateTrajectory(const GimbalJointTrajectory &trajectory, Safety
     if (!configured_)
         return -EACCES;
     if (action > SafetyAction::Active || !std::isfinite(trajectory.position_rad) ||
-        !std::isfinite(trajectory.rate_rad_s) || !std::isfinite(trajectory.acceleration_rad_s2) ||
-        !std::isfinite(dt) || dt < 0)
+        !std::isfinite(trajectory.rate_rad_s) || !std::isfinite(trajectory.acceleration_rad_s2) || !std::isfinite(dt) ||
+        dt < 0)
         return -EINVAL;
     if (action == SafetyAction::Disable) {
         withdraw();

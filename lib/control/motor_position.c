@@ -89,10 +89,9 @@ int control_motor_position_step(control_motor_position_state *state, const contr
     }
 
     const control_motor_velocity_input velocity_input = {
-        .requested_velocity_rad_s =
-            local.position.output +
-            config->velocity_feedforward_gain *
-                (input->has_reference_velocity ? input->reference_velocity_rad_s : 0.0f),
+        .requested_velocity_rad_s = local.position.output +
+                                    config->velocity_feedforward_gain *
+                                        (input->has_reference_velocity ? input->reference_velocity_rad_s : 0.0f),
         .measured_velocity_rad_s = input->measured_velocity_rad_s,
         .position_reference_rad = input->has_position_reference ? input->position_reference_rad
                                                                 : input->continuous_target_rad,
@@ -112,9 +111,8 @@ int control_motor_position_step(control_motor_position_state *state, const contr
      * regulator has to be told when the combined effort saturates. Re-running
      * one step with a frozen integrator uses the existing anti-windup input
      * instead of duplicating the regulator state in this layer. */
-    const float effort_feedforward =
-        config->acceleration_effort_gain *
-        (input->has_reference_acceleration ? input->reference_acceleration_rad_s2 : 0.0f);
+    const float effort_feedforward = config->acceleration_effort_gain *
+                                     (input->has_reference_acceleration ? input->reference_acceleration_rad_s2 : 0.0f);
     if (!isfinite(effort_feedforward)) {
         return -ERANGE;
     }

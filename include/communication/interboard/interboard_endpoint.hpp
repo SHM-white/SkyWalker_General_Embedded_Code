@@ -39,9 +39,11 @@ public:
     };
     InterBoardEndpoint(InterBoardTransport &transport, const Config &config)
         : config_(config), transport_(transport), link_(config.role) {
-        link_.setRefereeHandler([](const RefereeFragment &fragment, void *context) {
-            static_cast<InterBoardEndpoint *>(context)->receiveRefereeFragment(fragment);
-        }, this);
+        link_.setRefereeHandler(
+            [](const RefereeFragment &fragment, void *context) {
+                static_cast<InterBoardEndpoint *>(context)->receiveRefereeFragment(fragment);
+            },
+            this);
     }
     InterBoardEndpoint(const InterBoardEndpoint &) = delete;
     InterBoardEndpoint &operator=(const InterBoardEndpoint &) = delete;
