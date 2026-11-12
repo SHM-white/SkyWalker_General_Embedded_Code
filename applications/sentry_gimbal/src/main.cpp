@@ -580,10 +580,10 @@ int main() {
                         (inertial.yaw_output_valid ? 32u : 0u) |
                         (inertial.pitch_output_valid ? 64u : 0u)),     // I31 head/control validity bits
                   float(head_snapshot.diagnostics.io_errors & 0xffff), // I32 head I/O errors
-                  float(head_snapshot.diagnostics.last_error),         // I33 head last driver error
+                  ps.feedback.position_rad,                            // I33 pitch joint position rad
                   float(age(head_sample.orientation.stamp, now_us)),   // I34 head orientation age ms
                   float(age(head_sample.gyro_rad_s.stamp, now_us)),    // I35 head gyro age ms
-                  float(head_sample.reference.epoch & 0xffff),         // I36 head reference epoch
+                  ps.feedback.velocity_rad_s,                          // I36 pitch joint velocity rad/s
                   float((!setup_ready ? 1u : 0u) | (!operator_state.fresh ? 2u : 0u) | (!gimbal_allowed ? 4u : 0u) |
                         (!peer_state.online ? 8u : 0u) | (!installed::imu_mounting_confirmed ? 16u : 0u) |
                         (!heading_fresh ? 32u : 0u) | (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u) |
@@ -594,7 +594,7 @@ int main() {
                   float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),     // I41 gyro age
                   spin_out.applied_rad_s,                                           // I42 applied variable spin rate
                   std::min(alloc.brake_margin_pos_rad, alloc.brake_margin_neg_rad), // I43 tightest outward travel
-                  float(heading_loss_duration_us) * .001f,                          // I44 current/last loss duration
+                  float(input.command.pitch_rate_rad_s),                            // I44 pitch joint rate command
                   float(dt_us),                                                     // I45 current cycle
                   raw_head_rate_rad_s,                                              // I46 raw head world-rate target
                   alloc.head.rate_rad_s,                                            // I47 feasible head world rate
