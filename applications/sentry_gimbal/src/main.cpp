@@ -131,8 +131,8 @@ int main() {
                                  installed::gimbalExecutionConfig());
     // 发射机构与 GM6020 小 Yaw 共用 CAN1：GM6020 走 0x1FF，M3508/M2006 走 0x200，
     // 反馈 0x207 与 0x201/0x202/0x204 互不冲突。摩擦轮与拨盘各自成组，共用一次 commit。
-    static motor::Motor friction_left(installed::frictionHardware(0)),
-        friction_right(installed::frictionHardware(1)), dial(installed::dialHardware());
+    static motor::Motor friction_left(installed::frictionHardware(0)), friction_right(installed::frictionHardware(1)),
+        dial(installed::dialHardware());
     static motor::Group friction_group(friction_left, friction_right), dial_group(dial);
     static ShooterExecutor shooter(friction_left, friction_right, dial, friction_group, dial_group,
                                    installed::frictionMotorConfig(), installed::dialMotorConfig(),
@@ -155,7 +155,7 @@ int main() {
     const int onboard_error = onboard.start();
     const int head_error = head.start();
     int yaw_error = installed::connections_confirmed ? yaw_bus.attach(yaw, friction_left, friction_right, dial)
-                                                   : -ENODEV;
+                                                     : -ENODEV;
     int pitch_error = installed::connections_confirmed ? pitch_bus.attach(pitch) : -ENODEV;
     if (yaw_error == 0)
         yaw_error = yaw_bus.start();
