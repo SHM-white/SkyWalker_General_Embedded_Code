@@ -190,7 +190,6 @@ int main() {
     bool heading_was_fresh = false, have_heading_loss = false;
     HeadingWaitReason last_heading_loss_reason = HeadingWaitReason::None;
     core::TimeUs heading_loss_start_us = 0, heading_loss_duration_us = 0;
-    std::uint64_t last_yaw_sequence = 0;
     bool vision_pitch_was_active = false;
     bool keyboard_spin_latched = false, shift_was_down = false;
     core::OrientationReference last_head_reference{};
@@ -322,8 +321,6 @@ int main() {
                                  std::isfinite(ps.feedback.position_rad);
         const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
-        // Previous completed output; current execution is checked again before TX.
-        const bool yaw_running = gimbal.yawTelemetry().output_valid;
         const auto &feedback = peer_state.big_yaw_feedback;
         const bool peer_feedback_valid = peer_state.online && feedback.valid &&
                                          forwardedFresh(feedback.stamp, feedback.production_age_ms, now_ms, 250) &&
@@ -413,16 +410,22 @@ int main() {
         input.transport_ready = setup_ready;
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
-        const bool big_channel_ready = setup_ready && operator_state.fresh && gimbal_allowed && gimbal_mode_matches &&
-                                       input.command.mode != GimbalMode::Disabled && peer_state.online &&
-                                       installed::imu_mounting_confirmed && heading_fresh && joint_valid &&
-                                       gimbal.yawTelemetry().output_valid && (!vision_selected || vision_active);
+        // 4dc29fb centering reads the joint AFTER gimbal.update() has prepared
+        // its encoder reference. Keep navigation/vision as authorized inputs.
+        const auto center_yaw = yaw.snapshot();
+        const bool center_joint_valid = center_yaw.feedback_fresh && center_yaw.position_reference_valid &&
+                                        bool(center_yaw.feedback.valid & motor::FeedbackPosition);
+        const bool yaw_running = gimbal.yawTelemetry().output_valid;
+        const bool big_channel_ready = setup_ready && operator_state.fresh && gimbal_allowed &&
+                                       peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
+                                       center_joint_valid && yaw_running;
         YawCenteringInputs follow{};
-        follow.joint_yaw_rad = ys.feedback.position_rad;
-        follow.joint_stamp = {ys.feedback.timestamp_ms * 1000, ys.feedback.timestamp_ms, joint_valid};
+        follow.joint_yaw_rad = center_yaw.feedback.position_rad;
+        follow.joint_stamp = {center_yaw.feedback.timestamp_ms * 1000, center_yaw.feedback.timestamp_ms,
+                              center_yaw.feedback_fresh};
         follow.source_stamp = input.source_stamp;
-        follow.enabled = big_channel_ready && peer_feedback_valid;
-        follow.head_stable = gimbal.yawTelemetry().output_valid && heading_fresh;
+        follow.enabled = big_channel_ready && peer_feedback_valid && input.command.mode != GimbalMode::Disabled;
+        follow.head_stable = yaw_running && heading_fresh;
         follow.permission_valid = gimbal_allowed && installed::connections_confirmed &&
                                   installed::imu_mounting_confirmed;
         const auto centered = centering.update(follow, now_us);
@@ -454,35 +457,6 @@ int main() {
         shooter_input.require_heat = false;
         shooter_input.emergency_stop = !setup_ready;
         (void)shooter.update(shooter_input, now_us);
-        // One commit per physical bus, before the inter-board request is built:
-        // this cycle's Yaw execution and its CAN result decide whether a nonzero
-        // carrier intent may be published at all.
-        int yaw_commit_error = 0;
-        if (yaw_started) {
-            yaw_commit_error = yaw_bus.commit().error;
-            if (yaw_commit_error < 0)
-                status.error = yaw_commit_error;
-        }
-        if (pitch_started) {
-            const int error = pitch_bus.commit().error;
-            if (error < 0)
-                status.error = error;
-        }
-        const auto yaw_telemetry = gimbal.yawTelemetry();
-        const bool yaw_updated = yaw_telemetry.target_sequence != last_yaw_sequence;
-        last_yaw_sequence = yaw_telemetry.target_sequence;
-        // `RunStatus::Active` may come from Pitch alone, so the carrier request
-        // needs its own Yaw evidence: executed this cycle, output valid, CAN
-        // committed and the joint measurement still usable.
-        const bool yaw_cycle_ok = control_error == 0 && (!vision_selected || inertial.yaw_output_valid) &&
-                                  yaw_updated && yaw_telemetry.output_valid && yaw_commit_error == 0 && joint_valid;
-        // 授权不包含本周期 Yaw 执行证据：yaw_running/joint_valid 会单周期抶动，
-        // 而底盘每收到一帧 Disabled 就会丢掉已保持的世界航向并重新捕获。
-        const bool big_follow_authorized = setup_ready && operator_state.fresh && gimbal_allowed &&
-                                           gimbal_mode_matches && input.command.mode != GimbalMode::Disabled &&
-                                           peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
-                                           (!vision_selected || vision_active);
-        const bool big_follow_executed = yaw_cycle_ok && peer_feedback_valid && centered.enabled;
         if (now_ms >= next_send_ms) {
             next_send_ms = now_ms + 10;
             BigYawRequest request{};
@@ -492,11 +466,10 @@ int main() {
             request.permission = {operator_state.fresh, big_channel_ready, operator_state.remote.stamp};
             // Reference v4 world intent: the peer applies motor sign/gyro control.
             // Zero enable obtains initial real feedback before any nonzero follow.
-            // 模式只反映授权；执行证据短暂缺失时保持 FollowCenter 但发零意图，
-            // 否则底盘会丢弃已保持的世界航向。
-            request.mode = big_follow_authorized ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-            // Legacy measured-offset centering, with this cycle's execution gate.
-            request.target_rate_rad_s = big_follow_authorized && big_follow_executed ? centered.velocity_rad_s : 0;
+            // Restore the original single readiness gate for mode and rate.
+            request.mode = big_channel_ready ? BigYawMode::FollowCenter : BigYawMode::Disabled;
+            request.target_rate_rad_s = big_channel_ready && peer_feedback_valid && centered.enabled
+                                            ? centered.velocity_rad_s : 0;
             if (peer_state.online && peer_state.peer.sender_boot_id) {
                 GimbalImuYaw sample{};
                 sample.valid = heading_fresh;
@@ -527,6 +500,18 @@ int main() {
                 wheel_command.wz_rad_s = spin_out.applied_rad_s;
             endpoint.submit(wheel_command);
         }
+        // Original publication order: submit requests, then commit each local
+        // bus once. Shooter shares CAN1 and remains in that same commit.
+        if (yaw_started) {
+            const int error = yaw_bus.commit().error;
+            if (error < 0)
+                status.error = error;
+        }
+        if (pitch_started) {
+            const int error = pitch_bus.commit().error;
+            if (error < 0)
+                status.error = error;
+        }
         endpoint.setStatus(status);
         const auto reason = !setup_ready || onboard_error || (vision_selected && head_error)  ? installed::DiagnosticReason::InitFailed
                             : !operator_state.fresh                      ? installed::DiagnosticReason::RemoteStale
@@ -541,9 +526,9 @@ int main() {
             installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
         // Fixed channel map documented in docs/dev/大Yaw突发跟转诊断操作指南.md
-        // (schema 107, I19..I48; rollback map in docs/dev/双Yaw回滚与控制分工分析.md).
+        // (schema 110, I19..I48; rollback map in docs/dev/双Yaw回滚与控制分工分析.md).
         const std::array<float, 30>
-            trace{107,                                                       // I19 legacy centering + CAN vision schema
+            trace{110,                                                       // I19 legacy centering + CAN vision schema
                   float(unsigned(heading_reason)),                           // I20 live reason
                   float(unsigned(carrier_snapshot.sample.attitude_quality)), // I21 quality
                   float(heading_fresh),                                      // I22 heading usable

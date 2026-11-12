@@ -108,8 +108,6 @@ int main() {
     diagnostics.event("motor_rail", power_error);
     std::uint64_t peer_boot = 0;
     int previous_big_commit_error = 0;
-    BigYawRequest held_big_request{};
-    core::TimeUs held_big_request_us = 0;
     core::TimeUs previous_cycle_us = 0, last_big_stop_dt_us = 0;
     bool big_was_requested = false, big_was_active = false, have_big_stop = false;
     WaitReason last_big_stop_reason = WaitReason::None;
@@ -169,20 +167,10 @@ int main() {
         auto status = chassis_error == 0 ? chassis.update(input, now_us)
                                          : chassis.suspend(now_us, WaitReason::Configuration, chassis_error, true);
         BigYawExecutionInputs big_input{};
-        // 短时链路间隙不能停机也不能丢已保持的航向：复用最后一个有效请求最多 80 ms，
-        // 并重新盖章，使执行器的时效判定只看发送时记录的命令/来源年龄。
-        if (rx.big_yaw_request.stamp.valid) {
-            held_big_request = rx.big_yaw_request;
-            held_big_request_us = now_us;
-        }
-        const bool big_request_held = !rx.big_yaw_request.stamp.valid && held_big_request.stamp.valid &&
-                                      now_us - held_big_request_us <= 80000;
-        big_input.request = rx.big_yaw_request.stamp.valid ? rx.big_yaw_request
-                            : big_request_held             ? held_big_request
-                                                           : BigYawRequest{};
-        if (big_request_held)
-            big_input.request.stamp = {now_ms, held_big_request.stamp.sequence, true};
-        auto big_gate = !big_input.request.stamp.valid                   ? BigYawGate::MissingRequest
+        // 4dc29fb: consume only the endpoint's currently valid request. Never
+        // renew a cached request's timestamp after it expires on the link.
+        big_input.request = rx.big_yaw_request;
+        auto big_gate = !rx.big_yaw_request.stamp.valid                  ? BigYawGate::MissingRequest
                         : big_input.request.mode == BigYawMode::Disabled ? BigYawGate::PeerDisabled
                                                                          : BigYawGate::None;
         bool heading_follow_active = false;
@@ -291,7 +279,7 @@ int main() {
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
         const auto &hd = heading_follower.diagnostics();
         const std::array<float, 30>
-            trace{108,                                                              // I19 chassis schema
+            trace{109,                                                              // I19 chassis schema
                   float(unsigned(big_gate)),                                        // I20 live gate
                   float(unsigned(big_status.reason)),                               // I21 live execution reason
                   float(rx.gimbal_imu.valid),                                       // I22 peer heading usable
@@ -328,7 +316,7 @@ int main() {
                   float(previous_big_commit_error),                  // I45 CAN commit error
                   heading_follower.initialized() ? heading_follower.worldRateRadS()
                                                  : unavailable, // I46 legacy world rate before body compensation
-                  float(big_axis.nativeSlewLimited() ? 32u : 0u), // I47 native slew only
+                  0, // I47 reserved; native executor restored to 4dc29fb
                   0}; // I48 reserved (legacy immediate stop capture)
         diagnostics.status({.reason = big_reason,
                             .valid = feedback.valid,

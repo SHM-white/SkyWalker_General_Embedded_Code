@@ -7,8 +7,8 @@
 #include <zephyr/linker/section_tags.h>
 #include <zephyr/sys/atomic.h>
 namespace skywalker::communication {
-// One communication task calls init/service/read/send. Callback only owns buffers
-// and copies RX chunks. Instances must outlive registered device callbacks.
+// One communication task calls init/service/read/send. Callbacks own FIFO I/O
+// and copy RX chunks. Instances must outlive registered device callbacks.
 class AsyncUart {
 public:
     // Define one static DmaBuffers per instance with the __nocache attribute.
@@ -53,6 +53,7 @@ private:
     static void irqCallback(const device *, void *);
     int enterIrqMode();
     void drainIrq();
+    void fillIrq();
     int sendIrq(const std::uint8_t *, std::size_t, std::uint32_t);
     const device *uart_;
     DmaBuffers &dma_;
@@ -62,6 +63,8 @@ private:
     atomic_t tx_error_ = 0;
     atomic_val_t observed_generation_ = 0;
     atomic_t rx_draining_ = 0;
+    k_spinlock irq_tx_lock_{};
+    std::size_t irq_tx_size_ = 0, irq_tx_offset_ = 0;
     std::uint64_t retry_ms_ = 0, tx_deadline_ms_ = 0;
     bool initialized_ = false, irq_mode_ = false;
 };

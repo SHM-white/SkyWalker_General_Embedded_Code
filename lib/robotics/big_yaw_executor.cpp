@@ -10,10 +10,11 @@ int BigYawExecutor::begin() {
     if (begin_attempted_)
         return -EALREADY;
     begin_attempted_ = true;
-    config_error_ = !config_.max_cycle_us || !std::isfinite(config_.rate_abs_max_rad_s) ||
-                            config_.rate_abs_max_rad_s <= 0 || !std::isfinite(config_.motor_to_joint_ratio) ||
-                            config_.motor_to_joint_ratio <= 0 || (config_.direction != 1 && config_.direction != -1) ||
-                            !config_.command_timeout_ms || !config_.source_timeout_us
+    config_error_ = !config_.max_cycle_us ||
+                            !std::isfinite(config_.rate_abs_max_rad_s) || config_.rate_abs_max_rad_s <= 0 ||
+                            !std::isfinite(config_.motor_to_joint_ratio) || config_.motor_to_joint_ratio <= 0 ||
+                            (config_.direction != 1 && config_.direction != -1) || !config_.command_timeout_ms ||
+                            !config_.source_timeout_us
                         ? -EINVAL
                     : config_.native_velocity_mode_confirmed
                         ? 0
@@ -34,7 +35,6 @@ int BigYawExecutor::begin() {
 void BigYawExecutor::withdraw(WaitReason, int, bool) {
     heading_.reset();
     native_last_rate_rad_s_ = 0;
-    native_slew_limited_ = false;
     native_enable_generation_ = 0;
     if (!config_.heading_lock_enabled && !config_.native_velocity_mode_confirmed)
         (void)axis_.reset();
@@ -139,7 +139,6 @@ RunStatus BigYawExecutor::update(const BigYawExecutionInputs &in, core::TimeUs n
         }
         const float target = r.target_rate_rad_s * config_.motor_to_joint_ratio * config_.direction;
         const float max_change = config_.native_velocity_acceleration_rad_s2 * dt;
-        native_slew_limited_ = std::fabs(target - native_last_rate_rad_s_) > max_change;
         const float staged_rate = native_last_rate_rad_s_ +
                                   std::clamp(target - native_last_rate_rad_s_, -max_change, max_change);
         const int staged = drive_.setVelocity(staged_rate);

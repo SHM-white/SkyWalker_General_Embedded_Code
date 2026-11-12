@@ -32,15 +32,17 @@ int AsyncUart::enterIrqMode() {
     irq_mode_ = true;
     atomic_clear(&in_use_);
     atomic_clear(&rx_disabled_);
+    uart_irq_tx_disable(uart_);
     uart_irq_rx_enable(uart_);
-    uart_irq_update(uart_);
     return 0;
 }
 void AsyncUart::irqCallback(const device *dev, void *self) {
     auto *uart = static_cast<AsyncUart *>(self);
     uart_irq_update(dev);
-    if (uart_irq_rx_ready(dev))
+    if (uart_irq_rx_ready(dev) > 0)
         uart->drainIrq();
+    if (uart_irq_tx_ready(dev) > 0)
+        uart->fillIrq();
 }
 void AsyncUart::drainIrq() {
     if (!atomic_cas(&rx_draining_, 0, 1))
@@ -64,22 +66,43 @@ void AsyncUart::drainIrq() {
     atomic_clear(&rx_draining_);
 }
 int AsyncUart::sendIrq(const std::uint8_t *p, std::size_t n, std::uint32_t timeout_ms) {
-    uart_irq_tx_enable(uart_);
-    const std::uint64_t deadline = static_cast<std::uint64_t>(k_uptime_get()) + timeout_ms;
-    std::size_t sent = 0;
-    while (sent < n) {
-        const int filled = uart_fifo_fill(uart_, p + sent, static_cast<int>(n - sent));
-        if (filled > 0) {
-            sent += static_cast<std::size_t>(filled);
-            continue;
-        }
-        if (static_cast<std::uint64_t>(k_uptime_get()) >= deadline) {
-            uart_irq_tx_disable(uart_);
-            return -EAGAIN;
-        }
-        k_yield();
+    // FIFO access belongs to the driver's callback context. In particular the
+    // CDC ACM driver rejects fifo_fill() from this communication thread.
+    const auto key = k_spin_lock(&irq_tx_lock_);
+    if (atomic_get(&tx_busy_)) {
+        k_spin_unlock(&irq_tx_lock_, key);
+        return -EAGAIN;
     }
+    std::memcpy(dma_.tx, p, n);
+    irq_tx_size_ = n;
+    irq_tx_offset_ = 0;
+    tx_deadline_ms_ = static_cast<std::uint64_t>(k_uptime_get()) + timeout_ms;
+    atomic_clear(&tx_error_);
+    atomic_set(&tx_busy_, 1);
+    uart_irq_tx_enable(uart_);
+    k_spin_unlock(&irq_tx_lock_, key);
     return 0;
+}
+void AsyncUart::fillIrq() {
+    const auto key = k_spin_lock(&irq_tx_lock_);
+    if (!atomic_get(&tx_busy_)) {
+        uart_irq_tx_disable(uart_);
+        k_spin_unlock(&irq_tx_lock_, key);
+        return;
+    }
+    const auto remaining = irq_tx_size_ - irq_tx_offset_;
+    const int filled = uart_fifo_fill(uart_, dma_.tx + irq_tx_offset_, static_cast<int>(remaining));
+    if (filled > 0 && static_cast<std::size_t>(filled) <= remaining)
+        irq_tx_offset_ += static_cast<std::size_t>(filled);
+    else
+        atomic_set(&tx_error_, filled < 0 ? filled : -EIO);
+    if (atomic_get(&tx_error_) || irq_tx_offset_ == irq_tx_size_) {
+        // A ready TX interrupt with no work would be resubmitted indefinitely
+        // by CDC ACM on the cooperative system workqueue, starving control/RX.
+        uart_irq_tx_disable(uart_);
+        atomic_clear(&tx_busy_);
+    }
+    k_spin_unlock(&irq_tx_lock_, key);
 }
 int AsyncUart::startRx() {
     atomic_set(&in_use_, 1);
@@ -101,9 +124,15 @@ int AsyncUart::service(std::uint64_t now) {
     if (!initialized_)
         return -EACCES;
     if (irq_mode_) {
-        // The interrupt handler owns the FIFO; a periodic drain only covers a
-        // missed callback.
-        drainIrq();
+        // RX FIFO access is also callback-only for CDC ACM. Service merely
+        // expires pending TX when a disconnected/full device makes no progress.
+        const auto key = k_spin_lock(&irq_tx_lock_);
+        if (atomic_get(&tx_busy_) && now >= tx_deadline_ms_) {
+            uart_irq_tx_disable(uart_);
+            atomic_set(&tx_error_, -ETIMEDOUT);
+            atomic_clear(&tx_busy_);
+        }
+        k_spin_unlock(&irq_tx_lock_, key);
         return 0;
     }
     if (atomic_get(&tx_busy_) && now >= tx_deadline_ms_) {
