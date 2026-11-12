@@ -21,18 +21,11 @@
 	data-bits = <8>;
 	parity = "none";
 	stop-bits = "1";
-	/* Reuse USART1's DMA channels with the USART10 request IDs. */
-	dmas = <&dmamux1 3 119 STM32_DMA_PERIPH_TX>,
-	       <&dmamux1 4 118 STM32_DMA_PERIPH_RX>;
-	dma-names = "tx", "rx";
 };
 
 &usart1 {
 	status = "okay";
 	current-speed = <115200>;
-	/* Console uses polling; DMA channels 3/4 now belong to USART10. */
-	/delete-property/ dmas;
-	/delete-property/ dma-names;
 };
 
 &rng {

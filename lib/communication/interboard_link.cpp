@@ -112,6 +112,15 @@ void InterBoardLink::accept(const FrameMeta &m, const std::uint8_t *p, std::size
     case MessageId::BigYawFeedback:
         ret = InterBoardCodec::decodeBigYawFeedback(m, p, n, big_yaw_feedback_);
         break;
+    case MessageId::RefereeData: {
+        RefereeFragment fragment{};
+        ret = InterBoardCodec::decodeRefereeFragment(m, p, n, fragment);
+        if (!ret && (!peerOnline(m.local_receive_ms) || fragment.sender_boot_id != heartbeat_.sender_boot_id))
+            ret = -ESTALE;
+        if (!ret && referee_handler_)
+            referee_handler_(fragment, referee_context_);
+        break;
+    }
     default:
         return;
     }

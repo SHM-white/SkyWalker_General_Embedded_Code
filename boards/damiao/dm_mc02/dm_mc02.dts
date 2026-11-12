@@ -229,6 +229,12 @@ zephyr_udc0: &usbotg_hs {
 	maximum-speed = "full-speed";
 };
 
+/* Global DMA inventory (DMAMUX1 channels, unique across enabled peripherals):
+ * SPI2 RX/TX=1/2; USART1 TX/RX=3/4; UART7 TX/RX=5/7;
+ * UART5 RX=6 (DBUS has no TX pin); USART2 RX/TX=8/11;
+ * USART3 TX/RX=9/10; USART10 TX/RX=12/13. Channels 0/14/15 free.
+ * USB CDC ACM is a USB device, not a hardware UART DMA client.
+ */
 &usart1 {
 	status = "okay";
 	pinctrl-0 = <&usart1_rx_pa10 &usart1_tx_pa9>;
@@ -245,6 +251,9 @@ zephyr_udc0: &usbotg_hs {
 	pinctrl-0 = <&usart2_de_pd4 &usart2_rx_pd6 &usart2_tx_pd5>;
 	pinctrl-names = "default";
 	de-enable;
+	dmas = <&dmamux1 11 44 STM32_DMA_PERIPH_TX>,
+	       <&dmamux1 8 43 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
 };
 
 &usart3 {
@@ -253,6 +262,9 @@ zephyr_udc0: &usbotg_hs {
 	pinctrl-0 = <&usart3_de_pb14 &usart3_rx_pd9 &usart3_tx_pd8>;
 	pinctrl-names = "default";
 	de-enable;
+	dmas = <&dmamux1 9 46 STM32_DMA_PERIPH_TX>,
+	       <&dmamux1 10 45 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
 };
 
 &uart5 {
@@ -273,6 +285,9 @@ zephyr_udc0: &usbotg_hs {
 	pinctrl-0 = <&uart7_rx_pe7 &uart7_tx_pe8>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
+	dmas = <&dmamux1 5 80 STM32_DMA_PERIPH_TX>,
+	       <&dmamux1 7 79 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
 };
 
 &usart10 {
@@ -280,6 +295,9 @@ zephyr_udc0: &usbotg_hs {
 	pinctrl-0 = <&usart10_rx_pe2 &usart10_tx_pe3>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
+	dmas = <&dmamux1 12 119 STM32_DMA_PERIPH_TX>,
+	       <&dmamux1 13 118 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
 };
 
 can1: &fdcan1 {

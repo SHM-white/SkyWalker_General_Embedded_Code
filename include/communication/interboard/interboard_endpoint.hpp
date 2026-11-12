@@ -39,6 +39,9 @@ public:
     };
     InterBoardEndpoint(InterBoardTransport &transport, const Config &config)
         : config_(config), transport_(transport), link_(config.role) {
+        link_.setRefereeHandler([](const RefereeFragment &fragment, void *context) {
+            static_cast<InterBoardEndpoint *>(context)->receiveRefereeFragment(fragment);
+        }, this);
     }
     InterBoardEndpoint(const InterBoardEndpoint &) = delete;
     InterBoardEndpoint &operator=(const InterBoardEndpoint &) = delete;
@@ -54,8 +57,20 @@ public:
     void setBigYawFeedback(const robotics::BigYawFeedback &);
     Snapshot snapshot() const;
     void poll(std::uint64_t now_ms);
+    // Bounded thread-only copies. TX is chassis-only, RX is gimbal-only.
+    // Frames are bound to the current peer boot and expire after 300 ms.
+    int submitRefereeFrame(const std::uint8_t *, std::size_t, std::uint64_t receive_ms);
+    int readRefereeFrame(RefereeRelayFrame &);
 
 private:
+    void receiveRefereeFragment(const RefereeFragment &);
+    std::array<RefereeRelayFrame, 8> referee_tx_{}, referee_rx_{};
+    std::size_t referee_tx_head_ = 0, referee_tx_count_ = 0, referee_rx_head_ = 0, referee_rx_count_ = 0;
+    std::uint32_t referee_transfer_id_ = 0;
+    RefereeRelayFrame referee_pending_{}, referee_assembly_{};
+    std::size_t referee_tx_offset_ = 0, referee_rx_offset_ = 0;
+    std::uint64_t referee_assembly_start_ms_ = 0;
+    bool referee_pending_valid_ = false;
     struct Outgoing {
         robotics::ChassisCommand command{};
         robotics::RefereeState referee{};

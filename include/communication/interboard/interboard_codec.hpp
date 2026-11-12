@@ -3,6 +3,8 @@
 namespace skywalker::communication {
 class InterBoardCodec {
 public:
+    static int encodeRefereeFragment(const RefereeFragment &, std::uint32_t, std::uint8_t *, std::size_t);
+    static int decodeRefereeFragment(const FrameMeta &, const std::uint8_t *, std::size_t, RefereeFragment &);
     // Encoders return COMPLETE frame bytes; decoders consume payloads and return 0/-errno.
     // Reference v4 0x0404, 32-byte payload (no sender Boot ID in the frame).
     static int encodeGimbalImuYaw(const robotics::GimbalImuYaw &, std::uint32_t, std::uint8_t *, std::size_t);

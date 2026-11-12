@@ -1,13 +1,13 @@
 # 哨兵云台应用
 
-固定手动编码器双轴云台、大 Yaw 回中、底盘手动行走、串口导航与视觉自瞄入口，配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。本地小 Yaw/Pitch 由 CAN1/CAN2 电机编码器闭环；板载 BMI088 随大 Yaw 转动。当前启用 USB AB 视觉命令接收、USART1 导航和 USART3 裁判接收/转发；不启动 CAN3 外置头部 IMU或发射机构。
+固定手动编码器双轴云台、大 Yaw 回中、底盘手动行走、串口导航与视觉自瞄入口，配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。本地小 Yaw/Pitch 由 CAN1/CAN2 电机编码器闭环；板载 BMI088 随大 Yaw 转动。当前启用 USB AB 视觉命令接收、USART1 导航和板间裁判接收/转发；不启动 CAN3 外置头部 IMU或发射机构。
 
 ```sh
 west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d ../build/applications/sentry_gimbal
 west flash -d ../build/applications/sentry_gimbal
 ```
 
-只需重新编译、烧录云台板，不修改参考底盘或 v4 协议。不叠加历史 `vision_*.conf`、`imu_*.conf` 等场景配置。本应用直接启用导航与自瞄，其他样例的 `vision_execute_confirmed` 开关保持独立。历史[外置 IMU 接管方案](../../docs/dev/云台视觉姿态回传与外置IMU接管方案.md)仍只描述后续外置姿态源与视觉上行设计。
+本次裁判转发增加 v4 扩展消息 `0x0201`，需要重新编译并烧录本仓库的云台、底盘两个应用；旧参考底盘固件不提供该消息。原有控制消息格式保持不变。不叠加历史 `vision_*.conf`、`imu_*.conf` 等场景配置。本应用直接启用导航与自瞄，其他样例的 `vision_execute_confirmed` 开关保持独立。历史[外置 IMU 接管方案](../../docs/dev/云台视觉姿态回传与外置IMU接管方案.md)仍只描述后续外置姿态源与视觉上行设计。
 
 ## 反馈与控制
 
@@ -34,7 +34,7 @@ west flash -d ../build/applications/sentry_gimbal
 | UART5 | DR16 遥控 |
 | USART1 PA9(TX)/PA10(RX)，115200 8N1 | RX 接导航命令，TX 转发裁判 A5 原始帧；与上位机交叉连接并共地 |
 | USB PA11/PA12 CDC ACM | AB 视觉自瞄命令接收 |
-| USART3 PD8(TX)/PD9(RX)，115200 8N1 | 板载 RS485 裁判接收入口，PB14 为 DE；裁判 TTL 输出需匹配电气适配 |
+| 板间裁判数据 `0x0201` | 接收底盘原生 USART10 的裁判帧；云台不创建本地裁判 UART 接收器 |
 | USART10 PE3/PE2，460800 8N1 | 对参考底盘的 v4 板间链路 |
 | UART7 PE8/PE7，115200 8N1 | 唯一诊断串口，不能同时给视觉 |
 | CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
@@ -49,7 +49,7 @@ west flash -d ../build/applications/sentry_gimbal
 
 ## 串口导航
 
-应用配置启用 `CONFIG_SKYWALKER_NAVIGATION_RECEIVER`，接收器独占 USART1，复用 `AsyncUart` 的 DMA 接收与恢复机制。无需修改参考底盘或板间协议。左 Middle 同时选择导航底盘与视觉自瞄：导航拥有 vx/vy/wz，视觉拥有小 Yaw/Pitch 和大 Yaw 协同跟随。右拨杆、摇杆和拨轮不覆盖此档的导航或自瞄命令；切到左 Up 恢复手动。导航与视觉各自执行超时保护，缺少导航时底盘停机，缺少视觉目标时云台保持关节目标，两者不互相阻断。
+应用配置启用 `CONFIG_SKYWALKER_NAVIGATION_RECEIVER`，接收器独占 USART1，复用 `AsyncUart` 的 DMA 接收与恢复机制。裁判转发使用新增的 v4 `0x0201` 分片消息，两块板都需更新本仓库应用。左 Middle 同时选择导航底盘与视觉自瞄：导航拥有 vx/vy/wz，视觉拥有小 Yaw/Pitch 和大 Yaw 协同跟随。右拨杆、摇杆和拨轮不覆盖此档的导航或自瞄命令；切到左 Up 恢复手动。导航与视觉各自执行超时保护，缺少导航时底盘停机，缺少视觉目标时云台保持关节目标，两者不互相阻断。
 
 帧固定为 9 字节：
 
@@ -78,11 +78,11 @@ USB CDC ACM 接收既有 AB 协议的 29 字节目标帧：`41 42 control yaw ya
 
 世界 Yaw 沿用板载静止标定后的启动零点；上位机必须使用同一参考。Pitch 水平编码器初值为 `vision_pitch_horizontal_rad=3.00 rad`，在 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp) 中独立调整，尚无实测零位。模型适用于现有近水平载体与两关节几何，不代表已实现外置头部 IMU 实测闭环。USB 当前仍为目标接收：没有真实弹速/弹数来源时不会构造 AB 的 43 字节反馈帧；上位机需使用已约定的姿态参考。
 
-裁判接收由命令管理线程轮询，启用 `CONFIG_SKYWALKER_REFEREE`，季节解码沿用项目默认 RM2027；本地裁判快照接入输出许可，只有新鲜且明确的禁止输出会限制相应机构。完整通过 CRC8 和 CRC16 的 A5 帧逐帧原样转发至 USART1 TX，包括本地解码器不认识的命令号；不会重编码为自定义报文。上位机在 USART1 RX 按标准 A5 帧解包，向 USART1 TX 发送 AA/06 导航帧，双向数据互不混用。
+裁判原始输入位于底盘 USART10（PE2 RX / PE3 TX，115200 8N1 原生 TTL），底盘 CRC 校验后经板间链路传到云台；云台命令管理线程重组并解码，季节解码沿用项目默认 RM2027；本地裁判快照接入输出许可，只有新鲜且明确的禁止输出会限制相应机构。完整通过 CRC8 和 CRC16 的 A5 帧经板间 `0x0201` 分片、云台重组并再次校验后，逐帧原样转发至云台 USART1 TX，包括本地解码器不认识的命令号；不会重编码为自定义报文。上位机在 USART1 RX 按标准 A5 帧解包，向 USART1 TX 发送 AA/06 导航帧，双向数据互不混用。
 
 转发最多排队 8 帧，每帧最多 256 字节；队满丢弃新帧，队列中超过 300 ms 的帧丢弃，发送错误计数，不重发历史状态。`NavigationReceiver::snapshot()` 提供 `forwarded_frames`、`forward_dropped`、`forward_errors` 和 `tx_error`。裁判原始帧转发不依赖遥控解锁，CRC 错误帧不转发。
 
-USART3 使用板载 RS485 通道，软件启用接收不改变其电气接口；裁判端 TTL 需经过匹配的 TTL/RS485 适配，不能仅按 UART 逻辑线直连板载 RS485 A/B。USART1 导航口为 PA9/PA10 UART，两个接口用途不同。
+接线：裁判 TX → 底盘 PE2（USART10 RX），共地并匹配 UART 电平；底盘 USART1 PA9/PA10 ↔ 云台 USART10 PE2/PE3，460800 8N1；云台 PA9（USART1 TX）→ 导航上位机 RX。云台 PA10 接导航上位机 TX，接收原有 AA/06 导航命令。不使用任一板载 RS485 接口接收裁判。
 
 ## 诊断
 

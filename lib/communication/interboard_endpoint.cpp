@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <core/clock.hpp>
 #include <zephyr/random/random.h>
 #include <communication/interboard/interboard_endpoint.hpp>
 namespace skywalker::communication {
@@ -40,6 +41,90 @@ void InterBoardEndpoint::setReferee(const RefereeState &referee) {
     const auto key = k_spin_lock(&lock_);
     outgoing_.referee = referee;
     k_spin_unlock(&lock_, key);
+}
+int InterBoardEndpoint::submitRefereeFrame(const std::uint8_t *bytes, std::size_t size, std::uint64_t receive_ms) {
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
+    if (config_.role != BoardRole::ChassisController)
+        return -EACCES;
+    if (!bytes || size < 9 || size > kRefereeFrameCapacity || bytes[0] != 0xA5)
+        return -EINVAL;
+    const auto key = k_spin_lock(&lock_);
+    int result = 0;
+    if (!published_.online || !published_.peer.sender_boot_id)
+        result = -ENOTCONN;
+    else if (referee_tx_count_ == referee_tx_.size())
+        result = -ENOSPC;
+    else {
+        auto &frame = referee_tx_[(referee_tx_head_ + referee_tx_count_) % referee_tx_.size()];
+        frame = {};
+        std::memcpy(frame.bytes.data(), bytes, size);
+        frame.size = static_cast<std::uint16_t>(size);
+        frame.receive_ms = receive_ms;
+        frame.receiver_boot_id = published_.peer.sender_boot_id;
+        frame.transfer_id = ++referee_transfer_id_;
+        ++referee_tx_count_;
+    }
+    k_spin_unlock(&lock_, key);
+    return result;
+}
+int InterBoardEndpoint::readRefereeFrame(RefereeRelayFrame &out) {
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
+    if (config_.role != BoardRole::GimbalController)
+        return -EACCES;
+    const auto now = core::monotonicTimeUs() / 1000;
+    const auto key = k_spin_lock(&lock_);
+    int result = -EAGAIN;
+    while (referee_rx_count_) {
+        const auto &frame = referee_rx_[referee_rx_head_];
+        referee_rx_head_ = (referee_rx_head_ + 1) % referee_rx_.size();
+        --referee_rx_count_;
+        if (!published_.online || frame.sender_boot_id != published_.peer.sender_boot_id ||
+            frame.receiver_boot_id != published_.local_boot_id || now < frame.receive_ms ||
+            frame.source_age_ms > 300 || now - frame.receive_ms > 300 - frame.source_age_ms)
+            continue;
+        out = frame;
+        result = 0;
+        break;
+    }
+    k_spin_unlock(&lock_, key);
+    return result;
+}
+void InterBoardEndpoint::receiveRefereeFragment(const RefereeFragment &fragment) {
+    if (config_.role != BoardRole::GimbalController || fragment.receiver_boot_id != boot_id_)
+        return;
+    if (!fragment.offset) {
+        referee_assembly_ = {};
+        referee_assembly_.size = fragment.total_size;
+        referee_assembly_.transfer_id = fragment.transfer_id;
+        referee_assembly_.sender_boot_id = fragment.sender_boot_id;
+        referee_assembly_.receiver_boot_id = fragment.receiver_boot_id;
+        referee_rx_offset_ = 0;
+        referee_assembly_start_ms_ = fragment.receive_ms;
+    }
+    if (fragment.transfer_id != referee_assembly_.transfer_id ||
+        fragment.sender_boot_id != referee_assembly_.sender_boot_id ||
+        fragment.total_size != referee_assembly_.size || fragment.offset != referee_rx_offset_ ||
+        fragment.receive_ms < referee_assembly_start_ms_ || fragment.receive_ms - referee_assembly_start_ms_ > 100) {
+        referee_assembly_.size = 0;
+        referee_rx_offset_ = 0;
+        return;
+    }
+    std::memcpy(referee_assembly_.bytes.data() + referee_rx_offset_, fragment.bytes.data(), fragment.size);
+    referee_rx_offset_ += fragment.size;
+    if (referee_rx_offset_ != referee_assembly_.size)
+        return;
+    referee_assembly_.receive_ms = fragment.receive_ms;
+    referee_assembly_.source_age_ms = fragment.source_age_ms;
+    const auto key = k_spin_lock(&lock_);
+    if (referee_rx_count_ < referee_rx_.size()) {
+        referee_rx_[(referee_rx_head_ + referee_rx_count_) % referee_rx_.size()] = referee_assembly_;
+        ++referee_rx_count_;
+    }
+    k_spin_unlock(&lock_, key);
+    referee_assembly_.size = 0;
+    referee_rx_offset_ = 0;
 }
 void InterBoardEndpoint::setStatus(const RunStatus &status) {
     const auto key = k_spin_lock(&lock_);
@@ -162,6 +247,8 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
         periods[messageIndex(MessageId::BigYawRequest)] = config_.control_period_ms;
         periods[messageIndex(MessageId::BigYawFeedback)] = config_.control_period_ms;
         periods[messageIndex(MessageId::GimbalImuYaw)] = config_.imu_period_ms;
+        periods[messageIndex(MessageId::RefereeData)] = 1;
+        std::size_t referee_fragment_size = 0;
         std::uint8_t batch[InterBoardTransport::kTxCapacity]{};
         std::size_t used = 0;
         std::array<bool, kMessageCount> included{};
@@ -295,10 +382,48 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 }
                 return InterBoardCodec::encodeBigYawFeedback(feedback, seq, bytes, cap);
             });
+            // Referee traffic uses only space left after heartbeat/control feedback.
+            if (referee_pending_valid_ && (!next.online || referee_pending_.receiver_boot_id != peer_boot_ ||
+                now < referee_pending_.receive_ms || now - referee_pending_.receive_ms > 300))
+                referee_pending_valid_ = false;
+            if (next.online && !referee_pending_valid_) {
+                const auto key = k_spin_lock(&lock_);
+                while (referee_tx_count_) {
+                    referee_pending_ = referee_tx_[referee_tx_head_];
+                    referee_tx_head_ = (referee_tx_head_ + 1) % referee_tx_.size();
+                    --referee_tx_count_;
+                    if (referee_pending_.receiver_boot_id != peer_boot_ || now < referee_pending_.receive_ms ||
+                        now - referee_pending_.receive_ms > 300)
+                        continue;
+                    referee_pending_valid_ = true;
+                    referee_tx_offset_ = 0;
+                    break;
+                }
+                k_spin_unlock(&lock_, key);
+            }
+            if (referee_pending_valid_)
+                append(MessageId::RefereeData, [&](auto seq, auto *bytes, auto cap) {
+                    RefereeFragment fragment{};
+                    fragment.sender_boot_id = boot_id_;
+                    fragment.receiver_boot_id = referee_pending_.receiver_boot_id;
+                    fragment.transfer_id = referee_pending_.transfer_id;
+                    fragment.source_age_ms = static_cast<std::uint32_t>(now - referee_pending_.receive_ms);
+                    fragment.total_size = referee_pending_.size;
+                    fragment.offset = static_cast<std::uint16_t>(referee_tx_offset_);
+                    fragment.size = std::min(kRefereeFragmentCapacity, referee_pending_.size - referee_tx_offset_);
+                    std::memcpy(fragment.bytes.data(), referee_pending_.bytes.data() + referee_tx_offset_, fragment.size);
+                    referee_fragment_size = fragment.size;
+                    return InterBoardCodec::encodeRefereeFragment(fragment, seq, bytes, cap);
+                });
         }
         if (used) {
             const int ret = transport_.send(batch, used, config_.tx_timeout_ms);
             if (ret == 0) {
+                if (included[messageIndex(MessageId::RefereeData)]) {
+                    referee_tx_offset_ += referee_fragment_size;
+                    if (referee_tx_offset_ == referee_pending_.size)
+                        referee_pending_valid_ = false;
+                }
                 next_tx_ms_ = now + 1;
                 for (std::size_t i = 0; i < included.size(); ++i)
                     if (included[i])

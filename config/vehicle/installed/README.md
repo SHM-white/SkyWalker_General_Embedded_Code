@@ -14,20 +14,35 @@
 | 板卡 | 设备 | 代码基线与所有者 |
 | --- | --- | --- |
 | 云台 | UART5 / DBUS | DR16 遥控，保留板上电气通路 |
-| 云台 | USART10 | 板间 UART，PE3 TX / PE2 RX，460800 8N1；DMAMUX 通道 3/4，TX/RX 请求 119/118 |
-| 云台 | UART7 | `diagnostic-uart`，PE8 TX / PE7 RX，115200 8N1；移除 DMA，由诊断 worker 单独发送 |
+| 云台 | USART10 | 板间 UART，PE3 TX / PE2 RX，460800 8N1；DMAMUX 通道 12/13，TX/RX 请求 119/118 |
+| 云台 | UART7 | `diagnostic-uart`，PE8 TX / PE7 RX，115200 8N1；全局配置 TX/RX DMA 5/7，由诊断 worker 单独发送 |
 | 云台 | CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
 | 云台 | CAN3 | 预留给独立惯性工程的头部 DM IMU（1 Mbps、主动四元数）；当前正式手动云台不实例化 CAN3 外置 IMU，板载 SPI BMI088 为载体航向来源 |
 | 云台 | PC15 | 外部 5 V 供电使能，启动时启用；仍须核对实物供电 |
 | 底盘 | CAN1 / CAN2 / CAN3 | 四舵向 / 四轮驱 / 大 Yaw，分别只有一个 CAN 所有者 |
 | 底盘 | USART1 | 板间 UART，460800 8N1；沿用板级 DMA 通道 3/4 |
-| 底盘 | UART7 | 与云台相同的单口诊断配置，无 DMA |
+| 底盘 | UART7 | 与云台相同的单口诊断配置，保留全局 DMA 5/7 |
+| 底盘 | USART10 | 原生 TTL 裁判输入，PE2 RX / PE3 TX，115200 8N1，DMA 12/13；经板间转发至云台 |
+| 云台 | USART1 | 导航 RX / 裁判转发 TX，PA10 / PA9，115200 8N1，DMA 3/4 |
+| 云台 | USB CDC ACM | AB 自瞄目标接收，USB 通道不使用 UART DMA |
 
-板载 SPI2 IMU 的 DMA1 通道 1/2 保留。云台 USART1 释放 DMA 3/4，再由 USART10 占用；不能同时启动两个共享这些 DMA 通道的串口异步链路。底盘保留 USART1 板间映射，不把 USART10 误认成当前板间口。
+DMA 统一在全局 [dm_mc02.dts](../../../boards/damiao/dm_mc02/dm_mc02.dts) 声明；正式应用及 MC02 样例 overlay 不再重复分配或删除串口 DMA。角色只决定各口用途和波特率。
+
+| 外设 | TX DMAMUX 通道 / 请求 | RX DMAMUX 通道 / 请求 |
+| --- | --- | --- |
+| SPI2 BMI088 | 2 / 2 | 1 / 1 |
+| USART1 | 3 / 42 | 4 / 41 |
+| USART2（RS485） | 11 / 44 | 8 / 43 |
+| USART3（RS485） | 9 / 46 | 10 / 45 |
+| UART5（DBUS） | 无 TX 引脚 | 6 / 65 |
+| UART7 | 5 / 80 | 7 / 79 |
+| USART10 | 12 / 119 | 13 / 118 |
+
+六个板级硬件串口均配置了其已引出方向的 DMA，通道互不重复，剩余 0/14/15。UART5 仅有 RX；USB CDC ACM 属于 USB，不分配硬件 UART 的 DMA。配置 DMA 资源不意味着所有发送调用自动走 DMA：当前诊断 worker 仍调用 `uart_poll_out`，业务 `AsyncUart` 使用异步 DMA API。
 
 DAPLink 目标连接尚未实查：当前候选是 UART7 PE8 TX 接 DAPLink RX，双方共地，电气形式和接头须与实际板卡一致。模式切换不依赖 RX 命令，因此无需为切换模式新增 PE7 RX 接线。若 DAPLink 实际接到别的 UART，先解决与业务口的冲突，再一次性修改对应共享 overlay；不要让不同阶段用不同接线。
 
-新共享配置不提供 `vision-uart` 别名，UART7 由诊断独占。后续视觉工程应先确定独立的物理资源、DMA 和接线，再添加其专用配置；不能把 UART7 同时交给视觉、console、AsyncUart 或 VOFA 接收器。USART3 仅保留裁判资源声明，真实裁判 TTL 与板载 RS485 仍需匹配的电气适配，声明不表示接收器已启动。
+正式云台的 `vision-uart` 使用 USB CDC ACM，UART7 由诊断独占。`referee-uart` 仅在底盘角色中绑定原生 USART10；云台裁判数据通过板间扩展 `0x0201` 接收，不占用云台 USART3，也不需要 TTL/RS485 转换。两块板都需烧录新应用；旧参考底盘不具备裁判原始帧转发能力。
 
 ## 单变量选择日志或 VOFA
 
@@ -51,7 +66,7 @@ inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Log;
 
 [diagnostics_config.hpp](../../../include/robotics/vehicle/diagnostics_config.hpp) 当前候选标识为硬件 `mc02-installed-20261025-candidate`、标定 `vehicle-20261025-unverified`；协议固定 v4。启动身份还包含应用、板角色和源码版本，便于区分本地未提交修改。配置修改后重建所有受影响阶段和最终应用；已烧录固件及旧通过记录不会自动更新。
 
-中央确认标志当前保留连接、IMU 安装、发射约束为 true，功率模型为 false。它们是当前代码配置，不能代替现场核对。阶段工程只应使能其明确负责的机构；新最终云台暂不启动发射/视觉，新最终底盘使用低电流手动机械策略，功率实测与受约束执行仍需单独接入。
+中央确认标志当前保留连接、IMU 安装、发射约束为 true，功率模型为 false。它们是当前代码配置，不能代替现场核对。阶段工程只应使能其明确负责的机构；新最终云台启用导航和视觉目标接收，暂不启动发射，新最终底盘使用低电流手动机械策略，功率实测与受约束执行仍需单独接入。
 
 ## 2026-10-28 舵轮参考候选
 

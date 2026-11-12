@@ -1,34 +1,44 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "Zephyr IDE: Build Active",
-            "type": "shell",
-            "command": "west",
-            "args": [
-                "build",
-                "${command:zephyr-ide.get-active-project-path}",
-                "--build-dir",
-                "${command:zephyr-ide.get-active-build-path}",
-                "--board",
-                "${command:zephyr-ide.get-active-board-name}",
-                "--",
-                "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
-                "-DCONFIG_DEBUG_THREAD_INFO=y"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "problemMatcher": "$gcc",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "clear": true
-            }
-        }
-    ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Zephyr IDE: Build Active",
+			"type": "shell",
+			"command": "west",
+			"args": [
+				"build",
+				"${command:zephyr-ide.get-active-project-path}",
+				"--build-dir",
+				"${command:zephyr-ide.get-active-build-path}",
+				"--board",
+				"${command:zephyr-ide.get-active-board-name}",
+				"--",
+				"-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+				"-DCONFIG_DEBUG_THREAD_INFO=y"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": "$gcc",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
+		{
+			"label": "Build sentry controllers",
+			"type": "shell",
+			"command": "west build applications/sentry_gimbal -d applications/sentry_gimbal/build/dm_mc02/stm32h723xx -b dm_mc02/stm32h723xx && west build applications/sentry_chassis -d applications/sentry_chassis/build/dm_mc02/stm32h723xx -b dm_mc02/stm32h723xx",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		}
+	]
 }

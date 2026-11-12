@@ -73,14 +73,12 @@ int main() {
                                                                     navigation_dma);
     static NavigationSource navigation_source(navigation);
 #endif
-// Referee polling is owned by CommandManager; its frame callback only enqueues
-// copies, leaving USART1 RX/TX exclusively with NavigationReceiver.
-#if DT_HAS_ALIAS(referee_uart) && IS_ENABLED(CONFIG_SKYWALKER_REFEREE)
-    static communication::AsyncUart::DmaBuffers referee_dma __nocache;
-    static communication::RefereeReceiver referee(DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma);
-    static RefereePermissionSource referee_source(referee);
+    // Chassis UART -> interboard reassembly -> referee decoder -> navigation TX.
+    // No referee UART is opened on the gimbal board.
+#if IS_ENABLED(CONFIG_SKYWALKER_REFEREE) && IS_ENABLED(CONFIG_SKYWALKER_INTERBOARD_ENDPOINT)
+    static InterBoardRefereeSource referee_source(endpoint);
 #if DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER)
-    referee.setFrameHandler([](const std::uint8_t *bytes, std::size_t size, void *context) {
+    referee_source.setFrameHandler([](const std::uint8_t *bytes, std::size_t size, void *context) {
         auto &receiver = *static_cast<communication::navigation::NavigationReceiver *>(context);
         (void)receiver.forwardRefereeFrame(bytes, size);
     }, &navigation);
@@ -128,7 +126,7 @@ int main() {
     if (command_error == 0)
         command_error = commands.registerSource(vision_source);
 #endif
-#if DT_HAS_ALIAS(referee_uart) && IS_ENABLED(CONFIG_SKYWALKER_REFEREE)
+#if IS_ENABLED(CONFIG_SKYWALKER_REFEREE) && IS_ENABLED(CONFIG_SKYWALKER_INTERBOARD_ENDPOINT)
     if (command_error == 0)
         command_error = commands.bindPermissions(referee_source);
 #endif

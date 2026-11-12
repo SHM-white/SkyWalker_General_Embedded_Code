@@ -1,5 +1,9 @@
 #pragma once
 #include <robotics/command/command_source.hpp>
+#if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_INTERBOARD_ENDPOINT)
+#include <communication/interboard/interboard_endpoint.hpp>
+#include <communication/referee/referee_service.hpp>
+#endif
 #ifdef CONFIG_SKYWALKER_NAVIGATION_RECEIVER
 #include <communication/navigation/navigation_receiver.hpp>
 #endif
@@ -14,6 +18,27 @@
 #endif
 
 namespace skywalker::robotics {
+#if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_INTERBOARD_ENDPOINT)
+// CommandManager consumes reassembled frames and owns the referee decoder.
+// No local UART or shared parser is involved on the gimbal board.
+class InterBoardRefereeSource final : public IPermissionSource {
+public:
+    explicit InterBoardRefereeSource(communication::InterBoardEndpoint &endpoint) : endpoint_(endpoint) {
+    }
+    int start() override {
+        return 0;
+    }
+    int sample(std::uint64_t now_ms, RefereeState &, SourceDiagnostics &) override;
+    void setFrameHandler(communication::RefereeParser::FrameHandler handler, void *context) {
+        service_.setFrameHandler(handler, context);
+    }
+
+private:
+    communication::InterBoardEndpoint &endpoint_;
+    communication::RefereeService service_;
+    std::uint64_t peer_boot_ = 0;
+};
+#endif
 #ifdef CONFIG_SKYWALKER_NAVIGATION_RECEIVER
 class NavigationSource final : public ICommandSource {
 public:

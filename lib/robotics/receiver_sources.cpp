@@ -1,6 +1,40 @@
 #include <cerrno>
+#include <algorithm>
+#include <core/clock.hpp>
 #include <robotics/command/receiver_sources.hpp>
 namespace skywalker::robotics {
+#if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_INTERBOARD_ENDPOINT)
+int InterBoardRefereeSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) {
+    const auto peer = endpoint_.snapshot();
+    diagnostics = {};
+    diagnostics.error = peer.error;
+    if (!peer.online || peer.peer.sender_boot_id != peer_boot_) {
+        service_.reset();
+        peer_boot_ = peer.online ? peer.peer.sender_boot_id : 0;
+    }
+    for (unsigned budget = 0; budget < 8; ++budget) {
+        communication::RefereeRelayFrame frame{};
+        const int result = endpoint_.readRefereeFrame(frame);
+        if (result == -EAGAIN)
+            break;
+        if (result < 0) {
+            diagnostics.error = result;
+            break;
+        }
+        if (frame.source_age_ms > frame.receive_ms)
+            continue;
+        // Convert the producer's age into this board's time domain. Polling
+        // the cache later must never renew a referee permission's source time.
+        service_.processBytes(frame.bytes.data(), frame.size, frame.receive_ms - frame.source_age_ms);
+    }
+    now_ms = std::max(now_ms, core::monotonicTimeUs() / 1000);
+    service_.processBytes(nullptr, 0, now_ms);
+    out = {};
+    if (peer.online)
+        service_.snapshot(now_ms, out);
+    return 0;
+}
+#endif
 #ifdef CONFIG_SKYWALKER_NAVIGATION_RECEIVER
 int NavigationSource::start() {
     return receiver_.start();

@@ -12,7 +12,8 @@ enum class MessageId : std::uint16_t {
     OperatorControl = 0x0301,
     BigYawRequest = 0x0402,
     BigYawFeedback = 0x0403,
-    GimbalImuYaw = 0x0404 // Reference v4 heading sample, 32B payload.
+    GimbalImuYaw = 0x0404, // Reference v4 heading sample, 32B payload.
+    RefereeData = 0x0201   // Chassis -> gimbal, fragmented original referee frame.
 };
 inline constexpr std::uint8_t kInterBoardProtocolVersion = 4;
 constexpr std::size_t kMaxPayload = 128, kMaxFrame = 142;
@@ -30,5 +31,20 @@ struct InterBoardFrame {
 };
 std::uint16_t interboardCrc16(const std::uint8_t *data, std::size_t size);
 int messageIndex(MessageId id);
-constexpr std::size_t kMessageCount = 8;
+constexpr std::size_t kMessageCount = 9;
+constexpr std::size_t kRefereeFrameCapacity = 256, kRefereeFragmentCapacity = 100;
+struct RefereeRelayFrame {
+    std::array<std::uint8_t, kRefereeFrameCapacity> bytes{};
+    std::uint16_t size = 0;
+    std::uint32_t transfer_id = 0, source_age_ms = 0;
+    std::uint64_t receive_ms = 0, sender_boot_id = 0, receiver_boot_id = 0;
+};
+struct RefereeFragment {
+    std::uint64_t sender_boot_id = 0, receiver_boot_id = 0;
+    std::uint32_t transfer_id = 0, source_age_ms = 0;
+    std::uint16_t total_size = 0, offset = 0;
+    std::array<std::uint8_t, kRefereeFragmentCapacity> bytes{};
+    std::size_t size = 0;
+    std::uint64_t receive_ms = 0;
+};
 }

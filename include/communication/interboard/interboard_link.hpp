@@ -9,6 +9,11 @@ public:
     explicit InterBoardLink(BoardRole role) : role_(role) {
     }
     int processRxBytes(const std::uint8_t *, std::size_t, std::uint64_t now_ms);
+    using RefereeHandler = void (*)(const RefereeFragment &, void *);
+    void setRefereeHandler(RefereeHandler handler, void *context) {
+        referee_handler_ = handler;
+        referee_context_ = context;
+    }
     void discardPartial() {
         parser_.discardPartial();
     }
@@ -54,5 +59,7 @@ private:
     std::array<std::uint64_t, 8> retired_boots_{};
     std::size_t retired_count_ = 0; // Full history fails closed until local reboot.
     std::uint32_t rejected_ = 0;
+    RefereeHandler referee_handler_ = nullptr;
+    void *referee_context_ = nullptr;
 };
 }

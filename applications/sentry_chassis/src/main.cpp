@@ -4,6 +4,7 @@
 #include <limits>
 #include <communication/interboard/configured_interboard_transport.hpp>
 #include <communication/interboard/interboard_endpoint.hpp>
+#include <communication/referee/referee_receiver.hpp>
 #include <core/clock.hpp>
 #include <drivers/imu/bmi088_imu.hpp>
 #include <drivers/imu/imu_receiver.hpp>
@@ -49,6 +50,12 @@ int main() {
                                                                    .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
                                                                   &link_dma);
     static communication::InterBoardEndpoint endpoint(transport, {BoardRole::ChassisController});
+    static communication::AsyncUart::DmaBuffers referee_dma __nocache;
+    static communication::RefereeReceiver referee(DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma);
+    referee.setFrameHandler([](const std::uint8_t *bytes, std::size_t size, void *context) {
+        auto &link = *static_cast<communication::InterBoardEndpoint *>(context);
+        (void)link.submitRefereeFrame(bytes, size, core::monotonicTimeUs() / 1000);
+    }, &endpoint);
     static motor::Motor s0(installed::steerHardware(0)), s1(installed::steerHardware(1)),
         s2(installed::steerHardware(2)), s3(installed::steerHardware(3));
     static motor::Motor d0(installed::wheelHardware(0)), d1(installed::wheelHardware(1)),
@@ -115,6 +122,8 @@ int main() {
         const bool cycle_valid = dt_us && dt_us <= big_yaw_config.max_cycle_us;
         previous_cycle_us = now_us;
         endpoint.poll(now_ms);
+        const auto referee_state = referee.poll(core::monotonicTimeUs() / 1000);
+        endpoint.setReferee(referee_state);
         const auto rx = endpoint.snapshot();
         if (rx.peer.stamp.valid && peer_boot != rx.peer.sender_boot_id) {
             peer_boot = rx.peer.sender_boot_id;
@@ -123,6 +132,8 @@ int main() {
         }
         ChassisExecutionInputs input{};
         input.command = rx.control.command;
+        input.permission = referee_state.robot.chassis_output;
+        input.require_permission = true;
         if (rx.control.global_action != SafetyAction::Active || !rx.online || !rx.local_boot_id ||
             rx.control.receiver_boot_id != rx.local_boot_id)
             input.command.mode = ChassisMode::Disabled;

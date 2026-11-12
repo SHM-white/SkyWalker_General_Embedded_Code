@@ -82,6 +82,45 @@ int InterBoardCodec::decodeHeartbeat(const FrameMeta &m, const std::uint8_t *p, 
     out = t;
     return 0;
 }
+int InterBoardCodec::decodeRefereeFragment(const FrameMeta &m, const std::uint8_t *p, std::size_t n,
+                                           RefereeFragment &out) {
+    if (!p || n <= 28 || n > kMaxPayload || !header(m, MessageId::RefereeData, BoardRole::ChassisController))
+        return -EINVAL;
+    RefereeFragment value{};
+    value.sender_boot_id = loadLe64(p);
+    value.receiver_boot_id = loadLe64(p + 8);
+    value.transfer_id = loadLe32(p + 16);
+    value.source_age_ms = loadLe32(p + 20);
+    value.total_size = loadLe16(p + 24);
+    value.offset = loadLe16(p + 26);
+    value.size = n - 28;
+    value.receive_ms = m.local_receive_ms;
+    if (!value.sender_boot_id || !value.receiver_boot_id || value.total_size < 9 ||
+        value.total_size > kRefereeFrameCapacity || value.offset >= value.total_size ||
+        value.size > static_cast<std::size_t>(value.total_size - value.offset) || value.source_age_ms > 300)
+        return -EINVAL;
+    std::memcpy(value.bytes.data(), p + 28, value.size);
+    out = value;
+    return 0;
+}
+int InterBoardCodec::encodeRefereeFragment(const RefereeFragment &value, std::uint32_t sequence,
+                                           std::uint8_t *out, std::size_t cap) {
+    if (!value.size || value.size > kRefereeFragmentCapacity)
+        return -EINVAL;
+    std::uint8_t payload[kMaxPayload]{};
+    storeLe64(payload, value.sender_boot_id);
+    storeLe64(payload + 8, value.receiver_boot_id);
+    storeLe32(payload + 16, value.transfer_id);
+    storeLe32(payload + 20, value.source_age_ms);
+    storeLe16(payload + 24, value.total_size);
+    storeLe16(payload + 26, value.offset);
+    std::memcpy(payload + 28, value.bytes.data(), value.size);
+    RefereeFragment decoded{};
+    const int result = decodeRefereeFragment({BoardRole::ChassisController, MessageId::RefereeData, sequence, 0},
+                                             payload, value.size + 28, decoded);
+    return result < 0 ? result : frame(BoardRole::ChassisController, MessageId::RefereeData, sequence,
+                                       payload, value.size + 28, out, cap);
+}
 int InterBoardCodec::encodeHeartbeat(const BoardHeartbeat &t, std::uint32_t seq, std::uint8_t *out, std::size_t cap) {
     std::uint8_t p[20]{};
     p[0] = static_cast<std::uint8_t>(t.role);

@@ -12,6 +12,9 @@ public:
     void discardPartial() {
         parser_.discardPartial();
     }
+    void reset() {
+        parser_.reset();
+    }
     void setFrameHandler(RefereeParser::FrameHandler handler, void *context) {
         parser_.setFrameHandler(handler, context);
     }

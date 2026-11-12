@@ -1,5 +1,15 @@
 #include "common.overlay"
 / {
-    aliases { interboard-uart = &usart1; };
+    aliases {
+        interboard-uart = &usart1;
+        referee-uart = &usart10;
+    };
 };
 &usart1 { current-speed = <460800>; };
+/* Spare native TTL UART, not either onboard RS485 transceiver. */
+&usart10 {
+    current-speed = <115200>;
+    data-bits = <8>;
+    parity = "none";
+    stop-bits = "1";
+};
