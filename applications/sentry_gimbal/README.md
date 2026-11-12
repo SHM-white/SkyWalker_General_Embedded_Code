@@ -1,13 +1,13 @@
 # 哨兵云台应用
 
-固定手动编码器双轴云台、大 Yaw 回中、底盘手动行走与串口导航入口，配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。本地小 Yaw/Pitch 由 CAN1/CAN2 电机编码器闭环；板载 BMI088 随大 Yaw 转动。当前不启动 CAN3 外置头部 IMU、视觉、裁判或发射机构。
+固定手动编码器双轴云台、大 Yaw 回中、底盘手动行走、串口导航与视觉自瞄入口，配未修改的参考底盘 `JJL0612/sentry_onlychassis@dcc8d4e`。本地小 Yaw/Pitch 由 CAN1/CAN2 电机编码器闭环；板载 BMI088 随大 Yaw 转动。当前启用 USB AB 视觉命令接收、USART1 导航和 USART3 裁判接收/转发；不启动 CAN3 外置头部 IMU或发射机构。
 
 ```sh
 west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d ../build/applications/sentry_gimbal
 west flash -d ../build/applications/sentry_gimbal
 ```
 
-只需重新编译、烧录云台板，不修改参考底盘或 v4 协议。不叠加历史 `vision_*.conf`、`imu_*.conf` 等场景配置；未来视觉功能见[视觉姿态回传与外置 IMU 接管方案](../../docs/dev/云台视觉姿态回传与外置IMU接管方案.md)。这些旧 conf 文件存在不代表当前固定入口启动了视觉。
+只需重新编译、烧录云台板，不修改参考底盘或 v4 协议。不叠加历史 `vision_*.conf`、`imu_*.conf` 等场景配置。本应用直接启用导航与自瞄，其他样例的 `vision_execute_confirmed` 开关保持独立。历史[外置 IMU 接管方案](../../docs/dev/云台视觉姿态回传与外置IMU接管方案.md)仍只描述后续外置姿态源与视觉上行设计。
 
 ## 反馈与控制
 
@@ -32,7 +32,9 @@ west flash -d ../build/applications/sentry_gimbal
 | 资源 | 当前用途 |
 | --- | --- |
 | UART5 | DR16 遥控 |
-| USART1 PA9(TX)/PA10(RX)，115200 8N1 | 导航速度接收；上位机 TX 接 PA10，共地 |
+| USART1 PA9(TX)/PA10(RX)，115200 8N1 | RX 接导航命令，TX 转发裁判 A5 原始帧；与上位机交叉连接并共地 |
+| USB PA11/PA12 CDC ACM | AB 视觉自瞄命令接收 |
+| USART3 PD8(TX)/PD9(RX)，115200 8N1 | 板载 RS485 裁判接收入口，PB14 为 DE；裁判 TTL 输出需匹配电气适配 |
 | USART10 PE3/PE2，460800 8N1 | 对参考底盘的 v4 板间链路 |
 | UART7 PE8/PE7，115200 8N1 | 唯一诊断串口，不能同时给视觉 |
 | CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
@@ -41,13 +43,13 @@ west flash -d ../build/applications/sentry_gimbal
 
 共享配置仍可能编译外置 IMU 驱动，但没有实例化或启动它，不会因 CAN3 无回传而阻止手动控制。不在本次修改共享接线或其他惯性实验入口。
 
-上电保持未解锁、静止约 3 秒，并等待诊断 I22=1（实际标定完成才允许大 Yaw）。左 Down、右 Middle，摇杆/拨轮归中保持至少 500 ms，左 Down→Middle 建立解锁，再拨 Up 手动。右杆控制小 Yaw/Pitch，左杆控制云台坐标内前后/横移，速度由当前 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp) 决定；进入手动后右拨杆先经过 Middle，再主动切 Down 才请求小陀螺。拨轮不再叠加大 Yaw 速度，以免打断自动回中。左 Down 停止；左 Middle 解锁后选择串口导航，详见下节。
+上电保持未解锁、静止约 3 秒，并等待诊断 I22=1（实际标定完成才允许大 Yaw）。左 Down、右 Middle，摇杆/拨轮归中保持至少 500 ms，左 Down→Middle 建立解锁，再拨 Up 手动。右杆控制小 Yaw/Pitch，左杆控制云台坐标内前后/横移，速度由当前 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp) 决定；进入手动后右拨杆先经过 Middle，再主动切 Down 才请求小陀螺。拨轮不再叠加大 Yaw 速度，以免打断自动回中。左 Down 停止；左 Middle 解锁后同时选择串口导航和视觉自瞄，详见下节。
 
 应用每 5 ms 控制，每 10 ms 发布大 Yaw 与行走请求。先确认小幅输入和撤权停止，再从中心两侧验证回中方向；编码器中心和 IMU 安装方向仍须实测，不能以候选标定或编译结果代替。
 
 ## 串口导航
 
-应用配置启用 `CONFIG_SKYWALKER_NAVIGATION_RECEIVER`，接收器独占 USART1，复用 `AsyncUart` 的 DMA 接收与恢复机制。无需修改参考底盘或板间协议。导航只控制底盘，小 Yaw、Pitch 和大 Yaw 跟随请求在导航档关闭，右拨杆和拨轮不覆盖导航速度。
+应用配置启用 `CONFIG_SKYWALKER_NAVIGATION_RECEIVER`，接收器独占 USART1，复用 `AsyncUart` 的 DMA 接收与恢复机制。无需修改参考底盘或板间协议。左 Middle 同时选择导航底盘与视觉自瞄：导航拥有 vx/vy/wz，视觉拥有小 Yaw/Pitch 和大 Yaw 协同跟随。右拨杆、摇杆和拨轮不覆盖此档的导航或自瞄命令；切到左 Up 恢复手动。导航与视觉各自执行超时保护，缺少导航时底盘停机，缺少视觉目标时云台保持关节目标，两者不互相阻断。
 
 帧固定为 9 字节：
 
@@ -64,9 +66,23 @@ west flash -d ../build/applications/sentry_gimbal
 
 例如 `AA 06 E8 03 0C FE F4 01 40` 表示 vx=1.000 m/s、vy=-0.500 m/s、wz=0.500 rad/s；停止帧为 `AA 06 00 00 00 00 00 00 AC`。图片只定义接收命令，没有定义 ACK，因此本实现不发送应答帧。
 
-操作流程：先归中并按现有流程解锁，左 Middle 为导航，左 Up 为手动，左 Down 为停止。进入导航档后必须收到一帧新的有效导航命令才运行，进入前缓存的命令不会启动底盘。上位机应持续发送，例如 50 Hz；超过 100 ms 未收到有效帧、遥控失联、左 Down 或板间链路撤权均停止导航。重新解锁或重新进入导航仍需新帧。
+操作流程：先归中并按现有流程解锁，左 Middle 为导航＋自瞄，左 Up 为手动，左 Down 为停止。进入导航档后必须收到一帧新的有效导航命令才运行，进入前缓存的命令不会启动底盘。上位机应持续发送，例如 50 Hz；超过 100 ms 未收到有效帧、遥控失联、左 Down 或板间链路撤权均停止导航。重新解锁或重新进入导航仍需新帧。
 
 接收器支持拆包、连续帧和错误后的滑动重同步，未完成的帧在字节间隔超过 20 ms 后丢弃；长度错误或 XOR 错误不刷新命令时间。传输溢出/故障立即使缓存命令失效。接收统计可从 `NavigationReceiver::snapshot()` 读取；命令快照中的 `navigation` 保留串口状态、丢包信息，`decision.chassis_reasons` 给出未收到、超时、等待新帧及限幅原因。
+
+## 自瞄与裁判转发
+
+USB CDC ACM 接收既有 AB 协议的 29 字节目标帧：`41 42 control yaw yaw_rate yaw_acc pitch pitch_rate pitch_acc crc16`。六个目标数值为小端 float32，单位分别为 rad、rad/s、rad/s²；control=0 停止，1 请求跟踪，2 请求跟踪/发射。当前未启用发射机构，因此 control=2 只参与跟踪。CRC16 沿用 [AbProtocol](../../include/communication/vision/ab_protocol.hpp)。
+
+左 Middle 解锁后，自瞄只接受进入该档后收到的新目标；100 ms 未更新、control=0、参考不匹配或非法数值均退出跟踪。Yaw 由双 Yaw 分配器转换为小 Yaw 关节轨迹和大 Yaw 世界角速度请求。Pitch 将世界瞄准方向经载体姿态及实测小 Yaw 关节反变换为编码器目标，受原有限位和最高 3 rad/s 的目标变化率限制。载体姿态、独立航向或任一关节测量不新鲜时不执行视觉目标。
+
+世界 Yaw 沿用板载静止标定后的启动零点；上位机必须使用同一参考。Pitch 水平编码器初值为 `vision_pitch_horizontal_rad=3.00 rad`，在 [calibration.hpp](../../include/robotics/vehicle/calibration.hpp) 中独立调整，尚无实测零位。模型适用于现有近水平载体与两关节几何，不代表已实现外置头部 IMU 实测闭环。USB 当前仍为目标接收：没有真实弹速/弹数来源时不会构造 AB 的 43 字节反馈帧；上位机需使用已约定的姿态参考。
+
+裁判接收由命令管理线程轮询，启用 `CONFIG_SKYWALKER_REFEREE`，季节解码沿用项目默认 RM2027；本地裁判快照接入输出许可，只有新鲜且明确的禁止输出会限制相应机构。完整通过 CRC8 和 CRC16 的 A5 帧逐帧原样转发至 USART1 TX，包括本地解码器不认识的命令号；不会重编码为自定义报文。上位机在 USART1 RX 按标准 A5 帧解包，向 USART1 TX 发送 AA/06 导航帧，双向数据互不混用。
+
+转发最多排队 8 帧，每帧最多 256 字节；队满丢弃新帧，队列中超过 300 ms 的帧丢弃，发送错误计数，不重发历史状态。`NavigationReceiver::snapshot()` 提供 `forwarded_frames`、`forward_dropped`、`forward_errors` 和 `tx_error`。裁判原始帧转发不依赖遥控解锁，CRC 错误帧不转发。
+
+USART3 使用板载 RS485 通道，软件启用接收不改变其电气接口；裁判端 TTL 需经过匹配的 TTL/RS485 适配，不能仅按 UART 逻辑线直连板载 RS485 A/B。USART1 导航口为 PA9/PA10 UART，两个接口用途不同。
 
 ## 诊断
 
@@ -78,4 +94,4 @@ I13/I20 原因码：0 正常；1 源未运行；3 陀螺/yaw 时间戳过期或�
 
 通道 14 仍为本地云台执行/初始化错误，没有混入 EKF 服务错误。I21/I26～I29/I40/I42/I43 仍是三维 EKF 诊断，不能当成 yaw 许可。预期急加减速时可以 I21=4、I26=2，但 I20=0、I22=1、I18 连续有效，I31 不增加，I37 不含 32。I24 是安装转换后的原始 gyro-z；有效时 `I24-I18` 约为固定启动零偏。I13=9/13 则需停机重启，重新解锁不会清除参考锁定。
 
-`reason=6` 仅指当前使用的板载航向无效，不再表示 CAN3 无回传；本地手动可运行而大 Yaw 因板载航向或对端反馈被禁止。其他原因沿用共享诊断定义。尚未烧录或实板验证；视觉回传、自动瞄准、姿态源接管均只记录后续方案，未接入此固件。
+`reason=6` 仅指当前使用的板载航向无效，不再表示 CAN3 无回传；本地手动可运行而大 Yaw 因板载航向或对端反馈被禁止。其他原因沿用共享诊断定义。尚未烧录或实板验证；导航、自瞄目标执行和裁判转发已接入，视觉姿态上行与外置 IMU 姿态源接管仍为后续工作。

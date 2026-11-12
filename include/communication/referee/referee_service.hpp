@@ -12,6 +12,9 @@ public:
     void discardPartial() {
         parser_.discardPartial();
     }
+    void setFrameHandler(RefereeParser::FrameHandler handler, void *context) {
+        parser_.setFrameHandler(handler, context);
+    }
     int snapshot(std::uint64_t now, robotics::RefereeState &out) const {
         if (!parser_.state().stamp.valid)
             return -EAGAIN;

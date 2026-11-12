@@ -10,6 +10,12 @@ public:
                       assembly_timeouts = 0;
     };
     RefereeParser() = default;
+    // Synchronous, borrowed view of a complete CRC-valid frame, including unknown IDs.
+    using FrameHandler = void (*)(const std::uint8_t *, std::size_t, void *);
+    void setFrameHandler(FrameHandler handler, void *context) {
+        frame_handler_ = handler;
+        frame_context_ = context;
+    }
     int reset();
     void discardPartial() {
         used_ = 0;
@@ -33,5 +39,7 @@ private:
     std::uint32_t sequence_ = 0;
     Stats stats_{};
     robotics::RefereeState state_{};
+    FrameHandler frame_handler_ = nullptr;
+    void *frame_context_ = nullptr;
 };
 }

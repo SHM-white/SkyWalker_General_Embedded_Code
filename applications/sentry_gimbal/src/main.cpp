@@ -73,16 +73,30 @@ int main() {
                                                                     navigation_dma);
     static NavigationSource navigation_source(navigation);
 #endif
+// Referee polling is owned by CommandManager; its frame callback only enqueues
+// copies, leaving USART1 RX/TX exclusively with NavigationReceiver.
+#if DT_HAS_ALIAS(referee_uart) && IS_ENABLED(CONFIG_SKYWALKER_REFEREE)
+    static communication::AsyncUart::DmaBuffers referee_dma __nocache;
+    static communication::RefereeReceiver referee(DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma);
+    static RefereePermissionSource referee_source(referee);
+#if DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER)
+    referee.setFrameHandler([](const std::uint8_t *bytes, std::size_t size, void *context) {
+        auto &receiver = *static_cast<communication::navigation::NavigationReceiver *>(context);
+        (void)receiver.forwardRefereeFrame(bytes, size);
+    }, &navigation);
+#endif
+#endif
     static CommandManager commands([] {
         auto config = installed::manualCommandConfig();
         config.allow_navigation = DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER);
-        // Up remains the installed manual position even if visual auto is enabled.
-        if (config.allow_navigation)
-            config.allow_auto = false;
+        config.allow_auto = DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER);
+        config.mapper.auto_on_up = false;
+        config.require_referee_for_chassis = true;
+        config.require_referee_for_gimbal = true;
         return config;
     }());
-    // Board IMU moves with big Yaw, not with the small-Yaw head. No external
-    // CAN3 IMU or vision receiver is instantiated in this manual application.
+    // Board IMU moves with big Yaw, not with the small-Yaw head. Visual pitch
+    // uses its attitude plus encoder geometry; CAN3 head IMU is not instantiated.
     static control::QuaternionEkf onboard_estimator({.initialization_samples = 800, .adapt_gyro_bias = false});
     static imu::Bmi088Imu onboard_source(DEVICE_DT_GET(DT_ALIAS(accel0)), DEVICE_DT_GET(DT_ALIAS(gyro0)),
                                          {.reference = installed::carrier_reference,
@@ -113,6 +127,10 @@ int main() {
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
     if (command_error == 0)
         command_error = commands.registerSource(vision_source);
+#endif
+#if DT_HAS_ALIAS(referee_uart) && IS_ENABLED(CONFIG_SKYWALKER_REFEREE)
+    if (command_error == 0)
+        command_error = commands.bindPermissions(referee_source);
 #endif
     if (command_error == 0)
         command_error = commands.start();
@@ -156,6 +174,7 @@ int main() {
     CarrierAccelerationEstimator carrier_acceleration;
     std::uint32_t vision_trajectory_sequence = 0, last_heading_generation = 0;
     std::uint64_t last_yaw_sequence = 0;
+    bool vision_pitch_was_active = false;
     for (;;) {
         // Snapshot before taking the validation time: a higher-priority IMU
         // update must not make a new gyro stamp appear to be in our future.
@@ -179,7 +198,8 @@ int main() {
             operator_state.navigation_active = false;
         }
         const bool navigation_allowed = operator_state.navigation_active && operator_state.fresh && setup_ready;
-        commands.setOperatorGate(operator_state.run_allowed || navigation_allowed,
+        const bool gimbal_allowed = operator_state.run_allowed || navigation_allowed;
+        commands.setOperatorGate(gimbal_allowed,
                                   static_cast<std::uint32_t>(operator_state.start_event_id));
         // The DR16 dial (spring-centred wheel) is the analog spin control. It
         // only scales and signs the chassis spin rate: translation still comes
@@ -224,11 +244,22 @@ int main() {
         GimbalExecutionInputs input{};
         input.command = frame.decision.command.gimbal;
         input.source_stamp = sourceStamp(frame, input.command.source);
+        const bool gimbal_mode_matches = navigation_allowed
+                                             ? frame.decision.operator_mode == OperatorMode::Navigation
+                                             : frame.decision.operator_mode == OperatorMode::Manual;
         const float raw_head_rate_rad_s = input.command.yaw_rate_rad_s;
         // Allocation runs on the pre-update snapshot: one measured joint state
         // and one carrier gyro sample produce the plan that this cycle's single
         // gimbal.update() consumes.
         const auto ys = yaw.snapshot();
+        const auto ps = pitch.snapshot();
+        const bool pitch_valid = ps.feedback_fresh && ps.position_reference_valid &&
+                                 bool(ps.feedback.valid & motor::FeedbackPosition) &&
+                                 std::isfinite(ps.feedback.position_rad);
+        auto carrier_orientation = carrier_snapshot.sample.orientation.value;
+        const bool carrier_pose_valid =
+            core::fresh(carrier_snapshot.sample.orientation.stamp, now_us, 20000) &&
+            core::normalize(carrier_orientation);
         const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
         // Last completed Yaw telemetry: the request below is gated on it and the
@@ -247,15 +278,16 @@ int main() {
         // by the manager exactly while the final gimbal source is Vision.
         const auto &selected_vision = frame.decision.selected_vision;
         const bool vision_selected = selected_vision.stamp.valid && input.command.source == ControlSource::Vision &&
-                                     input.command.mode != GimbalMode::Disabled;
+                                     input.command.mode != GimbalMode::Disabled && gimbal_allowed && gimbal_mode_matches;
         // The vision trajectory is expressed in the head world frame, so it is
         // only consumed while the carrier attitude and the joint measurement are
         // fresh; otherwise the axis holds the measured joint instead of chasing
         // a world angle in joint space.
-        const bool vision_active = vision_selected && heading_fresh && joint_valid;
+        const bool vision_active = vision_selected && heading_fresh && joint_valid && pitch_valid && carrier_pose_valid;
         if (vision_selected && !vision_active)
             input.command.mode = GimbalMode::Hold;
         float vision_angle_rad = 0, vision_rate_rad_s = 0, vision_acceleration_rad_s2 = 0;
+        float vision_pitch_rad = 0;
         std::uint32_t vision_epoch = 0;
         if (vision_selected) {
             const auto &v = selected_vision.value.yaw;
@@ -270,10 +302,13 @@ int main() {
             vision_angle_rad = v.angle_rad + v.rate_rad_s * age_s + 0.5f * v.acceleration_rad_s2 * age_s * age_s;
             vision_rate_rad_s = v.rate_rad_s;
             vision_acceleration_rad_s2 = v.acceleration_rad_s2;
+            const auto &p = selected_vision.value.pitch;
+            vision_pitch_rad = p.angle_rad + p.rate_rad_s * age_s + 0.5f * p.acceleration_rad_s2 * age_s * age_s;
             vision_epoch = (static_cast<std::uint32_t>(selected_vision.value.reference.frame_id) << 16) ^
                            static_cast<std::uint32_t>(selected_vision.value.reference.epoch);
         }
-        const bool big_channel_ready = setup_ready && operator_state.fresh && operator_state.run_allowed &&
+        const bool big_channel_ready = setup_ready && operator_state.fresh && gimbal_allowed && gimbal_mode_matches &&
+                                       input.command.mode != GimbalMode::Disabled &&
                                        peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
                                        joint_valid && yaw_running;
         DualYawAllocatorInputs allocation{};
@@ -289,11 +324,11 @@ int main() {
         allocation.source_stamp = input.source_stamp;
         allocation.big_yaw_available = big_channel_ready && peer_feedback_valid;
         allocation.enabled =
-            operator_state.run_allowed &&
+            gimbal_allowed && gimbal_mode_matches &&
             (input.command.mode == GimbalMode::Rate ||
              (vision_active && input.command.mode != GimbalMode::Disabled));
         allocation.permission_valid =
-            operator_state.run_allowed && installed::connections_confirmed && installed::imu_mounting_confirmed;
+            gimbal_allowed && gimbal_mode_matches && installed::connections_confirmed && installed::imu_mounting_confirmed;
         allocation.vision_active = vision_active;
         allocation.vision_angle_rad = vision_angle_rad;
         allocation.vision_rate_rad_s = vision_rate_rad_s;
@@ -310,15 +345,31 @@ int main() {
         allocation.carrier_acceleration_rad_s2 = carrier_acceleration.value_rad_s2();
         const auto alloc = dual_yaw.update(allocation, now_us);
         if (alloc.enabled && alloc.vision_mode) {
-            // Vision owns the Yaw through the validated joint trajectory. Pitch
-            // keeps a measured joint hold until the separate vision attitude
-            // chain supplies a joint-space pitch target.
+            // Yaw uses the allocator; transform the world aiming ray through
+            // carrier attitude and the measured Yaw joint before commanding Pitch.
             input.yaw_trajectory.valid = true;
             input.yaw_trajectory.position_rad = alloc.joint_position_rad;
             input.yaw_trajectory.rate_rad_s = alloc.joint_rate_rad_s;
             input.yaw_trajectory.acceleration_rad_s2 = alloc.joint_acceleration_rad_s2;
             input.yaw_trajectory.stamp = {now_us, ++vision_trajectory_sequence, true};
-            input.command.pitch_target_rad = pitch.snapshot().feedback.position_rad;
+            auto carrier_euler = core::euler(carrier_orientation);
+            carrier_euler.yaw = heading.yaw_rad; // Same startup yaw reference as the allocator.
+            const auto yaw_pose = core::multiply(
+                core::fromEuler(carrier_euler),
+                core::fromEuler({0, 0, installed::small_yaw.direction *
+                                          (ys.feedback.position_rad - installed::yaw_center_rad)}));
+            const float cp = std::cos(vision_pitch_rad);
+            const core::Vec3 world_ray{cp * std::cos(vision_angle_rad), cp * std::sin(vision_angle_rad),
+                                       -std::sin(vision_pitch_rad)};
+            const auto joint_ray = core::rotate(core::conjugate(yaw_pose), world_ray);
+            const float target = std::clamp(installed::vision_pitch_horizontal_rad +
+                                               installed::pitch.direction * std::atan2(-joint_ray.z, joint_ray.x),
+                                           installed::pitch_min_rad, installed::pitch_max_rad);
+            const float seed = vision_pitch_was_active ? static_cast<float>(gimbal.pitchTargetRad())
+                                                        : ps.feedback.position_rad;
+            const float step = installed::manual_max_gimbal_pitch_rate_rad_s *
+                               static_cast<float>(std::min<core::TimeUs>(dt_us, 20000)) * 1e-6f;
+            input.command.pitch_target_rad = std::clamp(target, seed - step, seed + step);
         }
         else if (vision_selected) {
             // Vision selected but the allocation was rejected this cycle: hold
@@ -338,7 +389,8 @@ int main() {
                                                : installed::small_yaw.direction * raw_head_rate_rad_s;
             input.command.pitch_rate_rad_s *= installed::pitch.direction;
         }
-        if (!operator_state.run_allowed)
+        vision_pitch_was_active = alloc.enabled && alloc.vision_mode;
+        if (!gimbal_allowed || !gimbal_mode_matches)
             input.command.mode = GimbalMode::Disabled;
         input.transport_ready = setup_ready;
         // The travel envelope rejected this cycle's outward command: drop the
@@ -412,14 +464,15 @@ int main() {
                                         wheel_command.source != ControlSource::Autonomous;
             if (!navigation_command && !manual_command)
                 wheel_command.mode = ChassisMode::Disabled;
-            if (manual_command && wheel_command.mode != ChassisMode::Disabled)
+            if (manual_command && wheel_command.mode != ChassisMode::Disabled &&
+                !(frame.decision.chassis_reasons & PermissionDenied))
                 wheel_command.wz_rad_s = spin_out.applied_rad_s;
             endpoint.submit(wheel_command);
         }
         endpoint.setStatus(status);
         const auto reason = !setup_ready || onboard_error                ? installed::DiagnosticReason::InitFailed
                             : !operator_state.fresh                      ? installed::DiagnosticReason::RemoteStale
-                            : !operator_state.run_allowed                ? installed::DiagnosticReason::Disarmed
+                            : !gimbal_allowed                            ? installed::DiagnosticReason::Disarmed
                             : !installed::imu_mounting_confirmed         ? installed::DiagnosticReason::Configuration
                             : !heading_fresh                             ? installed::DiagnosticReason::ImuStale
                             : !peer_state.online || !peer_feedback_valid ? installed::DiagnosticReason::PeerStale
@@ -454,7 +507,7 @@ int main() {
             loss_estimator.gravity_error_m_s2,                           // I35 event accel error
             loss_estimator.innovation_nis,                               // I36 event NIS
             float((!setup_ready ? 1u : 0u) | (!operator_state.fresh ? 2u : 0u) |
-                  (!operator_state.run_allowed ? 4u : 0u) | (!peer_state.online ? 8u : 0u) |
+                  (!gimbal_allowed ? 4u : 0u) | (!peer_state.online ? 8u : 0u) |
                   (!installed::imu_mounting_confirmed ? 16u : 0u) | (!heading_fresh ? 32u : 0u) |
                   (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u)), // I37 disabled prerequisites; zero=ready
             alloc.big.rate_rad_s,                                        // I38 big-Yaw world intent

@@ -243,6 +243,10 @@ inline constexpr float yaw_max_rad = (yaw_high_ticks - small_yaw.encoder_zero_ti
 inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
 // 调参：Pitch 驱动坐标的软件限位，rad；沿用现值，须与实测机械端点确认后再修改。
 inline constexpr float pitch_min_rad = 2.60f, pitch_max_rad = 3.40f;
+// 自瞄几何：枪口水平时的 Pitch 编码器位置，rad；3.00 为待实测的初值。
+// 与限位独立，不能用修改限位来修正视觉零位。
+inline constexpr float vision_pitch_horizontal_rad = 3.00f;
+static_assert(vision_pitch_horizontal_rad >= pitch_min_rad && vision_pitch_horizontal_rad <= pitch_max_rad);
 static_assert(yaw_min_rad < yaw_max_rad && yaw_center_rad > yaw_min_rad && yaw_center_rad < yaw_max_rad &&
                   pitch_min_rad < pitch_max_rad,
               "gimbal software limits must be ordered and contain their centers");

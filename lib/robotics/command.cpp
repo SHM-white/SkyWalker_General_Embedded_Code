@@ -114,7 +114,8 @@ void CommandArbiter::withdrawMouseShooter() {
 ManualCommandMapper::Config CommandArbiter::mapperConfig() const {
     auto c = config_.mapper;
     // 视觉执行样例保留左 Up=自动；其余样例由适配层把左 Up 作为手动档。
-    c.auto_on_up = c.auto_on_up || config_.allow_auto;
+    // Navigation and aim share Middle in installed vehicles; Up stays manual.
+    c.auto_on_up = c.auto_on_up || (config_.allow_auto && !config_.allow_navigation);
     c.navigation_on_middle = c.navigation_on_middle || config_.allow_navigation;
     return c;
 }
@@ -265,13 +266,14 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         return disable(SafeRequested, 0);
     if (i.mode == OperatorMode::Auto && !config_.allow_auto)
         return disable(AutoUnavailable, 0);
-    if (i.mode == OperatorMode::Navigation) {
+    const bool navigation_mode = i.mode == OperatorMode::Navigation;
+    const bool automatic_aim = i.mode == OperatorMode::Auto || (navigation_mode && config_.allow_auto);
+    if (navigation_mode) {
         if (!config_.allow_navigation)
             return disable(NavigationUnavailable, 0);
         withdrawMouseShooter();
         n.mouse_fire = {};
         manual_override_ = have_override_quiet_time_ = false;
-        previous_mode_ = i.mode;
         if (!navigation_active_) {
             navigation_active_ = true;
             navigation_entry_us_ = now;
@@ -299,35 +301,34 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
                 chassis.wz_rad_s != nav.value.wz_rad_s)
                 n.chassis_reasons |= ValueLimited;
         }
-        n.command = n.requested;
-        n.chassis_reasons |= cr;
-        if (cr)
-            n.command.chassis.vx_m_s = n.command.chassis.vy_m_s = n.command.chassis.wz_rad_s = 0;
-        return finish(0);
     }
-    navigation_active_ = false;
-    if (i.mode == OperatorMode::Auto) {
-        if (previous_mode_ != OperatorMode::Auto) {
+    else
+        navigation_active_ = false;
+    if (automatic_aim) {
+        if (previous_mode_ != i.mode) {
             auto_entry_us_ = now;
             auto_baseline_sequence_ = in.vision.stamp.valid ? in.vision.stamp.sequence : 0;
         }
-        updateAutoOverride(i, in, now);
+        if (!navigation_mode)
+            updateAutoOverride(i, in, now);
     }
     else
         manual_override_ = have_override_quiet_time_ = false;
     previous_mode_ = i.mode;
-    fillManualMotion(i, config_, n.requested);
+    if (!navigation_mode)
+        fillManualMotion(i, config_, n.requested);
     n.manual_override = manual_override_;
     n.override_quiet = have_override_quiet_time_;
     bool visual_control = false;
-    if (i.mode == OperatorMode::Auto && manual_override_) {
+    if (automatic_aim && manual_override_) {
         n.gimbal_reasons |= ManualOverride;
         if (n.override_quiet)
             n.gimbal_reasons |= OverrideQuiet;
     }
-    else if (i.mode == OperatorMode::Auto) {
+    else if (automatic_aim) {
         n.requested.gimbal = {};
         n.requested.gimbal.mode = GimbalMode::Hold;
+        n.requested.gimbal.source = i.source;
         const auto &v = in.vision.value;
         const float values[] = {v.yaw.angle_rad,    v.pitch.angle_rad,         v.yaw.rate_rad_s,
                                 v.pitch.rate_rad_s, v.yaw.acceleration_rad_s2, v.pitch.acceleration_rad_s2};
@@ -373,7 +374,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
             g.pitch_rate_rad_s = target.pitch.rate_rad_s;
         }
     }
-    if (!config_.enable_shooter || !i.friction_requested)
+    if (navigation_mode || !config_.enable_shooter || !i.friction_requested)
         n.shooter_reasons |= ShooterNotArmed;
     else {
         auto &s = n.requested.shooter;

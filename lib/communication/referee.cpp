@@ -95,6 +95,8 @@ void RefereeParser::scan(std::uint64_t now) {
             continue;
         }
         ++stats_.valid_frames;
+        if (frame_handler_)
+            frame_handler_(p, total, frame_context_);
         decode(wire::loadLe16(p + 5), p + 7, n, receive_ms_[total - 1]);
         discard(total);
         started_ms_ = now;

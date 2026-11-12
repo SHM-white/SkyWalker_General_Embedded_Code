@@ -48,3 +48,12 @@
            <&dmamux1 4 118 STM32_DMA_PERIPH_RX>;
     dma-names = "tx", "rx";
 };
+/* Existing onboard RS485 transceiver; the referee's TTL output needs a
+ * matching electrical adapter before it can reach this USART3 input. */
+&usart3 {
+    status = "okay";
+    current-speed = <115200>;
+    data-bits = <8>;
+    parity = "none";
+    stop-bits = "1";
+};

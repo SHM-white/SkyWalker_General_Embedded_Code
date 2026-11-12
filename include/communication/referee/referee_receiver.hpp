@@ -47,6 +47,10 @@ public:
     int error() const {
         return error_;
     }
+    // Bind before the owner thread starts polling; callback must not block.
+    void setFrameHandler(RefereeParser::FrameHandler handler, void *context) {
+        service_.setFrameHandler(handler, context);
+    }
 
 private:
     AsyncUart uart_;
