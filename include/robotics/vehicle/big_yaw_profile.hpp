@@ -68,6 +68,10 @@ inline BigYawWorldHeadingFollower::Config bigYawHeadingFollowerConfig() {
     c.rate_integral_max_rad_s = big_yaw_heading_integral_max_rad_s;
     c.output_max_rad_s = cal.velocity_limit_rad_s;
     c.release_epsilon_rad_s = big_yaw_heading_release_epsilon_rad_s;
+    // 双 Yaw 分配器的大 Yaw 世界意图是连续轨迹：反向点和“持续前馈 + 回中”抵消
+    // 都会自然穿过零速。只有零请求持续 100 ms 才按松杆处理，避免每次过零都丢弃
+    // 已积累的航向目标。
+    c.stop_capture_dwell_s = 0.1f;
     return c;
 }
 } // namespace skywalker::robotics::vehicle

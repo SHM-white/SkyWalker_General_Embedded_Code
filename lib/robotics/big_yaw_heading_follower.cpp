@@ -12,11 +12,12 @@ float wrap(float a) {
 int BigYawWorldHeadingFollower::validate() const {
     for (float x : {config_.heading_kp, config_.heading_rate_max_rad_s, config_.rate_kp, config_.rate_ki,
                     config_.rate_integral_max_rad_s, config_.output_max_rad_s, config_.release_epsilon_rad_s,
-                    config_.max_sample_age_s, config_.max_dt_s})
+                    config_.stop_capture_dwell_s, config_.max_sample_age_s, config_.max_dt_s})
         if (!std::isfinite(x) || x < 0)
             return -EINVAL;
     return config_.heading_error_max_rad > 0 && config_.heading_error_max_rad <= pi && config_.output_max_rad_s > 0 &&
-                   config_.rate_integral_max_rad_s > 0 && config_.max_dt_s > 0 && config_.max_sample_age_s >= 0
+                   config_.rate_integral_max_rad_s > 0 && config_.max_dt_s > 0 && config_.max_sample_age_s >= 0 &&
+                   config_.stop_capture_dwell_s <= 1.0f
                ? 0
                : -EINVAL;
 }
@@ -25,6 +26,8 @@ void BigYawWorldHeadingFollower::reset() {
     initialized_ = false;
     target_heading_rad_ = previous_requested_rate_rad_s_ = 0;
     rate_integral_rad_s_ = heading_error_rad_ = world_rate_rad_s_ = 0;
+    zero_request_s_ = 0;
+    stop_captured_ = true;
     last_peer_boot_id_ = 0;
     last_zero_generation_ = 0;
 }
@@ -60,18 +63,24 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
         return 0;
     }
     const float requested = in.desired_world_rate_rad_s;
+    const float dt = std::min(in.dt_s, config_.max_dt_s);
     // Releasing the stick captures the current heading; the operator must not
-    // watch the joint chase a target that lagged behind the measurement.
-    if (std::fabs(requested) <= config_.release_epsilon_rad_s &&
-        std::fabs(previous_requested_rate_rad_s_) > config_.release_epsilon_rad_s) {
+    // watch the joint chase a target that lagged behind the measurement. A
+    // continuous trajectory crosses zero as well, so the zero must persist for
+    // `stop_capture_dwell_s` before it is treated as a release.
+    const bool zero_request = std::fabs(requested) <= config_.release_epsilon_rad_s;
+    zero_request_s_ = zero_request ? zero_request_s_ + dt : 0;
+    if (zero_request && !stop_captured_ && zero_request_s_ >= config_.stop_capture_dwell_s) {
+        stop_captured_ = true;
         target_heading_rad_ = heading;
         rate_integral_rad_s_ = 0;
         ++diagnostics_.capture_count;
         diagnostics_.capture_reason = 2;
         diagnostics_.capture_ms = in.now_ms;
     }
+    if (!zero_request)
+        stop_captured_ = false;
     previous_requested_rate_rad_s_ = requested;
-    const float dt = std::min(in.dt_s, config_.max_dt_s);
     float error = wrap(target_heading_rad_ + requested * dt - heading);
     const bool clamping = std::fabs(error) > config_.heading_error_max_rad;
     if (clamping && !diagnostic_clamping_)

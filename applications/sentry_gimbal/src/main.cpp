@@ -12,7 +12,7 @@
 #include <robotics/command/receiver_sources.hpp>
 #include <robotics/chassis/imu_heading.hpp>
 #include <core/attitude.hpp>
-#include <robotics/gimbal/yaw_centering.hpp>
+#include <robotics/gimbal/dual_yaw_motion_allocator.hpp>
 #include <robotics/gimbal/gimbal_executor.hpp>
 #include <robotics/gimbal/inertial_gimbal.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
@@ -48,7 +48,7 @@ std::uint32_t age(const core::Stamp &stamp, core::TimeUs now_us) {
 int main() {
     static installed::Diagnostics diagnostics;
     diagnostics.start("sentry_gimbal", "gimbal",
-                      "legacy yaw centering; CAN head IMU for vision; carrier BMI088 for big yaw");
+                      "dual-yaw allocation; CAN head IMU for vision; carrier BMI088 for big yaw");
     static led::StatusLed status_led;
     const int status_led_error = status_led.start();
     if constexpr (led::StatusLed::available)
@@ -116,9 +116,10 @@ int main() {
     static imu::ImuReceiver head(head_source, {.poll_interval_us = 1000, .priority = 6});
     static const auto inertial_config = installed::sentryInertialConfig();
     static InertialGimbalAdapter head_control(inertial_config);
-    // Restore the 4dc29fb coordination: the small joint aims, the carrier
-    // follows its measured offset with the original rate/acceleration limits.
-    static YawCenteringController centering(installed::manualCenteringConfig());
+    // 双 Yaw 分配器是正式链路里唯一的大小 Yaw 分工点：大 Yaw 主动承担持续运动
+    // 与回中，小 Yaw 补偿实测残差并守住行程。旧的 YawCenteringController
+    // （robotics/gimbal/yaw_centering.hpp）已作废，不再参与本应用。
+    static DualYawMotionAllocator dual_yaw(installed::dualYawAllocatorConfig());
     // Variable-speed top spin: the curve is vehicle::spinRateCurveRadS().
     static SpinSpeedProfile spin(installed::spinProfileConfig());
     static motor::Motor yaw(installed::yawHardware()), pitch(installed::pitchHardware());
@@ -171,6 +172,8 @@ int main() {
     diagnostics.event("yaw_bus", yaw_error);
     diagnostics.event("pitch_bus", pitch_error);
     diagnostics.event("gimbal", control_error);
+    // 非零表示分配器参数非法：此时它按 Configuration 拒绝运行，回退旧编码器路径。
+    diagnostics.event("dual_yaw", dual_yaw.validate());
     diagnostics.event("shooter", shooter_error);
     diagnostics.event("motor_rail", power_error);
     // 载体 IMU 门控大 Yaw；外置头部 IMU 门控视觉，手动保持旧编码器控制。
@@ -295,7 +298,7 @@ int main() {
         const bool head_ready = head_usable && !head_reference_changed;
         if (!head_ready || !head_was_ready) {
             if (last_head_source == ControlSource::Vision)
-                centering.reset();
+                dual_yaw.reset();
             (void)head_control.suspend(now_us, WaitReason::Reference);
         }
         head_was_ready = head_ready;
@@ -310,7 +313,7 @@ int main() {
         const float raw_head_rate_rad_s = input.command.yaw_rate_rad_s;
         const float raw_pitch_rate_rad_s = input.command.pitch_rate_rad_s;
         if (input.command.source != last_head_source) {
-            centering.reset();
+            dual_yaw.reset();
             (void)head_control.suspend(now_us, WaitReason::Command);
             last_head_source = input.command.source;
         }
@@ -328,7 +331,7 @@ int main() {
                                          std::fabs(feedback.actual_rate_rad_s) <=
                                              installed::big_yaw.velocity_limit_rad_s;
         if (peer_feedback_valid != peer_feedback_was_valid)
-            centering.reset();
+            dual_yaw.reset();
         peer_feedback_was_valid = peer_feedback_valid;
         // Only the arbitrated target is ever consumed. `selected_vision` is kept
         // by the manager exactly while the final gimbal source is Vision.
@@ -341,7 +344,7 @@ int main() {
                                    selected_vision.value.reference == head_sample.reference;
         if (vision_selected && !vision_active)
             input.command.mode = GimbalMode::Disabled;
-        float vision_angle_rad = 0, vision_rate_rad_s = 0;
+        float vision_angle_rad = 0, vision_rate_rad_s = 0, vision_acceleration_rad_s2 = 0;
         float vision_pitch_rad = 0;
         if (vision_selected) {
             const auto &v = selected_vision.value.yaw;
@@ -355,9 +358,41 @@ int main() {
             const float age_s = std::min(local_age_s + installed::vision_capture_latency_s, 0.05f);
             vision_angle_rad = v.angle_rad + v.rate_rad_s * age_s + 0.5f * v.acceleration_rad_s2 * age_s * age_s;
             vision_rate_rad_s = v.rate_rad_s + v.acceleration_rad_s2 * age_s;
+            vision_acceleration_rad_s2 = v.acceleration_rad_s2;
             const auto &p = selected_vision.value.pitch;
             vision_pitch_rad = p.angle_rad + p.rate_rad_s * age_s + 0.5f * p.acceleration_rad_s2 * age_s * age_s;
         }
+        // --- 双 Yaw 分配：每周期唯一一次，必须早于头部外环 --------------------
+        // 输入是“已仲裁的头部世界速率意图”（手动）或视觉轨迹（角度/速度/加速度），
+        // 输出是可行头部世界参考 + 大 Yaw 世界意图 + 带行程保护的小 Yaw 关节速率。
+        DualYawAllocatorInputs alloc_input{};
+        alloc_input.head_rate_target_rad_s = raw_head_rate_rad_s;
+        alloc_input.joint_rad = ys.feedback.position_rad;
+        alloc_input.joint_rate_rad_s =
+            bool(ys.feedback.valid & motor::FeedbackVelocity) ? ys.feedback.velocity_rad_s : 0.0f;
+        alloc_input.joint_stamp = {ys.feedback.timestamp_ms * 1000ULL, ys.feedback.timestamp_ms, joint_valid};
+        alloc_input.carrier_rate_rad_s = heading_fresh ? heading.rate_rad_s : 0.0f;
+        alloc_input.carrier_stamp = heading.stamp;
+        alloc_input.carrier_valid = heading_fresh;
+        alloc_input.source_stamp = input.source_stamp;
+        // 头部实测世界角只用于重播种/超前角保护；手动模式不因此依赖外置 IMU。
+        alloc_input.head_angle_measured_rad = head_usable ? head_euler.yaw : 0.0f;
+        alloc_input.head_angle_valid = head_usable;
+        alloc_input.enabled = gimbal_allowed && input.command.mode != GimbalMode::Disabled;
+        alloc_input.permission_valid = gimbal_allowed && installed::connections_confirmed &&
+                                       installed::imu_mounting_confirmed;
+        // 大 Yaw 通道是否可用的判定与发送门控分离：真正的 mode/rate 仍在下面
+        // big_channel_ready 之后决定，这里只决定本周期是否推进大 Yaw 意图。
+        alloc_input.big_yaw_available = peer_state.online && peer_feedback_valid && heading_fresh && joint_valid;
+        alloc_input.vision_active = vision_active;
+        alloc_input.vision_angle_rad = vision_angle_rad;
+        alloc_input.vision_rate_rad_s = vision_rate_rad_s;
+        alloc_input.vision_acceleration_rad_s2 = vision_acceleration_rad_s2;
+        // 视觉参考代次变化必须在分配器里重新播种，不能沿用上一参考下的角度。
+        alloc_input.vision_epoch = head_usable ? head_sample.reference.epoch : 0;
+        const auto allocation = dual_yaw.update(alloc_input, now_us);
+        if (allocation.joint_reseed_requested)
+            (void)gimbal.reseedYawTarget();
         InertialGimbalInputs inertial_input{};
         inertial_input.head = head_snapshot;
         inertial_input.yaw = ys;
@@ -367,15 +402,24 @@ int main() {
         inertial_input.prerequisites_ready = setup_ready && installed::imu_mounting_confirmed;
         // The received target and the feedback quaternion share the CAN IMU's
         // reference. Never rebuild this target in the carrier's independent zero.
+        // 分配器给出可行头部世界角/速率，头部外环只负责把实测姿态闭环到它；
+        // 分配器不可用时才退回视觉原始目标，保证失配时仍有旧的视觉行为。
         inertial_input.yaw_reference_valid = vision_active;
-        inertial_input.yaw_reference_rad = vision_angle_rad;
-        inertial_input.yaw_reference_rate_rad_s = vision_rate_rad_s;
+        inertial_input.yaw_reference_rad = allocation.head_reference_valid ? allocation.head_angle_rad : vision_angle_rad;
+        inertial_input.yaw_reference_rate_rad_s =
+            allocation.head_reference_valid ? allocation.head_reference_rate_rad_s : vision_rate_rad_s;
         inertial_input.command.mode = vision_active ? GimbalMode::Rate : GimbalMode::Disabled;
         const auto inertial = head_control.update(inertial_input, now_us);
         if (vision_active) {
             input.command = inertial.command;
             input.source_stamp = inertial.source_stamp;
             input.yaw_output_valid = inertial.yaw_output_valid;
+            // 头部外环的关节速率仍必须服从分配器实时的行程/制动余量，否则
+            // 视觉修正可以把小 Yaw 推过软端点。
+            if (allocation.joint_rate_valid)
+                input.command.yaw_rate_rad_s =
+                    std::clamp(input.command.yaw_rate_rad_s, -allocation.outward_budget_neg_rad_s,
+                               allocation.outward_budget_pos_rad_s);
             // Remove the measured Pitch joint from the *head CAN quaternion*.
             // This leaves the yaw-stage pose in exactly the vision world frame.
             const auto yaw_pose = core::multiply(
@@ -400,9 +444,14 @@ int main() {
                               installed::manual_max_gimbal_pitch_rate_rad_s) : 0;
         }
         else if (input.command.mode == GimbalMode::Rate) {
-            // Original manual encoder loops and measured carrier compensation.
-            input.command.yaw_rate_rad_s = installed::small_yaw.direction *
-                (raw_head_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
+            // 小 Yaw 关节速率直接来自分配器：已含实测载体补偿、头部加速度窗和
+            // 行程度包络；退化输出同样带保护。只有分配器完全不可用时才回退到
+            // 旧的“原始头部速率减载体角速度”公式。
+            input.command.yaw_rate_rad_s =
+                allocation.joint_rate_valid
+                    ? allocation.joint_rate_rad_s
+                    : installed::small_yaw.direction *
+                          (raw_head_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
             input.command.pitch_rate_rad_s = raw_pitch_rate_rad_s * installed::pitch.direction;
         }
         vision_pitch_was_active = vision_active;
@@ -410,8 +459,8 @@ int main() {
         input.transport_ready = setup_ready;
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
-        // 4dc29fb centering reads the joint AFTER gimbal.update() has prepared
-        // its encoder reference. Keep navigation/vision as authorized inputs.
+        // 板间大 Yaw 的发送门控仍然在本周期执行结果之后再判断：分配器只提供
+        // 世界速率意图，能不能发出去由仲裁、对端在线、对端反馈和本机执行状态决定。
         const auto center_yaw = yaw.snapshot();
         const bool center_joint_valid = center_yaw.feedback_fresh && center_yaw.position_reference_valid &&
                                         bool(center_yaw.feedback.valid & motor::FeedbackPosition);
@@ -419,16 +468,6 @@ int main() {
         const bool big_channel_ready = setup_ready && operator_state.fresh && gimbal_allowed &&
                                        peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
                                        center_joint_valid && yaw_running;
-        YawCenteringInputs follow{};
-        follow.joint_yaw_rad = center_yaw.feedback.position_rad;
-        follow.joint_stamp = {center_yaw.feedback.timestamp_ms * 1000, center_yaw.feedback.timestamp_ms,
-                              center_yaw.feedback_fresh};
-        follow.source_stamp = input.source_stamp;
-        follow.enabled = big_channel_ready && peer_feedback_valid && input.command.mode != GimbalMode::Disabled;
-        follow.head_stable = yaw_running && heading_fresh;
-        follow.permission_valid = gimbal_allowed && installed::connections_confirmed &&
-                                  installed::imu_mounting_confirmed;
-        const auto centered = centering.update(follow, now_us);
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
         communication::vision::Feedback vision_feedback{};
         vision_feedback.mode = navigation_allowed ? communication::vision::Mode::AutoAim
@@ -468,8 +507,9 @@ int main() {
             // Zero enable obtains initial real feedback before any nonzero follow.
             // Restore the original single readiness gate for mode and rate.
             request.mode = big_channel_ready ? BigYawMode::FollowCenter : BigYawMode::Disabled;
-            request.target_rate_rad_s = big_channel_ready && peer_feedback_valid && centered.enabled
-                                            ? centered.velocity_rad_s : 0;
+            request.target_rate_rad_s = big_channel_ready && peer_feedback_valid && allocation.enabled
+                                            ? allocation.big.rate_rad_s
+                                            : 0;
             if (peer_state.online && peer_state.peer.sender_boot_id) {
                 GimbalImuYaw sample{};
                 sample.valid = heading_fresh;
@@ -525,10 +565,11 @@ int main() {
         (void)status_led.setStatus(
             installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
-        // Fixed channel map documented in docs/dev/大Yaw突发跟转诊断操作指南.md
-        // (schema 110, I19..I48; rollback map in docs/dev/双Yaw回滚与控制分工分析.md).
+        // Fixed channel map documented in docs/dev/双Yaw速度加速度分配与视觉轨迹控制方案.md
+        // (schema 111, I19..I48). I38/I43/I48 now describe the dual-Yaw allocator
+        // instead of the retired centering controller.
         const std::array<float, 30>
-            trace{110,                                                       // I19 legacy centering + CAN vision schema
+            trace{111,                                                       // I19 dual-Yaw allocation + CAN vision schema
                   float(unsigned(heading_reason)),                           // I20 live reason
                   float(unsigned(carrier_snapshot.sample.attitude_quality)), // I21 quality
                   float(heading_fresh),                                      // I22 heading usable
@@ -554,20 +595,22 @@ int main() {
                   float((!setup_ready ? 1u : 0u) | (!operator_state.fresh ? 2u : 0u) | (!gimbal_allowed ? 4u : 0u) |
                         (!peer_state.online ? 8u : 0u) | (!installed::imu_mounting_confirmed ? 16u : 0u) |
                         (!heading_fresh ? 32u : 0u) | (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u) |
-                        (!head_ready ? 256u : 0u)),                          // I37 disabled prerequisites; zero=ready
-                  centered.velocity_rad_s,                                      // I38 big-Yaw world intent
+                        (!head_ready ? 256u : 0u)),           // I37 disabled prerequisites; zero=ready
+                  allocation.big.rate_rad_s,                  // I38 big-Yaw world intent
                   peer_feedback_valid ? float(feedback.armed) : unavailable, // I39 peer armed
                   float(age(carrier_snapshot.sample.orientation.stamp, now_us)),    // I40 orientation age
                   float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),     // I41 gyro age
                   spin_out.applied_rad_s,                                           // I42 applied variable spin rate
-                  std::min(installed::yaw_max_rad - ys.feedback.position_rad, ys.feedback.position_rad - installed::yaw_min_rad), // I43 tightest outward travel
+                  std::min(allocation.brake_margin_pos_rad, allocation.brake_margin_neg_rad), // I43 tightest outward travel
                   float(input.command.pitch_rate_rad_s),                            // I44 pitch joint rate command
                   float(dt_us),                                                     // I45 current cycle
                   raw_head_rate_rad_s,                                              // I46 raw head world-rate target
-                  input.command.yaw_rate_rad_s,                                            // I47 small joint rate command
-                  float((centered.enabled ? 1u : 0u) | (big_channel_ready ? 16u : 0u) |
-                        (vision_active ? 512u : 0u) |
-                        (static_cast<unsigned>(centered.reason) << 5))}; // I48 centering flags/reason
+                  allocation.joint_rate_rad_s,                                      // I47 allocated small joint rate
+                  float((allocation.enabled ? 1u : 0u) | (allocation.travel_limited ? 2u : 0u) |
+                        (allocation.big_saturated ? 4u : 0u) | (allocation.tracking_limited ? 8u : 0u) |
+                        (big_channel_ready ? 16u : 0u) | (allocation.joint_reseed_requested ? 32u : 0u) |
+                        (allocation.head_reference_valid ? 64u : 0u) | (vision_active ? 512u : 0u) |
+                        (static_cast<unsigned>(allocation.reason) << 10))}; // I48 allocator flags/reason
 
         diagnostics.status({.reason = reason,
                             .valid = joint_valid && (!vision_selected || head_ready),
@@ -583,7 +626,7 @@ int main() {
                                      : !head_usable && head_snapshot.diagnostics.last_error
                                          ? head_snapshot.diagnostics.last_error
                                          : onboard_error,
-                            .extra0 = installed::small_yaw.direction * centered.center_error_rad,
+                            .extra0 = installed::small_yaw.direction * allocation.center_error_rad,
                             .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
                             .extended = true,
                             .extension = trace});

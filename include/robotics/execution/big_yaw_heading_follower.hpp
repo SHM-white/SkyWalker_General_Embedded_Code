@@ -41,6 +41,13 @@ public:
         float rate_integral_max_rad_s = 1.5f, output_max_rad_s = 10.0f;
         // Operator-release zero detection; avoids recapturing on float noise.
         float release_epsilon_rad_s = 1e-4f;
+        // A continuous world-rate trajectory legitimately passes through zero at
+        // a reversal, or while the sustained feedforward and the centring term
+        // cancel. Capturing the heading at that instant would drop the
+        // accumulated target and leave the head behind the real intent, so the
+        // request must stay inside the epsilon band for this long before it
+        // counts as a release. Zero keeps the legacy first-zero-cycle capture.
+        float stop_capture_dwell_s = 0;
         float max_sample_age_s = 0.05f, max_dt_s = 0.02f;
     };
     BigYawWorldHeadingFollower() = default;
@@ -84,6 +91,11 @@ private:
     bool initialized_ = false;
     float target_heading_rad_ = 0, previous_requested_rate_rad_s_ = 0;
     float rate_integral_rad_s_ = 0, heading_error_rad_ = 0, world_rate_rad_s_ = 0;
+    // Time the request has spent inside the zero band, and whether the release
+    // capture for the current stop has already been taken. A true initial value
+    // keeps the legacy behavior of never capturing a stop that never started.
+    float zero_request_s_ = 0;
+    bool stop_captured_ = true;
     std::uint64_t last_peer_boot_id_ = 0;
     std::uint32_t last_zero_generation_ = 0;
     // Retained across control resets to expose otherwise invisible recaptures.

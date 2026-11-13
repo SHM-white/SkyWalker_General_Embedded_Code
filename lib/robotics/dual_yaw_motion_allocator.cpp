@@ -380,6 +380,8 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
                                     (head_.acceleration_rad_s2 -
                                      (in.carrier_acceleration_valid ? in.carrier_acceleration_rad_s2 : 0.0f));
     out.center_error_rad = center_error_rad_;
+    out.slow_rate_rad_s = slow_rad_s_;
+    out.center_rate_rad_s = center_rate;
     out.joint_rate_valid = true;
     out.travel_limited = travel_limited || head_limited || head_.conflict;
     out.tracking_limited = tracking_limited_;

@@ -5,6 +5,15 @@
 
 namespace skywalker::robotics {
 
+// 【已作废 / deprecated】旧的大 Yaw 回中链路。
+//
+// 它只用小 Yaw 相对中心的偏角产生一个速度请求：偏差出现之前大 Yaw 不动，
+// 偏差越大转得越快，且不包含持续运动前馈、载体实际跟踪、速度/加速度预算和
+// 制动行程预测。正式云台（applications/sentry_gimbal）已改由
+// robotics::DualYawMotionAllocator 主动分配，本类不再参与正式控制链路。
+//
+// 保留原因：历史 bringup 样例与 robotics_contracts 契约测试仍引用它，
+// 便于对照旧行为。新代码不得再把它和分配器同时接到大 Yaw 上累加输出。
 struct YawCenteringInputs {
     float joint_yaw_rad = 0;
     core::Stamp joint_stamp{}, source_stamp{};

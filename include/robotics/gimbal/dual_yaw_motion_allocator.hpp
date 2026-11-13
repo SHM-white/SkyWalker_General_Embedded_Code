@@ -124,6 +124,9 @@ struct DualYawAllocatorOutput {
     float center_error_rad = 0;
     float outward_budget_pos_rad_s = 0, outward_budget_neg_rad_s = 0;
     float brake_margin_pos_rad = 0, brake_margin_neg_rad = 0;
+    // Diagnostics for the split itself: what the sustained component asks from
+    // the big Yaw, and the extra centring term added on top of it this cycle.
+    float slow_rate_rad_s = 0, center_rate_rad_s = 0;
     bool big_saturated = false, travel_limited = false, tracking_limited = false;
     bool vision_mode = false;
     WaitReason reason = WaitReason::Command;

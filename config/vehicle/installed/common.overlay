@@ -6,11 +6,13 @@
         /delete-property/ referee-uart;
         /delete-property/ telemetry-uart;
     };
+
     chosen {
         /delete-property/ zephyr,console;
         /delete-property/ zephyr,shell-uart;
     };
 };
+
 &uart7 {
     status = "okay";
     current-speed = <115200>;
@@ -18,7 +20,22 @@
     parity = "none";
     stop-bits = "1";
 };
-&can1 { status = "okay"; bitrate = <1000000>; };
-&can2 { status = "okay"; bitrate = <1000000>; };
-&can3 { status = "okay"; bitrate = <1000000>; };
-&rng { status = "okay"; };
+
+&can1 {
+    status = "okay";
+    bitrate = <1000000>;
+};
+
+&can2 {
+    status = "okay";
+    bitrate = <1000000>;
+};
+
+&can3 {
+    status = "okay";
+    bitrate = <1000000>;
+};
+
+&rng {
+    status = "okay";
+};
