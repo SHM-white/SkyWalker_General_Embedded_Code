@@ -234,7 +234,8 @@ inline constexpr std::uint16_t yaw_low_ticks = 5770, yaw_high_ticks = 7340;
 inline constexpr float yaw_min_rad = (yaw_low_ticks - small_yaw.encoder_zero_ticks) * two_pi / 8192;
 inline constexpr float yaw_max_rad = (yaw_high_ticks - small_yaw.encoder_zero_ticks) * two_pi / 8192;
 // TODO(calibration): measure this independently; encoder zero is not joint center.
-inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
+// inline constexpr float yaw_center_rad = (yaw_min_rad + yaw_max_rad) * 0.5f;
+inline constexpr float yaw_center_rad = 0.35f;
 // 调参：Pitch 驱动坐标的软件限位，rad；沿用现值，须与实测机械端点确认后再修改。
 inline constexpr float pitch_min_rad = 2.60f, pitch_max_rad = 3.40f;
 // 自瞄几何：枪口水平时的 Pitch 编码器位置，rad；3.00 为待实测的初值。

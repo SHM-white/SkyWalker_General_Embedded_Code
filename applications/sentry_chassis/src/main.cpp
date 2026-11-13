@@ -262,6 +262,7 @@ int main() {
         (void)status_led.setStatus(
             installed::statusLedFor(reason, status.state == RunState::Active || big_status.state == RunState::Active,
                                     false, execution_error));
+#if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
         const auto big_reason = big_error || power_error                   ? installed::DiagnosticReason::InitFailed
                                 : !rx.online                               ? installed::DiagnosticReason::PeerStale
                                 : big_status.reason == WaitReason::Command ? installed::DiagnosticReason::CommandStale
@@ -336,6 +337,7 @@ int main() {
                             .extra1 = float(unsigned(have_big_stop ? last_big_stop_gate : big_gate)),
                             .extended = true,
                             .extension = trace});
+#endif
         deadline += period;
         const auto ticks = k_uptime_ticks();
         if (deadline <= ticks)

@@ -130,7 +130,7 @@ inline DualYawAllocatorConfig dualYawAllocatorConfig() {
     // 头部世界速率硬上限（rad/s）：手动满幅就是它，也是可行域的外层上限。
     c.head_rate_max_rad_s = manual_max_gimbal_yaw_rate_rad_s;
     // 头部世界加速度上限（rad/s²）：决定推杆后多久到满速、反向时多久停住。
-    c.head_acceleration_max_rad_s2 = 8.0f;
+    c.head_acceleration_max_rad_s2 = 10.0f;
     // 头部 jerk 上限（rad/s³）：0 = 关闭 jerk 整形，只做每周期加速度钳制。
     c.head_jerk_max_rad_s3 = 0;
     // 持续运动预算（rad/s）：长期可交给大 Yaw 的世界速率，必须 ≤ head_rate_max。
@@ -140,7 +140,7 @@ inline DualYawAllocatorConfig dualYawAllocatorConfig() {
     // 大 Yaw 世界意图上限（rad/s）：与头部速率同量级，不直接使用关节速度上限。
     c.big_intent_max_rad_s = manual_max_gimbal_yaw_rate_rad_s;
     // 大 Yaw 世界意图加速度上限（rad/s²）：越大越早跟上意图，越容易过冲。
-    c.big_acceleration_max_rad_s2 = 8.0f;
+    c.big_acceleration_max_rad_s2 = 10.5f;
     // 大 Yaw jerk 上限（rad/s³）：0 = 关闭。
     c.big_jerk_max_rad_s3 = 0;
     // 大 Yaw 意图收敛增益（1/s）：把“持续分量 + 回中”拉向世界意图的速度，

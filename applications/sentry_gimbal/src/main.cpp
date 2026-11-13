@@ -571,6 +571,7 @@ int main() {
                                                                          : installed::DiagnosticReason::CommandStale;
         (void)status_led.setStatus(
             installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
+#if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
         // Fixed channel map documented in docs/dev/双Yaw速度加速度分配与视觉轨迹控制方案.md
         // (schema 111, I19..I48). I38/I43/I48 now describe the dual-Yaw allocator
@@ -638,6 +639,7 @@ int main() {
                             .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
                             .extended = true,
                             .extension = trace});
+#endif
         deadline += period;
         const auto ticks = k_uptime_ticks();
         if (deadline <= ticks)

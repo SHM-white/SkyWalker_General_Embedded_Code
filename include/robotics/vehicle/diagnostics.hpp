@@ -42,6 +42,7 @@ struct DiagnosticStatus {
 };
 // One application/telemetry thread owns each instance. Output copies into a
 // fixed queue; UART transmission runs in a separate low-priority worker.
+#if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
 class Diagnostics {
 public:
     int start(const char *application, const char *role, const char *limits = "see application profile");
@@ -55,4 +56,14 @@ private:
     DiagnosticReason last_reason_ = DiagnosticReason::Boot;
     int first_error_ = 0;
 };
+#else
+class Diagnostics {
+public:
+    int start(const char *, const char *, const char * = "see application profile") {
+        return 0;
+    }
+    void event(const char *, int) {}
+    void status(const DiagnosticStatus &) {}
+};
+#endif
 } // namespace skywalker::robotics::vehicle
