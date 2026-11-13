@@ -151,11 +151,16 @@ int main() {
         alloc_input.carrier_stamp = heading.stamp;
         alloc_input.carrier_valid = heading_fresh;
         alloc_input.source_stamp = sourceStamp(frame, frame.decision.command.gimbal.source);
-        alloc_input.enabled = op.run_allowed && configured &&
-                              frame.decision.command.gimbal.mode != GimbalMode::Disabled;
+        // 同正式云台：Hold/Disabled 下小 Yaw 不执行分配器的关节速率，不能继续用
+        // 回中项驱动大 Yaw，否则关节偏角不变、大 Yaw 会以恒定速率一直转。
+        const auto commanded_mode = frame.decision.command.gimbal.mode;
+        const bool yaw_motion_commanded = commanded_mode == GimbalMode::Rate ||
+                                          commanded_mode == GimbalMode::AbsoluteAngle;
+        alloc_input.enabled = op.run_allowed && configured && yaw_motion_commanded;
         alloc_input.permission_valid = vehicle::connections_confirmed && vehicle::imu_mounting_confirmed &&
                                        op.run_allowed && !op.clear_estop;
-        alloc_input.big_yaw_available = peer.online && peer_feedback_valid && heading_fresh && joint_valid;
+        alloc_input.big_yaw_available = yaw_motion_commanded && peer.online && peer_feedback_valid && heading_fresh &&
+                                        joint_valid;
         const auto allocation = dual_yaw.update(alloc_input, now);
         if (allocation.joint_reseed_requested)
             (void)gimbal.reseedYawTarget();

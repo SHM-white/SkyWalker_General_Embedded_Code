@@ -378,12 +378,20 @@ int main() {
         // 头部实测世界角只用于重播种/超前角保护；手动模式不因此依赖外置 IMU。
         alloc_input.head_angle_measured_rad = head_usable ? head_euler.yaw : 0.0f;
         alloc_input.head_angle_valid = head_usable;
-        alloc_input.enabled = gimbal_allowed && input.command.mode != GimbalMode::Disabled;
+        // 分配器假定小 Yaw 真正执行它给出的关节速率。仲裁器在左中档（导航/自动，
+        // 本机 allow_auto 打开）没有视觉目标时给出的是 GimbalMode::Hold ——
+        // 小 Yaw 只锁关节角、不再补偿载体，关节偏角因此永远不变；若此时仍按
+        // center_rate 驱动大 Yaw，就会以恒定速率一直转下去（越补越偏）。
+        // 所以只有小 Yaw 真正执行运动指令时才让分配器接管大 Yaw。
+        const bool yaw_motion_commanded = vision_active || input.command.mode == GimbalMode::Rate ||
+                                          input.command.mode == GimbalMode::AbsoluteAngle;
+        alloc_input.enabled = gimbal_allowed && yaw_motion_commanded;
         alloc_input.permission_valid = gimbal_allowed && installed::connections_confirmed &&
                                        installed::imu_mounting_confirmed;
         // 大 Yaw 通道是否可用的判定与发送门控分离：真正的 mode/rate 仍在下面
         // big_channel_ready 之后决定，这里只决定本周期是否推进大 Yaw 意图。
-        alloc_input.big_yaw_available = peer_state.online && peer_feedback_valid && heading_fresh && joint_valid;
+        alloc_input.big_yaw_available = yaw_motion_commanded && peer_state.online && peer_feedback_valid &&
+                                        heading_fresh && joint_valid;
         alloc_input.vision_active = vision_active;
         alloc_input.vision_angle_rad = vision_angle_rad;
         alloc_input.vision_rate_rad_s = vision_rate_rad_s;
