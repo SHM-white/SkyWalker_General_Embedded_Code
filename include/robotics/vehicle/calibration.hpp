@@ -149,7 +149,7 @@ static_assert(validDirection(reference_big_yaw.direction) && positive(reference_
               "reference big-Yaw calibration must be valid");
 // Calibrated encoder forward zero in the reference firmware, 2026-10-28.
 // Confirm that the installed J4310 and CAN identity match before motor operation.
-inline constexpr float reference_big_yaw_forward_zero_rad = -2.62f;
+inline constexpr float reference_big_yaw_forward_zero_rad = 0.048638f;
 inline constexpr float steer_position_kp = 40, steer_velocity_kp = 0.20f;
 // A/(motor-shaft rad/s); swerve_profile converts once to wheel-shaft units.
 inline constexpr float drive_rotor_velocity_kp = 0.08f;

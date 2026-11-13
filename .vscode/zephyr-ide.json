@@ -718,7 +718,7 @@
             "config": [],
             "overlay": []
           },
-          "activeProfile": "DM MC02 OpenOCD"
+          "activeProfile": "DM MC02 Chassis DAPLink"
         }
       },
       "twisterConfigs": {},
