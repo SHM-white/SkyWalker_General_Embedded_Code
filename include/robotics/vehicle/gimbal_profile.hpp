@@ -45,10 +45,17 @@ inline motor::dm::Config pitchHardware() {
                                            .enable_timeout_ms = 3000,
                                            .retry_interval_ms = 100}});
 }
+// 小 Yaw 机械/执行配置，字段顺序与 GimbalAxisConfig 一致：
+//   {topology, min_angle_rad, max_angle_rad, max_rate_rad_s, hold_on_zero_rate, reference_init}
+//   - min/max_angle_rad：软限位端点，来自 calibration.hpp 的 yaw_min/max_rad（由 ticks 换算）
+//   - max_rate_rad_s：关节限速，取 GM6020 输出轴标定
+//   - hold_on_zero_rate：Rate 目标为 0 时保持当前位置，而不是松开
+//   - reference_init：用标定反馈重建编码器参考（上电即按绝对反馈对齐）
 inline constexpr GimbalAxisConfig yawAxisConfig() {
     return {AxisTopology::Limited,          yaw_min_rad, yaw_max_rad,
             small_yaw.velocity_limit_rad_s, true,        AxisReferenceInit::CalibratedFeedback};
 }
+// Pitch 同理：限位/限速取自 calibration.hpp 的 pitch_min/max_rad 与 pitch 标定。
 inline constexpr GimbalAxisConfig pitchAxisConfig() {
     return {AxisTopology::Limited,      pitch_min_rad, pitch_max_rad,
             pitch.velocity_limit_rad_s, true,          AxisReferenceInit::CalibratedFeedback};

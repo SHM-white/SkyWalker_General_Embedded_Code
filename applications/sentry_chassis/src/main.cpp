@@ -316,8 +316,8 @@ int main() {
                   float(previous_big_commit_error),                  // I45 CAN commit error
                   heading_follower.initialized() ? heading_follower.worldRateRadS()
                                                  : unavailable, // I46 legacy world rate before body compensation
-                  0, // I47 reserved; native executor restored to 4dc29fb
-                  0}; // I48 reserved (legacy immediate stop capture)
+                  0,                                            // I47 reserved; native executor restored to 4dc29fb
+                  0};                                           // I48 reserved (legacy immediate stop capture)
         diagnostics.status({.reason = big_reason,
                             .valid = feedback.valid,
                             .enabled = feedback.armed,

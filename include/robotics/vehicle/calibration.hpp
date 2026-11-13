@@ -57,6 +57,11 @@ template <std::size_t N> constexpr bool validMotorSet(const std::array<MotorCali
 }
 
 // TODO(calibration): ID/mode, current-mode firmware, output-shaft units and signs.
+// 字段顺序（与 MotorCalibration 一致）：
+//   {id, master_id, gear_ratio, direction, effort_limit, velocity_limit_rad_s, encoder_zero_ticks}
+//   - effort_limit：DJI 电流上限 A / DM 力矩上限 N·m
+//   - velocity_limit_rad_s：输出轴（关节）速度上限 rad/s
+//   - encoder_zero_ticks：原始编码器零点，8192 ticks/转
 inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
 inline constexpr MotorCalibration pitch{1, 0x00, 1, 1, 10.0f, 10, 0};
 inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 10.0f, 10, 0};

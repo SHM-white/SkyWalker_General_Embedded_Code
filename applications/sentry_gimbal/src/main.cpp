@@ -368,8 +368,8 @@ int main() {
         DualYawAllocatorInputs alloc_input{};
         alloc_input.head_rate_target_rad_s = raw_head_rate_rad_s;
         alloc_input.joint_rad = ys.feedback.position_rad;
-        alloc_input.joint_rate_rad_s =
-            bool(ys.feedback.valid & motor::FeedbackVelocity) ? ys.feedback.velocity_rad_s : 0.0f;
+        alloc_input.joint_rate_rad_s = bool(ys.feedback.valid & motor::FeedbackVelocity) ? ys.feedback.velocity_rad_s
+                                                                                         : 0.0f;
         alloc_input.joint_stamp = {ys.feedback.timestamp_ms * 1000ULL, ys.feedback.timestamp_ms, joint_valid};
         alloc_input.carrier_rate_rad_s = heading_fresh ? heading.rate_rad_s : 0.0f;
         alloc_input.carrier_stamp = heading.stamp;
@@ -405,9 +405,10 @@ int main() {
         // 分配器给出可行头部世界角/速率，头部外环只负责把实测姿态闭环到它；
         // 分配器不可用时才退回视觉原始目标，保证失配时仍有旧的视觉行为。
         inertial_input.yaw_reference_valid = vision_active;
-        inertial_input.yaw_reference_rad = allocation.head_reference_valid ? allocation.head_angle_rad : vision_angle_rad;
-        inertial_input.yaw_reference_rate_rad_s =
-            allocation.head_reference_valid ? allocation.head_reference_rate_rad_s : vision_rate_rad_s;
+        inertial_input.yaw_reference_rad = allocation.head_reference_valid ? allocation.head_angle_rad
+                                                                           : vision_angle_rad;
+        inertial_input.yaw_reference_rate_rad_s = allocation.head_reference_valid ? allocation.head_reference_rate_rad_s
+                                                                                  : vision_rate_rad_s;
         inertial_input.command.mode = vision_active ? GimbalMode::Rate : GimbalMode::Disabled;
         const auto inertial = head_control.update(inertial_input, now_us);
         if (vision_active) {
@@ -417,14 +418,17 @@ int main() {
             // 头部外环的关节速率仍必须服从分配器实时的行程/制动余量，否则
             // 视觉修正可以把小 Yaw 推过软端点。
             if (allocation.joint_rate_valid)
-                input.command.yaw_rate_rad_s =
-                    std::clamp(input.command.yaw_rate_rad_s, -allocation.outward_budget_neg_rad_s,
-                               allocation.outward_budget_pos_rad_s);
+                input.command.yaw_rate_rad_s = std::clamp(input.command.yaw_rate_rad_s,
+                                                          -allocation.outward_budget_neg_rad_s,
+                                                          allocation.outward_budget_pos_rad_s);
             // Remove the measured Pitch joint from the *head CAN quaternion*.
             // This leaves the yaw-stage pose in exactly the vision world frame.
-            const auto yaw_pose = core::multiply(
-                head_orientation, core::fromEuler({0, -installed::pitch.direction *
-                    (ps.feedback.position_rad - installed::vision_pitch_horizontal_rad), 0}));
+            const auto yaw_pose = core::multiply(head_orientation,
+                                                 core::fromEuler({0,
+                                                                  -installed::pitch.direction *
+                                                                      (ps.feedback.position_rad -
+                                                                       installed::vision_pitch_horizontal_rad),
+                                                                  0}));
             const float cp = std::cos(vision_pitch_rad);
             const core::Vec3 world_ray{cp * std::cos(vision_angle_rad), cp * std::sin(vision_angle_rad),
                                        -std::sin(vision_pitch_rad)};
@@ -432,26 +436,28 @@ int main() {
             // A target behind the current yaw must not produce a 180-degree
             // Pitch command. Aim elevation first; yaw alignment finishes the ray.
             const float target = std::clamp(installed::vision_pitch_horizontal_rad +
-                installed::pitch.direction * std::atan2(-joint_ray.z, std::hypot(joint_ray.x, joint_ray.y)),
-                installed::pitch_min_rad, installed::pitch_max_rad);
+                                                installed::pitch.direction *
+                                                    std::atan2(-joint_ray.z, std::hypot(joint_ray.x, joint_ray.y)),
+                                            installed::pitch_min_rad, installed::pitch_max_rad);
             const float seed = vision_pitch_was_active ? static_cast<float>(gimbal.pitchTargetRad())
                                                        : ps.feedback.position_rad;
             const float dt = dt_us > 0 && dt_us <= 20000 ? float(dt_us) * 1e-6f : 0;
             // Keep Rate mode for BOTH axes: AbsoluteAngle would replace the
             // IMU yaw correction with a world angle interpreted as a joint angle.
-            input.command.pitch_rate_rad_s = dt > 0
-                ? std::clamp((target - seed) / dt, -installed::manual_max_gimbal_pitch_rate_rad_s,
-                              installed::manual_max_gimbal_pitch_rate_rad_s) : 0;
+            input.command.pitch_rate_rad_s = dt > 0 ? std::clamp((target - seed) / dt,
+                                                                 -installed::manual_max_gimbal_pitch_rate_rad_s,
+                                                                 installed::manual_max_gimbal_pitch_rate_rad_s)
+                                                    : 0;
         }
         else if (input.command.mode == GimbalMode::Rate) {
             // 小 Yaw 关节速率直接来自分配器：已含实测载体补偿、头部加速度窗和
             // 行程度包络；退化输出同样带保护。只有分配器完全不可用时才回退到
             // 旧的“原始头部速率减载体角速度”公式。
-            input.command.yaw_rate_rad_s =
-                allocation.joint_rate_valid
-                    ? allocation.joint_rate_rad_s
-                    : installed::small_yaw.direction *
-                          (raw_head_rate_rad_s - (heading_fresh ? heading.rate_rad_s : 0.0f));
+            input.command.yaw_rate_rad_s = allocation.joint_rate_valid
+                                               ? allocation.joint_rate_rad_s
+                                               : installed::small_yaw.direction *
+                                                     (raw_head_rate_rad_s -
+                                                      (heading_fresh ? heading.rate_rad_s : 0.0f));
             input.command.pitch_rate_rad_s = raw_pitch_rate_rad_s * installed::pitch.direction;
         }
         vision_pitch_was_active = vision_active;
@@ -465,13 +471,13 @@ int main() {
         const bool center_joint_valid = center_yaw.feedback_fresh && center_yaw.position_reference_valid &&
                                         bool(center_yaw.feedback.valid & motor::FeedbackPosition);
         const bool yaw_running = gimbal.yawTelemetry().output_valid;
-        const bool big_channel_ready = setup_ready && operator_state.fresh && gimbal_allowed &&
-                                       peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
-                                       center_joint_valid && yaw_running;
+        const bool big_channel_ready = setup_ready && operator_state.fresh && gimbal_allowed && peer_state.online &&
+                                       installed::imu_mounting_confirmed && heading_fresh && center_joint_valid &&
+                                       yaw_running;
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
         communication::vision::Feedback vision_feedback{};
         vision_feedback.mode = navigation_allowed ? communication::vision::Mode::AutoAim
-                                                   : communication::vision::Mode::Idle;
+                                                  : communication::vision::Mode::Idle;
         vision_feedback.reference = head_sample.reference;
         if (head_ready) {
             // Preserve acquisition stamps. No carrier fallback, synthetic yaw,
@@ -553,11 +559,12 @@ int main() {
                 status.error = error;
         }
         endpoint.setStatus(status);
-        const auto reason = !setup_ready || onboard_error || (vision_selected && head_error)  ? installed::DiagnosticReason::InitFailed
-                            : !operator_state.fresh                      ? installed::DiagnosticReason::RemoteStale
-                            : !gimbal_allowed                            ? installed::DiagnosticReason::Disarmed
-                            : !installed::imu_mounting_confirmed         ? installed::DiagnosticReason::Configuration
-                            : !heading_fresh || (vision_selected && !head_ready)              ? installed::DiagnosticReason::ImuStale
+        const auto reason = !setup_ready || onboard_error || (vision_selected && head_error)
+                                ? installed::DiagnosticReason::InitFailed
+                            : !operator_state.fresh              ? installed::DiagnosticReason::RemoteStale
+                            : !gimbal_allowed                    ? installed::DiagnosticReason::Disarmed
+                            : !installed::imu_mounting_confirmed ? installed::DiagnosticReason::Configuration
+                            : !heading_fresh || (vision_selected && !head_ready) ? installed::DiagnosticReason::ImuStale
                             : !peer_state.online || !peer_feedback_valid ? installed::DiagnosticReason::PeerStale
                             : !joint_valid || !yaw_running               ? installed::DiagnosticReason::FeedbackStale
                             : status.state == RunState::Active           ? installed::DiagnosticReason::Ready
@@ -569,8 +576,8 @@ int main() {
         // (schema 111, I19..I48). I38/I43/I48 now describe the dual-Yaw allocator
         // instead of the retired centering controller.
         const std::array<float, 30>
-            trace{111,                                                       // I19 dual-Yaw allocation + CAN vision schema
-                  float(unsigned(heading_reason)),                           // I20 live reason
+            trace{111,                             // I19 dual-Yaw allocation + CAN vision schema
+                  float(unsigned(heading_reason)), // I20 live reason
                   float(unsigned(carrier_snapshot.sample.attitude_quality)), // I21 quality
                   float(heading_fresh),                                      // I22 heading usable
                   heading_fresh ? heading.yaw_rad : unavailable,             // I23 world yaw
@@ -595,17 +602,18 @@ int main() {
                   float((!setup_ready ? 1u : 0u) | (!operator_state.fresh ? 2u : 0u) | (!gimbal_allowed ? 4u : 0u) |
                         (!peer_state.online ? 8u : 0u) | (!installed::imu_mounting_confirmed ? 16u : 0u) |
                         (!heading_fresh ? 32u : 0u) | (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u) |
-                        (!head_ready ? 256u : 0u)),           // I37 disabled prerequisites; zero=ready
-                  allocation.big.rate_rad_s,                  // I38 big-Yaw world intent
+                        (!head_ready ? 256u : 0u)),                          // I37 disabled prerequisites; zero=ready
+                  allocation.big.rate_rad_s,                                 // I38 big-Yaw world intent
                   peer_feedback_valid ? float(feedback.armed) : unavailable, // I39 peer armed
-                  float(age(carrier_snapshot.sample.orientation.stamp, now_us)),    // I40 orientation age
-                  float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),     // I41 gyro age
-                  spin_out.applied_rad_s,                                           // I42 applied variable spin rate
-                  std::min(allocation.brake_margin_pos_rad, allocation.brake_margin_neg_rad), // I43 tightest outward travel
-                  float(input.command.pitch_rate_rad_s),                            // I44 pitch joint rate command
-                  float(dt_us),                                                     // I45 current cycle
-                  raw_head_rate_rad_s,                                              // I46 raw head world-rate target
-                  allocation.joint_rate_rad_s,                                      // I47 allocated small joint rate
+                  float(age(carrier_snapshot.sample.orientation.stamp, now_us)), // I40 orientation age
+                  float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),  // I41 gyro age
+                  spin_out.applied_rad_s,                                        // I42 applied variable spin rate
+                  std::min(allocation.brake_margin_pos_rad,
+                           allocation.brake_margin_neg_rad), // I43 tightest outward travel
+                  float(input.command.pitch_rate_rad_s),     // I44 pitch joint rate command
+                  float(dt_us),                              // I45 current cycle
+                  raw_head_rate_rad_s,                       // I46 raw head world-rate target
+                  allocation.joint_rate_rad_s,               // I47 allocated small joint rate
                   float((allocation.enabled ? 1u : 0u) | (allocation.travel_limited ? 2u : 0u) |
                         (allocation.big_saturated ? 4u : 0u) | (allocation.tracking_limited ? 8u : 0u) |
                         (big_channel_ready ? 16u : 0u) | (allocation.joint_reseed_requested ? 32u : 0u) |

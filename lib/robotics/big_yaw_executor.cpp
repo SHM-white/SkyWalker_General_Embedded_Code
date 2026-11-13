@@ -10,11 +10,10 @@ int BigYawExecutor::begin() {
     if (begin_attempted_)
         return -EALREADY;
     begin_attempted_ = true;
-    config_error_ = !config_.max_cycle_us ||
-                            !std::isfinite(config_.rate_abs_max_rad_s) || config_.rate_abs_max_rad_s <= 0 ||
-                            !std::isfinite(config_.motor_to_joint_ratio) || config_.motor_to_joint_ratio <= 0 ||
-                            (config_.direction != 1 && config_.direction != -1) || !config_.command_timeout_ms ||
-                            !config_.source_timeout_us
+    config_error_ = !config_.max_cycle_us || !std::isfinite(config_.rate_abs_max_rad_s) ||
+                            config_.rate_abs_max_rad_s <= 0 || !std::isfinite(config_.motor_to_joint_ratio) ||
+                            config_.motor_to_joint_ratio <= 0 || (config_.direction != 1 && config_.direction != -1) ||
+                            !config_.command_timeout_ms || !config_.source_timeout_us
                         ? -EINVAL
                     : config_.native_velocity_mode_confirmed
                         ? 0

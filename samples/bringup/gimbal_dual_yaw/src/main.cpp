@@ -144,8 +144,8 @@ int main() {
         DualYawAllocatorInputs alloc_input{};
         alloc_input.head_rate_target_rad_s = frame.decision.command.gimbal.yaw_rate_rad_s;
         alloc_input.joint_rad = ys.feedback.position_rad;
-        alloc_input.joint_rate_rad_s =
-            bool(ys.feedback.valid & motor::FeedbackVelocity) ? ys.feedback.velocity_rad_s : 0.0f;
+        alloc_input.joint_rate_rad_s = bool(ys.feedback.valid & motor::FeedbackVelocity) ? ys.feedback.velocity_rad_s
+                                                                                         : 0.0f;
         alloc_input.joint_stamp = {ys.feedback.timestamp_ms * 1000ULL, ys.feedback.timestamp_ms, joint_valid};
         alloc_input.carrier_rate_rad_s = heading_fresh ? heading.rate_rad_s : 0.0f;
         alloc_input.carrier_stamp = heading.stamp;
@@ -165,11 +165,11 @@ int main() {
         // 只有编码器闭环关节。小 Yaw 速率由分配器给出：它已按实测载体速度补偿，
         // 并带头部加速度窗与行程度保护，因此大 Yaw 回中时不需要再手算一次。
         if (request.command.mode == GimbalMode::Rate) {
-            request.command.yaw_rate_rad_s =
-                allocation.joint_rate_valid
-                    ? allocation.joint_rate_rad_s
-                    : vehicle::small_yaw.direction * (request.command.yaw_rate_rad_s -
-                                                      (heading_fresh ? heading.rate_rad_s : 0.0f));
+            request.command.yaw_rate_rad_s = allocation.joint_rate_valid
+                                                 ? allocation.joint_rate_rad_s
+                                                 : vehicle::small_yaw.direction *
+                                                       (request.command.yaw_rate_rad_s -
+                                                        (heading_fresh ? heading.rate_rad_s : 0.0f));
             request.command.pitch_rate_rad_s *= vehicle::pitch.direction;
         }
         if (!op.run_allowed)
@@ -181,8 +181,8 @@ int main() {
         const int yaw_error = yaw_started ? yaw_bus.commit().error : 0;
         const int pitch_error = pitch_started ? pitch_bus.commit().error : 0;
         const bool yaw_running = gimbal.yawTelemetry().output_valid;
-        const bool big_channel_ready =
-            peer.online && alloc_input.permission_valid && heading_fresh && yaw_running && joint_valid;
+        const bool big_channel_ready = peer.online && alloc_input.permission_valid && heading_fresh && yaw_running &&
+                                       joint_valid;
         BigYawRequest big_request{};
         // Encoder offset requests WORLD rate. The peer applies gyro compensation
         // and motor direction; do not negate it here. Zero enables initial feedback.
