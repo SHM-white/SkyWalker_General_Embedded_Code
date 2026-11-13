@@ -62,8 +62,10 @@ public:
     int start(const char *, const char *, const char * = "see application profile") {
         return 0;
     }
-    void event(const char *, int) {}
-    void status(const DiagnosticStatus &) {}
+    void event(const char *, int) {
+    }
+    void status(const DiagnosticStatus &) {
+    }
 };
 #endif
 } // namespace skywalker::robotics::vehicle

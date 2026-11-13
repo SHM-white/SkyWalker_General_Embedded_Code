@@ -48,6 +48,12 @@ public:
         // request must stay inside the epsilon band for this long before it
         // counts as a release. Zero keeps the legacy first-zero-cycle capture.
         float stop_capture_dwell_s = 0;
+        // Stationary hold band. While the request is zero, heading errors inside
+        // this band are not corrected and the rate integral is cleared. Without
+        // it the P loop keeps chasing sub-degree gyro noise, so the carrier —
+        // and the small Yaw that compensates it — never comes fully to rest.
+        // Zero keeps the legacy behavior.
+        float hold_deadband_rad = 0;
         float max_sample_age_s = 0.05f, max_dt_s = 0.02f;
     };
     BigYawWorldHeadingFollower() = default;

@@ -19,6 +19,14 @@ inline motor::dm::Config bigYawHardware() {
                                                      .retry_interval_ms = 100}};
     return big_yaw_native_velocity_profile_confirmed ? motor::dm::j4310Velocity(options) : motor::dm::j4310Mit(options);
 }
+// 大 Yaw 速度环配置。
+// 【重要】当前后端是 NativeVelocity（big_yaw_backend），BigYawExecutor 走
+// drive_.setVelocity()，把速度帧直接交给 J4310，驱动器用自己内部的速度环闭环；
+// 这里的 kp/ki/kd、reference_slew、软死区和滤波都不会参与运算。
+// 因此“大 Yaw 过冲的 kd”在大 Yaw 世界环里（calibration.hpp 的
+// big_yaw_heading_rate_kp），不在本函数；本函数只在 MIT / 位置后端下生效。
+// reference_slew 仍保留与执行器加速度（big_yaw_native_acceleration_rad_s2）同量级，
+// 避免切到 MIT 后端时意外变成 40 倍慢。
 inline control::VelocityMotor::Config bigYawMotorConfig() {
     control::VelocityMotor::Config c{};
     c.effort_unit = control::EffortUnit::NewtonMeter;
@@ -37,7 +45,8 @@ inline control::VelocityMotor::Config bigYawMotorConfig() {
                                  .dt_min_s = 0.001f,
                                  .dt_max_s = 0.020f};
     // 速度参考升/降斜率（电机轴 rad/s²）：底层再兜一次加速度，避免阶跃。
-    c.loop.reference_slew = {0.5f, 0.5f};
+    // 与 big_yaw_native_acceleration_rad_s2 同量级；0.5 会让 MIT 后端慢 40 倍。
+    c.loop.reference_slew = {20.0f, 20.0f};
     // 速度反馈滤波时间常数（s）：抑制 CAN 反馈量化噪声，过大会拖慢响应。
     c.loop.measurement_filter_tau_s = 0.02f;
     // 速度软死区（电机轴 rad/s）：小速度不输出力矩，避免静止时来回顶。
@@ -95,6 +104,10 @@ inline BigYawWorldHeadingFollower::Config bigYawHeadingFollowerConfig() {
     // 都会自然穿过零速。只有零请求持续 100 ms 才按松杆处理，避免每次过零都丢弃
     // 已积累的航向目标；0 = 旧行为（第一个零速周期就捕获）。
     c.stop_capture_dwell_s = 0.1f;
+    // 静止保持死区（rad，约 0.46°）：请求为零时，死区内的航向误差不产生修正，
+    // 否则 P 环会一直追陀螺噪声，大 Yaw 微调不停，小 Yaw 也就跟着抖。
+    // 调大 → 更稳但允许更大的缓慢漂移；调小 → 更准但低速容易微振。
+    c.hold_deadband_rad = 0.008f;
     return c;
 }
 } // namespace skywalker::robotics::vehicle

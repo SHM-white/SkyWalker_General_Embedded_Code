@@ -203,11 +203,13 @@ inline constexpr float chassis_drive_slew_rad_s2 = 30.0f, chassis_steer_slew_rad
 // 调参：大 Yaw 世界航向闭环（航向 P + 角速度 PI），单位 rad/s；仅作实车整定起点，新硬件上未验证。
 // heading_kp 作用于航向误差，修正量上限 heading_rate_max_rad_s；
 // rate_kp/rate_ki 作用于“目标世界角速度 - 实测角速度”，积分上限 integral_max_rad_s。
-// 实车首次打开 0.25/0.5 时关节速度反复顶到 ±要求上限且掉帧变多，先保留 0；
-// 待确认头部角速度反馈符号/刻度后，从 rate_kp=0.15、rate_ki=0 逐级加。
+// rate_kp 就是这条世界环的“kd”：实测头部角速度超前于目标时减小关节指令，抑制过冲。
+// 实车首次打开 0.25/0.5 时关节速度反复顶到 ±要求上限且掉帧变多，所以 ki 保持 0；
+// 现在只从 rate_kp=0.15 起步，逐个确认符号、抖动与掉帧后再考虑加 ki。
+// 注意：驱动器内部速度环的 kd 不在这里，见 bigYawMotorConfig() 的说明。
 // release_epsilon_rad_s 是回中断的“零速”判断，只用于松手捕获航向，不是运行许可。
 inline constexpr float big_yaw_heading_kp = 2.0f, big_yaw_heading_rate_max_rad_s = 6.0f;
-inline constexpr float big_yaw_heading_rate_kp = 0.0f, big_yaw_heading_rate_ki = 0.0f;
+inline constexpr float big_yaw_heading_rate_kp = 0.15f, big_yaw_heading_rate_ki = 0.0f;
 inline constexpr float big_yaw_heading_integral_max_rad_s = 1.5f;
 inline constexpr float big_yaw_heading_release_epsilon_rad_s = 1e-4f;
 // 调参：大 Yaw 原生速度模式的目标加速度，单位电机轴 rad/s²。

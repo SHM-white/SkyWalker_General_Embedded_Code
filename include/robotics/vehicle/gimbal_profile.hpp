@@ -68,9 +68,9 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     // 调参：先确认速度内环，再改位置外环增益/积分限幅；保持原有初值，
     // 不通过提高 kp 掩盖速度、电流饱和。deadband 单位 rad，0.012约0.69°；
     // 根据静止噪声与机械间隙逐步缩小，不能直接清零来消除微调台阶。
-    c.loop.position = {.kp = 30.0f,
+    c.loop.position = {.kp = 35.0f,
                        .ki = 0.5f,
-                       .kd = 1.0f,
+                       .kd = 3.6f,
                        .derivative_tau_s = 0.0f,
                        .integral_min = -0.6f,
                        .integral_max = 0.6f,
@@ -81,25 +81,25 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
                        .dt_max_s = 0.020f};
     // 调参：Yaw速度内环。误差单位 rad/s，输出/积分限幅单位 A；
     // 增益、微分滤波和限幅按电流/转速反馈分别调，勿同时改多组参数。
-    c.loop.velocity.regulator.feedback = {.kp = 0.45f,
-                                          .ki = 0.55f,
-                                          .kd = 0.00005f,
+    c.loop.velocity.regulator.feedback = {.kp = 0.35f,
+                                          .ki = 0.4f,
+                                          .kd = 0.0f,
                                           .derivative_tau_s = 0.0f,
                                           .integral_min = -1.2f,
                                           .integral_max = 1.2f,
-                                          .output_min = -1.2f,
-                                          .output_max = 1.2f,
+                                          .output_min = -3.0f,
+                                          .output_max = 3.0f,
                                           .deadband = 0.0f,
                                           .dt_min_s = 0.001f,
                                           .dt_max_s = 0.020f};
     // 调参：速度参考升/降斜率（rad/s²），决定启动、停转和反向响应。
-    c.loop.velocity.reference_slew = {20.0f, 20.0f};
+    c.loop.velocity.reference_slew = {40.0f, 40.0f};
     // 调参：速度反馈滤波时间常数（s），0直通；软死区单位rad/s。
     c.loop.velocity.measurement_filter_tau_s = 0.0f;
     c.loop.velocity.soft_deadband_rad_s = 0.0f;
     // 调参：内环速度/电流上限；与硬件能力协调，鼠标灵敏度独立设置。
-    c.loop.velocity.requested_velocity_abs_max_rad_s = 8.0f;
-    c.loop.velocity.effort_abs_max = 1.2f;
+    c.loop.velocity.requested_velocity_abs_max_rad_s = 15.0f;
+    c.loop.velocity.effort_abs_max = 3.0f;
     return c;
 }
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {

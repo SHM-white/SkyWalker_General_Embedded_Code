@@ -61,7 +61,8 @@ int DualYawMotionAllocator::validate() const {
                         std::isfinite(c.brake_deceleration_rad_s2) && std::isfinite(c.tracking_error_rad_s) &&
                         std::isfinite(c.tracking_budget_scale_min) && std::isfinite(c.tracking_budget_slew_per_s) &&
                         std::isfinite(c.still_rate_epsilon_rad_s) &&
-                        std::isfinite(c.still_acceleration_epsilon_rad_s2) && std::isfinite(c.head_angle_lead_max_rad);
+                        std::isfinite(c.still_acceleration_epsilon_rad_s2) &&
+                        std::isfinite(c.head_angle_lead_max_rad) && std::isfinite(c.brake_release_scale);
     if (!finite || std::fabs(c.joint_direction) != 1 || !(c.joint_margin_rad >= 0) || !(c.joint_tolerance_rad >= 0) ||
         !(c.head_rate_max_rad_s > 0) || !(c.head_acceleration_max_rad_s2 > 0) || !(c.head_jerk_max_rad_s3 >= 0) ||
         !(c.head_steady_rate_max_rad_s > 0) || c.head_steady_rate_max_rad_s > c.head_rate_max_rad_s ||
@@ -74,7 +75,8 @@ int DualYawMotionAllocator::validate() const {
         !(c.tracking_error_rad_s > 0) || !(c.tracking_budget_scale_min > 0) || c.tracking_budget_scale_min > 1 ||
         !(c.tracking_budget_slew_per_s > 0) || !(c.still_rate_epsilon_rad_s >= 0) ||
         !(c.still_acceleration_epsilon_rad_s2 >= 0) || c.head_angle_lead_max_rad < 0 ||
-        c.head_angle_lead_max_rad > kTwoPi * 0.5f || !c.feedback_timeout_us || !c.source_timeout_us || !c.max_cycle_us)
+        c.head_angle_lead_max_rad > kTwoPi * 0.5f || !(c.brake_release_scale > 0) || c.brake_release_scale > 1 ||
+        !c.feedback_timeout_us || !c.source_timeout_us || !c.max_cycle_us)
         return -EINVAL;
     return c.joint_center_rad > c.joint_min_rad && c.joint_center_rad < c.joint_max_rad ? 0 : -EINVAL;
 }
@@ -93,6 +95,8 @@ void DualYawMotionAllocator::dropPlans() {
     tracking_limited_ = false;
     still_latched_ = true;
     initialized_ = false;
+    over_pos_ = over_neg_ = false;
+    last_reseed_us_ = 0;
 }
 
 void DualYawMotionAllocator::reset() {
@@ -188,6 +192,7 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
         head_angle_plan_rad_ = in.head_angle_measured_rad;
         joint_position_plan_rad_ = std::clamp(in.joint_rad, joint_lo, joint_hi);
         out.joint_reseed_requested = true;
+        last_reseed_us_ = now;
         vision_epoch_ = in.vision_epoch;
         vision_seeded_ = true;
     }
@@ -230,7 +235,12 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     // Relative joint rate in encoder coordinates: w_enc = direction*(w_head-carrier).
     float relative = std::clamp(c.joint_direction * (head_target - carrier), -budget_neg, budget_pos);
     bool travel_limited = relative != c.joint_direction * (head_target - carrier);
-    const bool over_pos = measured > budget_pos, over_neg = measured < -budget_neg;
+    // Hysteresis: enter at the budget itself, leave only after the measured
+    // outward rate falls back below a fraction of it. Without it, measurement
+    // noise near a soft end flips the allowed direction every cycle.
+    over_pos_ = measured > (over_pos_ ? budget_pos * c.brake_release_scale : budget_pos);
+    over_neg_ = measured < -(over_neg_ ? budget_neg * c.brake_release_scale : budget_neg);
+    const bool over_pos = over_pos_, over_neg = over_neg_;
     if (over_pos) {
         // Already faster outward than the braking envelope allows: command at
         // most standstill and let the inward path stay available.
@@ -342,13 +352,24 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
 
     // --- Planned angles (stage-C trajectory interface) -----------------------
     float joint_rate = std::clamp(c.joint_direction * (head_.rate_rad_s - carrier), -budget_neg, budget_pos);
+    // 静止锁存时世界角由大 Yaw 保持，小 Yaw 只保持相对关节角。否则
+    // `-direction * carrier` 会把载体陀螺的零偏和噪声整形成第二个世界保持积分器，
+    // 表现为停杆后 I23/I47 的小幅来回。
+    if (still_latched_ && c.still_hold_joint_relative)
+        joint_rate = 0;
     if (over_pos || over_neg) {
         // Out of the braking envelope: forbid the outward direction at the final
         // joint command, drop the accumulated lead and clear the same-direction
         // head plan so the next cycle cannot rebuild it through the ramp.
         joint_rate = over_pos ? std::min(joint_rate, 0.0f) : std::max(joint_rate, 0.0f);
         joint_position_plan_rad_ = std::clamp(in.joint_rad, joint_lo, joint_hi);
-        out.joint_reseed_requested = true;
+        // Rate-limit the reseed: at a soft end the same condition can hold for
+        // many cycles, and resetting the position loop every cycle removes its
+        // integral and never lets the joint settle.
+        if (!c.reseed_interval_us || now - last_reseed_us_ >= c.reseed_interval_us) {
+            out.joint_reseed_requested = true;
+            last_reseed_us_ = now;
+        }
         head_.rate_rad_s = over_pos ? std::min(head_.rate_rad_s, carrier) : std::max(head_.rate_rad_s, carrier);
         head_.acceleration_rad_s2 = 0;
         travel_limited = true;

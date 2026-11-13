@@ -184,6 +184,10 @@ inline DualYawAllocatorConfig dualYawAllocatorConfig() {
     c.still_rate_epsilon_rad_s = 0.01f;
     // 加速度静止阈值（rad/s²）：与上面一起判定静止。
     c.still_acceleration_epsilon_rad_s2 = 0.05f;
+    // 静止时小 Yaw 归谁管：true = 只保持相对关节角，世界角完全交给大 Yaw；
+    // false = 继续按 -direction×载体速度 补偿（第二个世界保持积分器，停杆后
+    // 会把陀螺零偏/噪声积成小幅来回，实测 I23/I47 同时振荡就是这个）。
+    c.still_hold_joint_relative = true;
     // ---- 时间与新鲜度 ----
     // 小 Yaw 关节反馈超时（us）：超过按 Feedback 拒绝分配。
     c.feedback_timeout_us = 50000;
@@ -191,6 +195,11 @@ inline DualYawAllocatorConfig dualYawAllocatorConfig() {
     c.source_timeout_us = 100000;
     // 允许的最大控制周期（us）：超过按 Cycle 处理，不跨周期积分。
     c.max_cycle_us = 20000;
+    // 越界退出滞回（0..1 的预算比例）：实测外向速度必须回落到预算的 80% 才
+    // 允许再次外向。1 = 用旧行为（一低于预算立刻放开），端点噪声会来回翻。
+    c.brake_release_scale = 0.8f;
+    // 重播种最小间隔（us）：0 = 旧行为（每个越界周期都重置位置环）。
+    c.reseed_interval_us = 100000;
     // ---- 计划角超前保护 ----
     // 计划角最多领先实测头部角 0.5 rad：小 Yaw 被行程卡住时不允许无限累积，
     // 但最终目标本身仍由输入每周期重新给出，不会被截短。

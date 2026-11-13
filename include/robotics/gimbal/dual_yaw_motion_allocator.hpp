@@ -74,6 +74,20 @@ struct DualYawAllocatorConfig {
     // World-angle lead ahead of a valid measured head angle, rad. Zero keeps
     // the legacy behavior without this additional lead guard.
     float head_angle_lead_max_rad = 0;
+    // Standstill split. With the latch active the big Yaw already owns the world
+    // angle, so the small Yaw must not keep chasing the measured carrier rate:
+    // that is a second world-hold integrator fed by gyro bias and noise, and it
+    // shows up as a small oscillation after the operator stops. True holds the
+    // small-Yaw encoder position instead; false keeps passive carrier following.
+    bool still_hold_joint_relative = false;
+    // Over-envelope exit hysteresis as a fraction of the outward budget. 1 keeps
+    // the legacy immediate exit; 0.8 requires the measured outward rate to fall
+    // back to 80 % of the budget before outward motion is allowed again, so
+    // measurement noise at a soft end cannot flip the direction every cycle.
+    float brake_release_scale = 1.0f;
+    // Minimum spacing between two `joint_reseed_requested` requests, us. 0 keeps
+    // the legacy request on every over-envelope cycle.
+    core::TimeUs reseed_interval_us = 0;
 };
 
 struct DualYawAllocatorInputs {
@@ -218,6 +232,9 @@ private:
     bool vision_seeded_ = false;
     float budget_scale_ = 1;
     bool tracking_limited_ = false, still_latched_ = true, initialized_ = false;
+    // Hysteretic over-envelope state and the last reseed time.
+    bool over_pos_ = false, over_neg_ = false;
+    core::TimeUs last_reseed_us_ = 0;
 };
 
 } // namespace skywalker::robotics

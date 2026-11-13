@@ -10,14 +10,15 @@ float wrap(float a) {
 }
 } // namespace
 int BigYawWorldHeadingFollower::validate() const {
-    for (float x : {config_.heading_kp, config_.heading_rate_max_rad_s, config_.rate_kp, config_.rate_ki,
-                    config_.rate_integral_max_rad_s, config_.output_max_rad_s, config_.release_epsilon_rad_s,
-                    config_.stop_capture_dwell_s, config_.max_sample_age_s, config_.max_dt_s})
+    for (float x :
+         {config_.heading_kp, config_.heading_rate_max_rad_s, config_.rate_kp, config_.rate_ki,
+          config_.rate_integral_max_rad_s, config_.output_max_rad_s, config_.release_epsilon_rad_s,
+          config_.stop_capture_dwell_s, config_.hold_deadband_rad, config_.max_sample_age_s, config_.max_dt_s})
         if (!std::isfinite(x) || x < 0)
             return -EINVAL;
     return config_.heading_error_max_rad > 0 && config_.heading_error_max_rad <= pi && config_.output_max_rad_s > 0 &&
                    config_.rate_integral_max_rad_s > 0 && config_.max_dt_s > 0 && config_.max_sample_age_s >= 0 &&
-                   config_.stop_capture_dwell_s <= 1.0f
+                   config_.stop_capture_dwell_s <= 1.0f && config_.hold_deadband_rad <= pi
                ? 0
                : -EINVAL;
 }
@@ -82,6 +83,15 @@ int BigYawWorldHeadingFollower::step(const BigYawWorldHeadingInputs &in, float &
         stop_captured_ = false;
     previous_requested_rate_rad_s_ = requested;
     float error = wrap(target_heading_rad_ + requested * dt - heading);
+    // Stationary hold: the world-heading loop must not chase sub-degree noise,
+    // otherwise the big Yaw keeps micro-correcting and the small Yaw follows.
+    // Re-anchoring the target on the measurement keeps the loop transparent
+    // inside the band while the body-rate feedforward still holds world.
+    if (config_.hold_deadband_rad > 0 && zero_request && std::fabs(error) <= config_.hold_deadband_rad) {
+        error = 0;
+        target_heading_rad_ = heading;
+        rate_integral_rad_s_ = 0;
+    }
     const bool clamping = std::fabs(error) > config_.heading_error_max_rad;
     if (clamping && !diagnostic_clamping_)
         ++diagnostics_.clamp_count;
