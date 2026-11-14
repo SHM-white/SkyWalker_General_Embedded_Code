@@ -310,6 +310,12 @@ int main() {
         GimbalExecutionInputs input{};
         input.command = frame.decision.command.gimbal;
         input.source_stamp = sourceStamp(frame, input.command.source);
+        // 导航失联保活时本地生成的 Hold 没有外部导航/视觉源；用仲裁命令时间作为
+        // 来源时间，避免执行器把“无源”误判为命令过期而失能。
+        if (operator_state.navigation_hold && input.command.mode == GimbalMode::Hold &&
+            frame.decision.command.gimbal.stamp.valid)
+            input.source_stamp = {frame.decision.command.gimbal.stamp.timestamp_ms * 1000,
+                                  frame.decision.command.gimbal.stamp.sequence, true};
         const bool gimbal_mode_matches = navigation_allowed ? frame.decision.operator_mode == OperatorMode::Navigation
                                                             : frame.decision.operator_mode == OperatorMode::Manual;
         if (!gimbal_allowed || !gimbal_mode_matches ||
@@ -548,6 +554,14 @@ int main() {
             request.stamp = {now_ms, ++request_sequence, true};
             endpoint.submitBigYaw(request);
             auto wheel_command = frame.decision.command.chassis;
+            // 导航失联保活且没有导航速度指令时，发零速 BodyVelocity 保持底盘使能，
+            // 不切换为 Disabled 让底盘撤权失能。
+            if (navigation_allowed && operator_state.navigation_hold && wheel_command.mode == ChassisMode::Disabled &&
+                wheel_command.stamp.valid) {
+                wheel_command.mode = ChassisMode::BodyVelocity;
+                wheel_command.vx_m_s = wheel_command.vy_m_s = wheel_command.wz_rad_s = 0;
+                wheel_command.source = ControlSource::Autonomous;
+            }
             // Reject a cached command from the previous RC mode. In navigation
             // wz is supplied by the navigation frame, never by the spin profile.
             const bool navigation_command = navigation_allowed && wheel_command.source == ControlSource::Autonomous;
