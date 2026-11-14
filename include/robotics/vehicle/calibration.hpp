@@ -63,7 +63,8 @@ template <std::size_t N> constexpr bool validMotorSet(const std::array<MotorCali
 //   - velocity_limit_rad_s：输出轴（关节）速度上限 rad/s
 //   - encoder_zero_ticks：原始编码器零点，8192 ticks/转
 inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
-inline constexpr MotorCalibration pitch{1, 0x00, 1, 1, 10.0f, 10, 0};
+// Pitch 编码器增大为抬头，与姿态/视觉 Pitch 低头为正的方向相反。
+inline constexpr MotorCalibration pitch{1, 0x00, 1, -1, 10.0f, 10, 0};
 inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 10.0f, 10, 0};
 inline constexpr std::array<MotorCalibration, 2> friction{{
     {1, 0, 19, -1, 2, 60, 0},

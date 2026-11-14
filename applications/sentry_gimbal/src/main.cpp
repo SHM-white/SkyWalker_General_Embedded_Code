@@ -477,7 +477,9 @@ int main() {
                                                : installed::small_yaw.direction *
                                                      (raw_head_rate_rad_s -
                                                       (heading_fresh ? heading.rate_rad_s : 0.0f));
-            input.command.pitch_rate_rad_s = raw_pitch_rate_rad_s * installed::pitch.direction;
+            // 手动输入上拨为正（抬头），先转换成姿态/视觉约定的低头正方向。
+            // 摇杆与鼠标已合并，在此统一转换以保留两者现有操控方向。
+            input.command.pitch_rate_rad_s = -raw_pitch_rate_rad_s * installed::pitch.direction;
         }
         vision_pitch_was_active = vision_active;
         input.pitch_output_valid = pitch_valid;
