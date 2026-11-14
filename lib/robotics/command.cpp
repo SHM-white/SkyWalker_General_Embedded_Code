@@ -248,13 +248,22 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         have_vision_sequence_ = true;
     }
     const auto ms = now / 1000;
-    if (!in.remote.online || !isFresh(in.remote.stamp, ms, config_.input_timeout_ms))
-        return disable(RcUnavailable, 0);
-    if (!in.run_allowed)
-        return disable(OperatorGateDenied, 0);
+    const bool rc_available = in.remote.online && isFresh(in.remote.stamp, ms, config_.input_timeout_ms);
     OperatorIntent i{};
-    if (ManualCommandMapper(mapperConfig()).map(in.remote, i) < 0)
-        return disable(InvalidInputs, -EINVAL);
+    if (!rc_available) {
+        // 左 Middle 导航档已解锁时，遥控链路掉线不撤销导航；手动档失联仍立即锁定。
+        if (!in.run_allowed || !config_.allow_navigation || !navigation_active_)
+            return disable(RcUnavailable, 0);
+        i.mode = OperatorMode::Navigation;
+        i.source = ControlSource::Autonomous;
+        i.stamp = in.remote.stamp;
+    }
+    else {
+        if (!in.run_allowed)
+            return disable(OperatorGateDenied, 0);
+        if (ManualCommandMapper(mapperConfig()).map(in.remote, i) < 0)
+            return disable(InvalidInputs, -EINVAL);
+    }
     const auto &robot = in.referee.robot;
     const auto cr = config_.require_referee_for_chassis
                         ? permissionReason(robot.chassis_output, ms, config_.permission_timeout_ms)
@@ -265,12 +274,18 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     const auto sr = config_.enable_shooter && config_.require_referee_for_shooter
                         ? permissionReason(robot.shooter_output, ms, config_.permission_timeout_ms)
                         : 0u;
-    if (observeRemoteFrame(in.remote, !gr && !sr, ms) < 0)
-        return disable(InvalidInputs, -ESTALE);
-    n.mouse_fire = mouse_fire_;
-    if (i.source == ControlSource::KeyboardMouse) {
-        i.friction_requested = mouse_fire_.friction_requested;
-        i.fire_requested = mouse_fire_.kind != MouseFeedKind::Idle;
+    if (rc_available) {
+        if (observeRemoteFrame(in.remote, !gr && !sr, ms) < 0)
+            return disable(InvalidInputs, -ESTALE);
+        n.mouse_fire = mouse_fire_;
+        if (i.source == ControlSource::KeyboardMouse) {
+            i.friction_requested = mouse_fire_.friction_requested;
+            i.fire_requested = mouse_fire_.kind != MouseFeedKind::Idle;
+        }
+    }
+    else {
+        // 失联导航保活时没有可信遥控帧；不能把“离线”当成 InvalidInputs 撤权。
+        withdrawMouseShooter();
     }
     n.operator_mode = i.mode;
     if (i.mode == OperatorMode::Safe)

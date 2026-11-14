@@ -179,7 +179,8 @@ int main() {
     // 载体 IMU 门控大 Yaw；外置头部 IMU 门控视觉，手动保持旧编码器控制。
     const bool setup_ready = command_error == 0 && yaw_error == 0 && pitch_error == 0 && control_error == 0 &&
                              power_error == 0;
-    samples::control::RcControlAdapter controls;
+    // 左 Middle 导航档失联不撤权；左 Up 手动档失联仍立即锁定。
+    samples::control::RcControlAdapter controls{};
     communication::RemoteReceiver::Snapshot remote_frame{};
     CommandSnapshot frame{};
     std::uint64_t next_send_ms = 0;
@@ -220,8 +221,12 @@ int main() {
             controls.withdraw();
             operator_state.run_allowed = false;
             operator_state.navigation_active = false;
+            operator_state.navigation_hold = false;
         }
-        const bool navigation_allowed = operator_state.navigation_active && operator_state.fresh && setup_ready;
+        // 左 Middle 导航档失联时 navigation_hold 维持导航授权；左 Up 手动档失联
+        // 仍由 withdraw() 撤销 run_allowed 并锁定。
+        const bool operator_authorized = operator_state.fresh || operator_state.navigation_hold;
+        const bool navigation_allowed = operator_state.navigation_active && operator_authorized && setup_ready;
         const bool gimbal_allowed = operator_state.run_allowed || navigation_allowed;
         commands.setOperatorGate(gimbal_allowed, static_cast<std::uint32_t>(operator_state.start_event_id));
         // The DR16 dial (spring-centred wheel) is the analog spin control. It
@@ -479,7 +484,7 @@ int main() {
         const bool center_joint_valid = center_yaw.feedback_fresh && center_yaw.position_reference_valid &&
                                         bool(center_yaw.feedback.valid & motor::FeedbackPosition);
         const bool yaw_running = gimbal.yawTelemetry().output_valid;
-        const bool big_channel_ready = setup_ready && operator_state.fresh && gimbal_allowed && peer_state.online &&
+        const bool big_channel_ready = setup_ready && operator_authorized && gimbal_allowed && peer_state.online &&
                                        installed::imu_mounting_confirmed && heading_fresh && center_joint_valid &&
                                        yaw_running;
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)

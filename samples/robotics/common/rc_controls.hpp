@@ -35,7 +35,9 @@ struct RcControlState {
     bool navigation_active = false; // 已解锁且左 Middle；无导航源的样例保持停机
     bool manual_active = false;     // 已解锁且左 Up
     bool run_allowed = false;       // 手动运动授权，与 manual_active 同步
-    bool spin_requested = false;    // 右 Down：小陀螺（仅手动档）
+    // 左 Middle 导航档失联后保留解锁和导航授权；重新上线后无需重新拨档。
+    bool navigation_hold = false;
+    bool spin_requested = false; // 右 Down：小陀螺（仅手动档）
     std::uint64_t start_event_id = 0;
     // Dormant compatibility fields for bench examples; no RC clear gesture is produced.
     bool clear_estop = false;
@@ -56,6 +58,8 @@ public:
         bool keyboard_mouse_selectable = false;  // 右 Middle 在手动档选择键鼠。
         bool require_right_middle_to_arm = true; // 仅前后行走入口不使用右拨杆。
         std::uint32_t input_timeout_ms = 100;    // ms，须与接收和命令层失联期限协调。
+        // 左 Middle 导航档失联时保持导航解锁；左 Up 手动档失联仍立即撤权锁定。
+        bool hold_navigation_on_link_loss = true;
     };
     RcControlAdapter() = default;
     explicit RcControlAdapter(Config config) : config_(config) {
@@ -95,8 +99,10 @@ public:
         if (!remote.online) {
             state_.remote = remote;
             state_.fresh = false;
-            withdraw();
-            previous_left_ = previous_right_ = RcSwitch::Unknown;
+            if (!holdNavigationOnLinkLoss(remote.left_switch)) {
+                withdraw();
+                previous_left_ = previous_right_ = RcSwitch::Unknown;
+            }
             return state_;
         }
         const bool newer = remote.stamp.valid &&
@@ -108,8 +114,10 @@ public:
         if (!candidate_valid) {
             if (!have_input_time_ || !robotics::isFresh(state_.remote.stamp, now_ms, config_.input_timeout_ms)) {
                 state_.fresh = false;
-                withdraw();
-                previous_left_ = previous_right_ = RcSwitch::Unknown;
+                if (!holdNavigationOnLinkLoss(state_.remote.left_switch)) {
+                    withdraw();
+                    previous_left_ = previous_right_ = RcSwitch::Unknown;
+                }
             }
             return state_;
         }
@@ -117,6 +125,7 @@ public:
         const bool first_frame = !have_input_time_;
         state_.remote = remote;
         state_.fresh = true;
+        state_.navigation_hold = false;
         have_sequence_ = true;
         last_sequence_ = remote.stamp.sequence;
         have_input_time_ = true;
@@ -203,9 +212,27 @@ public:
     }
 
 private:
+    // 只有已解锁且处于左 Middle 导航档时才保留导航会话；手动/安全档失联仍撤权。
+    bool holdNavigationOnLinkLoss(robotics::RcSwitch last_left) {
+        if (!config_.hold_navigation_on_link_loss || !armed_ || state_.mode != RcMode::Navigation ||
+            last_left != robotics::RcSwitch::Middle)
+            return false;
+        state_.fresh = false;
+        state_.navigation_hold = true;
+        state_.navigation_active = true;
+        state_.manual_active = false;
+        state_.run_allowed = false;
+        state_.mode = RcMode::Navigation;
+        state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
+        state_.keyboard_mouse_selected = false;
+        right_neutral_seen_ = mouse_release_seen_ = false;
+        previous_left_ = previous_right_ = robotics::RcSwitch::Unknown;
+        return true;
+    }
     void stopMotion() {
         state_.armed = state_.navigation_active = state_.manual_active = false;
         state_.run_allowed = false;
+        state_.navigation_hold = false;
         state_.mode = RcMode::Safe;
         state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
         state_.keyboard_mouse_selected = false;
