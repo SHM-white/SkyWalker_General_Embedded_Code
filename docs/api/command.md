@@ -19,7 +19,8 @@ CommandArbiter 是同步策略核心；CommandManager 注册静态来源、启�
 ### 1. explicit CommandManager(const Config &config); int CommandManager::registerSource(ICommandSource &source)
 
 ```cpp
-explicit CommandManager(const Config &config); int CommandManager::registerSource(ICommandSource &source)
+explicit CommandManager(const Config &config);
+int CommandManager::registerSource(ICommandSource &source)
 ```
 
 构造策略服务并在启动前注册来源。一个 Operator 必须存在，Aim 与 Navigation 可选，每个角色最多一个，总容量三个。
@@ -67,13 +68,14 @@ int CommandManager::start()
 
 **错误 / 边界：** -EWOULDBLOCK：ISR；-EALREADY：重复尝试；-EINVAL：配置错误或缺少 Operator；-ENODEV：策略要求裁判但未绑定；其他值透传来源 start。失败时发布 invalid/Disabled 决策。
 
-### 4. int CommandManager::current(RobotCommand &out) const; int CommandManager::snapshot(CommandSnapshot &out) const
+### 4. `current()` / `snapshot()`
 
 ```cpp
-int CommandManager::current(RobotCommand &out) const; int CommandManager::snapshot(CommandSnapshot &out) const
+int CommandManager::current(RobotCommand &out) const;
+int CommandManager::snapshot(CommandSnapshot &out) const
 ```
 
-current 复制最终命令；snapshot 同时复制 observed、decision 与 remote/vision/permission 诊断，供执行和观测读者独立使用。
+current 复制最终命令；snapshot 同时复制 observed、decision 与 remote/vision/navigation/permission 诊断，供执行和观测读者独立使用。
 
 | 参数 | 含义与边界 |
 | --- | --- |
@@ -85,10 +87,13 @@ current 复制最终命令；snapshot 同时复制 observed、decision 与 remot
 
 **错误 / 边界：** 读取 0 不代表命令 Active；应检查模式、decision.error、原因位和 command.stamp。执行器继续强制过期，防止 worker 停滞时重用旧目标。
 
-### 5. explicit CommandArbiter(const Config &config); int CommandArbiter::configError() const; CommandDecision CommandArbiter::update(const CommandInputs &inputs); void CommandArbiter::reset()
+### 5. `CommandArbiter()` / `configError()` / `update()` 等接口
 
 ```cpp
-explicit CommandArbiter(const Config &config); int CommandArbiter::configError() const; CommandDecision CommandArbiter::update(const CommandInputs &inputs); void CommandArbiter::reset()
+explicit CommandArbiter(const Config &config);
+int CommandArbiter::configError() const;
+CommandDecision CommandArbiter::update(const CommandInputs &inputs);
+void CommandArbiter::reset()
 ```
 
 同步入口适合应用自行采集/调度。update 生成 requested 候选与按裁判裁剪后的 command，保留最终采用视觉的完整 selected_vision；reset 清仲裁历史，不操作硬件。
@@ -103,6 +108,20 @@ explicit CommandArbiter(const Config &config); int CommandArbiter::configError()
 **线程 / 时序：** 单写入者；update/reset 由调用者串行化，不适用于 ISR。
 
 **错误 / 边界：** 时间倒退可产生 -ESTALE/ClockRegression；非法配置/输入产生 -EINVAL；来源离线、Safe、视觉缺失和许可撤销可正常返回 error=0 但命令 Disabled/Hold。
+
+### 6. 执行线程授权、操作档位与扫描反馈
+
+```cpp
+std::uint32_t CommandManager::setOperatorGate(
+    bool run_allowed, std::uint32_t session = 0,
+    const OperatorSelection &selection = {});
+void CommandManager::setRunAllowed(bool run_allowed);
+void CommandManager::setPlantState(float pitch_joint_rad, bool pitch_joint_valid);
+```
+
+`setOperatorGate()` 在同一临界区写入运行意图、解锁会话与操作选择，返回当前 **revision**（不是 errno）。运行允许、session 或模式/行为类别变化才推进 revision；新遥控帧的时间戳更新不应每帧撤销鼠标手势。巡航子档之间只改变底盘旋转速率时，不算新的行为版本。执行线程应将 revision 与决策版本比较，避免消费授权边界前的旧快照。
+
+`setRunAllowed()` 是只修改运行意图的便捷入口；`setPlantState()` 把测得的 Pitch 关节角及有效位提供给本地巡航摆头的入口播种。二者不替执行器更新电机或续期命令。上述写接口仅线程上下文有效；ISR 的 `setOperatorGate()` 返回 0 且不写入，`setPlantState()` 不写入。详细字段见 [CommandManager 源码](../../include/robotics/command/command_manager.hpp)。
 
 ## 调用示例
 
