@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light" data-code-layout="scroll">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,10 +7,26 @@
   <title>SkyWalker · 架构与接口手册</title>
   <link rel="stylesheet" href="styles.css?v=99a97c9">
   <link rel="stylesheet" href="reader.css?v=20261116-1">
+  <link rel="stylesheet" href="reader-ui.css?v=20261116-2">
+  <script>
+    (() => {
+      let theme = 'system', layout = 'auto';
+      try {
+        theme = localStorage.getItem('skywalker-doc-theme') || 'system';
+        layout = localStorage.getItem('skywalker-code-layout') || 'auto';
+      } catch {}
+      if (!['system', 'light', 'dark'].includes(theme)) theme = 'system';
+      if (!['auto', 'wrap', 'scroll'].includes(layout)) layout = 'auto';
+      document.documentElement.dataset.theme = theme === 'system'
+        ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
+      document.documentElement.dataset.codeLayout = layout === 'auto'
+        ? (matchMedia('(max-width: 760px)').matches ? 'wrap' : 'scroll') : layout;
+    })();
+  </script>
   <script defer src="data.js?v=diagram-20261115-2"></script>
   <script defer src="architecture-data.js?v=diagram-20261115-2"></script>
   <script defer src="vehicle-diagram.js?v=diagram-20261115-2"></script>
-  <script defer src="app.js?v=reader-20261116-1"></script>
+  <script defer src="app.js?v=reader-20261116-2"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到正文</a>
@@ -23,7 +39,7 @@
       <a href="#modules" data-nav="modules"><span class="nav-icon">▤</span>接口与示例<span class="nav-hint">03</span></a>
       <a href="#workflows" data-nav="workflows"><span class="nav-icon">⇢</span>端到端调用链<span class="nav-hint">04</span></a>
       <a href="#docs" data-nav="docs"><span class="nav-icon">▱</span>Markdown 文档<span class="nav-hint">05</span></a>
-      <a href="#history" data-nav="history"><span class="nav-icon">◷</span>变更来历<span class="nav-hint">06</span></a>
+      <a href="#history" data-nav="history"><span class="nav-icon">◷</span>文档更新记录<span class="nav-hint">06</span></a>
     </nav>
     <div class="nav-section-label">模块速查</div>
     <nav id="module-nav" class="module-nav" aria-label="模块目录"></nav>
@@ -34,6 +50,24 @@
     <header class="topbar">
       <div class="topbar-left"><button id="menu-toggle" class="icon-button" aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">☰</button><span id="breadcrumb">系统 / 整车架构</span></div>
       <form id="search-form" class="global-search" role="search"><label class="sr-only" for="global-search">搜索模块、接口或文档</label><span aria-hidden="true">⌕</span><input id="global-search" type="search" placeholder="搜索模块、接口、文档…" autocomplete="off"><kbd>/</kbd></form>
+      <details class="display-settings" id="display-settings">
+        <summary title="阅读外观设置" aria-label="阅读外观设置">显示 <span aria-hidden="true">◐</span></summary>
+        <div class="display-settings-panel">
+          <label for="theme-choice">界面主题</label>
+          <select id="theme-choice">
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+          <label for="code-layout-choice">所有代码块</label>
+          <select id="code-layout-choice">
+            <option value="auto">自适应屏幕</option>
+            <option value="scroll">横向滚动</option>
+            <option value="wrap">自动换行</option>
+          </select>
+          <small>设置保存在当前浏览器中，在所有文档页生效。</small>
+        </div>
+      </details>
       <span class="version-label">代码@dd3f673 · 11.15</span>
     </header>
     <main id="main" tabindex="-1"><div id="content"></div></main>
