@@ -32,7 +32,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/status_led samples/status_led
 | `samples/communication/dr16` | RemoteReceiver 接收与 18 字节 DR16 解码 | MC02 UART5 接收，独立 VOFA UART 显示 16 通道；console 查看初始化与异常 |
 | [samples/communication/vision](../../samples/communication/vision/README.md) | AB 视觉指令独立接收与 VOFA 回显 | MC02 UART7 115200 输入，USART1 输出 |
 | `samples/communication/referee` | 裁判串口 CRC 和状态解析 | MC02 USART1，观察权限、功率、buffer 和统计量 |
-| `samples/communication/interboard` | 两块板 UART 板间协议 | 一块默认 Gimbal role，另一块加 `chassis.conf` |
+| [samples/communication/interboard](../../samples/communication/interboard/README.md) | 两块板的 v4 协议与可选 UART/RS485/CAN 传输实验 | 按样例配置配对角色、后端与物理连线；实车正式应用仍固定 UART |
 
 通信样例都只验证消息链路，不自动控制电机。样例级说明还在各自的 `README.md`。
 
@@ -45,7 +45,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/interboard-chassis \
   samples/communication/interboard
 ```
 
-两块板互连时使用 TX→RX、RX→TX 和共地；不要把两个板的同名 TX 直接并联。
+当样例选择普通 UART 时，两块板互连使用 TX→RX、RX→TX 和共地，不要把两个板的同名 TX 直接并联；切到 RS485 或 CAN 时须按相应收发器/终端规范接线，不能沿用 UART 直连。参考[三种板间后端](../modules/communication/interboard-transports.md)。
 
 ## 3. DJI 电机
 
