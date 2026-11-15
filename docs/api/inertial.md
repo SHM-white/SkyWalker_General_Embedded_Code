@@ -16,10 +16,11 @@
 
 ## 接口契约
 
-### 1. InertialGimbalAdapter(const Config &); InertialGimbalOutput update(const InertialGimbalInputs &, core::TimeUs now_us)
+### 1. `InertialGimbalAdapter()` / `update()`
 
 ```cpp
-InertialGimbalAdapter(const Config &); InertialGimbalOutput update(const InertialGimbalInputs &, core::TimeUs now_us)
+InertialGimbalAdapter(const Config &);
+InertialGimbalOutput update(const InertialGimbalInputs &, core::TimeUs now_us)
 ```
 
 输入头部 Snapshot、两轴 MotorSnapshot、command/source_stamp/prerequisites_ready。可选 `yaw_reference_rad`/`yaw_reference_rate_rad_s`（`yaw_reference_valid`）用分配器可行世界参考替代本地 Yaw 目标积分，`pitch_rate_feedforward_rad_s`（`pitch_rate_feedforward_valid`）为绝对视觉 Pitch 目标提供速度前馈。输出关节 command、原 stamp、两轴 output_valid、stabilization_valid、误差，以及仅供诊断的 `carrier_yaw_rate_rad_s`/`carrier_pitch_rate_rad_s` 与有效位。
