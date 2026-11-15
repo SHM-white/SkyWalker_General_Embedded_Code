@@ -1869,9 +1869,53 @@
         "config": [],
         "overlay": []
       }
+    },
+    "m3508_can1_speed_control": {
+      "relPath": "samples/motor/m3508_can1_speed_control",
+      "name": "m3508_can1_speed_control",
+      "buildConfigs": {
+        "build/rm_typec/stm32f407xx": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "rm_typec",
+          "board": "rm_typec/stm32f407xx",
+          "name": "build/rm_typec/stm32f407xx",
+          "compilerOptimization": "debug",
+          "westBuildArgs": [],
+          "westBuildCMakeArgs": [
+            "-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+            "-DCONFIG_DEBUG_THREAD_INFO=y",
+            "-DSKYWALKER_OPENOCD_PROBE=stlink"
+          ],
+          "confFiles": {
+            "config": [],
+            "overlay": []
+          },
+          "activeProfile": "RM Type-C ST-Link OpenOCD"
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "overlay": []
+      }
     }
   },
   "runnerProfiles": [
+    {
+      "name": "RM Type-C ST-Link OpenOCD",
+      "flash": {
+        "kind": "west-flash",
+        "runner": "openocd"
+      },
+      "debug": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      },
+      "attach": {
+        "kind": "cortex-debug",
+        "runner": "openocd"
+      }
+    },
     {
       "name": "DM MC02 OpenOCD",
       "flash": {
@@ -1938,6 +1982,21 @@
       "attach": {
         "kind": "cortex-debug",
         "runner": "openocd"
+      }
+    },
+    {
+      "name": "Auto",
+      "flash": {
+        "kind": "west-flash",
+        "runner": "openocd"
+      },
+      "debug": {
+        "kind": "cortex-debug",
+        "runner": "stlink"
+      },
+      "attach": {
+        "kind": "cortex-debug",
+        "runner": "stlink"
       }
     }
   ],

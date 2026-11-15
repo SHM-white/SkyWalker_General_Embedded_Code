@@ -12,8 +12,21 @@ inline constexpr std::uint32_t manual_command_timeout_ms = gimbal_command_timeou
 // 调参：巡航（左 Middle + 右上/右下）无有效视觉目标时的本地扫描速度，
 // 单位 rad/s 的头部世界偏航角速度。方向沿用头部世界坐标约定；
 // 0.3 rad/s 约 17.2°/s，是按机构行程、视场和场地待实测的初值。
-inline constexpr float cruise_yaw_rate_rad_s = 0.3f;
+inline constexpr float cruise_yaw_rate_rad_s = 0.6f;
 static_assert(cruise_yaw_rate_rad_s != 0 && cruise_yaw_rate_rad_s <= manual_max_gimbal_yaw_rate_rad_s);
+// 调参：巡航俯仰摆头。速率单位 rad/s（0 = 只保持入口关节角），
+// 幅度单位 rad，是相对“进入扫描时实测角”的单边行程。
+// Pitch 全程只有 pitch_min_rad..pitch_max_rad（2.60..3.40 rad），0.15 rad 约 8.6°；
+// 两端各留 margin，避免每次折返都撞软限位形成锯齿。
+inline constexpr float cruise_pitch_rate_rad_s = 1.6f;
+inline constexpr float cruise_pitch_span_rad = 1.0f;
+inline constexpr float cruise_pitch_margin_rad = 0.02f;
+inline constexpr float cruise_pitch_min_rad = pitch_min_rad + cruise_pitch_margin_rad;
+inline constexpr float cruise_pitch_max_rad = pitch_max_rad - cruise_pitch_margin_rad;
+static_assert(cruise_pitch_rate_rad_s >= 0 && cruise_pitch_rate_rad_s <= manual_max_gimbal_pitch_rate_rad_s,
+              "cruise pitch rate must fit the pitch joint budget");
+static_assert(cruise_pitch_span_rad > 0 && cruise_pitch_min_rad < cruise_pitch_max_rad,
+              "cruise pitch span must fit inside the pitch travel");
 // Old physical joint-direction hint retained for standalone benches;
 // reference-v4 world-rate commands must NOT apply this factor.
 inline constexpr float big_yaw_wire_direction = -1.0f;

@@ -52,6 +52,14 @@ std::uint32_t CommandManager::setOperatorGate(bool allowed, std::uint32_t sessio
     k_spin_unlock(&operator_gate_lock_, key);
     return revision;
 }
+void CommandManager::setPlantState(float pitch_joint_rad, bool pitch_joint_valid) {
+    if (k_is_in_isr())
+        return;
+    const auto key = k_spin_lock(&operator_gate_lock_);
+    plant_.pitch_joint_rad = pitch_joint_rad;
+    plant_.pitch_joint_valid = pitch_joint_valid;
+    k_spin_unlock(&operator_gate_lock_, key);
+}
 int CommandManager::registerSource(ICommandSource &source) {
     if (k_is_in_isr())
         return -EWOULDBLOCK;
@@ -213,10 +221,17 @@ void CommandManager::run() {
         next.observed.now_us = core::monotonicTimeUs();
         const auto now_ms = next.observed.now_us / 1000;
         OperatorGate gate{};
-        if (require_external_gate_) {
+        PlantState plant{};
+        {
+            // 选择、会话、行为版本与机械反馈一次性复制，避免读到两次写入的混合。
             const auto key = k_spin_lock(&operator_gate_lock_);
             gate = operator_gate_;
+            plant = plant_;
             k_spin_unlock(&operator_gate_lock_, key);
+        }
+        next.observed.pitch_joint_rad = plant.pitch_joint_rad;
+        next.observed.pitch_joint_valid = plant.pitch_joint_valid;
+        if (require_external_gate_) {
             if (gate.revision != gate_revision) {
                 gate_revision = gate.revision;
                 safe_gate_latched = false;

@@ -35,6 +35,12 @@ public:
         bool enable_cruise = false;
         // 调参：扫描头部世界偏航角速度 rad/s；方向沿用头部世界坐标约定。
         float cruise_yaw_rate_rad_s = 0.3f;
+        // 调参：巡航扫描的俯仰关节速率 rad/s 与相对入口角的单边幅度 rad。
+        // 速率为 0 时保持入口角度（Pitch 不摆头）。
+        float cruise_pitch_rate_rad_s = 0;
+        float cruise_pitch_span_rad = 0;
+        // 扫描允许的 Pitch 软限位（编码器坐标），与“入口角±幅度”取交集。
+        float cruise_pitch_min_rad = -3.14159265f, cruise_pitch_max_rad = 3.14159265f;
     };
     explicit CommandArbiter(const Config &config);
     // One owner thread; inputs include the arbitration time. Results are owned values.
@@ -65,8 +71,16 @@ private:
     std::uint64_t navigation_baseline_sequence_ = 0;
     // 最近处理的解锁会话；变化时清理入口基线，避免跨会话复用目标。
     std::uint32_t operator_session_ = 0;
+    // 巡航 Pitch 摆头：进入扫描时用实测关节角播种，之后由仲裁器按周期积分并在
+    // 入口角±幅度与软限位的交集处折返。
+    float cruise_pitch_planned_rad_ = 0, cruise_pitch_low_rad_ = 0, cruise_pitch_high_rad_ = 0;
+    core::TimeUs cruise_pitch_last_us_ = 0;
+    std::int8_t cruise_pitch_direction_ = 1;
+    bool cruise_pitch_seeded_ = false;
     void updateAutoOverride(OperatorIntent &, const CommandInputs &, core::TimeUs);
     void clearEntryBaselines();
+    void resetCruisePitch();
+    float cruisePitchRate(const CommandInputs &, core::TimeUs);
 };
 // 两个调用方（仲裁器与上电启动动作判定）共用的有效映射配置，
 // 避免快捷解锁使用一份缺少巡航/导航/键鼠语义的默认 mapper。

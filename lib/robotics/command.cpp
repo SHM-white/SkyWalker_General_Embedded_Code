@@ -116,6 +116,7 @@ void CommandArbiter::reset() {
     navigation_active_ = false;
     navigation_entry_us_ = navigation_baseline_sequence_ = 0;
     operator_session_ = 0;
+    resetCruisePitch();
     withdrawMouseShooter();
 }
 void CommandArbiter::clearEntryBaselines() {
@@ -126,6 +127,45 @@ void CommandArbiter::clearEntryBaselines() {
     auto_entry_us_ = 0;
     auto_baseline_sequence_ = 0;
     manual_override_ = have_override_quiet_time_ = false;
+    resetCruisePitch();
+}
+void CommandArbiter::resetCruisePitch() {
+    // 下一次扫描必须重新用当时实测关节角播种，不沿用旧幅度区间。
+    cruise_pitch_planned_rad_ = cruise_pitch_low_rad_ = cruise_pitch_high_rad_ = 0;
+    cruise_pitch_last_us_ = 0;
+    cruise_pitch_direction_ = 1;
+    cruise_pitch_seeded_ = false;
+}
+float CommandArbiter::cruisePitchRate(const CommandInputs &in, core::TimeUs now) {
+    if (!(config_.cruise_pitch_rate_rad_s > 0) || !(config_.cruise_pitch_span_rad > 0))
+        return 0.0f;
+    if (!cruise_pitch_seeded_) {
+        // 没有可信的关节实测角时先保持，下一周期再播种。
+        if (!in.pitch_joint_valid || !std::isfinite(in.pitch_joint_rad))
+            return 0.0f;
+        const float span = config_.cruise_pitch_span_rad;
+        cruise_pitch_low_rad_ = std::max(config_.cruise_pitch_min_rad, in.pitch_joint_rad - span);
+        cruise_pitch_high_rad_ = std::min(config_.cruise_pitch_max_rad, in.pitch_joint_rad + span);
+        cruise_pitch_planned_rad_ =
+            std::clamp(in.pitch_joint_rad, cruise_pitch_low_rad_, cruise_pitch_high_rad_);
+        cruise_pitch_direction_ = 1;
+        cruise_pitch_last_us_ = now;
+        cruise_pitch_seeded_ = true;
+    }
+    const float dt = now > cruise_pitch_last_us_ ? static_cast<float>(now - cruise_pitch_last_us_) * 1e-6f : 0.0f;
+    cruise_pitch_last_us_ = now;
+    if (!(cruise_pitch_high_rad_ > cruise_pitch_low_rad_))
+        return 0.0f;
+    cruise_pitch_planned_rad_ += static_cast<float>(cruise_pitch_direction_) * config_.cruise_pitch_rate_rad_s * dt;
+    if (cruise_pitch_planned_rad_ >= cruise_pitch_high_rad_) {
+        cruise_pitch_planned_rad_ = cruise_pitch_high_rad_;
+        cruise_pitch_direction_ = -1;
+    }
+    else if (cruise_pitch_planned_rad_ <= cruise_pitch_low_rad_) {
+        cruise_pitch_planned_rad_ = cruise_pitch_low_rad_;
+        cruise_pitch_direction_ = 1;
+    }
+    return static_cast<float>(cruise_pitch_direction_) * config_.cruise_pitch_rate_rad_s;
 }
 void CommandArbiter::withdrawMouseShooter() {
     mouse_gesture_.withdraw();
@@ -174,6 +214,15 @@ int CommandArbiter::validateConfig() const {
     if (config_.enable_cruise && (!config_.require_external_run_gate || !std::isfinite(config_.cruise_yaw_rate_rad_s) ||
                                   config_.cruise_yaw_rate_rad_s == 0 ||
                                   std::fabs(config_.cruise_yaw_rate_rad_s) > config_.max_gimbal_yaw_rate_rad_s))
+        return -EINVAL;
+    // 俯仰扫描：速率与幅度可以为 0（保持入口角），但不得为负/非有限，
+    // 且必须落在 Pitch 关节速率预算与配置的软限位内。
+    if (config_.enable_cruise &&
+        (!std::isfinite(config_.cruise_pitch_rate_rad_s) || config_.cruise_pitch_rate_rad_s < 0 ||
+         config_.cruise_pitch_rate_rad_s > config_.max_gimbal_pitch_rate_rad_s ||
+         !std::isfinite(config_.cruise_pitch_span_rad) || config_.cruise_pitch_span_rad < 0 ||
+         !std::isfinite(config_.cruise_pitch_min_rad) || !std::isfinite(config_.cruise_pitch_max_rad) ||
+         config_.cruise_pitch_min_rad >= config_.cruise_pitch_max_rad))
         return -EINVAL;
     if (!config_.input_timeout_ms || (config_.allow_navigation && !config_.navigation_timeout_us) ||
         ((config_.require_referee_for_chassis || config_.require_referee_for_gimbal ||
@@ -471,14 +520,19 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     }
     // 巡航：没有可用视觉目标时由本地生成低速扫描。非法目标/参考不匹配
     // 仍保留原拒绝语义，不用扫描掩盖故障。
+    bool cruise_scan = false;
     if (cruise_mode && !visual_control && !manual_override_) {
         const bool bad_vision = (n.gimbal_reasons & (InvalidVision | VisionReferenceMismatch)) != 0;
-        if (!bad_vision) {
-            n.requested.gimbal = makeCruiseScanCommand(config_.cruise_yaw_rate_rad_s);
-            n.selected_vision = {};
-            n.gimbal_behavior = GimbalBehavior::Scan;
-        }
+        cruise_scan = !bad_vision;
     }
+    if (cruise_scan) {
+        // Pitch 摆头方向与幅度由仲裁器自己维护；视觉接管或退出扫描后重新播种。
+        n.requested.gimbal = makeCruiseScanCommand(config_.cruise_yaw_rate_rad_s, cruisePitchRate(in, now));
+        n.selected_vision = {};
+        n.gimbal_behavior = GimbalBehavior::Scan;
+    }
+    else
+        resetCruisePitch();
     if (navigation_mode || !config_.enable_shooter || !i.friction_requested)
         n.shooter_reasons |= ShooterNotArmed;
     else {

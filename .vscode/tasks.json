@@ -2,6 +2,26 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "RM Type-C: Build M3508",
+			"type": "shell",
+			"command": "west",
+			"args": [
+				"build",
+				"samples/motor/m3508_can1_speed_control",
+				"--build-dir",
+				"samples/motor/m3508_can1_speed_control/build/rm_typec/stm32f407xx",
+				"--board",
+				"rm_typec/stm32f407xx",
+				"--",
+				"-DBOARD_ROOT=${workspaceFolder}",
+				"-DSKYWALKER_OPENOCD_PROBE=stlink",
+				"-DCONFIG_DEBUG_OPTIMIZATIONS=y",
+				"-DCONFIG_DEBUG_THREAD_INFO=y"
+			],
+			"options": { "cwd": "${workspaceFolder}" },
+			"problemMatcher": "$gcc"
+		},
+		{
 			"label": "Zephyr IDE: Build Active",
 			"type": "shell",
 			"command": "west",

@@ -36,6 +36,9 @@ public:
     void setRunAllowed(bool run_allowed) {
         setOperatorGate(run_allowed);
     }
+    // 执行线程每周期推送的机械反馈，仅供仲裁器为本地扫描播种。
+    // 与门控共用同一临界区；ISR 调用不写入且不改变门控状态。
+    void setPlantState(float pitch_joint_rad, bool pitch_joint_valid);
 
 private:
     struct Slot {
@@ -59,6 +62,11 @@ private:
         OperatorSelection selection{};
     };
     OperatorGate operator_gate_{};
+    struct PlantState {
+        float pitch_joint_rad = 0;
+        bool pitch_joint_valid = false;
+    };
+    PlantState plant_{}; // 与 operator_gate_ 共用 operator_gate_lock_
     mutable k_spinlock operator_gate_lock_{};
     std::array<Slot, 3> sources_{};
     std::size_t source_count_ = 0;

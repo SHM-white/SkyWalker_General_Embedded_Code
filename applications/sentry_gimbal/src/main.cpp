@@ -107,6 +107,10 @@ int main() {
         // 左 Middle 由右拨杆选择普通导航/巡航/巡航+小陀螺。
         config.enable_cruise = true;
         config.cruise_yaw_rate_rad_s = installed::cruise_yaw_rate_rad_s;
+        config.cruise_pitch_rate_rad_s = installed::cruise_pitch_rate_rad_s;
+        config.cruise_pitch_span_rad = installed::cruise_pitch_span_rad;
+        config.cruise_pitch_min_rad = installed::cruise_pitch_min_rad;
+        config.cruise_pitch_max_rad = installed::cruise_pitch_max_rad;
         config.mapper.cruise_on_middle = true;
         config.mapper.navigation_on_middle = true;
         config.require_referee_for_chassis = true;
@@ -400,6 +404,8 @@ int main() {
                                  std::isfinite(ps.feedback.position_rad);
         const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
+        // 把 Pitch 实测角推给命令线程：巡航扫描用它作为摆头中心。
+        commands.setPlantState(ps.feedback.position_rad, pitch_valid);
         const auto &feedback = peer_state.big_yaw_feedback;
         const bool peer_feedback_valid = peer_state.online && feedback.valid &&
                                          forwardedFresh(feedback.stamp, feedback.production_age_ms, now_ms, 250) &&
@@ -410,8 +416,9 @@ int main() {
             dual_yaw.reset();
         peer_feedback_was_valid = peer_feedback_valid;
         // --- 巡航扫描入口：只在新进入扫描时显式重播种两轴目标 -------------
-        // 进入扫描后 Pitch 保持该关节角（速率恒为 0），因此不能每帧重播种；
-        // 退出扫描或反馈未就绪时保留 pending，本周期降级为新鲜 Hold 继续初始化。
+        // 扫描期间 Yaw 是速率意图、Pitch 是速率往返（方向与折返由仲裁器维护），
+        // 因此不能每帧重播种；退出扫描或反馈未就绪时保留 pending，
+        // 本周期降级为新鲜 Hold 继续初始化。
         const bool scan_selected = decision_matches && cruise_selected &&
                                    decision.gimbal_behavior == GimbalBehavior::Scan &&
                                    input.command.source == ControlSource::LocalBehavior &&
@@ -426,13 +433,13 @@ int main() {
                 dual_yaw.reset();
                 (void)head_control.suspend(now_us, WaitReason::Command);
                 // 两个调用都成功才允许输出扫描速率；丢弃上一视觉会话的积分目标。
+                // Pitch 重播种把摆头起点钉在当前实测角，与仲裁器的播种一致。
                 if (gimbal.reseedYawTarget() == 0 && gimbal.reseedPitchTarget() == 0)
                     scan_entry_pending = false;
             }
             if (scan_entry_pending) {
                 input.command.mode = GimbalMode::Hold;
                 input.command.yaw_rate_rad_s = 0;
-                input.command.pitch_rate_rad_s = 0;
             }
         }
         // Only the arbitrated target is ever consumed. `selected_vision` is kept

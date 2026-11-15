@@ -2,6 +2,24 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "RM Type-C: Debug M3508 (ST-Link)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "servertype": "openocd",
+            "preLaunchTask": "RM Type-C: Build M3508",
+            "executable": "${workspaceFolder}/samples/motor/m3508_can1_speed_control/build/rm_typec/stm32f407xx/zephyr/zephyr.elf",
+            "gdbPath": "${command:zephyr-ide.get-gdb-path}",
+            "serverpath": "${env:HOME}/zephyr-sdk-1.0.1/hosttools/sysroots/x86_64-pokysdk-linux/usr/bin/openocd",
+            "searchDir": [
+                "${env:HOME}/zephyr-sdk-1.0.1/hosttools/sysroots/x86_64-pokysdk-linux/usr/share/openocd/scripts"
+            ],
+            "configFiles": [
+                "${workspaceFolder}/boards/rm_typec/support/openocd_stlink.cfg"
+            ],
+            "runToEntryPoint": "main"
+        },
+        {
             "name": "MC02: Build and Run (no RTOS)",
             "type": "cortex-debug",
             "request": "launch",

@@ -55,7 +55,7 @@ VS Code 的 `sentry_gimbal` 使用独立构建目录 `applications/sentry_gimbal
 - 解锁：左 Down 建立归中基线，右 Middle，摇杆与拨轮满足 `centered()`（原始值 ±33）后再左 Down→Middle。上电首帧还提供一次性快捷解锁：只要正式配置下的映射判定为“解锁后不会主动产生动作”即可（左上右上、左上右中均满足），不再固定要求右 Middle；右 Down/Shift/Q/E/有效拨轮、非零摇杆或鼠标机构请求、巡航档本身都会拒绝快捷解锁。快捷解锁资格一旦消耗不会因输入回零而重建。
 - 掉线保持：只有“最后一帧已接受的有效输入处于左 Middle 且已经解锁”才保持自主运行。重连后新帧立即更新选择（左 Down 先停止），掉线期间的旧摇杆/鼠标/键盘值不参与自主运动。上电无遥控、从未解锁、手动档掉线、板间掉线或对端重启都不会被转换成自动授权。
 - 巡航分工：两档的 `wz` 由本地小陀螺逻辑独占，不与导航 `wz` 相加。右下切右上是“停止请求旋转并按现有减速度回零”，不是物理转速瞬间为零；两档互切不重启视觉会话、不重新捕获扫描 Pitch、不重置减速状态。
-- 扫描：使用头部世界 Yaw 角速度，经现有双 Yaw 分配器分配到大小 Yaw；Pitch 保持进入扫描时的实际关节角（不是回水平，也不是延续上一次视觉目标）。扫描速度集中在 `manual_profile.hpp` 的 `cruise_yaw_rate_rad_s`（0.3 rad/s ≈ 17.2°/s，方向与大小待实机确认）。
+- 扫描：Yaw 使用头部世界角速度（`cruise_yaw_rate_rad_s`，0.3 rad/s ≈ 17.2°/s）；Pitch 以 `cruise_pitch_rate_rad_s`（0.2 rad/s）在“进入扫描时的实测角 ± `cruise_pitch_span_rad`（0.15 rad ≈ 8.6°）”之间往返，并与 `cruise_pitch_min_rad`/`cruise_pitch_max_rad`（`pitch_min/max_rad` 内缩 0.02 rad）求交集；速率或幅度为 0 时退化为只保持入口角度。两者都经同一个双 Yaw 分配器与 `GimbalAxis` 的速率积分执行，视觉接管或退出扫描后重新从当前实测角播种，不会延续上一次视觉目标。参数均在 `manual_profile.hpp`，方向与幅度待实机确认。
 - 导航：巡航在无有效导航帧时平移为零（仍发合法零速 `BodyVelocity`），任一轴过期立即归零；普通导航（左中右中）的 `wz` 仍来自导航帧。
 - 视觉失效：`VisionMissing/VisionStale/VisionStopped/WaitNewVision` 转入扫描；非法目标、世界参考不匹配、时钟倒退仍保留原拒绝/Hold/Disabled 语义，不用扫描掩盖故障。头部 IMU 不可用或裁判明确拒绝时仍停止输出。
 

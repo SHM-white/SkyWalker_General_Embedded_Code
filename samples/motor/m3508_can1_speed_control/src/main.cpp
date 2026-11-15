@@ -28,20 +28,21 @@ constexpr std::int64_t kControlPeriodMs = 5;
 constexpr std::uint32_t kTelemetryPeriodCycles = 1U;
 constexpr std::int64_t kRunDurationMs = 300000;
 
-constexpr float kRequestedVelocityRadS = 0.5f;
+constexpr float kRequestedVelocityRadS = 5.0f;
 constexpr float kRequestedVelocityAbsMaxRadS = 50.0f;
-constexpr float kSoftwareCurrentAbsMaxA = 0.8f;
+constexpr float kSoftwareCurrentAbsMaxA = 5.0f;
 constexpr float kDeadbandRadS = 0.20f;
 constexpr float kVelocityFilterTauS = 0.025f;
 
 float requestedVelocityForTime(std::int64_t elapsed_ms) {
-    if (elapsed_ms < 500) {
-        return 0.0f;
-    }
-    if (elapsed_ms < kRunDurationMs) {
-        return kRequestedVelocityRadS * std::sin(static_cast<float>(elapsed_ms) / 1000.0f);
-    }
-    return 0.0f;
+    // if (elapsed_ms < 500) {
+    //     return 0.0f;
+    // }
+    // if (elapsed_ms < kRunDurationMs) {
+    //     return kRequestedVelocityRadS * std::sin(static_cast<float>(elapsed_ms) / 1000.0f);
+    // }
+    // return 0.0f;
+    return kRequestedVelocityRadS;
 }
 
 control_motor_velocity_config makeVelocityLoopConfig() {
@@ -97,7 +98,7 @@ int main() {
         return -ENODEV;
     static skywalker::motor::Motor drive{skywalker::motor::dji::m3508({
         .id = 1,
-        .current_limit_a = 3.0f,
+        .current_limit_a = 20.0f,
         // .encoder_zero_ticks = 0,
         // .current_mode_confirmed = true,
         .gear_ratio = 268.0f / 17.0f,

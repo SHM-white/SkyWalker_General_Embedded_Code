@@ -23,6 +23,10 @@ struct CommandInputs {
     std::uint32_t operator_session = 0;
     // 当前可执行的行为版本；每次允许状态/会话/模式类别变化时递增。
     std::uint32_t operator_revision = 0;
+    // 执行线程推送的 Pitch 关节实测角（编码器坐标），仅供巡航扫描入口播种；
+    // 仲裁器不据此做闭环，也不取代执行器自己的重播种。
+    float pitch_joint_rad = 0;
+    bool pitch_joint_valid = false;
 };
 
 enum ArbitrationReason : std::uint32_t {
