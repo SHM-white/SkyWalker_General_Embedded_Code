@@ -68,10 +68,11 @@ int RemoteReceiver::snapshot(Snapshot &out)
 
 **错误 / 边界：** 不得把 -EAGAIN 当作一条新帧；检查 out.remote.online 和原始 stamp，不只检查返回值。
 
-### 4. int RemoteService::processBytes(const std::uint8_t *bytes, std::size_t size, std::uint64_t now_ms); int RemoteService::snapshot(std::uint64_t now_ms, robotics::RemoteState &out) const
+### 4. `processBytes()` / `snapshot()`
 
 ```cpp
-int RemoteService::processBytes(const std::uint8_t *bytes, std::size_t size, std::uint64_t now_ms); int RemoteService::snapshot(std::uint64_t now_ms, robotics::RemoteState &out) const
+int RemoteService::processBytes(const std::uint8_t *bytes, std::size_t size, std::uint64_t now_ms);
+int RemoteService::snapshot(std::uint64_t now_ms, robotics::RemoteState &out) const
 ```
 
 自行管理通信线程时使用：流式累积 18 字节，坏帧滑动一个字节重同步；snapshot 复制最近合法帧并按 timeout 判断在线。
@@ -88,10 +89,11 @@ int RemoteService::processBytes(const std::uint8_t *bytes, std::size_t size, std
 
 **错误 / 边界：** 非空长度配空指针返回 -EINVAL；UART 溢出后调用 discardPartial()。
 
-### 5. int Dr16Decoder::decodeFrame(const std::uint8_t *bytes, std::size_t size, std::uint64_t timestamp_ms, robotics::RemoteState &out); int Dr16Decoder::reset()
+### 5. `decodeFrame()` / `reset()`
 
 ```cpp
-int Dr16Decoder::decodeFrame(const std::uint8_t *bytes, std::size_t size, std::uint64_t timestamp_ms, robotics::RemoteState &out); int Dr16Decoder::reset()
+int Dr16Decoder::decodeFrame(const std::uint8_t *bytes, std::size_t size, std::uint64_t timestamp_ms, robotics::RemoteState &out);
+int Dr16Decoder::reset()
 ```
 
 解码固定 18 字节帧，通道减去中心并应用死区，生成单调递增本地序号；reset 清零统计与序号。
