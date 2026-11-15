@@ -273,6 +273,24 @@
     return result + esc(value.slice(end));
   }
 
+  // Escape all source text before inserting highlighting spans; never execute code from Markdown.
+  const codeTokens = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|^[ \t]*#(?:include|define|pragma|if|ifdef|ifndef|endif|else|elif)[^\n]*|\b(?:alignas|auto|bool|break|case|class|const|constexpr|continue|default|delete|do|double|else|enum|explicit|extern|false|float|for|if|inline|int|long|namespace|new|nullptr|override|private|protected|public|return|short|signed|sizeof|static|struct|switch|template|this|true|typedef|typename|union|unsigned|using|virtual|void|volatile|while|char|size_t)\b|\b(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[uUlLfF]+)?)\b/gm;
+  function highlightCode(value, language) {
+    if (!/^(cpp|c|c\+\+|cc|h|hpp)$/i.test(language)) return esc(value);
+    let html = '', offset = 0;
+    for (const match of value.matchAll(codeTokens)) {
+      const token = match[0];
+      html += esc(value.slice(offset, match.index));
+      const kind = token.startsWith('//') || token.startsWith('/*') ? 'comment'
+        : /^["']/.test(token) ? 'string'
+        : /^[ \t]*#/.test(token) ? 'preprocessor'
+        : /^(?:0x|\d)/.test(token) ? 'number' : 'keyword';
+      html += '<span class="token-' + kind + '">' + esc(token) + '</span>';
+      offset = match.index + token.length;
+    }
+    return html + esc(value.slice(offset));
+  }
+
   function markdown(source, path) {
     const lines = source.replace(/\r/g, '').split('\n');
     const headings = [], ids = new Map();
@@ -290,7 +308,12 @@
         index++;
         while (index < lines.length && !new RegExp(`^\\s*${fence[1][0]}{${fence[1].length},}\\s*$`).test(lines[index])) block.push(lines[index++]);
         if (index < lines.length) index++;
-        chunks.push(`${language === 'mermaid' ? '<div class="unrendered-diagram">此正文中的 Mermaid 原始定义如下；交互架构图见“整车架构”和“模块关系”。</div>' : ''}<div class="code-example"><div class="code-heading"><strong>${esc(language || 'text')}</strong><button data-copy-code>复制代码</button></div><pre><code class="language-${esc(language)}">${esc(block.join('\n'))}</code></pre></div>`);
+        const softWrap = window.matchMedia('(max-width: 760px)').matches;
+        chunks.push((language === 'mermaid' ? '<div class="unrendered-diagram">此正文中的 Mermaid 原始定义如下；交互架构图见“整车架构”和“模块关系”。</div>' : '') +
+          '<div class="code-example"><div class="code-heading"><strong>' + esc(language || 'text') +
+          '</strong><div class="code-actions"><button type="button" data-wrap-code aria-pressed="' + String(softWrap) + '">' +
+          (softWrap ? '横向滚动' : '自动换行') + '</button><button type="button" data-copy-code>复制代码</button></div></div><pre><code class="language-' +
+          esc(language) + '">' + highlightCode(block.join('\n'), language) + '</code></pre></div>');
         continue;
       }
       const title = line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
@@ -355,7 +378,13 @@
       } else {
         const rendered = markdown(source, path);
         const toc = rendered.headings.filter(item => item.level <= 3);
-        content.innerHTML = (module ? heading('03 / Module reference', module.title, module.summary, `${pill(module.status)}<a class="quiet-link" href="#relations?selected=${esc(module.id)}">在关系图中定位 ↗</a>`) : '') + toolbar + `${path.startsWith('docs/dev/') ? '<div class="notice warn">这是开发记录或待实施方案。本文中的设计建议不代表当前接口已经实现。</div>' : ''}<div class="reader-layout"><article class="markdown-body">${rendered.html}</article><nav class="section-toc" aria-label="文档目录"><div class="toc-title">文档目录</div>${toc.map(item => `<a style="padding-left:${item.level > 1 ? 13 : 0}px" href="${routeFile(path)}?anchor=${encodeURIComponent(item.id)}">${esc(item.title)}</a>`).join('')}</nav></div>`;
+        const tocLinks = toc.map(item =>
+          '<a style="padding-left:' + (item.level > 1 ? 13 : 0) + 'px" href="' +
+          routeFile(path) + '?anchor=' + encodeURIComponent(item.id) + '">' + esc(item.title) + '</a>'
+        ).join('');
+        const mobileToc = toc.length ? '<details class="reader-mobile-toc"><summary>本页目录 · ' +
+          toc.length + ' 节</summary><nav aria-label="本页章节">' + tocLinks + '</nav></details>' : '';
+        content.innerHTML = (module ? heading('03 / Module reference', module.title, module.summary, `${pill(module.status)}<a class="quiet-link" href="#relations?selected=${esc(module.id)}">在关系图中定位 ↗</a>`) : '') + toolbar + mobileToc + `${path.startsWith('docs/dev/') ? '<div class="notice warn">这是开发记录或待实施方案。本文中的设计建议不代表当前接口已经实现。</div>' : ''}<div class="reader-layout"><article class="markdown-body">${rendered.html}</article><nav class="section-toc" aria-label="文档目录"><div class="toc-title">文档目录</div>${tocLinks}</nav></div>`;
         document.title = `${rendered.headings[0]?.title || path.split('/').at(-1)} · SkyWalker`;
       }
       scrollToAnchor(params.get('anchor') || (isSource && params.get('line') ? `line-${params.get('line')}` : ''));
@@ -372,6 +401,12 @@
     });
   }
 
+  function setNavigationOpen(open) {
+    document.getElementById('sidebar').classList.toggle('open', open);
+    document.getElementById('menu-toggle').setAttribute('aria-expanded', String(open));
+    document.getElementById('nav-dismiss').hidden = !open;
+  }
+
   async function render() {
     const version = ++renderVersion;
     const hash = window.location.hash.slice(1) || 'overview';
@@ -385,8 +420,7 @@
     breadcrumb.textContent = `系统 / ${labels[page] || '文档'}`;
     document.title = `${labels[page] || '架构与接口手册'} · SkyWalker`;
     activateNav(page, id);
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('menu-toggle').setAttribute('aria-expanded', 'false');
+    setNavigationOpen(false);
     const previousScroll = window.scrollY;
     if (!params.has('anchor') && page !== 'relations' && !(page === 'workflows' && params.has('step'))) window.scrollTo({top: 0});
     if (!architecture || !modules.length) { content.innerHTML = empty('架构数据未加载，请确认通过 run.sh 打开，并保留同目录全部脚本。'); return; }
@@ -428,25 +462,35 @@
         const copied = document.execCommand('copy'); field.remove();
         if (!copied) throw new Error('copy');
       }
-      toast('调用示例已复制');
+      toast('代码已复制');
     } catch { toast('复制未完成，可直接选择代码复制'); }
   }
 
   document.getElementById('search-form').addEventListener('submit', event => {
     event.preventDefault(); window.location.hash = `search?q=${encodeURIComponent(input.value.trim())}`;
   });
-  document.getElementById('menu-toggle').addEventListener('click', event => {
-    const open = document.getElementById('sidebar').classList.toggle('open');
-    event.currentTarget.setAttribute('aria-expanded', String(open));
+  document.getElementById('menu-toggle').addEventListener('click', () => {
+    setNavigationOpen(!document.getElementById('sidebar').classList.contains('open'));
   });
+  document.getElementById('nav-dismiss').addEventListener('click', () => setNavigationOpen(false));
   document.addEventListener('keydown', event => {
     if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) { event.preventDefault(); input.focus(); }
-    if (event.key === 'Escape') { document.getElementById('sidebar').classList.remove('open'); document.getElementById('menu-toggle').setAttribute('aria-expanded', 'false'); input.blur(); }
+    if (event.key === 'Escape') { setNavigationOpen(false); input.blur(); }
   });
   content.addEventListener('click', event => {
     if (event.target.closest('[data-refresh-docs]')) { render(); return; }
     const category = event.target.closest('[data-category]');
     if (category) window.location.hash = `modules?category=${encodeURIComponent(category.dataset.category)}`;
+    const wrapButton = event.target.closest('[data-wrap-code]');
+    if (wrapButton) {
+      const shouldWrap = wrapButton.getAttribute('aria-pressed') !== 'true';
+      const block = wrapButton.closest('.code-example');
+      block.classList.toggle('force-wrap', shouldWrap);
+      block.classList.toggle('no-wrap', !shouldWrap);
+      wrapButton.setAttribute('aria-pressed', String(shouldWrap));
+      wrapButton.textContent = shouldWrap ? '横向滚动' : '自动换行';
+      return;
+    }
     const copyButton = event.target.closest('[data-copy-code]');
     if (copyButton) {
       const code = copyButton.closest('.code-example')?.querySelector('pre code');
