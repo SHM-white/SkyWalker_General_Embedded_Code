@@ -16,10 +16,12 @@ Motor 保存运行意图、最新命令和真实反馈；CanBus 处理物理 I/O
 
 ## 接口契约
 
-### 1. dji::Config dji::gm6020(const Gm6020Options &options); dji::Config dji::m3508(const M3508Options &options); dji::Config dji::m2006(const M2006Options &options)
+### 1. `gm6020()` / `m3508()` / `m2006()`
 
 ```cpp
-dji::Config dji::gm6020(const Gm6020Options &options); dji::Config dji::m3508(const M3508Options &options); dji::Config dji::m2006(const M2006Options &options)
+dji::Config dji::gm6020(const Gm6020Options &options);
+dji::Config dji::m3508(const M3508Options &options);
+dji::Config dji::m2006(const M2006Options &options)
 ```
 
 构建不同型号的值配置，然后传给 Motor；工厂不创建设备、不发 CAN、不验证全部选项。
@@ -57,10 +59,11 @@ int dji::describe(const Config &config, Descriptor &out)
 
 **错误 / 边界：** -ERANGE：型号/电机 ID 不合法。不同协议 TX/RX 冲突最终由总线 start() 检查。
 
-### 3. bool dji::decodeFeedback(const can_frame &frame, RawFeedback &out); int dji::buildCommandFrame(can_frame &frame, uint16_t command_id, const int16_t command_raw[4])
+### 3. `decodeFeedback()` / `buildCommandFrame()`
 
 ```cpp
-bool dji::decodeFeedback(const can_frame &frame, RawFeedback &out); int dji::buildCommandFrame(can_frame &frame, uint16_t command_id, const int16_t command_raw[4])
+bool dji::decodeFeedback(const can_frame &frame, RawFeedback &out);
+int dji::buildCommandFrame(can_frame &frame, uint16_t command_id, const int16_t command_raw[4])
 ```
 
 底层协议工具：解码编码器/RPM/原始电流/温度；把四个原始电流槽位编码成命令帧。正常应用使用 Motor，避免绕过权限和限幅。
@@ -81,7 +84,8 @@ bool dji::decodeFeedback(const can_frame &frame, RawFeedback &out); int dji::bui
 ### 4. int Motor::setCurrent(float ampere); int Motor::setCurrent(float ampere, uint64_t sampled_enable_generation)
 
 ```cpp
-int Motor::setCurrent(float ampere); int Motor::setCurrent(float ampere, uint64_t sampled_enable_generation)
+int Motor::setCurrent(float ampere);
+int Motor::setCurrent(float ampere, uint64_t sampled_enable_generation)
 ```
 
 设置 DJI 电流目标；反馈计算结果必须携带计算时 snapshot.enable_generation，不能计算后重新贴新版本。
@@ -95,7 +99,9 @@ int Motor::setCurrent(float ampere); int Motor::setCurrent(float ampere, uint64_
 ### 5. MotorInfo Motor::info() const; MotorSnapshot Motor::snapshot() const; bool Motor::active() const
 
 ```cpp
-MotorInfo Motor::info() const; MotorSnapshot Motor::snapshot() const; bool Motor::active() const
+MotorInfo Motor::info() const;
+MotorSnapshot Motor::snapshot() const;
+bool Motor::active() const
 ```
 
 查询能力、参数和状态值副本；enabled_requested 是运行意图，output_permitted/feedback_fresh 是实际执行条件，retry_count 与 last_fault 是诊断。
@@ -109,7 +115,8 @@ MotorInfo Motor::info() const; MotorSnapshot Motor::snapshot() const; bool Motor
 ### 6. int Motor::enable(); int Motor::disable()
 
 ```cpp
-int Motor::enable(); int Motor::disable()
+int Motor::enable();
+int Motor::disable()
 ```
 
 enable 幂等保存运行意图，离线也可接受；disable 在真→假时取消旧命令和旧协议操作，停止后重复 disable 不清掉之后新提交的目标。Group 成员也可直接操作。
@@ -174,7 +181,8 @@ CanBus(const device *can, BusOptions options = {}); int CanBus::attach(Motor &mo
 ### 10. CommitResult CanBus::commit(); BusStatus CanBus::status() const
 
 ```cpp
-CommitResult CanBus::commit(); BusStatus CanBus::status() const
+CommitResult CanBus::commit();
+BusStatus CanBus::status() const
 ```
 
 commit 发布完整总线最新快照，Recovering 时继续接受。status 含 latest_submitted_sequence、last_tx、rx_overflows、rx_invalid_frames、superseded_batches 和 last_recovery。
@@ -185,10 +193,14 @@ commit 发布完整总线最新快照，Recovering 时继续接受。status 含 
 
 **错误 / 边界：** 未启动/永久配置错误返回调用错误；成功不代表远端收到或执行。
 
-### 11. Group(Motor &first, Others &...others); Group(std::span<Motor *const> members); int Group::enable(); void Group::disable(); GroupStatus Group::status() const
+### 11. `Group()` / `enable()` / `disable()` 等接口
 
 ```cpp
-Group(Motor &first, Others &...others); Group(std::span<Motor *const> members); int Group::enable(); void Group::disable(); GroupStatus Group::status() const
+Group(Motor &first, Others &...others);
+Group(std::span<Motor *const> members);
+int Group::enable();
+void Group::disable();
+GroupStatus Group::status() const
 ```
 
 固定成员批量启停和统计，无故障传播、就绪屏障、成员所有权或独立恢复状态。
