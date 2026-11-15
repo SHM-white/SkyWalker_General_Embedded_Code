@@ -108,7 +108,7 @@ def scan_history(root):
     try:
         run = subprocess.run(
             ["git", "-C", str(root), "log", "-n", "100",
-             "--format=%H%x1f%aI%x1f%s%x1e", "--name-only",
+             "--format=%x1e%H%x1f%aI%x1f%s", "--name-only",
              "--", *DOC_PATHS],
             capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=12, check=True,
