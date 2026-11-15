@@ -106,14 +106,14 @@ jobs:
           cache-to: type=gha,mode=max,scope=skywalker-zephyr-arm
 
   firmware:
-    name: MC02 firmware (shard ${{ matrix.shard }}/6)
+    name: MC02 firmware (shard ${{ matrix.shard }}/12)
     needs: prepare-image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     container:
       image: ${{ needs.prepare-image.outputs.image }}
       credentials:
@@ -125,9 +125,7 @@ jobs:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
       ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
       SHARD_ID: ${{ matrix.shard }}
-      SHARD_COUNT: 6
-      CCACHE_COMPILERCHECK: content
-      CCACHE_MAXSIZE: 300M
+      SHARD_COUNT: 12
     defaults:
       run:
         shell: bash
@@ -139,20 +137,6 @@ jobs:
 
       - name: Link prebuilt Zephyr modules
         run: bash skywalker_code/.github/ci/link-prebuilt-workspace.sh
-
-      - name: Configure compiler cache
-        run: |
-          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-          mkdir -p "$GITHUB_WORKSPACE/.ccache"
-
-      - name: Restore cached object files
-        uses: actions/cache@v4
-        with:
-          path: .ccache
-          key: arm-ccache-v1-${{ hashFiles('skywalker_code/west.yml') }}-shard${{ matrix.shard }}-${{ github.sha }}
-          restore-keys: |
-            arm-ccache-v1-${{ hashFiles('skywalker_code/west.yml') }}-shard${{ matrix.shard }}-
 
       - name: Build this shard of all applications and samples
         run: |
@@ -183,8 +167,7 @@ jobs:
                 -d "build/ci/$build_name" \
                 "$project" \
                 -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code" \
-                   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-                   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache; then
+                   -DUSE_CCACHE=0; then
               echo "PASS: $relative"
             else
               echo "::error title=Firmware build failed::$relative"
@@ -207,10 +190,6 @@ jobs:
             exit 1
           fi
 
-      - name: Print ccache statistics
-        if: always()
-        run: ccache --show-stats || true
-
       - name: Upload failed build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -224,10 +203,14 @@ jobs:
           retention-days: 7
 
   variants:
-    name: MC02 staged hardware configurations
+    name: MC02 staged hardware (subset ${{ matrix.part }}/8)
     needs: prepare-image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6, 7, 8]
     container:
       image: ${{ needs.prepare-image.outputs.image }}
       credentials:
@@ -260,13 +243,14 @@ jobs:
             -p dm_mc02/stm32h723xx \
             -x=ZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code" \
             --inline-logs --jobs 2 \
+            --subset="${{ matrix.part }}/8" \
             -O build/staged-hardware-variants
 
       - name: Upload hardware build reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mc02-staged-hardware-reports
+          name: mc02-staged-hardware-reports-part-${{ matrix.part }}
           path: |
             build/staged-hardware-variants/*.json
             build/staged-hardware-variants/*.xml
