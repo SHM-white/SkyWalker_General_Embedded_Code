@@ -65,9 +65,7 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
                                               (shooter_selectable ? r.right_switch == RcSwitch::Middle
                                                                   : r.right_switch == RcSwitch::Up));
     n.source = keyboard_mouse ? ControlSource::KeyboardMouse : ControlSource::Remote;
-    const auto norm = [&](float x) {
-        return normalizeChannel(x, config_.channel_range, config_.analog_deadband);
-    };
+    const auto norm = [&](float x) { return normalizeChannel(x, config_.channel_range, config_.analog_deadband); };
     const float analog_vx = norm(r.analog.left_y);
     const float analog_vy = -norm(r.analog.left_x);
     const float analog_yaw = -norm(r.analog.right_x);
@@ -173,10 +171,9 @@ int CommandArbiter::validateConfig() const {
         (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0))
         return -EINVAL;
     // 本地巡航扫描只在执行线程门控下生效，且扫描速率必须落在头部速率预算内。
-    if (config_.enable_cruise &&
-        (!config_.require_external_run_gate || !std::isfinite(config_.cruise_yaw_rate_rad_s) ||
-         config_.cruise_yaw_rate_rad_s == 0 ||
-         std::fabs(config_.cruise_yaw_rate_rad_s) > config_.max_gimbal_yaw_rate_rad_s))
+    if (config_.enable_cruise && (!config_.require_external_run_gate || !std::isfinite(config_.cruise_yaw_rate_rad_s) ||
+                                  config_.cruise_yaw_rate_rad_s == 0 ||
+                                  std::fabs(config_.cruise_yaw_rate_rad_s) > config_.max_gimbal_yaw_rate_rad_s))
         return -EINVAL;
     if (!config_.input_timeout_ms || (config_.allow_navigation && !config_.navigation_timeout_us) ||
         ((config_.require_referee_for_chassis || config_.require_referee_for_gimbal ||

@@ -32,8 +32,7 @@ public:
     // for a fault-clear boundary. Returns the current revision (not an error
     // code): execution threads compare it with the decision to reject stale
     // snapshots. ISR calls return 0 and write nothing.
-    std::uint32_t setOperatorGate(bool run_allowed, std::uint32_t session = 0,
-                                  const OperatorSelection &selection = {});
+    std::uint32_t setOperatorGate(bool run_allowed, std::uint32_t session = 0, const OperatorSelection &selection = {});
     void setRunAllowed(bool run_allowed) {
         setOperatorGate(run_allowed);
     }

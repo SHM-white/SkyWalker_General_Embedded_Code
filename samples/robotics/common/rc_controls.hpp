@@ -149,8 +149,8 @@ public:
         const bool arm_switch_ready = !config_.require_right_middle_to_arm || right == RcSwitch::Middle;
         // 普通解锁继续要求归中 + 右 Middle；语义快捷解锁改看“解锁后是否会产生动作”。
         // 两者语义不同：raw=25 满足 ±33 归中，但映射后可能已是非零运动意图。
-        const bool startup_eligible =
-            config_.semantic_startup_unlock ? startup_no_action : (neutral && arm_switch_ready);
+        const bool startup_eligible = config_.semantic_startup_unlock ? startup_no_action
+                                                                      : (neutral && arm_switch_ready);
 
         // One-shot startup shortcut: the first accepted frame may arm from a
         // centred neutral pose without a 500 ms hold. It is never rebuilt after

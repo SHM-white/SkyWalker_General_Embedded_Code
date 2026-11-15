@@ -27,16 +27,13 @@ CommandManager::CommandManager(const Config &config)
       require_shooter_permissions_(config.require_referee_for_shooter),
       permission_timeout_ms_(config.permission_timeout_ms), require_external_gate_(config.require_external_run_gate) {
 }
-std::uint32_t CommandManager::setOperatorGate(bool allowed, std::uint32_t session,
-                                               const OperatorSelection &selection) {
+std::uint32_t CommandManager::setOperatorGate(bool allowed, std::uint32_t session, const OperatorSelection &selection) {
     if (k_is_in_isr())
         return 0;
     const auto now = core::monotonicTimeUs() / 1000;
     // 巡航两档（右上/右下）的云台与平移完全相同，只有底盘 wz 不同，因此
     // 子模式互切不算行为版本变化：可以复用同一会话内仍新鲜的巡航云台决策。
-    const auto behaviorClass = [](AutonomousMode mode) {
-        return isCruise(mode) ? AutonomousMode::Cruise : mode;
-    };
+    const auto behaviorClass = [](AutonomousMode mode) { return isCruise(mode) ? AutonomousMode::Cruise : mode; };
     const auto key = k_spin_lock(&operator_gate_lock_);
     const bool changed = operator_gate_.allowed != allowed || operator_gate_.session != session ||
                          operator_gate_.selection.valid != selection.valid ||

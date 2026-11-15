@@ -40,8 +40,7 @@ struct StartupActionAssessment {
 // observed 为管理线程最近一次发布前的输入快照；nullptr 表示尚无快照。
 inline StartupActionAssessment assessStartupAction(const RemoteState &remote, const CommandInputs *observed,
                                                    const CommandArbiter::Config &config,
-                                                   const SpinSpeedProfile::Config &spin_config,
-                                                   core::TimeUs now_us) {
+                                                   const SpinSpeedProfile::Config &spin_config, core::TimeUs now_us) {
     StartupActionAssessment result{};
     const auto now_ms = now_us / 1000;
     // 输入必须在线、戳有效且新鲜；两拨杆必须已知。
@@ -70,8 +69,7 @@ inline StartupActionAssessment assessStartupAction(const RemoteState &remote, co
         if (i.chassis_vx_norm != 0 || i.chassis_vy_norm != 0)
             reasons |= StartupChassisMotion;
         if (i.gimbal_yaw_rate_norm != 0 || i.gimbal_pitch_rate_norm != 0 ||
-            (i.mouse_rate_mapping &&
-             (i.mouse_yaw_rate_rad_s != 0 || i.mouse_pitch_rate_rad_s != 0)))
+            (i.mouse_rate_mapping && (i.mouse_yaw_rate_rad_s != 0 || i.mouse_pitch_rate_rad_s != 0)))
             reasons |= StartupGimbalMotion;
         // 合并键鼠档的附加动作输入：Shift 即将锁存小陀螺，Q/E 代替拨轮方向。
         // 只对正式应用的合并配置生效，不改变 PhysicalRemote 或其他样例。
@@ -80,11 +78,9 @@ inline StartupActionAssessment assessStartupAction(const RemoteState &remote, co
         const bool shift = merged_keys && (((bits >> 4) & 1u) != 0);
         const bool q = merged_keys && (((bits >> 6) & 1u) != 0);
         const bool e = merged_keys && (((bits >> 7) & 1u) != 0);
-        const float wheel =
-            ManualCommandMapper::normalizeChannel(remote.analog.wheel, 660.0f, 0.03f);
+        const float wheel = ManualCommandMapper::normalizeChannel(remote.analog.wheel, 660.0f, 0.03f);
         const float dial = e ? 1.0f : q ? -1.0f : wheel;
-        if (remote.right_switch == RcSwitch::Down || shift ||
-            std::fabs(dial) >= spin_config.dial_deadband)
+        if (remote.right_switch == RcSwitch::Down || shift || std::fabs(dial) >= spin_config.dial_deadband)
             reasons |= StartupSpinRequest;
         if (i.friction_requested || i.fire_requested)
             reasons |= StartupMechanism;

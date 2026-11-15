@@ -32,9 +32,7 @@ public:
     // 调用方保证 range>0、0<=deadband<1 且参数有限（map() 在入口统一校验）。
     static float normalizeChannel(float raw, float range, float deadband) {
         const float x = std::clamp(raw / range, -1.0f, 1.0f);
-        return std::fabs(x) <= deadband
-                   ? 0.0f
-                   : std::copysign((std::fabs(x) - deadband) / (1.0f - deadband), x);
+        return std::fabs(x) <= deadband ? 0.0f : std::copysign((std::fabs(x) - deadband) / (1.0f - deadband), x);
     }
     int map(const RemoteState &remote, OperatorIntent &out) const;
 

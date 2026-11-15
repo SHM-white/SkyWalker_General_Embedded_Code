@@ -233,7 +233,8 @@ int main() {
         (void)remote.snapshot(remote_frame);
         const auto startup_test = installed::assessStartupAction(remote_frame.remote,
                                                                  have_action_snapshot ? &frame.observed : nullptr,
-                                                                 command_config, installed::spinProfileConfig(), now_us);
+                                                                 command_config, installed::spinProfileConfig(),
+                                                                 now_us);
         auto operator_state = controls.update(remote_frame.remote, now_ms, startup_test.noAction());
         const auto peer_state = endpoint.snapshot();
         const bool peer_revoked = (was_peer_online && !peer_state.online) ||
@@ -262,7 +263,7 @@ int main() {
         // selection.valid=true 只表示“本应用提供选择”，不授予运行权。
         OperatorSelection selection{};
         selection.valid = true;
-        selection.mode = autonomous_allowed ? OperatorMode::Navigation
+        selection.mode = autonomous_allowed           ? OperatorMode::Navigation
                          : operator_state.run_allowed ? OperatorMode::Manual
                                                       : OperatorMode::Safe;
         selection.autonomous = autonomous_allowed ? operator_state.autonomous : AutonomousMode::None;
@@ -296,21 +297,23 @@ int main() {
         const float manual_dial = keyboard_dial != 0.0f ? keyboard_dial : wheel_dial;
         // 小陀螺 profile 每 5 ms 只推进一次，并明确归属手动/巡航：Q/E 与拨轮
         // 只在手动档生效，巡航只由当前子模式请求。
-        const bool chassis_command_fresh =
-            isFresh(decision.command.chassis.stamp, now_ms, command_config.input_timeout_ms);
+        const bool chassis_command_fresh = isFresh(decision.command.chassis.stamp, now_ms,
+                                                   command_config.input_timeout_ms);
         const bool chassis_permission_ok = (decision.chassis_reasons & PermissionDenied) == 0;
         const bool body_command_ready = decision_matches && chassis_command_fresh &&
                                         decision.command.chassis.mode == ChassisMode::BodyVelocity &&
                                         chassis_permission_ok;
         const SpinOwner spin_owner = operator_state.run_allowed && operator_state.fresh ? SpinOwner::Manual
-                                     : cruise_selected                                   ? SpinOwner::Cruise
-                                                                                         : SpinOwner::None;
+                                     : cruise_selected                                  ? SpinOwner::Cruise
+                                                                                        : SpinOwner::None;
         if (spin_owner != previous_spin_owner)
             spin.reset();
         previous_spin_owner = spin_owner;
-        const bool spin_requested = spin_owner == SpinOwner::Cruise   ? operator_state.autonomous == AutonomousMode::CruiseSpin
-                                    : spin_owner == SpinOwner::Manual ? (operator_state.spin_requested || keyboard_spin_latched)
-                                                                      : false;
+        const bool spin_requested = spin_owner == SpinOwner::Cruise
+                                        ? operator_state.autonomous == AutonomousMode::CruiseSpin
+                                    : spin_owner == SpinOwner::Manual
+                                        ? (operator_state.spin_requested || keyboard_spin_latched)
+                                        : false;
         const float spin_intensity = spin_owner == SpinOwner::Manual ? manual_dial : 0.0f;
         const bool spin_allowed = spin_owner != SpinOwner::None && body_command_ready;
         const auto spin_out = spin.update(spin_requested, spin_allowed, spin_intensity, now_us);
@@ -620,8 +623,8 @@ int main() {
             request.command_age_ms = age(input.command.stamp, now_ms);
             // 应用层授权：扫描/视觉/手动各自给出授权戳；遥控掉线时可以授权，
             // 但不把“离线”冒充成遥控新鲜。
-            const bool local_authority =
-                autonomous_allowed && decision_matches && input.command.source == ControlSource::LocalBehavior;
+            const bool local_authority = autonomous_allowed && decision_matches &&
+                                         input.command.source == ControlSource::LocalBehavior;
             const bool visual_authority = autonomous_allowed && decision_matches && vision_active;
             const bool manual_authority = operator_state.run_allowed && operator_state.fresh && decision_matches;
             const bool authority_valid = local_authority || visual_authority || manual_authority;
@@ -663,8 +666,8 @@ int main() {
             }
             // Reject a cached command from the previous RC mode. 普通导航的 wz 来自
             // 导航帧；巡航与手动的 wz 只由本地小陀螺曲线生成。
-            const bool autonomous_command =
-                autonomous_allowed && decision_matches && wheel_command.source == ControlSource::Autonomous;
+            const bool autonomous_command = autonomous_allowed && decision_matches &&
+                                            wheel_command.source == ControlSource::Autonomous;
             const bool manual_command = operator_state.run_allowed && operator_state.fresh && decision_matches &&
                                         wheel_command.source == expected_manual_source;
             if (!chassis_command_fresh || (!autonomous_command && !manual_command)) {
@@ -745,15 +748,14 @@ int main() {
                         (operator_state.navigation_hold ? 2048u : 0u) |
                         (static_cast<unsigned>(operator_state.autonomous) << 12) |
                         (static_cast<unsigned>(decision.gimbal_behavior) << 14) |
-                        (startup_test.known ? (1u << 16) : 0u) |
-                        (startup_test.noAction() ? (1u << 17) : 0u) |
+                        (startup_test.known ? (1u << 16) : 0u) | (startup_test.noAction() ? (1u << 17) : 0u) |
                         (decision_matches ? (1u << 18) : 0u) | (scan_entry_pending ? (1u << 19) : 0u)),
                   // I37 控制上下文位图：bit0..8 失能前提、bit9 已解锁、bit10 遥控新鲜、
                   // bit11 掉线自主保持、bit12..13 AutonomousMode、bit14..15 GimbalBehavior、
                   // bit16 启动动作判定已知、bit17 判定为无动作、bit18 决策匹配、
                   // bit19 扫描入口仍等待准备。不能按整值判断“是否禁止运行”。
-                  allocation.big.rate_rad_s,                                 // I38 big-Yaw world intent
-                  peer_feedback_valid ? float(feedback.armed) : unavailable, // I39 peer armed
+                  allocation.big.rate_rad_s,                                     // I38 big-Yaw world intent
+                  peer_feedback_valid ? float(feedback.armed) : unavailable,     // I39 peer armed
                   float(age(carrier_snapshot.sample.orientation.stamp, now_us)), // I40 orientation age
                   float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),  // I41 gyro age
                   spin_out.applied_rad_s,                                        // I42 applied variable spin rate
