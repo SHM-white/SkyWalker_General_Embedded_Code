@@ -16,10 +16,12 @@ ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionS
 
 ## 接口契约
 
-### 1. virtual SourceRole ICommandSource::role() const = 0; virtual int ICommandSource::start() = 0; virtual int ICommandSource::sample(SourceSample &out) = 0
+### 1. `role()` / `start()` / `sample()`
 
 ```cpp
-virtual SourceRole ICommandSource::role() const = 0; virtual int ICommandSource::start() = 0; virtual int ICommandSource::sample(SourceSample &out) = 0
+virtual SourceRole ICommandSource::role() const = 0;
+virtual int ICommandSource::start() = 0;
+virtual int ICommandSource::sample(SourceSample &out) = 0
 ```
 
 输入扩展接口。role 固定为 Operator、Aim 或 Navigation；SourceValue 是 RemoteState、Measurement<AimCommand> 或 navigation::Command 的 variant，必须和角色相匹配。
@@ -34,10 +36,11 @@ virtual SourceRole ICommandSource::role() const = 0; virtual int ICommandSource:
 
 **错误 / 边界：** 角色/variant 不匹配由 manager 视为 -EINVAL；其他错误进入诊断，不能留旧值继续有效。
 
-### 2. virtual int IPermissionSource::start() = 0; virtual int IPermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) = 0
+### 2. `start()` / `sample()`
 
 ```cpp
-virtual int IPermissionSource::start() = 0; virtual int IPermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) = 0
+virtual int IPermissionSource::start() = 0;
+virtual int IPermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) = 0
 ```
 
 单独的许可约束接口；不占据 Operator/Aim/Navigation 来源槽。
@@ -52,12 +55,14 @@ virtual int IPermissionSource::start() = 0; virtual int IPermissionSource::sampl
 
 **线程 / 时序：** start 单次；sample 只有 manager worker 所有。
 
-**错误 / 边界：** 缺少必需许可来源时 manager.start=-ENODEV；合法离线数据可返回 0，由仲裁按原始 stamp 决定。
+**错误 / 边界：** 没有绑定许可来源不单独导致 start 失败；合法离线数据可返回 0，由仲裁按原始 stamp 决定。
 
-### 3. explicit RemoteSource(communication::RemoteReceiver &receiver); int RemoteSource::start(); int RemoteSource::sample(SourceSample &out)
+### 3. `RemoteSource()` / `start()` / `sample()`
 
 ```cpp
-explicit RemoteSource(communication::RemoteReceiver &receiver); int RemoteSource::start(); int RemoteSource::sample(SourceSample &out)
+explicit RemoteSource(communication::RemoteReceiver &receiver);
+int RemoteSource::start();
+int RemoteSource::sample(SourceSample &out)
 ```
 
 固定 Operator；start 转发 receiver.start，sample 拷贝 RemoteState、UART 状态与 dropped 诊断。
@@ -73,10 +78,12 @@ explicit RemoteSource(communication::RemoteReceiver &receiver); int RemoteSource
 
 **错误 / 边界：** 预先 start 接收器会导致 manager 再启动时 -EALREADY；dropped_available=true。
 
-### 4. explicit VisionSource(communication::vision::VisionReceiver &receiver); int VisionSource::start(); int VisionSource::sample(SourceSample &out)
+### 4. `VisionSource()` / `start()` / `sample()`
 
 ```cpp
-explicit VisionSource(communication::vision::VisionReceiver &receiver); int VisionSource::start(); int VisionSource::sample(SourceSample &out)
+explicit VisionSource(communication::vision::VisionReceiver &receiver);
+int VisionSource::start();
+int VisionSource::sample(SourceSample &out)
 ```
 
 固定 Aim；从 receiver.snapshot 提取原始 Measurement，不把读快照的时刻写到目标 stamp。
@@ -92,10 +99,12 @@ explicit VisionSource(communication::vision::VisionReceiver &receiver); int Visi
 
 **错误 / 边界：** UART error 放在 diagnostics.error；样本存在不代表视觉请求正在控制；dropped_available=true。
 
-### 5. explicit RefereePermissionSource(communication::RefereeReceiver &receiver); int RefereePermissionSource::start(); int RefereePermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics)
+### 5. `RefereePermissionSource()` / `start()` / `sample()`
 
 ```cpp
-explicit RefereePermissionSource(communication::RefereeReceiver &receiver); int RefereePermissionSource::start(); int RefereePermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics)
+explicit RefereePermissionSource(communication::RefereeReceiver &receiver);
+int RefereePermissionSource::start();
+int RefereePermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics)
 ```
 
 start 为 0，真正 I/O 由 sample 调用 receiver.poll；裁判没有单独 worker。
@@ -112,10 +121,11 @@ start 为 0，真正 I/O 由 sample 调用 receiver.poll；裁判没有单独 wo
 
 **错误 / 边界：** RefereeReceiver 未公开丢块数，因此 dropped_available=false，不伪造为可用计数。
 
-### 6. explicit ManualCommandMapper(const Config &config); int ManualCommandMapper::map(const RemoteState &remote, OperatorIntent &out) const
+### 6. `ManualCommandMapper()` / `map()`
 
 ```cpp
-explicit ManualCommandMapper(const Config &config); int ManualCommandMapper::map(const RemoteState &remote, OperatorIntent &out) const
+explicit ManualCommandMapper(const Config &config);
+int ManualCommandMapper::map(const RemoteState &remote, OperatorIntent &out) const
 ```
 
 将中心化遥控值变为 [-1,1] 意图。默认 `RemoteInputProfile::KeyboardMouseSelectable` 下左 Down=Safe、Middle/Up=Manual，右拨杆不再选择键鼠来源；`auto_on_up=true`（仅视觉执行样例）才把左 Up 标为 Auto。`ShooterSelectable` 台架左 Middle/Up 均为 Manual。
@@ -130,6 +140,17 @@ explicit ManualCommandMapper(const Config &config); int ManualCommandMapper::map
 **线程 / 时序：** 纯值映射，无 I/O；后续 CommandArbiter 应用物理限速和许可。
 
 **错误 / 边界：** mapper 不自行按当前时刻判断 stamp 年龄，仲裁器必须先检查新鲜度。`Dr16Decoder` 默认 `decode_wheel=true`：正式云台把拨轮作为小陀螺强度（`dial_deadband` 0.05），底盘旋转由右拨杆 Down 或导航 `wz` 决定。
+
+### 7. 队列式遥控事件与来源诊断
+
+```cpp
+virtual int ICommandSource::nextOperatorFrame(RemoteState &out);
+int RemoteSource::nextOperatorFrame(RemoteState &out);
+```
+
+`nextOperatorFrame()` 是可选的完整帧队列接口：默认返回 `-ENOTSUP`，表示仅支持快照；`RemoteSource` 则从接收队列逐帧取出，保留原始时间、序号及拨杆/鼠标边沿。仅 CommandManager worker 消费此队列，独立快照读者不取走事件。无新帧返回 `-EAGAIN`；其他错误撤销本次鼠标发射意图并进入 `sample_error` 诊断。每轮 worker 最多消费 32 帧，避免事件处理无限占用仲裁周期。
+
+`CommandSnapshot` 分别保存 remote、vision、navigation 与 permission 诊断；`SourceDiagnostics::dropped_available` 用于区分计数不可提供和确实零丢包。
 
 ## 调用示例
 
