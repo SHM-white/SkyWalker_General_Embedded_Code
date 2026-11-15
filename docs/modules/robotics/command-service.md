@@ -1,11 +1,11 @@
 # 注册式命令来源与后台仲裁服务
 
-更新日期：2026-10-25。命令库分成同步策略核心和后台服务两层；下图表示可组合的库能力，不表示最终应用会同时启动三类来源：
+更新日期：2026-11-16。按当前 `main@4c6cba8` 的 `command_source.hpp`、`command_manager.hpp` 和 `command_manager.cpp` 补齐运行契约。命令库分成同步策略核心和后台服务两层；下图表示可组合的库能力，不表示最终应用会同时启动三类来源：
 
 ~~~text
-RemoteSource / VisionSource ─┐
-                              ├─ CommandManager worker
-RefereePermissionSource ──────┘       │
+Remote / Vision / Navigation ─┐
+                               ├─ CommandManager worker
+UART / 板间裁判许可来源 ────────┘       │
                                       ▼
                            CommandArbiter::update()
                                       │
@@ -21,17 +21,19 @@ CommandArbiter 接收一次 CommandInputs 并同步生成 CommandDecision。Comm
 
 ICommandSource 表示一个输入来源，role 固定为 Operator、Aim 或 Navigation。一个 CommandManager 最多注册三个输入来源，每个角色至多一个；必须注册 Operator，Aim/Navigation 可选。IPermissionSource 单独提供裁判许可，不与运动目标竞争。
 
-内置适配器位于 include/robotics/command/receiver_sources.hpp：
+内置适配器位于 [receiver_sources.hpp](../../../include/robotics/command/receiver_sources.hpp)：
 
 - RemoteSource 把 RemoteReceiver 快照适配为 Operator 消息。
 - VisionSource 把 VisionReceiver 的 Aim Measurement 适配为 Aim 消息。
+- NavigationSource 把 NavigationReceiver 的 Command 适配为 Navigation 消息。
+- InterBoardRefereeSource 在云台端消费经板间 Endpoint 重组的裁判原始帧，不额外占用本地裁判 UART。
 - RefereePermissionSource 在后台 worker 调用 RefereeReceiver::poll() 并提供裁判许可。
 
 适配器传递原始时间戳。消息拷贝不能刷新来源有效期。来源 sample 返回 -EAGAIN 时管理器保留上次缓存；其他错误会让对应缓存失效，并把错误放入诊断字段。RefereeReceiver 不公开串口丢块计数，因此裁判诊断不会伪造该计数。
 
 ## 初始化与非消费式读取
 
-注册、绑定和启动只能由一个启动线程在 start 前完成。manager、source、receiver、协议对象和 DMA 缓冲区都需要静态或等同的长期生命周期。start 依次启动来源和许可源，然后创建后台仲裁线程；返回 0 只表示线程已创建，不代表输入在线或已经发布首个仲裁结果。
+注册、绑定和启动只能由一个启动线程在 start 前完成。manager、source、receiver、协议对象和 DMA 缓冲区都需要静态或等同的长期生命周期。start 依次启动来源和已绑定的许可源，然后创建后台仲裁线程；返回 0 只表示线程已创建，不代表输入在线或已经发布首个仲裁结果。
 
 下面使用当前手动云台的配置方式，注册物理遥控并由执行线程显式提供运行授权：
 
@@ -67,11 +69,30 @@ void executionCycle(bool run_allowed, std::uint32_t clear_event_id) {
 
 `manualCommandConfig()` 使用 PhysicalRemote，`require_external_run_gate=true`、`require_referee_for_chassis/gimbal/shooter=false`、`allow_auto=false`。启用外部门控后，服务初始不允许运行；应用根据真实遥控安全档归中和解锁动作调用 `setOperatorGate()`，不能在启动时写入永久 true 来代替操作输入。`setRunAllowed(bool)` 是不指定会话号时的便捷入口。授权或 session 改变会撤销旧鼠标发射意图；接收队列里跨越授权边界的帧仍按其原始时间处理。
 
-需要裁判约束的独立工程另行构造 RefereeReceiver 和 RefereePermissionSource，在 `start()` 前调用 `bindPermissions(permission_source)`，并按机构把 `require_referee_for_chassis/gimbal/shooter` 设为 true，同时确认构建期裁判版本与电气接口。库默认的 require_referee 策略与上述手动应用配置不同，不能依赖未绑定来源或默认数值生成有效许可。
+需要裁判约束的独立工程可另行构造 RefereeReceiver 和 RefereePermissionSource，在 `start()` 前调用 `bindPermissions(permission_source)`，并按机构把 `require_referee_for_chassis/gimbal/shooter` 设为 true，同时确认构建期裁判版本与电气接口。库默认的 require_referee 策略与上述手动应用配置不同。**未绑定许可来源不会单独导致 `start()` 失败**；运行期缺失/过期许可字段不应假装为明确拒绝，只有当前有效的许可拒绝才构成相应约束。
 
 需要自动瞄准时，另行静态构造 VisionReceiver、AbProtocol 和 VisionSource，在 manager.start() 前 registerSource(vision_source)。注册顺序不代表优先级；仲裁规则由 CommandArbiter 配置决定。没有组装视觉来源时应设置 allow_auto=false。
 
 snapshot() 提供同一时刻的观测输入、最终决策和来源诊断；current() 只复制最终 RobotCommand。读取不消费结果，也不会更新时间戳或保证收到新序号。首次发布前返回 -EAGAIN；start 失败会发布无效的 Disabled 结果，已启动来源仍须保持存活。所有接口只能在线程上下文使用，不能在 ISR 调用。
+
+## 操作档位、队列边沿与本地扫描
+
+执行线程调用完整的 `setOperatorGate(run_allowed, session, selection)`：三个参数一次写入授权意图、解锁会话以及 `OperatorSelection`。返回值是门控 revision，用于执行侧识别旧版本决策，**不是错误码**。是否允许运行、session、模式或行为类别变化才推进 revision；每帧更新 `accepted_remote_stamp` 不应让鼠标连点/长按每轮失效。两个巡航转速子档归属同一行为类别。ISR 调用不写入，返回 0。
+
+```cpp
+const auto revision = manager.setOperatorGate(
+    run_allowed, unlock_session, operator_selection);
+manager.setPlantState(pitch_joint_rad, pitch_feedback_valid);
+CommandSnapshot frame{};
+if (manager.snapshot(frame) == 0) {
+    // 将 revision 与 frame.decision 内的操作版本约束一并核对。
+    // snapshot() 不延长任何原始来源的有效期。
+}
+```
+
+`setPlantState()` 提供 Pitch 实测关节角与有效位，用于巡航摆头进入时播种。它不更新电机，也不代替真实反馈。若没有有效 Pitch 反馈，执行者不得根据文档假设扫描已就绪。
+
+`ICommandSource::nextOperatorFrame()` 默认为 `-ENOTSUP`；`RemoteSource` 可逐帧提供原始操作事件。manager worker 每轮最多取 32 帧，先按边界/许可处理遥控 Safe 与鼠标发射事件，再完成本轮仲裁；`snapshot()` / `current()` 均为非消费读取，不取走队列中的边沿。来源、Navigation 和裁判诊断各有独立字段，不能用读快照的时间替换消息生产时间。
 
 ## 同步仲裁核心
 
