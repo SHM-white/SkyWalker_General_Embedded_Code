@@ -20,6 +20,7 @@
 #include <drivers/led/status_led.hpp>
 #include <robotics/vehicle/manual_profile.hpp>
 #include <robotics/vehicle/shooter_profile.hpp>
+#include <robotics/vehicle/startup_action.hpp>
 #include <zephyr/drivers/regulator.h>
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
 #include <communication/vision/ab_protocol.hpp>
@@ -31,6 +32,9 @@ namespace {
 using namespace skywalker;
 using namespace robotics;
 namespace installed = robotics::vehicle;
+// 小陀螺 profile 的归属：手动、自主巡航、无。切换归属时重置曲线状态，
+// 避免手动转速/拨轮方向带进巡航，也避免把巡航速度带回手动。
+enum class SpinOwner : std::uint8_t { None, Manual, Cruise };
 communication::AsyncUart::DmaBuffers link_dma __nocache;
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
@@ -90,7 +94,9 @@ int main() {
         &navigation);
 #endif
 #endif
-    static CommandManager commands([] {
+    // 命令配置只在这里构造一次：仲裁器与上电启动动作判定必须使用同一份
+    // 映射/巡航/键鼠语义，不能另建一份缺字段的默认 mapper。
+    static const auto command_config = [] {
         auto config = installed::manualCommandConfig();
         config.mapper.input_profile = RemoteInputProfile::KeyboardMouseSelectable;
         // 解锁即合并键鼠：不再要求右拨杆上拨选择来源，摇杆离开死区时按轴优先。
@@ -98,10 +104,16 @@ int main() {
         config.allow_navigation = DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER);
         config.allow_auto = DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER);
         config.mapper.auto_on_up = false;
+        // 左 Middle 由右拨杆选择普通导航/巡航/巡航+小陀螺。
+        config.enable_cruise = true;
+        config.cruise_yaw_rate_rad_s = installed::cruise_yaw_rate_rad_s;
+        config.mapper.cruise_on_middle = true;
+        config.mapper.navigation_on_middle = true;
         config.require_referee_for_chassis = true;
         config.require_referee_for_gimbal = true;
         return config;
-    }());
+    }();
+    static CommandManager commands(command_config);
     // 板载 BMI088 测量大 Yaw 载体，继续独立发布给底盘；CAN3 IMU 随枪头运动，
     // 负责本地 Yaw/Pitch 姿态外环，不能替换板间载体航向。
     static control::QuaternionEkf onboard_estimator({.initialization_samples = 800, .adapt_gyro_bias = false});
@@ -180,7 +192,12 @@ int main() {
     const bool setup_ready = command_error == 0 && yaw_error == 0 && pitch_error == 0 && control_error == 0 &&
                              power_error == 0;
     // 左 Middle 导航档失联不撤权；左 Up 手动档失联仍立即锁定。
-    samples::control::RcControlAdapter controls{};
+    // 巡航拨杆与“解锁后无动作”的快捷解锁只在正式应用启用；
+    // 两个字段位于 Config 末尾，其余参数保留默认值。
+    samples::control::RcControlAdapter controls({
+        .enable_cruise_switches = true,
+        .semantic_startup_unlock = true,
+    });
     communication::RemoteReceiver::Snapshot remote_frame{};
     CommandSnapshot frame{};
     std::uint64_t next_send_ms = 0;
@@ -196,6 +213,9 @@ int main() {
     core::TimeUs heading_loss_start_us = 0, heading_loss_duration_us = 0;
     bool vision_pitch_was_active = false;
     bool keyboard_spin_latched = false, shift_was_down = false;
+    SpinOwner previous_spin_owner = SpinOwner::None;
+    bool scan_entry_pending = false, scan_was_selected = false;
+    std::uint32_t last_startup_reasons = 0;
     core::OrientationReference last_head_reference{};
     bool head_reference_known = false, head_was_ready = false;
     ControlSource last_head_source = ControlSource::None;
@@ -208,8 +228,13 @@ int main() {
         const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
         previous_cycle_us = now_us;
         endpoint.poll(now_ms);
+        // 先用管理线程现有快照判定“解锁后是否会产生动作”，再把新鲜遥控帧交给状态机。
+        const bool have_action_snapshot = commands.snapshot(frame) == 0;
         (void)remote.snapshot(remote_frame);
-        auto operator_state = controls.update(remote_frame.remote, now_ms);
+        const auto startup_test = installed::assessStartupAction(remote_frame.remote,
+                                                                 have_action_snapshot ? &frame.observed : nullptr,
+                                                                 command_config, installed::spinProfileConfig(), now_us);
+        auto operator_state = controls.update(remote_frame.remote, now_ms, startup_test.noAction());
         const auto peer_state = endpoint.snapshot();
         const bool peer_revoked = (was_peer_online && !peer_state.online) ||
                                   (last_peer_boot && peer_state.peer.sender_boot_id &&
@@ -219,16 +244,41 @@ int main() {
         was_peer_online = peer_state.online;
         if (peer_revoked) {
             controls.withdraw();
+            operator_state.armed = false;
             operator_state.run_allowed = false;
+            operator_state.manual_active = false;
             operator_state.navigation_active = false;
             operator_state.navigation_hold = false;
+            operator_state.autonomous = AutonomousMode::None;
+            operator_state.mode = samples::control::RcMode::Safe;
         }
         // 左 Middle 导航档失联时 navigation_hold 维持导航授权；左 Up 手动档失联
         // 仍由 withdraw() 撤销 run_allowed 并锁定。
         const bool operator_authorized = operator_state.fresh || operator_state.navigation_hold;
-        const bool navigation_allowed = operator_state.navigation_active && operator_authorized && setup_ready;
-        const bool gimbal_allowed = operator_state.run_allowed || navigation_allowed;
-        commands.setOperatorGate(gimbal_allowed, static_cast<std::uint32_t>(operator_state.start_event_id));
+        const bool autonomous_allowed = operator_state.navigation_active && operator_authorized && setup_ready;
+        const bool gimbal_allowed = operator_state.run_allowed || autonomous_allowed;
+        const bool cruise_selected = autonomous_allowed && isCruise(operator_state.autonomous);
+        // 已授权的模式选择在同一临界区内交给命令线程；返回的行为版本用于拒绝旧快照。
+        // selection.valid=true 只表示“本应用提供选择”，不授予运行权。
+        OperatorSelection selection{};
+        selection.valid = true;
+        selection.mode = autonomous_allowed ? OperatorMode::Navigation
+                         : operator_state.run_allowed ? OperatorMode::Manual
+                                                      : OperatorMode::Safe;
+        selection.autonomous = autonomous_allowed ? operator_state.autonomous : AutonomousMode::None;
+        selection.accepted_remote_stamp = operator_state.remote.stamp;
+        const auto operator_session = static_cast<std::uint32_t>(operator_state.start_event_id);
+        const auto expected_revision = commands.setOperatorGate(gimbal_allowed, operator_session, selection);
+        const bool have_decision = commands.snapshot(frame) == 0;
+        // 快照必须属于当前会话、当前行为版本和当前主模式；巡航两档视为同一行为，
+        // 因此右上/右下互切可以复用同一会话内的云台决策。
+        const auto &decision = frame.decision;
+        const bool same_autonomous_behavior = decision.autonomous == selection.autonomous ||
+                                              (isCruise(decision.autonomous) && isCruise(selection.autonomous));
+        const bool decision_matches = have_decision && decision.operator_session == operator_session &&
+                                      decision.operator_revision == expected_revision &&
+                                      decision.operator_mode == selection.mode &&
+                                      (selection.mode != OperatorMode::Navigation || same_autonomous_behavior);
         // The DR16 dial (spring-centred wheel) is the analog spin control. It
         // only scales and signs the chassis spin rate: translation still comes
         // from the sticks and the gimbal command is untouched.
@@ -243,10 +293,27 @@ int main() {
         shift_was_down = shift_down;
         const float wheel_dial = samples::control::RcControlAdapter::normalize(operator_state.remote.analog.wheel);
         const float keyboard_dial = ((keyboard_bits >> 7) & 1u) ? 1.0f : ((keyboard_bits >> 6) & 1u) ? -1.0f : 0.0f;
-        const auto spin_out = spin.update(operator_state.spin_requested || keyboard_spin_latched,
-                                          operator_state.run_allowed,
-                                          keyboard_dial != 0.0f ? keyboard_dial : wheel_dial, now_us);
-        (void)commands.snapshot(frame);
+        const float manual_dial = keyboard_dial != 0.0f ? keyboard_dial : wheel_dial;
+        // 小陀螺 profile 每 5 ms 只推进一次，并明确归属手动/巡航：Q/E 与拨轮
+        // 只在手动档生效，巡航只由当前子模式请求。
+        const bool chassis_command_fresh =
+            isFresh(decision.command.chassis.stamp, now_ms, command_config.input_timeout_ms);
+        const bool chassis_permission_ok = (decision.chassis_reasons & PermissionDenied) == 0;
+        const bool body_command_ready = decision_matches && chassis_command_fresh &&
+                                        decision.command.chassis.mode == ChassisMode::BodyVelocity &&
+                                        chassis_permission_ok;
+        const SpinOwner spin_owner = operator_state.run_allowed && operator_state.fresh ? SpinOwner::Manual
+                                     : cruise_selected                                   ? SpinOwner::Cruise
+                                                                                         : SpinOwner::None;
+        if (spin_owner != previous_spin_owner)
+            spin.reset();
+        previous_spin_owner = spin_owner;
+        const bool spin_requested = spin_owner == SpinOwner::Cruise   ? operator_state.autonomous == AutonomousMode::CruiseSpin
+                                    : spin_owner == SpinOwner::Manual ? (operator_state.spin_requested || keyboard_spin_latched)
+                                                                      : false;
+        const float spin_intensity = spin_owner == SpinOwner::Manual ? manual_dial : 0.0f;
+        const bool spin_allowed = spin_owner != SpinOwner::None && body_command_ready;
+        const auto spin_out = spin.update(spin_requested, spin_allowed, spin_intensity, now_us);
         // 手动档已始终合并键鼠，命令来源固定为 KeyboardMouse。来源必须稳定：
         // 忽 Remote 忽 KeyboardMouse 会让回中控制器和惯性外环每帧复位。
         constexpr auto expected_manual_source = ControlSource::KeyboardMouse;
@@ -308,16 +375,11 @@ int main() {
         }
         head_was_ready = head_ready;
         GimbalExecutionInputs input{};
-        input.command = frame.decision.command.gimbal;
+        input.command = decision.command.gimbal;
         input.source_stamp = sourceStamp(frame, input.command.source);
-        // 导航失联保活时本地生成的 Hold 没有外部导航/视觉源；用仲裁命令时间作为
-        // 来源时间，避免执行器把“无源”误判为命令过期而失能。
-        if (operator_state.navigation_hold && input.command.mode == GimbalMode::Hold &&
-            frame.decision.command.gimbal.stamp.valid)
-            input.source_stamp = {frame.decision.command.gimbal.stamp.timestamp_ms * 1000,
-                                  frame.decision.command.gimbal.stamp.sequence, true};
-        const bool gimbal_mode_matches = navigation_allowed ? frame.decision.operator_mode == OperatorMode::Navigation
-                                                            : frame.decision.operator_mode == OperatorMode::Manual;
+        // 模式、会话、行为版本与自主行为类别统一由 decision_matches 表达；
+        // 它只说明“这份快照属于当前行为”，不替代命令/来源新鲜度检查。
+        const bool gimbal_mode_matches = decision_matches;
         if (!gimbal_allowed || !gimbal_mode_matches ||
             (operator_state.run_allowed && input.command.source != expected_manual_source))
             input.command.mode = GimbalMode::Disabled;
@@ -344,6 +406,32 @@ int main() {
         if (peer_feedback_valid != peer_feedback_was_valid)
             dual_yaw.reset();
         peer_feedback_was_valid = peer_feedback_valid;
+        // --- 巡航扫描入口：只在新进入扫描时显式重播种两轴目标 -------------
+        // 进入扫描后 Pitch 保持该关节角（速率恒为 0），因此不能每帧重播种；
+        // 退出扫描或反馈未就绪时保留 pending，本周期降级为新鲜 Hold 继续初始化。
+        const bool scan_selected = decision_matches && cruise_selected &&
+                                   decision.gimbal_behavior == GimbalBehavior::Scan &&
+                                   input.command.source == ControlSource::LocalBehavior &&
+                                   input.command.mode == GimbalMode::Rate;
+        if (!scan_selected)
+            scan_entry_pending = false;
+        else if (!scan_was_selected)
+            scan_entry_pending = true;
+        scan_was_selected = scan_selected;
+        if (scan_selected && scan_entry_pending) {
+            if (joint_valid && pitch_valid && heading_fresh) {
+                dual_yaw.reset();
+                (void)head_control.suspend(now_us, WaitReason::Command);
+                // 两个调用都成功才允许输出扫描速率；丢弃上一视觉会话的积分目标。
+                if (gimbal.reseedYawTarget() == 0 && gimbal.reseedPitchTarget() == 0)
+                    scan_entry_pending = false;
+            }
+            if (scan_entry_pending) {
+                input.command.mode = GimbalMode::Hold;
+                input.command.yaw_rate_rad_s = 0;
+                input.command.pitch_rate_rad_s = 0;
+            }
+        }
         // Only the arbitrated target is ever consumed. `selected_vision` is kept
         // by the manager exactly while the final gimbal source is Vision.
         const auto &selected_vision = frame.decision.selected_vision;
@@ -492,12 +580,13 @@ int main() {
         const bool center_joint_valid = center_yaw.feedback_fresh && center_yaw.position_reference_valid &&
                                         bool(center_yaw.feedback.valid & motor::FeedbackPosition);
         const bool yaw_running = gimbal.yawTelemetry().output_valid;
-        const bool big_channel_ready = setup_ready && operator_authorized && gimbal_allowed && peer_state.online &&
-                                       installed::imu_mounting_confirmed && heading_fresh && center_joint_valid &&
-                                       yaw_running;
+        const bool big_channel_ready = setup_ready && operator_authorized && gimbal_allowed && decision_matches &&
+                                       peer_state.online && installed::imu_mounting_confirmed && heading_fresh &&
+                                       center_joint_valid && yaw_running;
 #if DT_HAS_ALIAS(vision_uart) && IS_ENABLED(CONFIG_SKYWALKER_VISION_RECEIVER)
         communication::vision::Feedback vision_feedback{};
-        vision_feedback.mode = navigation_allowed ? communication::vision::Mode::AutoAim
+        // 全部授权自主子模式（含掉线保持）维持 AutoAim，扫描期间视觉仍能发现目标。
+        vision_feedback.mode = autonomous_allowed ? communication::vision::Mode::AutoAim
                                                   : communication::vision::Mode::Idle;
         vision_feedback.reference = head_sample.reference;
         if (head_ready) {
@@ -529,7 +618,14 @@ int main() {
             request.source_sequence = static_cast<std::uint32_t>(input.source_stamp.sequence);
             request.source_age_ms = age(input.source_stamp, now_us);
             request.command_age_ms = age(input.command.stamp, now_ms);
-            request.permission = {operator_state.fresh, big_channel_ready, operator_state.remote.stamp};
+            // 应用层授权：扫描/视觉/手动各自给出授权戳；遥控掉线时可以授权，
+            // 但不把“离线”冒充成遥控新鲜。
+            const bool local_authority =
+                autonomous_allowed && decision_matches && input.command.source == ControlSource::LocalBehavior;
+            const bool visual_authority = autonomous_allowed && decision_matches && vision_active;
+            const bool manual_authority = operator_state.run_allowed && operator_state.fresh && decision_matches;
+            const bool authority_valid = local_authority || visual_authority || manual_authority;
+            request.permission = {authority_valid, authority_valid && big_channel_ready, input.command.stamp};
             // Reference v4 world intent: the peer applies motor sign/gyro control.
             // Zero enable obtains initial real feedback before any nonzero follow.
             // Restore the original single readiness gate for mode and rate.
@@ -555,23 +651,28 @@ int main() {
             }
             request.stamp = {now_ms, ++request_sequence, true};
             endpoint.submitBigYaw(request);
-            auto wheel_command = frame.decision.command.chassis;
-            // 导航失联保活且没有导航速度指令时，发零速 BodyVelocity 保持底盘使能，
-            // 不切换为 Disabled 让底盘撤权失能。
-            if (navigation_allowed && operator_state.navigation_hold && wheel_command.mode == ChassisMode::Disabled &&
+            auto wheel_command = decision.command.chassis;
+            // 普通导航失联保活且没有导航速度指令时，发零速 BodyVelocity 保持底盘
+            // 使能。巡航已由仲裁器主动产生合法零平移命令，不依赖这个补丁。
+            if (autonomous_allowed && operator_state.navigation_hold && decision_matches &&
+                !isCruise(operator_state.autonomous) && wheel_command.mode == ChassisMode::Disabled &&
                 wheel_command.stamp.valid) {
                 wheel_command.mode = ChassisMode::BodyVelocity;
                 wheel_command.vx_m_s = wheel_command.vy_m_s = wheel_command.wz_rad_s = 0;
                 wheel_command.source = ControlSource::Autonomous;
             }
-            // Reject a cached command from the previous RC mode. In navigation
-            // wz is supplied by the navigation frame, never by the spin profile.
-            const bool navigation_command = navigation_allowed && wheel_command.source == ControlSource::Autonomous;
-            const bool manual_command = operator_state.run_allowed && wheel_command.source == expected_manual_source;
-            if (!navigation_command && !manual_command)
+            // Reject a cached command from the previous RC mode. 普通导航的 wz 来自
+            // 导航帧；巡航与手动的 wz 只由本地小陀螺曲线生成。
+            const bool autonomous_command =
+                autonomous_allowed && decision_matches && wheel_command.source == ControlSource::Autonomous;
+            const bool manual_command = operator_state.run_allowed && operator_state.fresh && decision_matches &&
+                                        wheel_command.source == expected_manual_source;
+            if (!chassis_command_fresh || (!autonomous_command && !manual_command)) {
                 wheel_command.mode = ChassisMode::Disabled;
-            if (manual_command && wheel_command.mode != ChassisMode::Disabled &&
-                !(frame.decision.chassis_reasons & PermissionDenied))
+                wheel_command.vx_m_s = wheel_command.vy_m_s = wheel_command.wz_rad_s = 0;
+            }
+            else if (wheel_command.mode != ChassisMode::Disabled && chassis_permission_ok &&
+                     (manual_command || (autonomous_command && cruise_selected)))
                 wheel_command.wz_rad_s = spin_out.applied_rad_s;
             endpoint.submit(wheel_command);
         }
@@ -590,7 +691,9 @@ int main() {
         endpoint.setStatus(status);
         const auto reason = !setup_ready || onboard_error || (vision_selected && head_error)
                                 ? installed::DiagnosticReason::InitFailed
-                            : !operator_state.fresh              ? installed::DiagnosticReason::RemoteStale
+                            // 遥控离线但已授权自主保持时不再报告链路故障。
+                            : (!operator_state.fresh && !operator_state.navigation_hold)
+                                ? installed::DiagnosticReason::RemoteStale
                             : !gimbal_allowed                    ? installed::DiagnosticReason::Disarmed
                             : !installed::imu_mounting_confirmed ? installed::DiagnosticReason::Configuration
                             : !heading_fresh || (vision_selected && !head_ready) ? installed::DiagnosticReason::ImuStale
@@ -603,10 +706,14 @@ int main() {
 #if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
         // Fixed channel map documented in docs/dev/双Yaw速度加速度分配与视觉轨迹控制方案.md
-        // (schema 111, I19..I48). I38/I43/I48 now describe the dual-Yaw allocator
-        // instead of the retired centering controller.
+        // (schema 112, I19..I48). I38/I43/I48 now describe the dual-Yaw allocator
+        // instead of the retired centering controller; I37 is a context bitmap.
+        if (startup_test.reasons != last_startup_reasons) {
+            last_startup_reasons = startup_test.reasons;
+            diagnostics.event("startup_action", static_cast<int>(startup_test.reasons));
+        }
         const std::array<float, 30>
-            trace{111,                             // I19 dual-Yaw allocation + CAN vision schema
+            trace{112,                             // I19 dual-Yaw allocation + CAN vision schema
                   float(unsigned(heading_reason)), // I20 live reason
                   float(unsigned(carrier_snapshot.sample.attitude_quality)), // I21 quality
                   float(heading_fresh),                                      // I22 heading usable
@@ -629,10 +736,22 @@ int main() {
                   float(age(head_sample.orientation.stamp, now_us)),   // I34 head orientation age ms
                   float(age(head_sample.gyro_rad_s.stamp, now_us)),    // I35 head gyro age ms
                   ps.feedback.velocity_rad_s,                          // I36 pitch joint velocity rad/s
-                  float((!setup_ready ? 1u : 0u) | (!operator_state.fresh ? 2u : 0u) | (!gimbal_allowed ? 4u : 0u) |
-                        (!peer_state.online ? 8u : 0u) | (!installed::imu_mounting_confirmed ? 16u : 0u) |
-                        (!heading_fresh ? 32u : 0u) | (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u) |
-                        (!head_ready ? 256u : 0u)),                          // I37 disabled prerequisites; zero=ready
+                  float((!setup_ready ? 1u : 0u) |
+                        ((!operator_state.fresh && !operator_state.navigation_hold) ? 2u : 0u) |
+                        (!gimbal_allowed ? 4u : 0u) | (!peer_state.online ? 8u : 0u) |
+                        (!installed::imu_mounting_confirmed ? 16u : 0u) | (!heading_fresh ? 32u : 0u) |
+                        (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u) | (!head_ready ? 256u : 0u) |
+                        (operator_state.armed ? 512u : 0u) | (operator_state.fresh ? 1024u : 0u) |
+                        (operator_state.navigation_hold ? 2048u : 0u) |
+                        (static_cast<unsigned>(operator_state.autonomous) << 12) |
+                        (static_cast<unsigned>(decision.gimbal_behavior) << 14) |
+                        (startup_test.known ? (1u << 16) : 0u) |
+                        (startup_test.noAction() ? (1u << 17) : 0u) |
+                        (decision_matches ? (1u << 18) : 0u) | (scan_entry_pending ? (1u << 19) : 0u)),
+                  // I37 控制上下文位图：bit0..8 失能前提、bit9 已解锁、bit10 遥控新鲜、
+                  // bit11 掉线自主保持、bit12..13 AutonomousMode、bit14..15 GimbalBehavior、
+                  // bit16 启动动作判定已知、bit17 判定为无动作、bit18 决策匹配、
+                  // bit19 扫描入口仍等待准备。不能按整值判断“是否禁止运行”。
                   allocation.big.rate_rad_s,                                 // I38 big-Yaw world intent
                   peer_feedback_valid ? float(feedback.armed) : unavailable, // I39 peer armed
                   float(age(carrier_snapshot.sample.orientation.stamp, now_us)), // I40 orientation age

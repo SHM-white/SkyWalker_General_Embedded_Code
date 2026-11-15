@@ -38,6 +38,8 @@ struct RcControlState {
     // 左 Middle 导航档失联后保留解锁和导航授权；重新上线后无需重新拨档。
     bool navigation_hold = false;
     bool spin_requested = false; // 右 Down：小陀螺（仅手动档）
+    // 左 Middle 已授权的自主子模式；掉线保持时保留最后接受的值。
+    robotics::AutonomousMode autonomous = robotics::AutonomousMode::None;
     std::uint64_t start_event_id = 0;
     // Dormant compatibility fields for bench examples; no RC clear gesture is produced.
     bool clear_estop = false;
@@ -60,6 +62,11 @@ public:
         std::uint32_t input_timeout_ms = 100;    // ms，须与接收和命令层失联期限协调。
         // 左 Middle 导航档失联时保持导航解锁；左 Up 手动档失联仍立即撤权锁定。
         bool hold_navigation_on_link_loss = true;
+        // 正式应用显式打开：左 Middle 时右拨杆选择巡航子模式。
+        bool enable_cruise_switches = false;
+        // 正式应用显式打开：上电快捷解锁改看“解锁后是否会产生动作”。
+        // 其他样例维持“归中 + 右 Middle”的旧快捷条件。
+        bool semantic_startup_unlock = false;
     };
     RcControlAdapter() = default;
     explicit RcControlAdapter(Config config) : config_(config) {
@@ -92,14 +99,21 @@ public:
             startup_consumed_ = true;
     }
 
-    const RcControlState &update(const robotics::RemoteState &remote, std::uint64_t now_ms) {
+    // `startup_no_action` 只描述当前候选帧的启动语义：由调用方用正式配置判定
+    // “解锁后不会主动产生动作”。内部先完成原有在线/时间戳/序号/开关合法性判定，
+    // 只有真正接受这一帧后才使用它。返回值仍为内部状态的只读引用，
+    // 调用方复制为局部变量，不跨线程保存这个引用。
+    const RcControlState &update(const robotics::RemoteState &remote, std::uint64_t now_ms,
+                                 bool startup_no_action = false) {
         using robotics::RcSwitch;
         // The accepted frame, not an untrusted candidate, owns the input lease.
         // An offline receiver is a real link-loss event; an old/bad candidate is not.
         if (!remote.online) {
-            state_.remote = remote;
             state_.fresh = false;
-            if (!holdNavigationOnLinkLoss(remote.left_switch)) {
+            // 保留已经接受的拨杆、序号和原始戳：掉线保持必须依据最后有效输入，
+            // 不能被失联快照中的 Unknown 或旧帧改写自主选择。
+            state_.remote.online = false;
+            if (!holdNavigationOnLinkLoss(state_.remote.left_switch)) {
                 withdraw();
                 previous_left_ = previous_right_ = RcSwitch::Unknown;
             }
@@ -133,17 +147,21 @@ public:
         const bool neutral = centered(remote);
         const auto left = remote.left_switch, right = remote.right_switch;
         const bool arm_switch_ready = !config_.require_right_middle_to_arm || right == RcSwitch::Middle;
+        // 普通解锁继续要求归中 + 右 Middle；语义快捷解锁改看“解锁后是否会产生动作”。
+        // 两者语义不同：raw=25 满足 ±33 归中，但映射后可能已是非零运动意图。
+        const bool startup_eligible =
+            config_.semantic_startup_unlock ? startup_no_action : (neutral && arm_switch_ready);
 
         // One-shot startup shortcut: the first accepted frame may arm from a
-        // centered neutral pose without a 500 ms hold. It is never rebuilt after
+        // centred neutral pose without a 500 ms hold. It is never rebuilt after
         // a later link loss or a non-neutral frame.
         if (first_frame && !startup_consumed_) {
-            if (neutral && arm_switch_ready)
+            if (startup_eligible)
                 startup_neutral_available_ = true;
             else
                 startup_consumed_ = true;
         }
-        if (startup_neutral_available_ && (!neutral || !arm_switch_ready)) {
+        if (startup_neutral_available_ && !startup_eligible) {
             startup_neutral_available_ = false;
             startup_consumed_ = true;
         }
@@ -154,12 +172,14 @@ public:
             state_.mode = RcMode::Safe;
             state_.run_allowed = false;
             state_.manual_active = state_.navigation_active = false;
+            state_.autonomous = robotics::AutonomousMode::None;
             state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
             state_.keyboard_mouse_selected = false;
             // Down still stops immediately. It does not destroy the startup
             // shortcut while the pose remains centered and the right switch is Middle.
             neutral_ready_ = neutral && arm_switch_ready;
-            if (!neutral_ready_)
+            // 语义模式由 startup_eligible 管理的一次性资格决定，不再被右拨杆取消。
+            if (!config_.semantic_startup_unlock && !neutral_ready_)
                 startup_neutral_available_ = false;
         }
         else {
@@ -205,6 +225,10 @@ public:
             state_.continuous_requested = manual && !state_.keyboard_mouse_selected && right_neutral_seen_ &&
                                           right == RcSwitch::Up;
         }
+        // 自主子模式只在已解锁的左 Middle 有效；手动档右拨杆不改变它。
+        state_.autonomous = state_.navigation_active
+                                ? robotics::selectAutonomousMode(remote, config_.enable_cruise_switches)
+                                : robotics::AutonomousMode::None;
         state_.armed = armed_;
         previous_left_ = left;
         previous_right_ = right;
@@ -223,6 +247,7 @@ private:
         state_.manual_active = false;
         state_.run_allowed = false;
         state_.mode = RcMode::Navigation;
+        // 巡航小陀螺只看 state_.autonomous，不依赖手动字段，故不被误停。
         state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
         state_.keyboard_mouse_selected = false;
         right_neutral_seen_ = mouse_release_seen_ = false;
@@ -234,6 +259,7 @@ private:
         state_.run_allowed = false;
         state_.navigation_hold = false;
         state_.mode = RcMode::Safe;
+        state_.autonomous = robotics::AutonomousMode::None;
         state_.spin_requested = state_.friction_requested = state_.continuous_requested = false;
         state_.keyboard_mouse_selected = false;
         armed_ = false;

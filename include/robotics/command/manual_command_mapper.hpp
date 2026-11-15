@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <cmath>
 #include <robotics/messages/remote.hpp>
 namespace skywalker::robotics {
 // ShooterSelectable 专用于台架：左 Down=Safe、左 Middle/Up=Manual，右 Middle=键鼠；
@@ -21,8 +23,18 @@ public:
         // 手动档始终合并键鼠：不再要求右拨杆选择键鼠来源。每轴独立，
         // 物理摇杆离开死区时该轴听摇杆，回中时交给键盘/鼠标。
         bool merge_keyboard_mouse = false;
+        // 左 Middle 时由右拨杆选择巡航子模式；默认关闭以保持旧样例映射。
+        bool cruise_on_middle = false;
     };
     explicit ManualCommandMapper(const Config &config) : config_(config) {
+    }
+    // 单通道归一化：先按 range 缩放并钳制，再按死区线性重映射，死区内输出精确 0。
+    // 调用方保证 range>0、0<=deadband<1 且参数有限（map() 在入口统一校验）。
+    static float normalizeChannel(float raw, float range, float deadband) {
+        const float x = std::clamp(raw / range, -1.0f, 1.0f);
+        return std::fabs(x) <= deadband
+                   ? 0.0f
+                   : std::copysign((std::fabs(x) - deadband) / (1.0f - deadband), x);
     }
     int map(const RemoteState &remote, OperatorIntent &out) const;
 

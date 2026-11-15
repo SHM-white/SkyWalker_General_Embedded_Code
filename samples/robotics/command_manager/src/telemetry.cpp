@@ -16,6 +16,8 @@ const char *source(robotics::ControlSource s) {
         return "Vision";
     case robotics::ControlSource::Autonomous:
         return "Autonomous";
+    case robotics::ControlSource::LocalBehavior:
+        return "LocalBehavior";
     }
     return "Unknown";
 }

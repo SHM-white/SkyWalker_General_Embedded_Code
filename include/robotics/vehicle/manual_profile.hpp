@@ -9,6 +9,11 @@
 
 namespace skywalker::robotics::vehicle {
 inline constexpr std::uint32_t manual_command_timeout_ms = gimbal_command_timeout_ms;
+// 调参：巡航（左 Middle + 右上/右下）无有效视觉目标时的本地扫描速度，
+// 单位 rad/s 的头部世界偏航角速度。方向沿用头部世界坐标约定；
+// 0.3 rad/s 约 17.2°/s，是按机构行程、视场和场地待实测的初值。
+inline constexpr float cruise_yaw_rate_rad_s = 0.3f;
+static_assert(cruise_yaw_rate_rad_s != 0 && cruise_yaw_rate_rad_s <= manual_max_gimbal_yaw_rate_rad_s);
 // Old physical joint-direction hint retained for standalone benches;
 // reference-v4 world-rate commands must NOT apply this factor.
 inline constexpr float big_yaw_wire_direction = -1.0f;

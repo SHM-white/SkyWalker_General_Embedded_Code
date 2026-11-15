@@ -65,6 +65,13 @@ public:
     int reseedYawTarget() {
         return yaw_.reseedTargetFromFeedback();
     }
+    // 扫描入口显式重播种 Pitch：捕获当前实际关节角作为新的保持目标。
+    // 只重建控制目标，不重新定义电机编码器零点。执行线程调用；
+    // 返回值沿用 GimbalAxis：-EACCES 未配置、-EAGAIN 反馈暂不可用、
+    // -ENODATA 缺少参考、-EINVAL 非法测量、0 成功。
+    int reseedPitchTarget() {
+        return pitch_.reseedTargetFromFeedback();
+    }
     const GimbalAxis::TargetStatus &yawTargetDiagnostics() const {
         return yaw_.targetStatus();
     }

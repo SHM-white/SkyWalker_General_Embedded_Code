@@ -30,6 +30,11 @@ public:
         bool require_external_run_gate = false;
         float override_enter_norm = 0.15f, override_exit_norm = 0.05f;
         core::TimeUs override_release_us = 200000;
+        // 本地巡航扫描：无有效视觉目标时由仲裁器生成头部世界速率命令。
+        // 与 allow_navigation（导航接收器能力）互相独立，可单独启用。
+        bool enable_cruise = false;
+        // 调参：扫描头部世界偏航角速度 rad/s；方向沿用头部世界坐标约定。
+        float cruise_yaw_rate_rad_s = 0.3f;
     };
     explicit CommandArbiter(const Config &config);
     // One owner thread; inputs include the arbitration time. Results are owned values.
@@ -58,6 +63,19 @@ private:
     bool navigation_active_ = false;
     core::TimeUs navigation_entry_us_ = 0;
     std::uint64_t navigation_baseline_sequence_ = 0;
+    // 最近处理的解锁会话；变化时清理入口基线，避免跨会话复用目标。
+    std::uint32_t operator_session_ = 0;
     void updateAutoOverride(OperatorIntent &, const CommandInputs &, core::TimeUs);
+    void clearEntryBaselines();
 };
+// 两个调用方（仲裁器与上电启动动作判定）共用的有效映射配置，
+// 避免快捷解锁使用一份缺少巡航/导航/键鼠语义的默认 mapper。
+inline ManualCommandMapper::Config effectiveMapperConfig(const CommandArbiter::Config &config) {
+    auto c = config.mapper;
+    // 视觉执行样例保留左 Up=自动；巡航启用后左 Up 必须仍是手动档。
+    c.auto_on_up = c.auto_on_up || (config.allow_auto && !config.allow_navigation && !config.enable_cruise);
+    c.navigation_on_middle = c.navigation_on_middle || config.allow_navigation || config.enable_cruise;
+    c.cruise_on_middle = c.cruise_on_middle || config.enable_cruise;
+    return c;
+}
 }

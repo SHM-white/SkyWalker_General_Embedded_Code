@@ -27,18 +27,33 @@ CommandManager::CommandManager(const Config &config)
       require_shooter_permissions_(config.require_referee_for_shooter),
       permission_timeout_ms_(config.permission_timeout_ms), require_external_gate_(config.require_external_run_gate) {
 }
-void CommandManager::setOperatorGate(bool allowed, std::uint32_t session) {
+std::uint32_t CommandManager::setOperatorGate(bool allowed, std::uint32_t session,
+                                               const OperatorSelection &selection) {
     if (k_is_in_isr())
-        return;
+        return 0;
     const auto now = core::monotonicTimeUs() / 1000;
+    // 巡航两档（右上/右下）的云台与平移完全相同，只有底盘 wz 不同，因此
+    // 子模式互切不算行为版本变化：可以复用同一会话内仍新鲜的巡航云台决策。
+    const auto behaviorClass = [](AutonomousMode mode) {
+        return isCruise(mode) ? AutonomousMode::Cruise : mode;
+    };
     const auto key = k_spin_lock(&operator_gate_lock_);
-    if (operator_gate_.allowed != allowed || operator_gate_.session != session) {
+    const bool changed = operator_gate_.allowed != allowed || operator_gate_.session != session ||
+                         operator_gate_.selection.valid != selection.valid ||
+                         operator_gate_.selection.mode != selection.mode ||
+                         behaviorClass(operator_gate_.selection.autonomous) != behaviorClass(selection.autonomous);
+    if (changed) {
         operator_gate_.allowed = allowed;
         operator_gate_.session = session;
         operator_gate_.boundary_ms = now;
         ++operator_gate_.revision;
     }
+    // accepted_remote_stamp 每次照实复制：新遥控帧本身不递增 revision，
+    // 否则会每帧清空鼠标手势、重建控制目标。
+    operator_gate_.selection = selection;
+    const auto revision = operator_gate_.revision;
     k_spin_unlock(&operator_gate_lock_, key);
+    return revision;
 }
 int CommandManager::registerSource(ICommandSource &source) {
     if (k_is_in_isr())
@@ -211,6 +226,10 @@ void CommandManager::run() {
                 arbiter_.withdrawMouseShooter();
             }
             next.observed.run_allowed = gate.allowed && !safe_gate_latched;
+            // 选择、会话与行为版本与允许状态同批复制，避免读到两次更新的混合。
+            next.observed.operator_selection = gate.selection;
+            next.observed.operator_session = gate.session;
+            next.observed.operator_revision = gate.revision;
         }
         const auto permission_available = [&](const OutputPermission &permission) {
             // Missing/expired referee data is allowed; only a current explicit

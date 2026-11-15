@@ -27,9 +27,13 @@ public:
     // refreshes timestamps: consumers must still enforce command expiry.
     int current(RobotCommand &out) const;
     int snapshot(CommandSnapshot &out) const;
-    // Thread-only; call after local unlock/fault handling. A change of enabled or
-    // session withdraws old clicks. Increment session for a fault-clear boundary.
-    void setOperatorGate(bool run_allowed, std::uint32_t session = 0);
+    // Thread-only; call after local unlock/fault handling. A change of enabled,
+    // session or accepted mode/behavior withdraws old clicks. Increment session
+    // for a fault-clear boundary. Returns the current revision (not an error
+    // code): execution threads compare it with the decision to reject stale
+    // snapshots. ISR calls return 0 and write nothing.
+    std::uint32_t setOperatorGate(bool run_allowed, std::uint32_t session = 0,
+                                  const OperatorSelection &selection = {});
     void setRunAllowed(bool run_allowed) {
         setOperatorGate(run_allowed);
     }
@@ -52,6 +56,8 @@ private:
         bool allowed = false;
         std::uint32_t session = 0, revision = 0;
         std::uint64_t boundary_ms = 0;
+        // 执行线程接受的拨杆选择；一次临界区内与允许状态一起写入。
+        OperatorSelection selection{};
     };
     OperatorGate operator_gate_{};
     mutable k_spinlock operator_gate_lock_{};

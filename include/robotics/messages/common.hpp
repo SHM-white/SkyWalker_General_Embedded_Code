@@ -3,7 +3,9 @@
 #include <control/motor_lifecycle.hpp>
 
 namespace skywalker::robotics {
-enum class ControlSource : std::uint8_t { None, Remote, KeyboardMouse, Vision, Autonomous };
+// LocalBehavior 只用于本机生成的自主云台命令（扫描/Hold）；底盘命令仍使用
+// Autonomous，板间编码器只接受 0…4，写入 5 会导致 -EINVAL。
+enum class ControlSource : std::uint8_t { None, Remote, KeyboardMouse, Vision, Autonomous, LocalBehavior };
 struct MessageStamp {
     // 消息产生或接收时的系统时间，单位 ms。
     std::uint64_t timestamp_ms = 0;

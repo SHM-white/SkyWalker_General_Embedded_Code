@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cerrno>
+#include <robotics/command/cruise_scan.hpp>
 #include <robotics/command/manual_command_mapper.hpp>
 #include <robotics/command/command_arbiter.hpp>
 namespace skywalker::robotics {
@@ -54,6 +55,9 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
                  ? (config_.navigation_on_middle ? OperatorMode::Navigation : OperatorMode::Manual)
              : config_.auto_on_up ? OperatorMode::Auto
                                   : OperatorMode::Manual;
+    // 左 Middle 的自主子模式由右拨杆决定；巡航未启用时固定为普通导航。
+    if (n.mode == OperatorMode::Navigation)
+        n.autonomous = selectAutonomousMode(r, config_.cruise_on_middle);
     const bool physical = config_.input_profile == RemoteInputProfile::PhysicalRemote;
     // 台架右 Middle 选择键鼠；旧键鼠配置仍使用右 Up，避免与物理遥控的发射拨杆抢同一位置。
     // merge_keyboard_mouse 打开后手动档始终合并键鼠，拨杆只保留其它含义。
@@ -61,11 +65,8 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
                                               (shooter_selectable ? r.right_switch == RcSwitch::Middle
                                                                   : r.right_switch == RcSwitch::Up));
     n.source = keyboard_mouse ? ControlSource::KeyboardMouse : ControlSource::Remote;
-    auto norm = [&](float x) {
-        x = std::clamp(x / config_.channel_range, -1.0f, 1.0f);
-        return std::fabs(x) <= config_.analog_deadband
-                   ? 0.0f
-                   : std::copysign((std::fabs(x) - config_.analog_deadband) / (1 - config_.analog_deadband), x);
+    const auto norm = [&](float x) {
+        return normalizeChannel(x, config_.channel_range, config_.analog_deadband);
     };
     const float analog_vx = norm(r.analog.left_y);
     const float analog_vy = -norm(r.analog.left_x);
@@ -116,19 +117,24 @@ void CommandArbiter::reset() {
     have_vision_sequence_ = have_step_time_ = manual_override_ = have_override_quiet_time_ = false;
     navigation_active_ = false;
     navigation_entry_us_ = navigation_baseline_sequence_ = 0;
+    operator_session_ = 0;
     withdrawMouseShooter();
+}
+void CommandArbiter::clearEntryBaselines() {
+    // 新会话不允许复用上一会话的“已看到帧”基线。
+    navigation_active_ = false;
+    navigation_entry_us_ = 0;
+    navigation_baseline_sequence_ = 0;
+    auto_entry_us_ = 0;
+    auto_baseline_sequence_ = 0;
+    manual_override_ = have_override_quiet_time_ = false;
 }
 void CommandArbiter::withdrawMouseShooter() {
     mouse_gesture_.withdraw();
     mouse_fire_ = {};
 }
 ManualCommandMapper::Config CommandArbiter::mapperConfig() const {
-    auto c = config_.mapper;
-    // 视觉执行样例保留左 Up=自动；其余样例由适配层把左 Up 作为手动档。
-    // Navigation and aim share Middle in installed vehicles; Up stays manual.
-    c.auto_on_up = c.auto_on_up || (config_.allow_auto && !config_.allow_navigation);
-    c.navigation_on_middle = c.navigation_on_middle || config_.allow_navigation;
-    return c;
+    return effectiveMapperConfig(config_);
 }
 int CommandArbiter::observeRemoteFrame(const RemoteState &remote, bool run_allowed, std::uint64_t now_ms) {
     OperatorIntent mapped{};
@@ -165,6 +171,12 @@ int CommandArbiter::validateConfig() const {
             return -EINVAL;
     if (config_.enable_shooter &&
         (!std::isfinite(config_.requested_fire_rate_hz) || config_.requested_fire_rate_hz <= 0))
+        return -EINVAL;
+    // 本地巡航扫描只在执行线程门控下生效，且扫描速率必须落在头部速率预算内。
+    if (config_.enable_cruise &&
+        (!config_.require_external_run_gate || !std::isfinite(config_.cruise_yaw_rate_rad_s) ||
+         config_.cruise_yaw_rate_rad_s == 0 ||
+         std::fabs(config_.cruise_yaw_rate_rad_s) > config_.max_gimbal_yaw_rate_rad_s))
         return -EINVAL;
     if (!config_.input_timeout_ms || (config_.allow_navigation && !config_.navigation_timeout_us) ||
         ((config_.require_referee_for_chassis || config_.require_referee_for_gimbal ||
@@ -223,6 +235,17 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         n.command.stamp = n.command.chassis.stamp = n.command.gimbal.stamp = n.command.shooter.stamp = stamp;
         sequence_ = stamp.sequence;
         n.error = ret;
+        // 会话与版本在所有早退上都要随快照一起返回，否则执行线程无法匹配。
+        n.operator_session = in.operator_session;
+        n.operator_revision = in.operator_revision;
+        // 本地生成云台命令（扫描/自主 Hold）用自己的生产时间；其他来源保留原始戳。
+        const auto &gimbal = n.command.gimbal;
+        if (gimbal.source == ControlSource::LocalBehavior && gimbal.mode != GimbalMode::Disabled)
+            n.local_gimbal_stamp = {now, std::uint64_t(stamp.sequence), true};
+        else
+            n.local_gimbal_stamp = {};
+        if (gimbal.mode == GimbalMode::Disabled)
+            n.gimbal_behavior = GimbalBehavior::None;
         return n;
     };
     const auto disable = [&](std::uint32_t reason, int ret) {
@@ -250,8 +273,32 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     const auto ms = now / 1000;
     const bool rc_available = in.remote.online && isFresh(in.remote.stamp, ms, config_.input_timeout_ms);
     OperatorIntent i{};
-    if (!rc_available) {
-        // 左 Middle 导航档已解锁时，遥控链路掉线不撤销导航；手动档失联仍立即锁定。
+    if (in.operator_selection.valid) {
+        // 执行线程已接受并授权的模式：掉线不改写选择，也不依赖管理线程是否见过帧。
+        if (!in.run_allowed)
+            return disable(OperatorGateDenied, 0);
+        const auto &selection = in.operator_selection;
+        if (selection.mode == OperatorMode::Safe)
+            return disable(SafeRequested, 0);
+        if (selection.mode == OperatorMode::Manual) {
+            OperatorIntent mapped{};
+            // 选择与遥控映射不一致时本周期不执行旧手动输入，等下一轮选择同步。
+            if (!rc_available || ManualCommandMapper(mapperConfig()).map(in.remote, mapped) < 0 ||
+                mapped.mode != OperatorMode::Manual)
+                return disable(RcUnavailable, 0);
+            i = mapped;
+        }
+        else {
+            if (selection.mode == OperatorMode::Auto && !config_.allow_auto)
+                return disable(AutoUnavailable, 0);
+            i.mode = selection.mode;
+            i.source = ControlSource::Autonomous;
+            i.stamp = in.remote.stamp;
+            i.autonomous = selection.mode == OperatorMode::Navigation ? selection.autonomous : AutonomousMode::None;
+        }
+    }
+    else if (!rc_available) {
+        // 旧调用方：左 Middle 导航档已解锁时，遥控链路掉线不撤销导航；手动档失联仍立即锁定。
         if (!in.run_allowed || !config_.allow_navigation || !navigation_active_)
             return disable(RcUnavailable, 0);
         i.mode = OperatorMode::Navigation;
@@ -288,14 +335,24 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         withdrawMouseShooter();
     }
     n.operator_mode = i.mode;
+    // 非自主模式不携带子模式，避免执行线程把残留的巡航选择当成本次行为。
+    n.autonomous = (i.mode == OperatorMode::Navigation || i.mode == OperatorMode::Auto) ? i.autonomous
+                                                                                        : AutonomousMode::None;
     if (i.mode == OperatorMode::Safe)
         return disable(SafeRequested, 0);
     if (i.mode == OperatorMode::Auto && !config_.allow_auto)
         return disable(AutoUnavailable, 0);
+    // 解锁会话变化时清理入口基线：新会话必须重新等待新导航/视觉帧。
+    if (in.operator_session != operator_session_) {
+        operator_session_ = in.operator_session;
+        clearEntryBaselines();
+    }
     const bool navigation_mode = i.mode == OperatorMode::Navigation;
+    const bool cruise_mode = navigation_mode && config_.enable_cruise && isCruise(i.autonomous);
     const bool automatic_aim = i.mode == OperatorMode::Auto || (navigation_mode && config_.allow_auto);
     if (navigation_mode) {
-        if (!config_.allow_navigation)
+        // 巡航只需要本地扫描能力，不要求导航接收器存在。
+        if (!config_.allow_navigation && !cruise_mode)
             return disable(NavigationUnavailable, 0);
         withdrawMouseShooter();
         n.mouse_fire = {};
@@ -304,6 +361,16 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
             navigation_active_ = true;
             navigation_entry_us_ = now;
             navigation_baseline_sequence_ = in.navigation.stamp.sequence;
+        }
+        if (cruise_mode) {
+            // 每轮从合法零速重建：导航过期后不得残留上一帧平移。
+            auto &chassis = n.requested.chassis;
+            chassis.mode = ChassisMode::BodyVelocity;
+            chassis.source = ControlSource::Autonomous;
+            chassis.vx_m_s = chassis.vy_m_s = chassis.wz_rad_s = 0.0f;
+            // 未启用导航接收器时这只是可选源缺失，不撤销整车。
+            if (!config_.allow_navigation)
+                n.chassis_reasons |= NavigationUnavailable;
         }
         const auto &nav = in.navigation;
         if (!nav.stamp.valid)
@@ -321,10 +388,12 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
             chassis.source = ControlSource::Autonomous;
             chassis.vx_m_s = std::clamp(nav.value.vx_m_s, -config_.max_chassis_vx_m_s, config_.max_chassis_vx_m_s);
             chassis.vy_m_s = std::clamp(nav.value.vy_m_s, -config_.max_chassis_vy_m_s, config_.max_chassis_vy_m_s);
-            chassis.wz_rad_s = std::clamp(nav.value.wz_rad_s, -config_.max_chassis_wz_rad_s,
-                                          config_.max_chassis_wz_rad_s);
+            // 巡航的 wz 由执行线程的小陀螺独占，不与导航角速度相加。
+            if (!cruise_mode)
+                chassis.wz_rad_s = std::clamp(nav.value.wz_rad_s, -config_.max_chassis_wz_rad_s,
+                                              config_.max_chassis_wz_rad_s);
             if (chassis.vx_m_s != nav.value.vx_m_s || chassis.vy_m_s != nav.value.vy_m_s ||
-                chassis.wz_rad_s != nav.value.wz_rad_s)
+                (!cruise_mode && chassis.wz_rad_s != nav.value.wz_rad_s))
                 n.chassis_reasons |= ValueLimited;
         }
     }
@@ -354,7 +423,9 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     else if (automatic_aim) {
         n.requested.gimbal = {};
         n.requested.gimbal.mode = GimbalMode::Hold;
-        n.requested.gimbal.source = i.source;
+        // 自主 Hold 由本机生成，使用独立的本地来源时间，不再借用导航/视觉戳。
+        n.requested.gimbal.source = ControlSource::LocalBehavior;
+        n.gimbal_behavior = GimbalBehavior::Hold;
         const auto &v = in.vision.value;
         const float values[] = {v.yaw.angle_rad,    v.pitch.angle_rad,         v.yaw.rate_rad_s,
                                 v.pitch.rate_rad_s, v.yaw.acceleration_rad_s2, v.pitch.acceleration_rad_s2};
@@ -378,6 +449,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         else {
             visual_control = true;
             n.selected_vision = in.vision;
+            n.gimbal_behavior = GimbalBehavior::Track;
             auto &target = n.selected_vision.value;
             const auto limit = [&](float value, float maximum) {
                 const float bounded = std::clamp(value, -maximum, maximum);
@@ -398,6 +470,16 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
             g.pitch_target_rad = target.pitch.angle_rad;
             g.yaw_rate_rad_s = target.yaw.rate_rad_s;
             g.pitch_rate_rad_s = target.pitch.rate_rad_s;
+        }
+    }
+    // 巡航：没有可用视觉目标时由本地生成低速扫描。非法目标/参考不匹配
+    // 仍保留原拒绝语义，不用扫描掩盖故障。
+    if (cruise_mode && !visual_control && !manual_override_) {
+        const bool bad_vision = (n.gimbal_reasons & (InvalidVision | VisionReferenceMismatch)) != 0;
+        if (!bad_vision) {
+            n.requested.gimbal = makeCruiseScanCommand(config_.cruise_yaw_rate_rad_s);
+            n.selected_vision = {};
+            n.gimbal_behavior = GimbalBehavior::Scan;
         }
     }
     if (navigation_mode || !config_.enable_shooter || !i.friction_requested)

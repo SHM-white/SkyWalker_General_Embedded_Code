@@ -55,6 +55,10 @@ inline core::Stamp sourceStamp(const CommandSnapshot &frame, ControlSource sourc
         return frame.decision.selected_vision.stamp;
     if (source == ControlSource::Autonomous)
         return frame.observed.navigation.stamp;
+    // 本地生成的扫描/自主 Hold 使用自己的生产时间，不能借用导航或仲裁时刻，
+    // 也不能让过期导航看起来仍然新鲜。
+    if (source == ControlSource::LocalBehavior)
+        return frame.decision.local_gimbal_stamp;
     return {};
 }
 }
