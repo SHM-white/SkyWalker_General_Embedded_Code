@@ -271,9 +271,20 @@ function vehicleSummary(graph) {
       const titleLines = wrapSvg(module.title, 13, 2);
       return `<g class="graph-node ${module.id === selected.id ? 'selected' : connected.has(module.id) ? 'connected' : ''}"><a href="#relations?selected=${esc(module.id)}" aria-label="高亮${esc(module.title)}的依赖"><rect x="${pos.x}" y="${pos.y}" width="${pos.w}" height="${pos.h}" rx="8"/><text x="${pos.x + 13}" y="${pos.y + 24}">${titleLines.map((line, index) => `<tspan x="${pos.x + 13}" dy="${index ? 17 : 0}">${esc(line)}</tspan>`).join('')}</text><text class="graph-subtitle" x="${pos.x + 13}" y="${pos.y + 70}">${esc(module.id)}</text></a></g>`;
     }).join('');
+    const mobilePicker = `<div class="relation-mobile-select"><label for="relation-module-picker">查看模块</label>
+      <select id="relation-module-picker" aria-label="选择模块查看上下游">
+      ${columns.map(column => `<optgroup label="${esc(column.title)}">${column.ids.map(mid =>
+        `<option value="${esc(mid)}" ${mid === selected.id ? 'selected' : ''}>${esc(byId.get(mid)?.title || mid)}</option>`
+      ).join('')}</optgroup>`).join('')}</select></div>`;
+    const compactLinks = `<div class="relation-compact"><h3>按架构层级浏览模块</h3>
+      <div class="relation-compact-grid">${columns.map(column => `<section class="relation-compact-group">
+      <h4>${esc(column.title)}</h4>${column.ids.map(mid =>
+        `<a href="#relations?selected=${esc(mid)}" class="${mid === selected.id ? 'active' : ''}">${esc(byId.get(mid)?.title || mid)}</a>`
+      ).join('')}</section>`).join('')}</div></div>`;
+    const smallScreen = window.matchMedia('(max-width: 1000px)').matches;
     content.innerHTML = heading('02 / Module relationships', '模块各司其职，关系一眼可见。', '箭头从被依赖的模块指向使用它的模块。点击节点高亮直接上下游；这是软件依赖图，整车实时数据流见架构总览和调用链。') +
-      `<div class="graph-layout"><div class="panel"><div class="panel-header"><div><h3>模块依赖地图</h3><p>当前选择：${esc(selected.title)}</p></div><a class="quiet-link" href="#relations?selected=application">定位整机应用 ↗</a></div><div class="relation-graph-wrap"><svg class="relation-graph" viewBox="0 0 1120 ${Math.max(610, 185 + (Math.max(...columns.map(column => column.ids.length)) - 1) * 128)}" role="img" aria-labelledby="relation-title"><title id="relation-title">SkyWalker 模块依赖图；绿色箭头为${esc(selected.title)}的直接关系。右侧提供同样的文字链接。</title><defs><marker id="edge-highlight" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path fill="#168674" d="M0 0 L10 5 L0 10z"/></marker><marker id="edge-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path fill="#cad6de" d="M0 0 L10 5 L0 10z"/></marker></defs>${columns.map((column, index) => `<text class="graph-lane-label" x="${20 + index * 220}" y="35">${esc(column.title)}</text>`).join('')}${paths}${boxes}</svg></div><div class="graph-legend"><span>所选模块的直接关系</span><span>其余模块依赖</span></div></div>
-      <aside class="panel graph-detail">${pill(selected.status)}<h3>${esc(selected.title)}</h3><p>${esc(selected.responsibility)}</p><div class="relation-label">输入 / 依赖</div><div class="relation-chips">${list(selected.depends).map(id => `<a class="relation-chip" href="#relations?selected=${esc(id)}">${esc(byId.get(id)?.title || id)}</a>`).join('') || '<span class="count-note">直接对接底层设备。</span>'}</div><div class="relation-label">消费者 / 下游</div><div class="relation-chips">${downstream(selected.id).map(module => `<a class="relation-chip" href="#relations?selected=${esc(module.id)}">${esc(module.title)}</a>`).join('') || '<span class="count-note">应用 / 样例直接使用。</span>'}</div><p style="margin-top:20px">${esc(selected.statusNote)}</p><a class="primary-button" href="#module/${esc(selected.id)}">打开接口与调用示例 →</a></aside></div>`;
+      mobilePicker + `<div class="graph-layout"><div class="panel relation-map-panel"><div class="panel-header"><div><h3>模块依赖地图</h3><p>当前选择：${esc(selected.title)}</p></div><a class="quiet-link" href="#relations?selected=application">定位整机应用 ↗</a></div><details class="relation-map-details" ${smallScreen ? '' : 'open'}><summary>展开完整依赖图（可左右滑动，点击节点选择）</summary><div class="relation-graph-wrap"><svg class="relation-graph" viewBox="0 0 1120 ${Math.max(610, 185 + (Math.max(...columns.map(column => column.ids.length)) - 1) * 128)}" role="img" aria-labelledby="relation-title"><title id="relation-title">SkyWalker 模块依赖图；绿色箭头为${esc(selected.title)}的直接关系。右侧提供同样的文字链接。</title><defs><marker id="edge-highlight" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path fill="#168674" d="M0 0 L10 5 L0 10z"/></marker><marker id="edge-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path fill="#cad6de" d="M0 0 L10 5 L0 10z"/></marker></defs>${columns.map((column, index) => `<text class="graph-lane-label" x="${20 + index * 220}" y="35">${esc(column.title)}</text>`).join('')}${paths}${boxes}</svg></div><div class="graph-legend"><span>所选模块的直接关系</span><span>其余模块依赖</span></div></details></div>
+      <aside class="panel graph-detail">${pill(selected.status)}<h3>${esc(selected.title)}</h3><p>${esc(selected.responsibility)}</p><div class="relation-label">输入 / 依赖</div><div class="relation-chips">${list(selected.depends).map(id => `<a class="relation-chip" href="#relations?selected=${esc(id)}">${esc(byId.get(id)?.title || id)}</a>`).join('') || '<span class="count-note">直接对接底层设备。</span>'}</div><div class="relation-label">消费者 / 下游</div><div class="relation-chips">${downstream(selected.id).map(module => `<a class="relation-chip" href="#relations?selected=${esc(module.id)}">${esc(module.title)}</a>`).join('') || '<span class="count-note">应用 / 样例直接使用。</span>'}</div><p style="margin-top:20px">${esc(selected.statusNote)}</p><a class="primary-button" href="#module/${esc(selected.id)}">打开接口与调用示例 →</a></aside></div>${compactLinks}`;
   }
 
   function workflows(id, params) {
@@ -552,6 +563,11 @@ function vehicleSummary(graph) {
   document.addEventListener('keydown', event => {
     if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) { event.preventDefault(); input.focus(); }
     if (event.key === 'Escape') { setNavigationOpen(false); input.blur(); }
+  });
+  content.addEventListener('change', event => {
+    if (event.target.id === 'relation-module-picker') {
+      window.location.hash = 'relations?selected=' + encodeURIComponent(event.target.value);
+    }
   });
   content.addEventListener('click', event => {
     if (event.target.closest('[data-refresh-docs]')) { render(); return; }
