@@ -116,7 +116,7 @@ RemoteReceiver / VisionReceiver / RefereeReceiver
 
 应用与上车工程共用纯配置和普通模块 API，不共用整车 `run()`、角色宏或装配流程。每工程的 CMake 固定引用共享基础与板级 conf，本地 overlay 只包含对应共享物理配置；本地 `prj.conf` 选择模块能力。旧 `vehicle_bench.hpp` 仅供历史 `vehicle_integration` 使用，不能作为当前应用装配说明。
 
-`Diagnostics` 从初始化阶段接管单一诊断 UART，固定选择 Log 或 Vofa；生产者无等待入队，低优先级 worker 发送，满队列丢观测并计数。诊断不参与运行授权，详见[调试与观测](../guides/debugging.md)和[实车入口表](../../samples/bringup/README.md)。
+启用 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS` 后，`Diagnostics` 从初始化阶段接管单一诊断 UART，固定选择 Log 或 Vofa；生产者无等待入队，低优先级 worker 发送，满队列丢观测并计数。诊断不参与运行授权，详见[调试与观测](../guides/debugging.md)和[实车入口表](../../samples/bringup/README.md)。
 
 ## 6. 单位和状态
 

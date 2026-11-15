@@ -1,11 +1,8 @@
 # MC02 实车共享配置基线
 
-可选 IMU 航向与坐标补偿由 `motion_profile.hpp` 配置，默认 Body 坐标、补偿关闭、大 Yaw
-航向锁定关闭。两个应用支持独立 0x0405 IMU 消息，BMI088 及 DM-IMU-L1 复用已有驱动。
-双板前向参考确认、MIT 模式和新增 PI 都须实车验收后启用，见
-[IMU 验收说明](../../../docs/dev/哨兵IMU航向控制验收.md)。
+正式应用的载体航向使用参考 v4 `0x0404`；外置头部 IMU 提供视觉参考。资源与现场验收要求见[双主控应用](../../../docs/applications/dual-controller.md)及[IMU 验收说明](../../../docs/dev/哨兵IMU航向控制验收.md)。
 
-配置文档初始日期：2026-10-25；当前正式入口复核：2026-11-10（`bad529abe5d6`）。此目录固定新 [独立上车工程](../../../samples/bringup/README.md) 和两个最终应用的板级资源、系统输出策略与驱动后端。当前内容依据仓库已有接线配置收敛，尚未实查 DAPLink 接线或完成实板验证。
+配置文档初始日期：2026-10-25；本页主要资源按 2026-11-15 的 `81578dd` 源码整理。此目录固定新 [独立上车工程](../../../samples/bringup/README.md) 和两个最终应用的板级资源、系统输出策略与驱动后端。当前内容依据仓库已有接线配置收敛，尚未实查 DAPLink 接线或完成实板验证。
 
 每个工程的 `app.overlay` 只包含对应 `gimbal.overlay` 或 `chassis.overlay`；构建文件固定引用 `base.conf`、板级 conf 与工程本地 `prj.conf`。本地工程只选择所需模块能力，使用自己的 `main.cpp` 装配对象、启动接收器和执行控制循环。物理设备声明不意味着每个工程都会创建或使能该设备的执行器。
 
@@ -17,7 +14,7 @@
 | 云台 | USART10 | 板间 UART，PE3 TX / PE2 RX，460800 8N1；DMAMUX 通道 12/13，TX/RX 请求 119/118 |
 | 云台 | UART7 | `diagnostic-uart`，PE8 TX / PE7 RX，115200 8N1；全局配置 TX/RX DMA 5/7，由诊断 worker 单独发送 |
 | 云台 | CAN1 / CAN2 | 小 Yaw / Pitch 电机 |
-| 云台 | CAN3 | 预留给独立惯性工程的头部 DM IMU（1 Mbps、主动四元数）；当前正式手动云台不实例化 CAN3 外置 IMU，板载 SPI BMI088 为载体航向来源 |
+| 云台 | CAN3 | 外置头部 DM IMU（1 Mbps、主动四元数）；正式云台实例化该来源，板载 SPI BMI088 为载体航向来源 |
 | 云台 | PC15 | 外部 5 V 供电使能，启动时启用；仍须核对实物供电 |
 | 底盘 | CAN1 / CAN2 / CAN3 | 四舵向 / 四轮驱 / 大 Yaw，分别只有一个 CAN 所有者 |
 | 底盘 | USART1 | 板间 UART，460800 8N1；沿用板级 DMA 通道 3/4 |
@@ -46,13 +43,13 @@ DAPLink 目标连接尚未实查：当前候选是 UART7 PE8 TX 接 DAPLink RX�
 
 ## 单变量选择日志或 VOFA
 
-统一选择位于 [diagnostics_config.hpp](../../../include/robotics/vehicle/diagnostics_config.hpp)：
+先启用 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS`（当前 `gimbal.conf` 启用、`base.conf` 关闭，底盘未覆盖）；输出选择位于 [diagnostics_config.hpp](../../../include/robotics/vehicle/diagnostics_config.hpp)：
 
 ```cpp
-inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Log;
+inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Vofa;
 ```
 
-改为 `DiagnosticOutput::Vofa` 后，用原工程命令重新编译和烧录即可；无需改 Kconfig、额外 conf、串口命令或接线。模式编入二进制并在本次运行期间固定，复位继续使用该固件模式。电脑端同一时刻只让串口终端或 VOFA 中一个程序占用 DAPLink COM 口，波特率统一为 115200。
+选择 `DiagnosticOutput::Log` 或 `DiagnosticOutput::Vofa` 后，用原工程命令重新编译和烧录；如果工程尚未启用诊断，也需要在工程配置中启用该 Kconfig。模式编入二进制并在本次运行期间固定，复位继续使用该固件模式。电脑端同一时刻只让串口终端或 VOFA 中一个程序占用 DAPLink COM 口，波特率统一为 115200。
 
 `base.conf` 关闭串口日志后台、console、shell 和启动 banner，启用专用日志后台。Log 模式把 `LOG_*` 与接入 Zephyr 日志的 `printk` 文本送入同一输出队列；Vofa 模式从初始化阶段丢弃这些文本，只发送 JustFloat，不因普通错误自动切回日志。以后新增错误路径也应使用这个输出策略，不能直接向 UART7 调用文本发送函数。
 
@@ -66,7 +63,7 @@ inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Log;
 
 [diagnostics_config.hpp](../../../include/robotics/vehicle/diagnostics_config.hpp) 当前候选标识为硬件 `mc02-installed-20261025-candidate`、标定 `vehicle-20261025-unverified`；协议固定 v4。启动身份还包含应用、板角色和源码版本，便于区分本地未提交修改。配置修改后重建所有受影响阶段和最终应用；已烧录固件及旧通过记录不会自动更新。
 
-中央确认标志当前保留连接、IMU 安装、发射约束为 true，功率模型为 false。它们是当前代码配置，不能代替现场核对。阶段工程只应使能其明确负责的机构；新最终云台启用导航和视觉目标接收，暂不启动发射，新最终底盘使用低电流手动机械策略，功率实测与受约束执行仍需单独接入。
+中央确认标志当前保留连接、IMU 安装、发射约束为 true，功率模型为 false。它们是当前代码配置，不能代替现场核对。阶段工程只应使能其明确负责的机构；正式云台启用导航和视觉接收并装配发射执行器；热量与发射许可输入、功率实测和有载发射仍需单独核实与验收。
 
 ## 2026-10-28 舵轮参考候选
 
@@ -75,4 +72,4 @@ inline constexpr DiagnosticOutput diagnostic_output = DiagnosticOutput::Log;
 [符号、单位及上车验收](../../../docs/dev/哨兵参考工程移植验收.md)。默认新增最终舵角联锁和 cos³ 驱动补偿，
 不改变 CAN1/2/3 所有权或功率标定状态。
 
-> 正式云台当前使用板载 BMI088 角速度补偿编码器手动双轴，并通过参考 v4 `0x0404/32B` 向底盘发布载体航向。驱动选项或 overlay 保留 CAN3 配置不表示实际 `main.cpp` 已启动外置头部 IMU。详见[当前双主控应用](../../../docs/applications/dual-controller.md)。
+> 正式云台通过参考 v4 `0x0404/32B` 向底盘发布板载 BMI088 载体航向，并单独启动 CAN3 外置头部 IMU。详见[当前双主控应用](../../../docs/applications/dual-controller.md)。

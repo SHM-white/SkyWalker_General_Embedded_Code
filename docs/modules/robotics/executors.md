@@ -1,8 +1,8 @@
 # 机构执行器、惯性适配与大 Yaw 回中
 
-当前正式应用核对：2026-11-10（`bad529abe5d6`）。公共执行器 API 与正式应用装配是两回事。执行器位于 `include/robotics/` 与 `lib/robotics/`；[云台应用](../../../applications/sentry_gimbal/README.md)与[底盘应用](../../../applications/sentry_chassis/README.md)各自在自己的 `src/main.cpp` 中构造对象、初始化资源并执行控制循环。它们不调用公共 `vehicle_bench.hpp`。应用持有 Motor、Group、CanBus 和输入来源，完成 attach/start，并在所有机构暂存输出后对每条物理 CAN commit 一次。执行器不创建或提交 CAN 总线。
+应用装配概览按 `81578dd`（2026-11-15）更新；执行器接口细节仍以源码为准。公共执行器 API 与正式应用装配是两回事。执行器位于 `include/robotics/` 与 `lib/robotics/`；[云台应用](../../../applications/sentry_gimbal/README.md)与[底盘应用](../../../applications/sentry_chassis/README.md)各自在自己的 `src/main.cpp` 中构造对象、初始化资源并执行控制循环。它们不调用公共 `vehicle_bench.hpp`。应用持有 Motor、Group、CanBus 和输入来源，完成 attach/start，并在所有机构暂存输出后对每条物理 CAN commit 一次。执行器不创建或提交 CAN 总线。
 
-应用与[独立上车工程](../../../samples/bringup/README.md)共享 [installed 物理配置](../../../config/vehicle/installed/README.md)及 `include/robotics/vehicle/` 中的标定与纯配置工厂。正式云台使用 CAN1 小 Yaw、CAN2 Pitch 与板载 SPI BMI088（CAN3 外置 IMU 未实例化）；底盘使用 CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw。UART7 为两板 DAPLink 诊断候选口，板间固定为云台 USART10、底盘 USART1。资源共用不会替代现场接线和标定确认。
+应用与[独立上车工程](../../../samples/bringup/README.md)共享 [installed 物理配置](../../../config/vehicle/installed/README.md)及 `include/robotics/vehicle/` 中的标定与纯配置工厂。正式云台使用 CAN1 小 Yaw及发射电机、CAN2 Pitch、板载 SPI BMI088 和 CAN3 外置头部 IMU；底盘使用 CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw。UART7 为两板 DAPLink 诊断候选口，板间固定为云台 USART10、底盘 USART1。资源共用不会替代现场接线和标定确认。
 
 所有有状态 update、begin、suspend 和 status 引用访问由一个执行线程拥有。跨线程使用 SnapshotCache 或 Endpoint 的值副本；读者不刷新生产时间。SnapshotCache 争锁使用有界短自旋，首次尚无发布时 snapshot 返回 -EAGAIN，ISR 调用返回 -EWOULDBLOCK。初始化配置失败保持 Blocked；运行意图由新鲜输入决定，电机等待/故障不阻止其他轴持续生产目标。Group 只是批量启停，Motor/CAN 独立恢复。
 

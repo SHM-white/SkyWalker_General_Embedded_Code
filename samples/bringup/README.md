@@ -33,11 +33,11 @@ west flash -d ../build/bringup/gimbal_yaw_encoder
 
 输入授权：真实遥控双拨Down，摇杆/拨轮归中保持500ms，先把左拨切Middle建立解锁，再拨左 Up 手动运行；左Down停止。遥控过期或双板对端离线/重启后重新解锁。先观察、再小幅动作；不使用永久有效授权，不上电自动运行轨迹。正常小幅动作、撤销输入、断流、恢复，双板再加单板重启与执行状态停更，由现场操作并记录结果。
 
-仅修改 `include/robotics/vehicle/diagnostics_config.hpp` 的 `diagnostic_output`，重编译烧录切换Log/Vofa。UART无console/shell/banner/默认串口后台；LOG和printk统一进自定义后台，Vofa固件丢弃文本，整次运行保持纯JustFloat。两模式用固定16包队列及低优先级输出线程，拥塞丢观测包并计数，控制线程不等串口。故障可能导致波形停流，主机保存时间及原始数据；切换固件不保留先前RAM事件。远端只提供协议已有字段，没有远端内部PID转发。
+启用 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS` 后，可修改 `include/robotics/vehicle/diagnostics_config.hpp` 的 `diagnostic_output` 并重编译烧录以切换 Log/Vofa。共享配置当前在云台侧启用、底盘侧默认关闭。UART无console/shell/banner/默认串口后台；LOG和printk统一进自定义后台，Vofa固件丢弃文本，整次运行保持纯JustFloat。两模式用固定16包队列及低优先级输出线程，拥塞丢观测包并计数，控制线程不等串口。故障可能导致波形停流，主机保存时间及原始数据；切换固件不保留先前RAM事件。远端只提供协议已有字段，没有远端内部PID转发。
 
 ## 诊断布局
 
-JustFloat版本1、50Hz上限、19个float、80字节/帧，约4kB/s。每个工程README说明其target/feedback/extra字段的物理意义。未使用字段为0；feedback无效时为NaN，age未知为-1。序号、时间、丢包计数拆为两个16位值：原值=low+65536×high，避免float丢低位；uptime_ms按32位回绕。
+以下为采用默认布局的上车工程：JustFloat版本1、50Hz上限、19个float、80字节/帧，约4kB/s。正式云台应用使用不同的 [32 通道布局](../../docs/dev/云台双轴响应VOFA通道说明.md)。每个工程README说明其target/feedback/extra字段的物理意义。未使用字段为0；feedback无效时为NaN，age未知为-1。序号、时间、丢包计数拆为两个16位值：原值=low+65536×high，避免float丢低位；uptime_ms按32位回绕。
 
 | 通道(从0开始) | 含义 |
 | --- | --- |

@@ -77,13 +77,13 @@ west flash -d build/dji_position
 
 | 用途 | 云台板 | 底盘板 |
 | --- | --- | --- |
-| 单口诊断 | UART7，PE8 TX / PE7 RX，115200 8N1，无 DMA | 同左 |
-| 板间 UART | USART10，PE3 TX / PE2 RX，460800，DMA 通道 3/4 | USART1，460800，DMA 通道 3/4 |
-| CAN1 | 小 Yaw | 四舵向 |
+| 单口诊断 | UART7，PE8 TX / PE7 RX，115200 8N1；板级声明 DMA 5/7，诊断 worker 采用轮询发送 | 同左 |
+| 板间 UART | USART10，PE3 TX / PE2 RX，460800，DMA 通道 12/13 | USART1，460800，DMA 通道 3/4 |
+| CAN1 | 小 Yaw及发射电机 | 四舵向 |
 | CAN2 | Pitch | 四轮驱 |
 | CAN3 | DM 头部 IMU 独占 | 大 Yaw |
 
-云台 USART1 释放 DMA 3/4 给 USART10；板载 SPI2 的 DMA1 通道 1/2 保留。新配置关闭 console/shell/banner，删除 `telemetry-uart` 并使用 `diagnostic-uart`，不提供 `vision-uart`。UART7 是 DAPLink 诊断候选，实际接线尚需确认，不能同时交给视觉或第二个发送者。各阶段只启动需要的对象，设备树中的其他设备声明不会自动使能电机。
+云台 USART1 的 DMA 3/4 用于导航，USART10 使用 12/13；板载 SPI2 使用 DMA 1/2。配置关闭 console/shell/banner，诊断使用 `diagnostic-uart`，视觉使用 USB CDC 的 `vision-uart`。UART7 是 DAPLink 诊断候选，实际接线尚需确认；当前云台侧启用诊断，底盘侧默认关闭。各阶段只启动需要的对象，设备树中的其他设备声明不会自动使能电机。
 
 固定模式选择见 [诊断配置](../../include/robotics/vehicle/diagnostics_config.hpp)，工程导航见 [独立上车入口](../../samples/bringup/README.md)。
 

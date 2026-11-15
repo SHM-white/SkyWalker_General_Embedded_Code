@@ -7,7 +7,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 ```text
 应用 / 样例
 ├── samples/                    独立可构建的硬件验证项目
-└── applications/               独立装配的双主控手动底盘 / 云台应用
+└── applications/               独立装配的双主控底盘 / 云台应用
         │
         ├── lib/                可复用算法、通信和机器人决策层
         └── drivers/            Zephyr 设备驱动与 CAN 电机驱动
@@ -34,7 +34,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 在线阅读：[GitHub Pages 架构与接口手册](https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/)；本地启动和私有站点见 [架构浏览器](docs/architecture-browser/README.md)。
 
-当前应用状态核对代码基线：`dev@bad529abe5d682797ca27d49078bbf0a9b00266b`（2026-11-10，已快进同步至 `main`）。正式云台使用小 Yaw/Pitch 编码器手动闭环与板载 BMI088 载体航向/角速度补偿；CAN3 外置头部 IMU、视觉和发射当前未实例化。底盘通过参考 v4 接收云台系平移与大 Yaw 世界角速度，转换时使用大 Yaw 原生角反馈。**2026-10-25 的 27 项编译/链接通过属于旧基线**，本次同步未重新构建、测试、烧录或实板验证。详见[双主控应用](docs/applications/dual-controller.md)与[板间 v4](docs/protocols/interboard-v4.md)。
+应用入口概览按 `81578dd`（2026-11-15）源码整理：正式云台装配外置头部 IMU、视觉与导航来源以及发射执行器，并使用板载 BMI088 提供载体航向；底盘通过 v4 接收云台系平移与大 Yaw 世界角速度。接入代码不等于硬件或带载验收通过；**2026-10-25 的 27 项编译/链接记录属于旧基线**。本次文档更新未重新构建、测试、烧录或实板验证。详见[双主控应用](docs/applications/dual-controller.md)、[云台应用](applications/sentry_gimbal/README.md)与[板间 v4](docs/protocols/interboard-v4.md)。
 
 ## 当前能力
 
@@ -53,13 +53,13 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 - 达妙：DM-J4310-2EC V1.1；支持 MIT、位置-速度、速度三种原生 CAN 模式，以及 Enable/Disable/ClearError/SaveZero。
 - 统一 CAN 电机驱动：`CanBus` 管物理传输，`Motor` 管端点，`Group` 提供显式批量启停，不传播成员故障；`VelocityMotor`、`PositionMotor` 复用纯 C 控制算法并暂存目标。
 - 纯 C 控制库：PID、前馈、复合前馈 PID、斜坡限幅、角度工具、速度环和位置-速度串级。
-- IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM IMU 支持 RS485 和 CAN 来源。正式云台使用板载 BMI088 作为载体航向来源；CAN3 主动四元数反馈仍可用于独立惯性样例，但未在当前正式云台入口启动。
+- IMU：独立 ImuSource / ImuState / ImuReceiver；BMI088 可选四元数 EKF 与 PWM 温控，DM IMU 支持 RS485 和 CAN 来源。正式云台使用板载 BMI088 作为载体航向来源，并启动 CAN3 外置头部 IMU 供视觉姿态参考。
 
 ### 通信与机器人算法
 
 - `AsyncUart`：固定缓冲、异步 UART、溢出代际检测和单线程消费约定。
 - DR16：18 字节帧解码、摇杆死区、拨杆、鼠标/键盘和在线判断。
-- 裁判系统：RM2026 V1.3 profile、CRC8/CRC16、权限和功率快照。
+- 裁判系统：编译期选择 RM2027 V1.0.0（默认）或 RM2026 V1.3.0，提供 CRC8/CRC16、权限和功率快照；目前解码范围见[裁判接口](docs/api/referee.md)。
 - 板间协议：统一 v4 帧格式、CRC16、生产者序号、boot_id 和原始输入年龄；电机独立自动恢复。
 - 机器人算法：CommandArbiter 同步仲裁；CommandManager 注册来源并后台发布快照；公开 GimbalExecutor、ChassisExecutor、BigYawExecutor 和 ShooterExecutor 消费新鲜输入；惯性适配与舵轮逐轴计算，Motor/CAN 独立恢复。
 
@@ -71,11 +71,11 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_io -d ../build/bringup/gimbal_io
 ```
 
-修改 [diagnostics_config.hpp](include/robotics/vehicle/diagnostics_config.hpp) 中唯一的 `diagnostic_output` 后重编译烧录，即可选择 Log 或 Vofa；同一 UART、115200 8N1、运行期间固定模式。VOFA 的 19 通道布局、有效位与阻塞原因见入口说明。
+启用 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS` 的工程可在 [diagnostics_config.hpp](include/robotics/vehicle/diagnostics_config.hpp) 中选择 Log 或 Vofa，再重编译烧录；同一 UART、115200 8N1、运行期间固定模式。布局以具体工程为准：上车工程的 19 通道见入口说明，正式云台的 32 通道见[响应通道表](docs/dev/云台双轴响应VOFA通道说明.md)。
 
 ## 构建一个样例
 
-命令从 west 工作区根目录执行；如果当前目录就是 `skywalker_code`，则可直接使用下面的源码路径。构建目录建议每个目标独立保存：
+以下命令从 `skywalker_code` 仓库目录执行；从 west 工作区根目录执行时，源码路径前需加 `skywalker_code/`。构建目录建议每个目标独立保存：
 
 ```bash
 west build -p -b dm_mc02/stm32h723xx \
@@ -123,7 +123,7 @@ skywalker_code/
 ├── config/vehicle/installed/   云台 / 底盘共享 overlay 与基础配置
 ├── samples/bringup/            21 个固定装配的实车上车工程
 ├── samples/                    其他单一功能与教学台架样例
-├── applications/               各自装配的 sentry_chassis / sentry_gimbal 手动应用
+├── applications/               各自装配的 sentry_chassis / sentry_gimbal 应用
 ├── tests/motor/regression/     电机软件回归测试
 ├── docs/                       当前文档与原始 PDF 手册
 ├── west.yml                    Zephyr 与依赖 revision

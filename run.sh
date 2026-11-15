@@ -1,1 +1,3 @@
-python3 -m http.server 4173 --bind 127.0.0.1 --directory docs/architecture-browser
+#!/bin/bash
+
+./docs/architecture-browser/run.sh "$@"

@@ -17,7 +17,7 @@ west build -b dm_mc02/stm32h723xx applications/sentry_chassis -d ../build/applic
 
 默认是受中央电流上限约束的手动机械链，不启用功率闭环，不以估算功率冒充实测，不宣称已实现裁判约束。当前轮半径、轮距、轴距和舵向零点仍需实车标定。大 Yaw 的 gear_ratio 指 Motor API 接口侧到关节侧速度比；线路目标/反馈均为关节 rad/s，见 [v4 契约](../../docs/protocols/interboard-v4.md)。
 
-诊断用共享 `diagnostic-uart` 和 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 的唯一输出选择，日志/VOFA 都通过 DAPLink。初始化失败不退出，持续报告步骤、阻塞原因和数据年龄。共享通道顺序与布局版本见 [上车入口说明](../../samples/bringup/README.md)。本应用保留固定 19 通道，运行诊断聚焦大 Yaw；状态灯仍综合四轮与大 Yaw 状态。
+当前底盘共享配置默认关闭 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS`。启用后使用共享 `diagnostic-uart` 和 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 选择日志或 VOFA，通过 DAPLink 输出。初始化失败不退出，持续报告步骤、阻塞原因和数据年龄。共享通道顺序与布局版本见 [上车入口说明](../../samples/bringup/README.md)。启用 VOFA 后本应用保留固定 19 通道，运行诊断聚焦大 Yaw；状态灯仍综合四轮与大 Yaw 状态。
 
 | 通道（从 0 开始） | 含义 |
 | --- | --- |

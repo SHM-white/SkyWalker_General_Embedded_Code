@@ -1,6 +1,6 @@
 # 01 快速开始
 
-本文只描述当前仓库真实存在的构建入口。命令默认在 west 工作区根目录执行；如果 `skywalker_code` 就是当前目录，路径可以直接写成 `samples/...`。
+本文只描述当前仓库真实存在的构建入口。除特别说明外，构建命令在 `skywalker_code` 仓库目录执行；若从 west 工作区根目录执行，源码路径需加 `skywalker_code/`。
 
 ## 1. 准备环境
 
@@ -26,9 +26,10 @@ self:
 west init -m https://github.com/SHM-white/SkyWalker_General_Embedded_Code.git skywalker_ws
 cd skywalker_ws
 west update
+cd skywalker_code
 ```
 
-已有工作区只需确认 manifest 已包含本仓库，然后执行 `west update`。不要只复制本目录而跳过 manifest 依赖，否则 CMSIS-DSP 或板卡搜索路径可能不完整。
+已有工作区只需确认 manifest 已包含本仓库，然后执行 `west update` 并进入 `skywalker_code`。不要只复制本目录而跳过 manifest 依赖，否则 CMSIS-DSP 或板卡搜索路径可能不完整。
 
 ## 2. 第一个构建
 
@@ -84,7 +85,7 @@ west build -p -b dm_mc02/stm32h723xx \
 1. 调试器目标电压和地线已连接。
 2. `build/<name>/zephyr/runners.yaml` 中的 `flash-runner` 与实际探针一致。
 3. `rm_typec` 已连接外部 CMSIS-DAP / ST-Link；它没有板载调试器。
-4. 教学样例按对应 console UART 打开串口；实车 `samples/bringup/` 与两个应用关闭 console，统一使用 `diagnostic-uart`，当前候选为 UART7、115200 8N1，经 DAPLink 观察，须先确认实际接线。
+4. 教学样例按对应 console UART 打开串口；实车工程使用候选 UART7 的 `diagnostic-uart`，115200 8N1，经 DAPLink 观察，须先确认接线及该工程是否启用了诊断。
 
 ## 4. 按目标选择样例
 
@@ -97,7 +98,7 @@ west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_head_imu -d ../build/br
 west build -b dm_mc02/stm32h723xx samples/bringup/gimbal_yaw_encoder -d ../build/bringup/gimbal_yaw_encoder
 ```
 
-只选择源码目录，不叠加角色、锁 Pitch 或场景 conf。日志与 VOFA 通过同一 DAPLink 串口；仅修改 `include/robotics/vehicle/diagnostics_config.hpp` 的 `diagnostic_output`，按原命令重编译烧录。完整操作与通道顺序见各工程 README。下表其余样例用于通用教学/台架，可能采用其他接线和 USB 输出。
+只选择源码目录，不叠加角色、锁 Pitch 或场景 conf。启用诊断的工程通过同一 DAPLink 串口输出日志或 VOFA；通过 `include/robotics/vehicle/diagnostics_config.hpp` 的 `diagnostic_output` 选择，按原命令重编译烧录。完整操作与通道顺序见各工程 README。下表其余样例用于通用教学/台架，可能采用其他接线和 USB 输出。
 
 | 目标 | 构建入口 |
 |---|---|

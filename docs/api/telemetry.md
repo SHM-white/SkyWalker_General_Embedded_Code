@@ -1,10 +1,10 @@
 # VOFA、日志与一致快照：接口与调用参考
 
-本轮实车诊断接口对齐固件 `48984ed90898`（2026-10-25）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+通用 VOFA 接口基线为 `48984ed90898`（2026-10-25）；实车诊断布局和启用状态按 `81578dd`（2026-11-15）补充。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 从同一帧快照解释来源、目标、许可、反馈和错误；JustFloat 有界排队，主机离线不阻塞控制。
 
-**接入状态：已有代码。** 实车独立工程与两个应用使用单一 DAPLink 诊断 UART，固定 Log/Vofa 模式、19 通道及有界队列。教学样例可继续使用 `lib/vofa`：单舵轮 16 通道、M2006 USB CDC 12 通道等，以各 README 为准。
+**接入状态：已有代码。** 实车工程可通过 Kconfig 启用单一 DAPLink 诊断 UART，使用固定 Log/Vofa 模式及有界队列；当前云台侧共享配置启用，底盘侧默认关闭。默认布局为 19 通道，正式云台使用 32 通道 schema 113。教学样例可继续使用 `lib/vofa`：单舵轮 16 通道、M2006 USB CDC 12 通道等，以各 README 为准。
 
 ## 职责与关联
 
@@ -30,11 +30,11 @@ void Diagnostics::status(const DiagnosticStatus &sample);
 - `status()` 最快每 20 ms 提交一次当前状态；Log 模式通常 1 Hz，原因变化另报。`DiagnosticStatus` 包含 reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、extra0/1，量纲由具体入口声明。
 - 每个 `Diagnostics` 实例只有一个应用/观测线程调用。发送内容复制到共享固定队列，UART 由唯一低优先级 worker 发送；提交不等待串口或主机。队列 16 项、每项最多 192 字节，拥塞丢观测并计数，不改变电机授权。
 
-只改 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 的 `diagnostic_output` 为 `DiagnosticOutput::Log` 或 `DiagnosticOutput::Vofa`，重新编译烧录；不增加构建参数或运行时切换命令。当前候选 `diagnostic-uart` 为 UART7、115200 8N1，经 DAPLink 连接，实物接线仍待确认。
+先在工程配置中启用 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS`；再在 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 选择 `DiagnosticOutput::Log` 或 `DiagnosticOutput::Vofa`，重新编译烧录。关闭时接口为空实现，不输出诊断。当前候选 `diagnostic-uart` 为 UART7、115200 8N1，经 DAPLink 连接，实物接线仍待确认。
 
 `base.conf` 关闭 console/shell/banner 和默认串口日志后台。专用后台让 Log 模式的 LOG/printk 进入同一队列，Vofa 模式从初始化阶段丢弃文本。实车路径直接封装 JustFloat 经 worker 发送，不调用下文 `vofa_init()`；不要在这个 UART 再注册另一个回调或文本发送者。
 
-Vofa 布局 1 为 19 个 float，80 字节/帧、上限 50 Hz：layout、seq低/高16、uptime_ms低/高16、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低/高16、extra0/1。valid=false 时 feedback=NaN，未知 age=-1；大值拆分避免 float 丢低位。完整通道和 reason 编号见 [上车说明](../../samples/bringup/README.md)，target/feedback/extra 的物理含义见各工程 README。
+默认 Vofa 布局 1 为 19 个 float，80 字节/帧、上限 50 Hz：layout、seq低/高16、uptime_ms低/高16、reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、dropped低/高16、extra0/1。valid=false 时 feedback=NaN，未知 age=-1；大值拆分避免 float 丢低位。完整通道和 reason 编号见 [上车说明](../../samples/bringup/README.md)，target/feedback/extra 的物理含义见各工程 README。正式云台调用 `gimbalResponse()` 输出 [32 通道 schema 113](../dev/云台双轴响应VOFA通道说明.md)，不能按布局 1 解读。
 
 诊断初始化失败或系统致命故障可能停流，主机必须保留时间，不能把最后一帧当作持续有效。普通 RAM 历史不跨复位/烧录保存，日志与波形由电脑留存。
 

@@ -131,7 +131,7 @@ west build -p -b dm_mc02/stm32h723xx -d build/swerve \
 | `samples/bringup/` | 当前实车的 21 个固定装配入口，共享物理参数、纯配置和诊断 |
 | 其他 `samples/` | 教学或历史台架，接线、USB、角色配置以各样例为准 |
 | `applications/sentry_chassis` | 独立 main：四舵轮、大 Yaw、实际板间授权；不启用功率闭环 |
-| `applications/sentry_gimbal` | 独立 main：物理 RC、CAN3 头 IMU、惯性双轴与回中；不启动视觉/发射 |
+| `applications/sentry_gimbal` | 独立 main：遥控、CAN3 头 IMU、视觉/导航来源、双轴控制与发射执行器；详见应用 README |
 
 整机应用的配置和线程关系见 [双主控应用](../applications/dual-controller.md)；从遥控到执行器的调用顺序见 [模块联动](../applications/module-integration.md)。
 
