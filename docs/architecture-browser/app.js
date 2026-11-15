@@ -16,6 +16,47 @@
   const statusText = {ready: '已有代码', partial: '接入 / 配置未完成', planned: '目标 / 待实现'};
   let renderVersion = 0;
   let toastTimer;
+function loadPreference(key, values, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return values.includes(value) ? value : fallback;
+  } catch { return fallback; }
+}
+
+function persistPreference(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* Private browsing may disable storage. */ }
+}
+
+function applyThemePreference(mode) {
+  const root = document.documentElement;
+  root.dataset.theme = mode === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : mode;
+  document.getElementById('theme-choice').value = mode;
+}
+
+function applyCodePreference(mode) {
+  const root = document.documentElement;
+  const result = mode === 'auto'
+    ? (window.matchMedia('(max-width: 760px)').matches ? 'wrap' : 'scroll') : mode;
+  root.dataset.codeLayout = result;
+  document.getElementById('code-layout-choice').value = mode;
+  document.querySelectorAll('[data-wrap-code]').forEach(button => {
+    button.textContent = result === 'wrap' ? '全部横向滚动' : '全部自动换行';
+    button.setAttribute('aria-pressed', String(result === 'wrap'));
+  });
+}
+  let themeMode = loadPreference('skywalker-doc-theme', ['system', 'light', 'dark'], 'system');
+  let codeMode = loadPreference('skywalker-code-layout', ['auto', 'wrap', 'scroll'], 'auto');
+
+function setCodePreference(mode) {
+  if (!['auto','wrap','scroll'].includes(mode)) return;
+  codeMode=mode;persistPreference('skywalker-code-layout',mode);applyCodePreference(mode);
+}
+function setThemePreference(mode) {
+  if (!['system','light','dark'].includes(mode)) return;
+  themeMode=mode;persistPreference('skywalker-doc-theme',mode);applyThemePreference(mode);
+}
+
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
   const text = value => Array.isArray(value) ? value.join('；') : String(value ?? '');
@@ -96,6 +137,26 @@
     return lines;
   }
 
+function vehicleSummary(graph) {
+  const names = {input: '外部输入与测量', host: '视觉 / 导航主机', gimbal: '云台主控与机构', chassis: '底盘主控与机构'};
+  const zones = [...new Set(graph.nodes.map(node => node.zone))];
+  return `<section class="vehicle-mobile" aria-label="按控制器划分的架构文字版">${zones.map(zone => {
+    const items = graph.nodes.filter(node => node.zone === zone).sort((a, b) => a.y - b.y || a.x - b.x);
+    return `<div class="vehicle-mobile-zone"><h3>${esc(names[zone] || zone || '其他模块')}</h3><div class="vehicle-mobile-group">${items.map(node => {
+      const inner = `<strong>${esc(node.title)}</strong><small>${esc(node.detail)}</small>`;
+      return byId.has(node.moduleId)
+        ? `<a class="vehicle-mobile-node ${esc(node.status)}" href="#module/${esc(node.moduleId)}">${inner}</a>`
+        : `<div class="vehicle-mobile-node ${esc(node.status)}">${inner}</div>`;
+    }).join('')}</div></div>`;
+  }).join('')}<details class="vehicle-mobile-links"><summary>查看全部数据连接 · ${graph.edges.length} 条</summary>
+    <ul>${graph.edges.map(edge => {
+      const a = graph.nodes.find(node => node.id === edge.from);
+      const b = graph.nodes.find(node => node.id === edge.to);
+      if (!a || !b) return '';
+      return `<li>${esc(a.title)} → ${esc(b.title)}${edge.label ? ` · ${esc(edge.label)}` : ''}</li>`;
+    }).join('')}</ul></details></section>`;
+}
+
   function vehicleDiagram(mode) {
     const graph = window.SKYWALKER_VEHICLE_MAP?.[mode];
     if (!graph) return '';
@@ -130,14 +191,29 @@
       const body = `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="7"/><circle cx="${node.x + node.w - 12}" cy="${node.y + 13}" r="3"/><text x="${node.x + 12}" y="${node.y + 22}">${titleLines.map((line, index) => `<tspan x="${node.x + 12}" dy="${index ? 16 : 0}">${esc(line)}</tspan>`).join('')}</text><text class="vehicle-detail" x="${node.x + 12}" y="${node.y + 22 + titleLines.length * 16}">${detailLines.map((line, index) => `<tspan x="${node.x + 12}" dy="${index ? 13 : 0}">${esc(line)}</tspan>`).join('')}</text>`;
       return `<g class="vehicle-node ${esc(node.status)}"><title>${esc(node.title)}：${esc(node.detail)}；${statusText[node.status] || ''}</title>${byId.has(node.moduleId) ? `<a href="#module/${esc(node.moduleId)}" aria-label="查看${esc(node.title)}接口">${body}</a>` : body}</g>`;
     }).join('');
-    return `<div class="vehicle-map-wrap"><svg class="vehicle-map" viewBox="0 0 1100 ${graph.height || 560}" role="img" aria-labelledby="vehicle-title"><title id="vehicle-title">${mode === 'current' ? '当前实际接入' : '最终上车目标'}：物理分工和数据流。下方提供对应文字链路。</title><defs>${['command', 'feedback', 'permission', 'planned'].map(kind => `<marker id="vehicle-${kind}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path class="arrow-${kind}" d="M0 0 L10 5 L0 10z"/></marker>`).join('')}</defs>${zones}${edges}${boxes}</svg></div>`;
+    const svg = `<svg class="vehicle-map" viewBox="0 0 1100 ${graph.height || 560}" role="img" aria-labelledby="vehicle-title"><title id="vehicle-title">${mode === 'current' ? '当前实际接入' : '最终上车目标'}：物理分工和数据流。下方提供对应文字链路。</title><defs>${['command', 'feedback', 'permission', 'planned'].map(kind => `<marker id="vehicle-${kind}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path class="arrow-${kind}" d="M0 0 L10 5 L0 10z"/></marker>`).join('')}</defs>${zones}${edges}${boxes}</svg>`;
+    const compactSvg = svg.replace(/vehicle-(command|feedback|permission|planned)/g, 'vehicle-mobile-$1')
+      .replaceAll('vehicle-title', 'vehicle-mobile-title');
+    return `<div class="vehicle-diagram-panel"><div class="diagram-toolbar">
+      <span>按住 Shift 并滚动、或使用下列按钮调整图的显示比例；图内节点可点击查看接口</span>
+      <div class="diagram-zoom-controls" aria-label="架构图缩放">
+        <button type="button" data-diagram-zoom="-1" aria-label="缩小图">−</button>
+        <button type="button" data-diagram-zoom="0">重置</button>
+        <button type="button" data-diagram-zoom="1" aria-label="放大图">＋</button>
+      </div></div>
+      <div class="vehicle-map-wrap">${svg}</div>
+      ${vehicleSummary(graph)}
+      <details class="vehicle-full-toggle"><summary>需要查看连线位置？展开完整矢量架构图（左右滑动）</summary>
+        <div class="vehicle-map-wrap">${compactSvg}</div></details>
+      <div class="vehicle-legend"><span>命令方向</span><span class="feedback">状态 / 反馈</span>
+        <span class="permission">许可来源</span><span class="planned">待实现链路</span></div></div>`;
   }
 
   function overview(params) {
     const mode = params.get('mode') === 'target' ? 'target' : 'current';
     const data = architecture[mode];
     const stats = [{number: '02', title: '实时主控分工', note: '云台决策 / 底盘执行'}, {number: String(modules.length).padStart(2, '0'), title: '模块接口手册', note: '源码、契约与调用顺序'}, {number: String(modules.length), title: '独立接口手册', note: 'Markdown 契约与调用示例'}, {number: documentMode ? String(documents.length) : '—', title: 'Markdown 阅读入口', note: '自动发现正文与样例'}];
-    content.innerHTML = heading('01 / System architecture', '从模块到整车，一张图读懂。', `对齐 ${architecture.baseline.branch}@${architecture.baseline.commit.slice(0, 7)} · ${architecture.baseline.date}。先看主控分工，再查公开接口与来源/测量缺口。`, `${pill('partial', '整车装配仍在进行')}<a class="quiet-link" href="#history">查看这次重建的来历 ↗</a>`) +
+    content.innerHTML = heading('01 / System architecture', '从模块到整车，一张图读懂。', `对齐 ${architecture.baseline.branch}@${architecture.baseline.commit.slice(0, 7)} · ${architecture.baseline.date}。先看主控分工，再查公开接口与来源/测量缺口。`, `${pill('partial', '整车装配仍在进行')}<a class="quiet-link" href="#history">查看文档更新记录 ↗</a>`) +
       documentWarning() + `<div class="intro-stats">${stats.map(stat => `<div class="stat"><div class="stat-number">${stat.number}</div><div class="stat-title">${stat.title}</div><small>${stat.note}</small></div>`).join('')}</div>
       <div class="overview-mode"><div class="tabs" aria-label="架构视图"><a class="${mode === 'current' ? 'active' : ''}" ${mode === 'current' ? 'aria-current="page"' : ''} href="#overview?mode=current">当前实际接入</a><a class="${mode === 'target' ? 'active' : ''}" ${mode === 'target' ? 'aria-current="page"' : ''} href="#overview?mode=target">最终上车蓝图</a></div><div class="legend"><span><i class="ready"></i>已有代码</span><span><i class="partial"></i>接入 / 配置未完成</span><span><i class="planned"></i>目标 / 待实现</span></div></div>
       <div class="panel"><div class="panel-header"><div><h2>${mode === 'current' ? '目前代码真正连通的路线' : '两块实时主控 + 视觉计算机'}</h2><p>点击图中模块进入接口手册 · 箭头表示数据方向</p></div><a class="quiet-link" href="#relations">展开所有模块关系 ↗</a></div>${vehicleDiagram(mode)}<div class="map-footer"><strong>${mode === 'current' ? '当前状态' : '目标约定'}：</strong>${esc(data.summary)}<div class="feedback-lines"><span>→ 命令：带单位的目标与原始时间</span><span>← 反馈：状态 / 参考 / 有效测量</span><span>许可：裁判 + 本地执行条件</span></div></div></div>
@@ -195,9 +271,20 @@
       const titleLines = wrapSvg(module.title, 13, 2);
       return `<g class="graph-node ${module.id === selected.id ? 'selected' : connected.has(module.id) ? 'connected' : ''}"><a href="#relations?selected=${esc(module.id)}" aria-label="高亮${esc(module.title)}的依赖"><rect x="${pos.x}" y="${pos.y}" width="${pos.w}" height="${pos.h}" rx="8"/><text x="${pos.x + 13}" y="${pos.y + 24}">${titleLines.map((line, index) => `<tspan x="${pos.x + 13}" dy="${index ? 17 : 0}">${esc(line)}</tspan>`).join('')}</text><text class="graph-subtitle" x="${pos.x + 13}" y="${pos.y + 70}">${esc(module.id)}</text></a></g>`;
     }).join('');
+    const mobilePicker = `<div class="relation-mobile-select"><label for="relation-module-picker">查看模块</label>
+      <select id="relation-module-picker" aria-label="选择模块查看上下游">
+      ${columns.map(column => `<optgroup label="${esc(column.title)}">${column.ids.map(mid =>
+        `<option value="${esc(mid)}" ${mid === selected.id ? 'selected' : ''}>${esc(byId.get(mid)?.title || mid)}</option>`
+      ).join('')}</optgroup>`).join('')}</select></div>`;
+    const compactLinks = `<div class="relation-compact"><h3>按架构层级浏览模块</h3>
+      <div class="relation-compact-grid">${columns.map(column => `<section class="relation-compact-group">
+      <h4>${esc(column.title)}</h4>${column.ids.map(mid =>
+        `<a href="#relations?selected=${esc(mid)}" class="${mid === selected.id ? 'active' : ''}">${esc(byId.get(mid)?.title || mid)}</a>`
+      ).join('')}</section>`).join('')}</div></div>`;
+    const smallScreen = window.matchMedia('(max-width: 1000px)').matches;
     content.innerHTML = heading('02 / Module relationships', '模块各司其职，关系一眼可见。', '箭头从被依赖的模块指向使用它的模块。点击节点高亮直接上下游；这是软件依赖图，整车实时数据流见架构总览和调用链。') +
-      `<div class="graph-layout"><div class="panel"><div class="panel-header"><div><h3>模块依赖地图</h3><p>当前选择：${esc(selected.title)}</p></div><a class="quiet-link" href="#relations?selected=application">定位整机应用 ↗</a></div><div class="relation-graph-wrap"><svg class="relation-graph" viewBox="0 0 1120 ${Math.max(610, 185 + (Math.max(...columns.map(column => column.ids.length)) - 1) * 128)}" role="img" aria-labelledby="relation-title"><title id="relation-title">SkyWalker 模块依赖图；绿色箭头为${esc(selected.title)}的直接关系。右侧提供同样的文字链接。</title><defs><marker id="edge-highlight" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path fill="#168674" d="M0 0 L10 5 L0 10z"/></marker><marker id="edge-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path fill="#cad6de" d="M0 0 L10 5 L0 10z"/></marker></defs>${columns.map((column, index) => `<text class="graph-lane-label" x="${20 + index * 220}" y="35">${esc(column.title)}</text>`).join('')}${paths}${boxes}</svg></div><div class="graph-legend"><span>所选模块的直接关系</span><span>其余模块依赖</span></div></div>
-      <aside class="panel graph-detail">${pill(selected.status)}<h3>${esc(selected.title)}</h3><p>${esc(selected.responsibility)}</p><div class="relation-label">输入 / 依赖</div><div class="relation-chips">${list(selected.depends).map(id => `<a class="relation-chip" href="#relations?selected=${esc(id)}">${esc(byId.get(id)?.title || id)}</a>`).join('') || '<span class="count-note">直接对接底层设备。</span>'}</div><div class="relation-label">消费者 / 下游</div><div class="relation-chips">${downstream(selected.id).map(module => `<a class="relation-chip" href="#relations?selected=${esc(module.id)}">${esc(module.title)}</a>`).join('') || '<span class="count-note">应用 / 样例直接使用。</span>'}</div><p style="margin-top:20px">${esc(selected.statusNote)}</p><a class="primary-button" href="#module/${esc(selected.id)}">打开接口与调用示例 →</a></aside></div>`;
+      mobilePicker + `<div class="graph-layout"><div class="panel relation-map-panel"><div class="panel-header"><div><h3>模块依赖地图</h3><p>当前选择：${esc(selected.title)}</p></div><a class="quiet-link" href="#relations?selected=application">定位整机应用 ↗</a></div><details class="relation-map-details" ${smallScreen ? '' : 'open'}><summary>展开完整依赖图（可左右滑动，点击节点选择）</summary><div class="relation-graph-wrap"><svg class="relation-graph" viewBox="0 0 1120 ${Math.max(610, 185 + (Math.max(...columns.map(column => column.ids.length)) - 1) * 128)}" role="img" aria-labelledby="relation-title"><title id="relation-title">SkyWalker 模块依赖图；绿色箭头为${esc(selected.title)}的直接关系。右侧提供同样的文字链接。</title><defs><marker id="edge-highlight" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path fill="#168674" d="M0 0 L10 5 L0 10z"/></marker><marker id="edge-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path fill="#cad6de" d="M0 0 L10 5 L0 10z"/></marker></defs>${columns.map((column, index) => `<text class="graph-lane-label" x="${20 + index * 220}" y="35">${esc(column.title)}</text>`).join('')}${paths}${boxes}</svg></div><div class="graph-legend"><span>所选模块的直接关系</span><span>其余模块依赖</span></div></details></div>
+      <aside class="panel graph-detail">${pill(selected.status)}<h3>${esc(selected.title)}</h3><p>${esc(selected.responsibility)}</p><div class="relation-label">输入 / 依赖</div><div class="relation-chips">${list(selected.depends).map(id => `<a class="relation-chip" href="#relations?selected=${esc(id)}">${esc(byId.get(id)?.title || id)}</a>`).join('') || '<span class="count-note">直接对接底层设备。</span>'}</div><div class="relation-label">消费者 / 下游</div><div class="relation-chips">${downstream(selected.id).map(module => `<a class="relation-chip" href="#relations?selected=${esc(module.id)}">${esc(module.title)}</a>`).join('') || '<span class="count-note">应用 / 样例直接使用。</span>'}</div><p style="margin-top:20px">${esc(selected.statusNote)}</p><a class="primary-button" href="#module/${esc(selected.id)}">打开接口与调用示例 →</a></aside></div>${compactLinks}`;
   }
 
   function workflows(id, params) {
@@ -207,9 +294,19 @@
     const index = Math.min(scenario.steps.length - 1, Math.max(0, Number.isFinite(requested) ? requested : 0));
     const step = scenario.steps[index];
     const module = byId.get(step.moduleId);
+    const mobileSteps = `<section class="workflow-mobile-steps" aria-label="完整调用链步骤">
+      <h2>完整步骤 · ${scenario.steps.length} 步</h2>
+      <ol>${scenario.steps.map((item, number) => `<li><details ${number === index ? 'open' : ''}>
+        <summary><span class="step-index">${number + 1}</span><strong>${esc(item.title)}</strong></summary>
+        <div class="workflow-mobile-detail"><p>${esc(item.detail)}</p>
+        ${byId.has(item.moduleId) ? `<a href="#module/${esc(item.moduleId)}">打开 ${esc(byId.get(item.moduleId).title)} 接口 →</a>` : ''}</div>
+      </details></li>`).join('')}</ol>
+      <div class="workflow-source">本场景依据</div>
+      ${sourceLinks(scenario.sources.map(source => ({...source})), true).replaceAll('#source/docs/', '#read/docs/')}
+      </section>`;
     content.innerHTML = heading('04 / End-to-end walkthrough', '把接口连起来，才是完整控制链。', '每一步说明谁持有数据、谁负责判定、谁推进硬件。选择场景后可以逐步阅读，并直接进入对应模块。') +
       `<nav class="workflow-picker" aria-label="调用链场景">${scenarios.map(item => `<a class="${item.id === scenario.id ? 'active' : ''}" href="#workflows/${esc(item.id)}" ${item.id === scenario.id ? 'aria-current="page"' : ''}>${esc(item.title)}</a>`).join('')}</nav><div class="notice">${esc(scenario.summary)}</div>
-      <div class="workflow-layout"><ol class="workflow-timeline">${scenario.steps.map((item, number) => `<li><a class="${number === index ? 'active' : ''}" href="#workflows/${esc(scenario.id)}?step=${number}" ${number === index ? 'aria-current="step"' : ''}><span class="step-index">${number + 1}</span><span>${esc(item.title)}</span></a></li>`).join('')}</ol><section class="panel workflow-step" aria-live="polite"><p class="eyebrow">Step ${String(index + 1).padStart(2, '0')} / ${scenario.steps.length}</p><h2>${esc(step.title)}</h2><p>${esc(step.detail)}</p>${module ? `<div class="workflow-module">${pill(module.status)}<h3 style="margin-top:12px">${esc(module.title)}</h3><p>${esc(module.summary)}</p><a href="#module/${esc(module.id)}">接口契约与调用示例 →</a></div>` : ''}<div class="workflow-controls"><button class="secondary-button" data-workflow="${esc(scenario.id)}" data-step="${index - 1}" ${index === 0 ? 'disabled' : ''}>← 上一步</button><button class="primary-button" data-workflow="${esc(scenario.id)}" data-step="${index + 1}" ${index === scenario.steps.length - 1 ? 'disabled' : ''}>下一步 →</button><span>${index + 1} / ${scenario.steps.length}</span></div><div class="workflow-source">本场景依据</div>${sourceLinks(scenario.sources.map(source => ({...source})), true).replaceAll('#source/docs/', '#read/docs/')}</section></div>
+      ${mobileSteps}<div class="workflow-layout"><ol class="workflow-timeline">${scenario.steps.map((item, number) => `<li><a class="${number === index ? 'active' : ''}" href="#workflows/${esc(scenario.id)}?step=${number}" ${number === index ? 'aria-current="step"' : ''}><span class="step-index">${number + 1}</span><span>${esc(item.title)}</span></a></li>`).join('')}</ol><section class="panel workflow-step" aria-live="polite"><p class="eyebrow">Step ${String(index + 1).padStart(2, '0')} / ${scenario.steps.length}</p><h2>${esc(step.title)}</h2><p>${esc(step.detail)}</p>${module ? `<div class="workflow-module">${pill(module.status)}<h3 style="margin-top:12px">${esc(module.title)}</h3><p>${esc(module.summary)}</p><a href="#module/${esc(module.id)}">接口契约与调用示例 →</a></div>` : ''}<div class="workflow-controls"><button class="secondary-button" data-workflow="${esc(scenario.id)}" data-step="${index - 1}" ${index === 0 ? 'disabled' : ''}>← 上一步</button><button class="primary-button" data-workflow="${esc(scenario.id)}" data-step="${index + 1}" ${index === scenario.steps.length - 1 ? 'disabled' : ''}>下一步 →</button><span>${index + 1} / ${scenario.steps.length}</span></div><div class="workflow-source">本场景依据</div>${sourceLinks(scenario.sources.map(source => ({...source})), true).replaceAll('#source/docs/', '#read/docs/')}</section></div>
       ${sectionHeading('从构造到上车：推荐的装配顺序', '这里描述工程顺序，具体命令见正文')}<div class="startup-list">${architecture.startup.map((item, number) => `<article><p class="eyebrow">${String(number + 1).padStart(2, '0')} / SETUP</p><h3>${esc(item.title)}</h3><p>${esc(item.detail)}</p></article>`).join('')}</div>`;
   }
 
@@ -220,12 +317,45 @@
       `<div class="notice"><strong>阅读边界：</strong>模块正文说明现行接口；docs/dev 是设计记录与待实施方案。开发记录中的拟议 API 需要结合当前源码判断。</div>${!documents.length && documentMode ? empty('当前工作区没有可索引的 Markdown 文档。') : ''}<div class="docs-layout">${groups.map(group => `<section class="panel doc-group"><h2>${esc(group)}</h2>${documents.filter(doc => doc.group === group).map(doc => `<a class="doc-entry" href="${routeFile(doc.path)}"><span>${esc(doc.title)}<small>${esc(doc.path)}</small></span><span class="doc-arrow">↗</span></a>`).join('')}</section>`).join('')}</div>`;
   }
 
-  function historyPage() {
-    content.innerHTML = heading('06 / Git history', '什么时候变成了覆盖层？', '以下时间来自仓库 Git 记录，均为北京时间。提交记录能说明实际修改与注明的目的，未注明的动机不作猜测。') +
-      `<div class="notice warn"><strong>关键启用点：2026-09-30 03:30:47，d860163。</strong> 前一提交添加刷新脚本，该提交把它插入页面。最初为补视觉 / IMU，后续继续叠加命令服务，导致多代描述依靠运行时覆盖。Markdown 目录始终存在。</div><div class="history-timeline">${architecture.history.map(item => `<article class="history-entry"><time>${esc(item.date)}</time><h3><code class="commit">${esc(item.hash)}</code>${esc(item.title)}</h3><p>${esc(item.detail)}</p></article>`).join('')}</div>
-      ${sectionHeading('这次重建的维护方式')}<div class="panel panel-body"><ol class="steps-list"><li>一个渲染入口 app.js；接口详情维护在 docs/api 的独立 Markdown，页面读取同一正文。</li><li>主图区分“当前实际接入”和“最终上车目标”，模块代码状态与真实装配状态分开显示。</li><li>Markdown 保留为长篇正文并在浏览器内阅读；本地源码入口直接读取工作区，不再固定到过时 GitHub 提交。</li><li>API 修改时更新 docs/api 和模块主题页；应用接入变化时更新架构数据与主图；每轮按照文档同步清单逐项完成。</li></ol><a class="quiet-link" href="#read/docs/architecture-browser/README.md" style="display:block;margin-top:20px">维护与启动说明 →</a></div>`;
+async function historyPage(version) {
+  content.innerHTML = heading('06 / Documentation history', '文档更新记录', '从 Git 历史中自动筛选影响 Markdown、在线文档浏览器和 Pages 部署的提交，不混入纯业务代码提交。') +
+    '<div class="loading" role="status">正在读取文档提交记录…</div>';
+  try {
+    const response = await fetch(new URL('history.json', window.location.href), {cache: 'no-store'});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const history = await response.json();
+    if (history.mode !== 'git' || !Array.isArray(history.commits)) throw new Error('当前服务器无法提供 Git 文档历史');
+    if (version !== renderVersion) return;
+    const entries = history.commits.filter(item => /^[0-9a-f]{40}$/.test(item.sha) && typeof item.title === 'string' &&
+      Array.isArray(item.paths));
+    const renderEntry = item => {
+      const date = new Date(item.date);
+      const when = Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }) : item.date;
+      const url = `https://github.com/SHM-white/SkyWalker_General_Embedded_Code/commit/${item.sha}`;
+      return `<article class="history-entry"><time datetime="${esc(item.date)}">${esc(when)}（北京时间）</time>
+        <h3><a class="commit-link" href="${url}" target="_blank" rel="noopener noreferrer">${esc(item.sha.slice(0, 9))}</a>${esc(item.title)}</h3>
+        <details class="history-files"><summary>查看本次涉及的 ${item.paths.length} 个文档 / 站点文件</summary>
+          <ul>${item.paths.map(file => `<li><code>${esc(file)}</code></li>`).join('')}</ul>
+        </details></article>`;
+    };
+    const latest = entries.slice(0, 35);
+    const older = entries.slice(35);
+    content.innerHTML = heading('06 / Documentation history', '文档更新记录', '来源为当前仓库 Git 提交历史。只展示修改 Markdown、浏览器前端或文档部署流程的提交；标题与时间保留原提交信息。') +
+      `<div class="notice">共收录最近 ${entries.length} 条相关提交。时间统一按北京时间展示；单击提交哈希查看 GitHub 原始改动。若本地仓库历史不完整，记录将受克隆深度限制。</div>` +
+      (entries.length ? `<div class="history-timeline">${latest.map(renderEntry).join('')}</div>` : empty('暂无文档相关提交。')) +
+      (older.length ? `<details class="history-older"><summary>展开更早的 ${older.length} 条文档提交</summary>
+         <div class="history-timeline">${older.map(renderEntry).join('')}</div></details>` : '') +
+      `<p class="count-note">此处不再人工维护提交列表。静态站点在部署时生成历史快照，本地 run.sh 在访问时从 Git 读取。</p>`;
+  } catch (error) {
+    if (version !== renderVersion) return;
+    content.innerHTML = heading('06 / Documentation history', '文档更新记录', '从 Git 提交记录中筛选影响文档的修改。') +
+      `<div class="notice warn history-fallback">当前未能加载文档提交记录：${esc(error.message)}。请使用仓库 run.sh 或等待 GitHub Pages 重新部署。
+      也可直接打开 <a target="_blank" rel="noopener noreferrer" href="https://github.com/SHM-white/SkyWalker_General_Embedded_Code/commits/main/docs/">GitHub 的 docs/ 提交历史</a>。</div>`;
   }
-
+}
   function searchPage(params) {
     const query = (params.get('q') || '').trim();
     input.value = query;
@@ -308,11 +438,11 @@
         index++;
         while (index < lines.length && !new RegExp(`^\\s*${fence[1][0]}{${fence[1].length},}\\s*$`).test(lines[index])) block.push(lines[index++]);
         if (index < lines.length) index++;
-        const softWrap = window.matchMedia('(max-width: 760px)').matches;
+        const softWrap = document.documentElement.dataset.codeLayout === 'wrap';
         chunks.push((language === 'mermaid' ? '<div class="unrendered-diagram">此正文中的 Mermaid 原始定义如下；交互架构图见“整车架构”和“模块关系”。</div>' : '') +
           '<div class="code-example"><div class="code-heading"><strong>' + esc(language || 'text') +
           '</strong><div class="code-actions"><button type="button" data-wrap-code aria-pressed="' + String(softWrap) + '">' +
-          (softWrap ? '横向滚动' : '自动换行') + '</button><button type="button" data-copy-code>复制代码</button></div></div><pre><code class="language-' +
+          (softWrap ? '全部横向滚动' : '全部自动换行') + '</button><button type="button" data-copy-code>复制代码</button></div></div><pre><code class="language-' +
           esc(language) + '">' + highlightCode(block.join('\n'), language) + '</code></pre></div>');
         continue;
       }
@@ -436,7 +566,7 @@
       case 'module': await moduleDetail(id, params, version); return;
       case 'workflows': workflows(id, params); if (params.has('step')) requestAnimationFrame(() => window.scrollTo({top: previousScroll})); break;
       case 'docs': docsPage(); break;
-      case 'history': historyPage(); break;
+      case 'history': await historyPage(version); return;
       case 'search': searchPage(params); break;
       case 'read': await readFile(id, false, params, version); return;
       case 'source': await readFile(id, true, params, version); return;
@@ -477,28 +607,51 @@
     if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) { event.preventDefault(); input.focus(); }
     if (event.key === 'Escape') { setNavigationOpen(false); input.blur(); }
   });
+  content.addEventListener('change', event => {
+    if (event.target.id === 'relation-module-picker') {
+      window.location.hash = 'relations?selected=' + encodeURIComponent(event.target.value);
+    }
+  });
   content.addEventListener('click', event => {
     if (event.target.closest('[data-refresh-docs]')) { render(); return; }
     const category = event.target.closest('[data-category]');
     if (category) window.location.hash = `modules?category=${encodeURIComponent(category.dataset.category)}`;
     const wrapButton = event.target.closest('[data-wrap-code]');
-    if (wrapButton) {
-      const shouldWrap = wrapButton.getAttribute('aria-pressed') !== 'true';
-      const block = wrapButton.closest('.code-example');
-      block.classList.toggle('force-wrap', shouldWrap);
-      block.classList.toggle('no-wrap', !shouldWrap);
-      wrapButton.setAttribute('aria-pressed', String(shouldWrap));
-      wrapButton.textContent = shouldWrap ? '横向滚动' : '自动换行';
-      return;
-    }
+    if (wrapButton) { setCodePreference(document.documentElement.dataset.codeLayout === 'wrap' ? 'scroll' : 'wrap'); return; }
     const copyButton = event.target.closest('[data-copy-code]');
     if (copyButton) {
       const code = copyButton.closest('.code-example')?.querySelector('pre code');
       if (code) copy(code.textContent);
     }
+    const zoomButton = event.target.closest('[data-diagram-zoom]');
+    if (zoomButton) {
+      const wrap = zoomButton.closest('.vehicle-diagram-panel')?.querySelector('.vehicle-map-wrap');
+      const svg = wrap?.querySelector('svg');
+      if (svg) {
+        const previous = Number.parseFloat(svg.style.getPropertyValue('--diagram-zoom')) || 1;
+        const delta = Number.parseInt(zoomButton.dataset.diagramZoom, 10);
+        const next = delta === 0 ? 1 : Math.max(.8, Math.min(1.8, previous + delta * .2));
+        svg.style.setProperty('--diagram-zoom', String(next));
+      }
+      return;
+    }
     const step = event.target.closest('[data-workflow]');
     if (step && !step.disabled) window.location.hash = `workflows/${step.dataset.workflow}?step=${step.dataset.step}`;
   });
+  document.getElementById('theme-choice').addEventListener('change', event => setThemePreference(event.target.value));
+  document.getElementById('code-layout-choice').addEventListener('change', event => setCodePreference(event.target.value));
+  document.addEventListener('click', event => {
+    const settings = document.getElementById('display-settings');
+    if (!settings.contains(event.target)) settings.open = false;
+  });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (themeMode === 'system') applyThemePreference(themeMode);
+  });
+  window.matchMedia('(max-width: 760px)').addEventListener('change', () => {
+    if (codeMode === 'auto') applyCodePreference(codeMode);
+  });
+  applyThemePreference(themeMode);
+  applyCodePreference(codeMode);
   nav();
   window.addEventListener('hashchange', render);
   render();
