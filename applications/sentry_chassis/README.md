@@ -2,8 +2,8 @@
 
 参考 v4 的 `0x0101` 平移以云台系定义：底盘在舵轮运动学之前，使用大 Yaw 原生电机反馈角 `native_position_rad` 及同坐标系的固定前向零位做车体系转换；参考小陀螺平移降速也在转换前执行。角度必须新鲜、原生角有效且为有限数；反馈中断时平移清零，在新鲜角度及有效行走命令恢复后重新放行。该转换不依赖连续位置展开参考，因此大 Yaw 掉线恢复后无需重新建立连续位置参考。BMI088 用于将大 Yaw 目标世界角速度换算为关节相对角速度。
 大 Yaw 在板间只接受 `0x0402 mode=0/1`，不再接受 `mode=2` 线上扩展。可选 MIT 航向内环仍是本地驱动策略，不改变 v4 的速度语义。
-原生速度配置的大 Yaw 关节速度上限由 `calibration.hpp` 的 `reference_big_yaw.velocity_limit_rad_s` 提供。世界速度经底盘旋转补偿后，按执行器使用的同一关节上限饱和，避免正常补偿超限触发反复失能。云台回中世界速度上限由云台入口单独设置；回中请求斜率恢复 0.8 rad/s²，原生电机速度斜率仍为 20 rad/s²。2026-11-12 本次回滚恢复 `4dc29fb` 的航向跟随器，去掉新增世界整形、按执行输出积分目标及停车停留逻辑；需与云台一同更新，诊断布局 I19=109。
-参数及双板启动、断流/重启规则见 [IMU 航向验收](../../docs/dev/哨兵IMU航向控制验收.md)。
+原生速度配置的大 Yaw 关节速度上限由 `calibration.hpp` 的 `reference_big_yaw.velocity_limit_rad_s` 提供。世界速度经底盘旋转补偿后，按执行器使用的同一关节上限饱和，避免正常补偿超限触发反复失能。云台回中由分配器的 `center_rate_max_rad_s=0.8 rad/s` 与 `big_acceleration_max_rad_s2=10.5 rad/s²` 约束；原生电机速度斜率仍为 20 rad/s²，旧 `YawCenteringController` 的 0.8 rad/s² 路径不再参与本应用。2026-11-12 本次回滚恢复 `4dc29fb` 的航向跟随器，去掉新增世界整形、按执行输出积分目标及停车停留逻辑；需与云台一同更新，诊断布局 I19=109。
+参数及双板启动、断流/重启规则见 [共享实车配置](../../config/vehicle/installed/README.md) 与 [v4 契约](../../docs/protocols/interboard-v4.md)。
 
 固定的手动板间底盘执行入口。`src/main.cpp` 自行装配八个舵轮电机、CAN1 舵向、CAN2 轮驱、CAN3 大 Yaw、UART 板间端点及两个执行器，每个控制周期由一个执行线程各提交一次物理 CAN。无公共整车 `run()`、角色宏或场景宏。
 
@@ -17,7 +17,7 @@ west build -b dm_mc02/stm32h723xx applications/sentry_chassis -d ../build/applic
 
 默认是受中央电流上限约束的手动机械链，不启用功率闭环，不以估算功率冒充实测，不宣称已实现裁判约束。当前轮半径、轮距、轴距和舵向零点仍需实车标定。大 Yaw 的 gear_ratio 指 Motor API 接口侧到关节侧速度比；线路目标/反馈均为关节 rad/s，见 [v4 契约](../../docs/protocols/interboard-v4.md)。
 
-当前底盘共享配置默认关闭 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS`。启用后使用共享 `diagnostic-uart` 和 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 选择日志或 VOFA，通过 DAPLink 输出。初始化失败不退出，持续报告步骤、阻塞原因和数据年龄。共享通道顺序与布局版本见 [上车入口说明](../../samples/bringup/README.md)。启用 VOFA 后本应用保留固定 19 通道，运行诊断聚焦大 Yaw；状态灯仍综合四轮与大 Yaw 状态。
+当前底盘共享配置默认关闭 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS`。启用后使用共享 `diagnostic-uart` 和 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 选择日志或 VOFA，通过 DAPLink 输出。初始化失败不退出，持续报告步骤、阻塞原因和数据年龄。共享通道顺序与布局版本见 [上车入口说明](../../samples/bringup/README.md)。启用 VOFA 后本应用输出 **49 通道**（基础 19 通道 + 30 项扩展，`I19=109`），运行诊断聚焦大 Yaw；状态灯仍综合四轮与大 Yaw 状态。
 
 | 通道（从 0 开始） | 含义 |
 | --- | --- |
@@ -31,9 +31,33 @@ west build -b dm_mc02/stm32h723xx applications/sentry_chassis -d ../build/applic
 | 17 | 当前 MotorState：0 Offline、1 Disabled、2 Enabling、3 Active、4 Fault |
 | 18 | 最近一次中断时的入口阻断条件；首次中断前显示当前条件，编号见下文 |
 
+扩展通道（I19～I48，启用扩展布局时追加）：
+
+| 通道 | 含义 |
+| --- | --- |
+| 19 | 布局标识，固定 109 |
+| 20 | 当前 BigYawGate：0 None、1 PeerDisabled、3 BodyGyro、4 PeerImu、5 MissingRequest |
+| 21 | 当前执行 WaitReason |
+| 22 / 23 / 24 | 云台 `0x0404` 可用 / 世界航向 rad / 世界角速度 rad/s |
+| 25 | 底盘 BMI088 的 gyro-z，rad/s；超过 50 ms 为 NaN |
+| 26 | 收到的世界速度意图，rad/s |
+| 27 / 28 | 航向跟随目标 / 误差，rad |
+| 29 | 斜率限制后的关节速度目标，rad/s |
+| 30 / 31 / 32 | 原生编码器角 / 展开角 / 展开圈数 |
+| 33 / 34 | DM 驱动状态 / 最近电机故障原因 |
+| 35 / 36 / 37 | 停机计数 / 停机时间低 16 位 / 高 16 位 |
+| 38 / 39 | 航向捕获次数 / 最近捕获原因 |
+| 40 | 航向跟随速率积分项 |
+| 41 | 停机时的 DM 驱动状态 |
+| 42 / 43 | 捕获时间低 16 位 / 高 16 位 |
+| 44 | 90° 限幅进入次数 |
+| 45 | 上一周期 CAN commit 错误 |
+| 46 | 载体补偿前的旧世界速率，rad/s |
+| 47 / 48 | 保留，当前恒为 0 |
+
 WaitReason：0 None、1 Command、2 Transport、3 Feedback、4 Reference、5 Configuration、6 Drive、7 Power、8 Cycle。通道 14 优先记录执行错误；中断时执行错误为零则保留电机 `last_fault.error`，该电机错误可能来自此前恢复，须结合通道 13/18 判断。常见 -34 为范围错误，-116 为数据过期，-110 为超时。
 
-通道 18：0 表示入口没有主动改成 Disabled，继续根据通道 13 排查执行器；1 表示收到的请求为 Disabled；2 表示底盘行走命令被禁用，连带撤销大 Yaw；3 表示底盘 BMI088 陀螺无效或超过 50 ms；4 表示云台发来的 `0x0404` 载体航向样本无效；5 表示没有可用的大 Yaw 请求，包含接收端因原始年龄过期清空请求的情况。
+通道 18：0 表示入口没有主动改成 Disabled，继续根据通道 13 排查执行器；1 表示收到的请求为 Disabled；3 表示底盘 BMI088 陀螺无效或超过 50 ms；4 表示云台发来的 `0x0404` 载体航向样本无效；5 表示没有可用的大 Yaw 请求，包含接收端因原始年龄过期清空请求的情况。旧的“2=行走命令禁用”分支已删除。
 
 每个控制周期捕获“请求撤回”或“Active 退出”事件，通道 11/13/14/18 保留该事件直至下一次中断或重启，使 2 ms 级的短暂中断不会被 20 ms 输出周期漏掉。左 Down 主动停止也会更新这份记录，因此应保存包含故障发生过程的波形。通道 5/6/7/8/9/10/12/17 始终反映当前值。
 
@@ -41,7 +65,7 @@ WaitReason：0 None、1 Command、2 Transport、3 Feedback、4 Reference、5 Con
 
 尚未进行实板验证；每个方向、停止时限和机构组合结论需现场单独记录。
 
-舵轮新增最终优化角的 0.10/0.40 rad 驱动联锁和逐轮 cos³ 补偿；参考 2026-10-28
+舵轮只保留逐轮 cos³ 缩速，最终优化角的 0.10/0.40 rad 驱动联锁已删除；参考 2026-10-28
 标定以可切换候选保存在 calibration.hpp，默认保留旧值。见
 [符号、单位、故障与上车验收](../../docs/dev/哨兵参考工程移植验收.md)。
 
@@ -55,4 +79,4 @@ WaitReason：0 None、1 Command、2 Transport、3 Feedback、4 Reference、5 Con
 
 所有串口 DMA 通道统一声明在全局 [dm_mc02.dts](../../boards/damiao/dm_mc02/dm_mc02.dts)，应用 overlay 只选择角色、波特率和帧格式；详见[全局资源表](../../config/vehicle/installed/README.md)。
 
-大 Yaw 全链路基线固定为 `4dc29fb`：执行器、航向跟随、回中及参数使用同一版本；不再缓存过期板间请求、不重新盖章续期。编码器平移变换、`-2.62 rad` 前向零位及原生展开逻辑与该提交相同。参见 [全链路回滚记录](../../docs/dev/双Yaw回滚与控制分工分析.md#大-yaw-全链路统一回滚)。
+大 Yaw 全链路基线固定为 `4dc29fb`：执行器、航向跟随、回中及参数使用同一版本；不再缓存过期板间请求、不重新盖章续期。原生展开逻辑与该提交相同；当前标定前向零位是 `reference_big_yaw_forward_zero_rad=0.048638 rad`，`-2.62 rad` 仅为历史记录值。参见 [全链路回滚记录](../../docs/dev/archive/双Yaw回滚与控制分工分析.md#大-yaw-全链路统一回滚)。

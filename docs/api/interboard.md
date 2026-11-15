@@ -1,6 +1,6 @@
 # 双主控板间通信：接口与调用参考
 
-参考 v4 的历史核对基线为 `bad529abe5d6`（2026-11-10）；此后应用增加裁判原始帧分片转发，见[协议契约](../protocols/interboard-v4.md)和各应用源码。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+参考 v4 的核对基线为 `dd3f673`（2026-11-15）；裁判原始帧分片转发已包含在内，见[协议契约](../protocols/interboard-v4.md)和各应用源码。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 统一参考 v4 字节契约，boot/生产序号与原年龄，传输框架支持 UART/RS485/CAN 后端；**当前正式应用固定 UART 并遵循参考工程的 0x0101/0x0402/0x0404 业务语义**。
 
@@ -36,7 +36,7 @@ ConfiguredInterBoardTransport(const Config &, AsyncUart::DmaBuffers *dma = nullp
 InterBoardEndpoint(InterBoardTransport &, const Config &); void poll(uint64_t now_ms)
 ```
 
-`poll()` 由唯一通信 owner 推进；默认命令/心跳/状态接收时限为 100 ms，TX 截止时限为 60 ms。独立应用在自己的控制循环内调用，云台 5 ms、底盘 2 ms；部分上车工程使用独立通信线程，以具体入口为准。
+`poll()` 由唯一通信 owner 推进；默认命令接收 100 ms、状态接收 100 ms、心跳接收 200 ms，TX 截止时限 60 ms。独立应用在自己的控制循环内调用，云台 5 ms、底盘 2 ms；部分上车工程使用独立通信线程，以具体入口为准。
 
 **返回 / 输出：** void；服务、解析和在线诊断由 snapshot 返回。
 
@@ -44,13 +44,15 @@ InterBoardEndpoint(InterBoardTransport &, const Config &); void poll(uint64_t no
 
 **错误 / 边界：** 非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。
 
-### 3. void submit(const ChassisCommand &); void setReferee(const RefereeState &); void setStatus(const RunStatus &); void submitBigYaw(const BigYawRequest &); void setBigYawFeedback(const BigYawFeedback &)
+### 3. void submit(const ChassisCommand &); void setReferee(const RefereeState &); void setStatus(const RunStatus &); void submitBigYaw(const BigYawRequest &); void setBigYawFeedback(const BigYawFeedback &); int submitRefereeFrame(const uint8_t *, size_t, uint64_t receive_ms); int readRefereeFrame(RefereeRelayFrame &)
 
 ```cpp
-void submit(const ChassisCommand &); void setReferee(const RefereeState &); void setStatus(const RunStatus &); void submitBigYaw(const BigYawRequest &); void setBigYawFeedback(const BigYawFeedback &)
+void submit(const ChassisCommand &); void setReferee(const RefereeState &); void setStatus(const RunStatus &); void submitBigYaw(const BigYawRequest &); void setBigYawFeedback(const BigYawFeedback &); int submitRefereeFrame(const uint8_t *, size_t, uint64_t receive_ms); int readRefereeFrame(RefereeRelayFrame &)
 ```
 
 复制原生产值与年龄；反复提交/重发同 producer 不续期，状态 stamp 由执行 owner 生产。
+
+`submitRefereeFrame`/`readRefereeFrame` 用于底盘到云台的裁判原始帧分片转发；单片最多 100 字节、整帧最多 256 字节，按双板 Boot ID 绑定，排队超过 300 ms 或对端重启时丢弃。
 
 **返回 / 输出：** void；发送机会由 poll 安排，接受不代表远端执行。
 
@@ -64,7 +66,7 @@ void submit(const ChassisCommand &); void setReferee(const RefereeState &); void
 int submitOperatorControl(const OperatorControl &); Snapshot snapshot() const
 ```
 
-独立操作管理传 run_allowed/estop/clear event 与 boot/原年龄；snapshot 含七类消息、online/error/transport/parser_stats。
+独立操作管理传 run_allowed/estop/clear event 与 boot/原年龄；snapshot 含心跳、行走命令、底盘约束、底盘反馈、操作控制、大 Yaw 请求/反馈与 `gimbal_imu` 八类消息，以及 online/error/transport/parser_stats。
 
 **返回 / 输出：** submit 0=复制；snapshot 为值副本。
 

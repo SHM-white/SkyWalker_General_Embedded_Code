@@ -55,9 +55,9 @@ static communication::InterBoardEndpoint link(
 | 云台头部 IMU | CAN3 | 1 Mbps，DmImuCanSource 独占；不是板间 CAN |
 | 底盘电机 | CAN1 / CAN2 / CAN3 | 舵向 / 轮驱 / 大 Yaw，各由一个 motor::CanBus 拥有 |
 
-云台 USART10 使用 DMAMUX 3(TX request 119)、4(RX request 118)，共享 overlay 让 USART1 释放这两路 DMA；底盘 USART1 保留自己的 3/4 通道。SPI2 的 DMA1/2 和遥控 UART5 的 DMA6 不能被挪给其他启动对象。UART7 已给诊断独占，不能同时启动旧视觉接收器、console、VOFA 或 AsyncUart 接收者。Log/VOFA 均通过共享 `diagnostic_output` 代码变量选择，见[上车诊断说明](../../../samples/bringup/README.md)。
+云台 USART10 使用 DMAMUX 12(TX request 119)、13(RX request 118)，USART1 保留 3/4 通道；底盘 USART1 同样使用 3/4。SPI2 的 DMA1/2 和遥控 UART5 的 DMA6 不能被挪给其他启动对象。UART7 已给诊断独占，不能同时启动旧视觉接收器、console、VOFA 或 AsyncUart 接收者。Log/VOFA 均通过共享 `diagnostic_output` 代码变量选择，见[上车诊断说明](../../../samples/bringup/README.md)。
 
-库的 RS485/CAN 示例另有设备布局：[通用板间样例 overlay](../../../samples/communication/interboard/app.overlay) 将 RS485 映射到 USART2（PD5 TX / PD6 RX / PD4 DE，经板载收发器到 A/B），460800 8N1；其 DMAMUX 为 0(TX request 44)、5(RX request 43)。CAN 示例使用 FDCAN3、经典 CAN 1 Mbps。这些候选资源必须按所选工程核对，不能覆盖实车 CAN3 IMU/电机所有者或复制到其他 overlay 后直接启用。
+库的 RS485/CAN 示例另有设备布局：[通用板间样例 overlay](../../../samples/communication/interboard/app.overlay) 将 RS485 映射到 USART2（PD5 TX / PD6 RX / PD4 DE，经板载收发器到 A/B），460800 8N1；其 DMAMUX 为 11(TX request 44)、8(RX request 43)。CAN 示例使用 FDCAN3、经典 CAN 1 Mbps。这些候选资源必须按所选工程核对，不能覆盖实车 CAN3 IMU/电机所有者或复制到其他 overlay 后直接启用。
 
 RS485 与普通 UART 使用 AsyncUart，CAN 使用 Zephyr CAN API；电气形式和驱动类型必须匹配。串口与 console、遥控、IMU、诊断不可重复拥有同一设备。
 

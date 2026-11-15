@@ -1,6 +1,6 @@
 # 头部惯性云台适配：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。
 
@@ -22,7 +22,7 @@
 InertialGimbalAdapter(const Config &); InertialGimbalOutput update(const InertialGimbalInputs &, core::TimeUs now_us)
 ```
 
-输入头部 Snapshot、两轴 MotorSnapshot、command/source_stamp/prerequisites_ready，输出关节 command、原 stamp、两轴 output_valid、stabilization_valid 与误差。
+输入头部 Snapshot、两轴 MotorSnapshot、command/source_stamp/prerequisites_ready。可选 `yaw_reference_rad`/`yaw_reference_rate_rad_s`（`yaw_reference_valid`）用分配器可行世界参考替代本地 Yaw 目标积分，`pitch_rate_feedforward_rad_s`（`pitch_rate_feedforward_valid`）为绝对视觉 Pitch 目标提供速度前馈。输出关节 command、原 stamp、两轴 output_valid、stabilization_valid、误差，以及仅供诊断的 `carrier_yaw_rate_rad_s`/`carrier_pitch_rate_rad_s` 与有效位。
 
 **返回 / 输出：** 值副本；不写电机、不持有总线。
 

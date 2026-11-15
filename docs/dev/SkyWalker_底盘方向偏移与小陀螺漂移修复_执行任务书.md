@@ -1,5 +1,7 @@
 # SkyWalker 底盘前进方向偏角与小陀螺漂移：执行模型修复任务书
 
+> **2026-11-15 复核**：展开位置与航向跟随已落地；文中 `-1.132792` 零位与 `YawCenteringController` 数据流已过时，当前前向零位 0.048638 rad、回中由分配器完成。
+
 ## 0. 执行范围与工作原则
 
 **主仓库**：https://github.com/SHM-white/SkyWalker_General_Embedded_Code ；以 `dev` 分支为基线。分析时基线为 `dc859d00681421d54a36c8dbd9cfa1b1483071e6`（2026-11-11），执行前先重新拉取最新 `dev`，确认实际文件与逻辑，不能把行号或旧 commit 当作当前事实。

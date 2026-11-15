@@ -1,5 +1,7 @@
 # 小 Yaw 低速偏慢的定位与提速参数指南
 
+> **已归档（2026-11-15）**：“`yaw_encoder_rate_rad_s=0.2` 是硬上限”的结论已失效，当前 bringup 策略为 4.0 rad/s 且正式云台由分配器限速。当前入口见 [archive/README.md](README.md) 与[云台应用 README](../../../applications/sentry_gimbal/README.md)。
+
 > 适用入口：`samples/bringup/gimbal_yaw_encoder`（CAN1 单轴小 Yaw）。
 > 本文只写给操作者亲手修改的步骤；**业务源码、配置和构建文件均未改动**。
 > 所有数值来自当前工作区源码快照，未做真机验证。

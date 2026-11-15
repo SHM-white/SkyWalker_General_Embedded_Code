@@ -1,6 +1,6 @@
 # DR16 遥控输入：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 从 18 字节 DR16 帧发布摇杆、开关、鼠标和键盘快照；脱机时保持数据但撤销 online。
 
@@ -148,12 +148,12 @@ int main() {
 
 | 配置项 | 作用与前提 |
 | --- | --- |
-| `Dr16Decoder::Config` | 默认 center=1024、min=364、max=1684、center_deadband=10；decode_wheel 默认 false。 |
+| `Dr16Decoder::Config` | 默认 center=1024、min=364、max=1684、center_deadband=0；`decode_wheel=true`，只有接收机实际提供第五通道时才可依赖拨轮值。 |
 | `RemoteService::Config` | 默认 offline_timeout_ms=100、assembly_gap_ms=10；全部使用 ms。 |
 | `CONFIG_SKYWALKER_REMOTE_DR16 / CONFIG_SKYWALKER_REMOTE_RECEIVER` | 分别启用纯解码服务与后台接收器；接收器依赖 UART_TRANSPORT。 |
 | `CONFIG_SKYWALKER_REMOTE_RX_STACK_SIZE / PRIORITY` | 默认栈 3072 字节、线程优先级 6；UART 参数按接收机和板级配置提供。 |
 
-- bytes 16～17 默认保留，decode_wheel=false；只有明确确认接收机提供第五通道才打开。
+- bytes 16～17 是拨轮通道，默认 `decode_wheel=true`；若接收机不提供第五通道，需显式关闭，否则会解出无效拨轮值。
 - RemoteState 的摇杆是原始中心化值，不能直接当 m/s 或 rad/s。
 - 读取快照不消费数据、不延长有效期；0 不等于在线。
 - RemoteReceiver 不支持 stop、重复 start 或运行中析构。

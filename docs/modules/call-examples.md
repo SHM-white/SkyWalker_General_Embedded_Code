@@ -96,13 +96,12 @@ receiver 与 DMA 缓冲必须静态存活；同一 UART 不能再交给另一个
 
 ## 5. RefereeReceiver
 
-RefereeReceiver 由调用线程轮询，内部封装 AsyncUart 的 service、初始化重试和 RefereeService 快照。要为其独占 UART 提供静态 DMA buffers；协议版本必须显式选择。
+RefereeReceiver 由调用线程轮询，内部封装 AsyncUart 的 service、初始化重试和 RefereeService 快照。要为其独占 UART 提供静态 DMA buffers；协议版本由构建期 Kconfig 选择（默认 RM2027）。
 
 ~~~cpp
 static communication::AsyncUart::DmaBuffers referee_dma __nocache;
 static communication::RefereeReceiver referee(
-    DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma,
-    communication::RefereeVersion::Rm2026V1_3);
+    DEVICE_DT_GET(DT_ALIAS(referee_uart)), referee_dma);
 
 void refereeTick() {
     const auto state = referee.poll(k_uptime_get());
@@ -119,7 +118,7 @@ void refereeTick() {
 
 ## 6. InterBoardEndpoint
 
-InterBoardEndpoint 将可选择的传输后端、板间 V1 编解码、peer 会话和线程安全值拷贝封装在一起。恰有一个通信线程调用 poll；生产者可通过短锁接口提交发送值，消费者取得 Snapshot 副本。UART、RS485 和 CAN 的初始化配置见[三种传输方式](communication/interboard-transports.md)。
+InterBoardEndpoint 将可选择的传输后端、板间 v4 编解码、peer 会话和线程安全值拷贝封装在一起。恰有一个通信线程调用 poll；生产者可通过短锁接口提交发送值，消费者取得 Snapshot 副本。UART、RS485 和 CAN 的初始化配置见[三种传输方式](communication/interboard-transports.md)。
 
 ~~~cpp
 #include <communication/interboard/configured_interboard_transport.hpp>

@@ -1,6 +1,6 @@
 # 公共电机模型：Motor、CanBus 与 Group
 
-当前源码基线：`main@99a97c9`（2026-10-05）。DJI 和 DM 共用同一套持续目标、异步发布和逐轴恢复模型。运行意图、实际设备状态、命令生产时间与位置参考分别管理。
+源码核对基线：`dd3f673`（2026-11-15）。DJI 和 DM 共用同一套持续目标、异步发布和逐轴恢复模型。运行意图、实际设备状态、命令生产时间与位置参考分别管理。
 
 本文负责公共语义；[DJI](motor-dji.md) / [DM](motor-dm.md) 负责型号和协议，[控制封装](../control/motor-control.md) 负责反馈到输出的计算，[周期工作流](../../guides/motor-workflow.md) 负责应用装配，[迁移指引](../../guides/motor-migration.md) 说明旧代码如何适配。常用签名及参数见 [DJI 接口参考](../../api/motor-dji.md)、[DM 接口参考](../../api/motor-dm.md)、[控制器接口参考](../../api/motor-control.md)。
 
@@ -73,7 +73,7 @@ recordCallError(motor.setCurrent(current_a, sampled.enable_generation));
 
 DM 协议确认用 callback 顺序号区分同一毫秒内 RX／TX。协议任务与正常目标交替调度，协议端点轮转；缺失端点按 retry_interval_ms 等待，不忙等。
 
-连续位置丢失后不能凭第一帧重新定义旧零点。可信绝对角可自动恢复；连续／相对参考等待显式提供正确坐标。`reseedPosition()` 仅更新本轴参考，不停其他轴。
+连续位置丢失后不能凭第一帧重新定义旧零点。可信绝对角可自动恢复；连续／相对参考等待显式提供正确坐标。`reseedPosition()` 仅更新本轴参考，不停其他轴。DM 快照的 `native_unwrapped_position_rad` 按协议 ±PMAX 边界展开，首帧保留原始角以便校准零点仍然有意义；disable/enable 和 `reseedPosition()` 都不会重置该坐标，只有电机或主控重启才重建。
 
 ### 停止报告
 

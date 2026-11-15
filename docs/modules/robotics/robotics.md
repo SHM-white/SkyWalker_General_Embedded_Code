@@ -18,11 +18,11 @@ CommandArbiter 是同步策略核心，接收 CommandInputs 并返回 CommandDec
 
 ## 命令来源服务
 
-启动时注册 Operator 来源，按策略可注册 Aim 来源，并绑定许可来源；随后调用 CommandManager::start()。后台线程按配置周期采样来源、调用 CommandArbiter、发布 CommandSnapshot。执行线程用 snapshot() 读取完整诊断帧，或用 current() 读取最终 RobotCommand。读快照不会消费结果，也不会延长旧输入的有效期。
+启动时注册 Operator 来源，按策略可注册 Aim 与 Navigation 来源，并绑定许可来源；随后调用 CommandManager::start()。最多三个来源，每个角色一个。后台线程按配置周期采样来源、调用 CommandArbiter、发布 CommandSnapshot。执行线程用 snapshot() 读取完整诊断帧，或用 current() 读取最终 RobotCommand。读快照不会消费结果，也不会延长旧输入的有效期。
 
 完整注册、错误语义、静态生命周期和同步仲裁入口见[命令来源与后台服务](command-service.md)。三源运行入口见 samples/robotics/command_manager/src/main.cpp。
 
-公开 GimbalExecutor、ChassisExecutor、BigYawExecutor、ShooterExecutor 以及惯性/回中适配接口见[机构执行器](executors.md)。
+公开 GimbalExecutor、ChassisExecutor、BigYawExecutor、ShooterExecutor 以及双 Yaw 分配/惯性适配接口见[机构执行器](executors.md)。
 
 ## GimbalAxis
 
@@ -30,7 +30,7 @@ CommandArbiter 是同步策略核心，接收 CommandInputs 并返回 CommandDec
 
 ## SwerveChassis 与功率限制
 
-运动学持续解算，舵向与轮驱分别有效、分别初始化、分别计算。没有全模块对齐互锁、drive_ready 或 cos 缩速。轮驱速度控制不需要位置参考；舵向使用绝对角的本地短程展开，未知角度不参与翻转判断。
+运动学持续解算，舵向与轮驱分别有效、分别初始化、分别计算。没有全模块对齐互锁或 drive_ready；每个模块按最终优化角的 cos³ 缩速（`cosine_compensation` 默认 true）。轮驱速度控制不需要位置参考；舵向使用绝对角的本地短程展开，未知角度不参与翻转判断。
 
 功率限制保留真实预算和测量有效期，删除与电机恢复时刻比较的授权边界。各轴输出携带计算时执行版本，统一物理 CAN 发布者提交。
 

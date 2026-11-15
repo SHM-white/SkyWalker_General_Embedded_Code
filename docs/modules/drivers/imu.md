@@ -139,4 +139,4 @@ ISR 只入有界队列并记录本地单调接收时间；采集线程执行解�
 [双 IMU 样例](../../../samples/imu/dual_imu/README.md) 同时启用板载采样/滤波/温控和 485-2 外置模块，并给出 VOFA 通道。samples/imu_test 作为单板载入口已迁移新 API，输出 roll/pitch/yaw、温度、duty、fresh_mask 六通道。算法/协议/过期及模拟 PWM 的运行检查见 [主流程验收](../../../tests/vision_imu/README.md)。
 
 没有进行实物温控、SPI、RS485、CAN 或姿态方向验收；协议兼容性、方向和实际可持续频率应上板确认。
-\n\n更多封装对象的初始化和周期调用见[封装模块调用示例](../../../call-examples.md)。\n
+更多封装对象的初始化和周期调用见[封装模块调用示例](../call-examples.md)。

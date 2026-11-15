@@ -1,10 +1,10 @@
 # 板级：MC02 / RoboMaster Type-C：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 把物理引脚、外设、alias、时钟、DMA与电源连接交给Zephyr，业务参数保留在应用配置。
 
-**接入状态：已有代码。** 两套板级存在；正式整车实物参数集中 calibration.hpp，connections_confirmed 默认 false；样例可另有 board_config。
+**接入状态：已有代码。** 两套板级存在；正式整车实物参数集中 calibration.hpp，当前 `connections_confirmed` 与 `imu_mounting_confirmed` 均为 true；样例可另有 board_config。确认 bool 只是代码约定，不能替代现场记录。
 
 ## 职责与关联
 

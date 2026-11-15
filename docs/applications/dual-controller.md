@@ -1,6 +1,6 @@
 # 双主控整车应用
 
-本文按 `81578dd`（2026-11-15）源码概述正式应用的装配；代码接入不表示已完成接线、运动、带载或故障验收。各板各自拥有 `main.cpp` 和控制循环，共享 [installed 配置](../../config/vehicle/installed/README.md) 与 `include/robotics/vehicle/` 的参数。
+本文按 `dd3f673`（2026-11-15）源码概述正式应用的装配；代码接入不表示已完成接线、运动、带载或故障验收。各板各自拥有 `main.cpp` 和控制循环，共享 [installed 配置](../../config/vehicle/installed/README.md) 与 `include/robotics/vehicle/` 的参数。
 
 ## 两板职责与资源
 
@@ -39,6 +39,6 @@ west flash -d ../build/applications/sentry_gimbal
 west flash -d ../build/applications/sentry_chassis
 ```
 
-`CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS` 控制是否编入诊断；当前共享配置在云台启用、底盘默认关闭。启用时通过 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 选择 Log/Vofa。正式云台使用 [32 通道 schema 113](../dev/云台双轴响应VOFA通道说明.md)；底盘启用诊断时沿用其 [19 通道布局](../../applications/sentry_chassis/README.md)。UART7/DAPLink 接线仍需现场确认。
+`CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS` 控制是否编入诊断；当前共享配置在云台启用、底盘默认关闭。启用时通过 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 选择 Log/Vofa。正式云台使用 [32 通道 schema 113](../dev/云台双轴响应VOFA通道说明.md)；底盘启用诊断时输出基础 19 通道加 30 项扩展（I19=109，共 49 通道），完整通道见 [底盘 README](../../applications/sentry_chassis/README.md)。UART7/DAPLink 接线仍需现场确认。
 
 2026-10-25 的 27 项编译/链接记录属于旧基线，不覆盖本次源码。本次文档更新未重新构建、测试、烧录或实板验证。

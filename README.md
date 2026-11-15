@@ -34,7 +34,7 @@ SkyWalker 是一个基于 Zephyr RTOS 的机器人电控代码仓库，以 Zephy
 
 在线阅读：[GitHub Pages 架构与接口手册](https://shm-white.github.io/SkyWalker_General_Embedded_Code/docs/architecture-browser/)；本地启动和私有站点见 [架构浏览器](docs/architecture-browser/README.md)。
 
-应用入口概览按 `81578dd`（2026-11-15）源码整理：正式云台装配外置头部 IMU、视觉与导航来源以及发射执行器，并使用板载 BMI088 提供载体航向；底盘通过 v4 接收云台系平移与大 Yaw 世界角速度。接入代码不等于硬件或带载验收通过；**2026-10-25 的 27 项编译/链接记录属于旧基线**。本次文档更新未重新构建、测试、烧录或实板验证。详见[双主控应用](docs/applications/dual-controller.md)、[云台应用](applications/sentry_gimbal/README.md)与[板间 v4](docs/protocols/interboard-v4.md)。
+应用入口概览按 `dd3f673`（2026-11-15）源码整理：正式云台装配外置头部 IMU、视觉与导航来源以及发射执行器，并使用板载 BMI088 提供载体航向；底盘通过 v4 接收云台系平移与大 Yaw 世界角速度。接入代码不等于硬件或带载验收通过；**2026-10-25 的 27 项编译/链接记录属于旧基线**。本次文档更新未重新构建、测试、烧录或实板验证。详见[双主控应用](docs/applications/dual-controller.md)、[云台应用](applications/sentry_gimbal/README.md)与[板间 v4](docs/protocols/interboard-v4.md)。
 
 ## 当前能力
 

@@ -1,10 +1,10 @@
 # 命令仲裁与后台服务：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 按 Safe/Manual/Auto、输入新鲜度、参考系、人工接管和裁判许可发布完整机器人命令。
 
-**接入状态：已有代码。** 注册来源与后台服务已实现；整车手动默认 Remote，裁判/视觉按 VEHICLE_* 阶段配置注册，不改变原输入年龄。
+**接入状态：已有代码。** 注册来源与后台服务已实现；正式云台注册 Remote、Vision、Navigation 并绑定板间裁判许可，底盘不创建 CommandManager。所有来源都保留原输入年龄，不再通过 VEHICLE_* 宏切换来源。
 
 ## 职责与关联
 
@@ -22,7 +22,7 @@ CommandArbiter 是同步策略核心；CommandManager 注册静态来源、启�
 explicit CommandManager(const Config &config); int CommandManager::registerSource(ICommandSource &source)
 ```
 
-构造策略服务并在启动前注册来源。一个 Operator 必须存在，Aim 可选，每个角色最多一个，总容量两个。
+构造策略服务并在启动前注册来源。一个 Operator 必须存在，Aim 与 Navigation 可选，每个角色最多一个，总容量三个。
 
 | 参数 | 含义与边界 |
 | --- | --- |
@@ -159,7 +159,7 @@ CommandManager 不接受 CommandInputs，也没有 update、configError、reset 
 ## 调用顺序
 
 1. 静态构造 receiver/codec/source/manager；策略与参考系先确定。
-2. 一个启动线程 registerSource(Operator)，按需注册 Aim，bindPermissions，然后 start 一次。
+2. 一个启动线程 registerSource(Operator)，按需注册 Aim/Navigation，bindPermissions，然后 start 一次；运行期由执行线程调用 `setOperatorGate()`/`setRunAllowed()` 同步本地解锁，`setPlantState()` 提供扫描播种所需的 Pitch 实测角。
 3. worker 按周期 sample → 原始时间有效性 → CommandArbiter::update → 发布整帧。
 4. 执行线程 current/snapshot 后检查目标模式和命令年龄，交本地执行器。
 5. 遥控 Safe、输入过期、参考不匹配或裁判许可撤销都会约束命令；本地恢复还需新的有效目标与恢复上下文。
@@ -171,14 +171,14 @@ CommandManager 不接受 CommandInputs，也没有 update、configError、reset 
 | `CONFIG_SKYWALKER_LIB_ROBOTICS / ROBOTICS_COMMAND / COMMAND_SERVICE` | 启用同步仲裁与后台注册服务；来源另外启用对应接收模块。 |
 | `CONFIG_SKYWALKER_COMMAND_PERIOD_MS / PRIORITY / STACK_SIZE` | 默认周期 10 ms、优先级 5、栈 6144 字节；服务发布与执行控制周期分开。 |
 | `新鲜度与参考` | input_timeout_ms=100、permission_timeout_ms=300、vision_timeout_us=100000，expected_vision_reference={1,1}。 |
-| `模式与人工接管` | require_referee_for_motion=true、allow_auto=true；override_enter_norm=0.15、exit=0.05、释放安静期 200000 μs。应用没有视觉时设 allow_auto=false。 |
+| `模式与人工接管` | 库默认 `require_referee_for_chassis/gimbal/shooter=true`、allow_auto=true。正式云台以 `manualCommandConfig()` 为基底，在 `main.cpp` 覆盖为 `require_referee_for_chassis/gimbal=true`、`require_referee_for_shooter=false`、`require_external_run_gate=true`，并在视觉接收器和 `vision-uart` alias 存在时把 `allow_auto` 设为 true。override_enter_norm=0.15、exit=0.05、释放安静期 200000 μs。 |
 | `目标上限` | 默认底盘 vx/vy=3 m/s、wz=6 rad/s；云台 yaw=3/pitch=2 rad/s；视觉加速度上限 30/20 rad/s²；射速请求 5 Hz。 |
 
 - 不要使用已移除的 GlobalSafetyManager/GimbalLocalSafety/ChassisLocalSafety；开发指南中的拟议接口不代表当前 API。
 - decision.requested 是未按裁判裁剪的候选，电机只能消费 decision.command。
 - 启动成功不代表输入上线；命令被禁止也可能 error=0，需看模式和原因位。
 - Auto 进入或人工接管释放后需要新的视觉目标；旧视觉快照不能跨新自动上下文直接采用。
-- shooting 命令类型已存在，但当前 sentry 应用没有完整发射执行链。
+- 正式云台已构造 ShooterExecutor 并每周期 update；摩擦轮/拨盘执行链存在，但热量与发射许可来源仍未接入（`require_heat=false`、`require_permission=false`），不能当作有载发射验收。
 
 ## 正文与源码
 

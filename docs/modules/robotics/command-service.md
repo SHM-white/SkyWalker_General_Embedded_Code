@@ -19,7 +19,7 @@ CommandArbiter 接收一次 CommandInputs 并同步生成 CommandDecision。Comm
 
 ## 来源接口与内置适配器
 
-ICommandSource 表示一个输入来源，role 固定为 Operator 或 Aim。一个 CommandManager 最多注册两个输入来源，每个角色至多一个；必须注册 Operator，Aim 来源可选。IPermissionSource 单独提供裁判许可，不与运动目标竞争。
+ICommandSource 表示一个输入来源，role 固定为 Operator、Aim 或 Navigation。一个 CommandManager 最多注册三个输入来源，每个角色至多一个；必须注册 Operator，Aim/Navigation 可选。IPermissionSource 单独提供裁判许可，不与运动目标竞争。
 
 内置适配器位于 include/robotics/command/receiver_sources.hpp：
 
@@ -65,9 +65,9 @@ void executionCycle(bool run_allowed, std::uint32_t clear_event_id) {
 }
 ~~~
 
-`manualCommandConfig()` 使用 PhysicalRemote，`require_external_run_gate=true`、`require_referee_for_motion=false`、`allow_auto=false`。启用外部门控后，服务初始不允许运行；应用根据真实遥控安全档归中和解锁动作调用 `setOperatorGate()`，不能在启动时写入永久 true 来代替操作输入。`setRunAllowed(bool)` 是不指定会话号时的便捷入口。授权或 session 改变会撤销旧鼠标发射意图；接收队列里跨越授权边界的帧仍按其原始时间处理。
+`manualCommandConfig()` 使用 PhysicalRemote，`require_external_run_gate=true`、`require_referee_for_chassis/gimbal/shooter=false`、`allow_auto=false`。启用外部门控后，服务初始不允许运行；应用根据真实遥控安全档归中和解锁动作调用 `setOperatorGate()`，不能在启动时写入永久 true 来代替操作输入。`setRunAllowed(bool)` 是不指定会话号时的便捷入口。授权或 session 改变会撤销旧鼠标发射意图；接收队列里跨越授权边界的帧仍按其原始时间处理。
 
-需要裁判约束的独立工程另行构造 RefereeReceiver 和 RefereePermissionSource，在 `start()` 前调用 `bindPermissions(permission_source)`，并将 `require_referee_for_motion` 设为 true、配置真实协议版本与电气接口。库默认的 require_referee 策略与上述手动应用配置不同，不能依赖未绑定来源或默认数值生成有效许可。
+需要裁判约束的独立工程另行构造 RefereeReceiver 和 RefereePermissionSource，在 `start()` 前调用 `bindPermissions(permission_source)`，并按机构把 `require_referee_for_chassis/gimbal/shooter` 设为 true，同时确认构建期裁判版本与电气接口。库默认的 require_referee 策略与上述手动应用配置不同，不能依赖未绑定来源或默认数值生成有效许可。
 
 需要自动瞄准时，另行静态构造 VisionReceiver、AbProtocol 和 VisionSource，在 manager.start() 前 registerSource(vision_source)。注册顺序不代表优先级；仲裁规则由 CommandArbiter 配置决定。没有组装视觉来源时应设置 allow_auto=false。
 
@@ -101,7 +101,7 @@ CommandArbiter 是单写入者对象；调用者负责序列化 update 与 reset
 
 - samples/robotics/command_manager 注册 RemoteSource、VisionSource 和 RefereePermissionSource，三路都进入 CommandManager worker；sample README 记录当前台架策略和接线。
 - samples/robotics/command_safety 只注册 RemoteSource，使用同一后台服务观察 Safe/Manual 和遥控断流恢复。
-- [applications/sentry_gimbal](../../../applications/sentry_gimbal/README.md) 在独立 main 中只注册 RemoteSource，不绑定裁判许可、不注册 VisionSource；使用上述物理 RC 外部门控策略。惯性适配、机械执行和板间发送由其主循环装配，CommandManager 不代替这些对象。
+- [applications/sentry_gimbal](../../../applications/sentry_gimbal/README.md) 在独立 main 中注册 RemoteSource、VisionSource 和 NavigationSource，并通过 `InterBoardRefereeSource` 绑定板间裁判许可；使用物理 RC 外部 `setOperatorGate()` 门控策略。它在 `manualCommandConfig()` 之上覆盖 `require_referee_for_chassis/gimbal=true`、`allow_auto`（按 alias 与接收器）和巡航映射，因此不能只看共享工厂的默认值判断应用门控。惯性适配、机械执行和板间发送由其主循环装配，CommandManager 不代替这些对象。
 - [applications/sentry_chassis](../../../applications/sentry_chassis/README.md) 不创建 CommandManager 或本地永久授权，直接消费经过 boot/年龄校验的板间操作授权与运动请求。其固定手动配置不启用功率闭环或有载发射。
 - [samples/bringup](../../../samples/bringup/README.md) 的执行入口按阶段选择真实 RC 或板间授权，观察入口只观察输入；硬件与控制值来自[共享实车配置](../../../config/vehicle/installed/README.md)。每个 main 自己装配，不通过历史角色宏调用公共 run。
 - 历史 [vehicle_integration](../../../samples/robotics/vehicle_integration/README.md) 仍保留 vehicle_bench 与 VEHICLE_* 宏组合，仅描述旧运行体；其附加 conf 不构成最终应用的配置入口。

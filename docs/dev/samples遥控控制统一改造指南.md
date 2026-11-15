@@ -1,5 +1,7 @@
 # samples 遥控控制与板间协议统一
 
+> **历史记录（2026-11-15 复核）**：板间协议标识已从 3 升级为 v4，sample 目录与入口也已重构。当前契约见[板间 v4](../protocols/interboard-v4.md)，操作见[统一遥控操作](../../samples/robotics/common/REMOTE_CONTROL.md)。
+
 本任务直接实现，古法编程模式仅对本任务禁用。核心操作说明见 [统一遥控操作](../../samples/robotics/common/REMOTE_CONTROL.md)。本说明记录改造范围、公共接口与最终编译入口，实板接线、标定和动作仍需在硬件上确认。
 
 ## 范围

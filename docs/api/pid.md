@@ -1,6 +1,6 @@
 # PID、前馈、斜坡与角度工具：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 无I/O的纯控制计算，明确单位、采样间隔、积分限制与失败语义。
 
@@ -209,10 +209,12 @@ int control_motor_position_validate(const control_motor_position_config *config)
 
 | 参数 | 含义与边界 |
 | --- | --- |
-| `config` | position外环PID + velocity内环；外环输出范围不能超过内环最大目标速度。 |
+| `config` | position外环PID + velocity内环；外环输出范围不能超过内环最大目标速度。可选 `velocity_feedforward_gain` 把参考速度加进速度请求，`acceleration_effort_gain` 提供加速度力矩/电流前馈，零值保持旧行为。 |
 | `state` | 先reset的外环/内环历史。 |
-| `input` | 连续目标/位置rad、测量rad/s、dt；has_position_reference可指定重力前馈使用的物理角度。 |
-| `output` | 外环结果、内环结果与effort_command。 |
+| `input` | 连续目标/位置rad、测量rad/s、dt；`has_position_reference` 可指定重力前馈使用的物理角度；`has_reference_velocity`/`has_reference_acceleration` 启用可选前馈。 |
+| `output` | 外环结果、内环结果、raw/前馈/限幅后的速度请求、`velocity_request_limited` 与 effort_command。 |
+
+舵轮 cos³ 缩速使用 `control_motor_velocity_step_scaled(state, config, input, reference_scale, output)`：先对名义速度做斜率，再按比例缩放 PID 参考；`reference_scale=0` 表示零速闭环，不是 disable。
 
 **返回 / 输出：** 0成功；失败不改外环、内环或output。
 

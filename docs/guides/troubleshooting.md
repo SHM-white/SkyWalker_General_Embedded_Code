@@ -19,7 +19,7 @@
 |---|---|
 | `no runners.yaml found` | 重新 pristine build；检查 `build/<name>/zephyr/runners.yaml` |
 | OpenOCD 打不开 | 核对 probe 选项、USB 权限、目标电压、SWDIO/SWCLK/GND；WSL 需要先透传调试器 |
-| MC02 probe 不匹配 | 构建时选择 `-DSKYWALKER_OPENOCD_PROBE=cmsis-dap|stlink|stlink-hla` |
+| MC02 probe 不匹配 | 构建时选择 `-DSKYWALKER_OPENOCD_PROBE=cmsis-dap` 或 `stlink`/`stlink-hla` |
 | `rm_typec` 无法连接 | 它没有板载调试器，需要外部 CMSIS-DAP 或 ST-Link |
 | 日志没有输出 | 检查 chosen console、串口设备、波特率和是否被 VOFA/其他工具占用 |
 
@@ -28,8 +28,8 @@
 | 现象 | 常见原因 |
 |---|---|
 | 反馈一直 Offline | CAN 未 start、收发线/地线/终端错误、bitrate 不同、motor-id/master-id 错误 |
-| DJI 反馈数值存在但无法 arm | 反馈不新鲜、Bus 未 attach、GM6020 没有 `current-loop-confirmed`，或设备状态 Fault |
-| DM arm 超时 | 电机未 Enable、master-id 路由错误、PMAX/VMAX/TMAX 不匹配、动力电源未开 |
+| DJI 反馈数值存在但一直 Disabled | 反馈不新鲜、Bus 未 attach、GM6020 没有 `current_mode_confirmed`，或设备状态 Fault |
+| DM 使能超时 | 电机未 Enable、master-id 路由错误、PMAX/VMAX/TMAX 不匹配、动力电源未开 |
 | `-ERANGE` | effort/速度/温度/dt 超出边界，或设备树限幅超过协议边界 |
 | 多电机互相影响 | 同一 CAN 没有共享原生 Bus，或 command ID/slot、DM `(master-id,motor-id)` 冲突 |
 | 位置差一个减速比 | 驱动反馈已经换算到输出轴，不要再除一次 gear ratio |
@@ -41,14 +41,14 @@
 
 | 返回/状态 | 含义 |
 |---|---|
-| `-EACCES` | 未 configure、未 Ready/Active，或权限不允许 |
+| `-EACCES` | 未 configure、producer 不匹配或权限不允许 |
 | `-EAGAIN` | 正在等反馈、CAN 恢复或稳定窗口 |
 | `-ESTALE` / `-EHOSTDOWN` | 反馈过期或驱动状态不可用 |
 | `-ERANGE` | dt、速度、温度、effort 或控制配置越界 |
 | `-EALREADY` | 同一个 wrapper 重复 configure/begin |
 | `telemetry.valid=false` | 本次 update 没有产生可用输出；不要沿用旧 effort |
 
-运行状态正常路径是 `configure → poll → Ready → resume → Active → update`。故障后先 suspend/stop，再 poll；恢复成功且拿到新鲜反馈、新命令后才允许 resume。
+当前生命周期是 `configure → enable（运行意图）→ update/commit`；`MotorState` 为 Offline/Disabled/Enabling/Active/Fault，反馈、使能与协议操作由逐轴自动恢复推进。没有 Ready/resume 阶段；故障后不要停在旧状态判断上，而应检查 `feedback_fresh`、`output_permitted`、`last_fault` 和恢复边界。
 
 ## 5. 通信与安全
 
@@ -58,11 +58,11 @@
 | Receiver InitFailed | 查 `Remote UART init` 和 `uart_error`：设备就绪、异步 UART 支持、nocache DMA、串口是否独占；修复后重启 |
 | Receiver snapshot 返回 0 但离线 | 0 只表示复制成功；检查 `remote.stamp.valid`、`remote.online` 和有效帧年龄 |
 | DR16 offline | UART 100000、8E1、实际电平反相链路、18 字节帧和 `offline_timeout_ms` |
-| 裁判 online 但没有权限 | `RefereeVersion` 是否明确为 `Rm2026V1_3`，权限帧 0x0201 是否通过 CRC |
+| 裁判 online 但没有权限 | 构建是否选中预期的 `CONFIG_SKYWALKER_REFEREE_RM2027`（默认）或 `..._RM2026`，权限帧 0x0201 是否通过 CRC |
 | 板间反复 offline | TX/RX 交叉、共地、460800、角色不同、CRC 和序列号 |
 | `-EOVERFLOW` 后安全不恢复 | 解析器必须 discardPartial；等待下一帧，不要拼旧缓冲 |
-| 全局一直 Disable | 查看 `active_reasons`：CommandStale、PowerStale、FeedbackStale、RecoveryBoundary、EmergencyStop 等 |
-| 急停清不掉 | 急停输入必须先释放，然后调用 `clearEmergencyStop(true)`；复位不会自动开始运动 |
+| 全局一直 Disable | 查看命令/来源年龄、机构许可与执行器 WaitReason；不再有全局 `active_reasons` 汇总对象 |
+| 急停清不掉 | 急停输入必须先释放，再把 `clear_estop` 置一次；锁存清除后仍需新的有效命令和目标，不会自动开始运动 |
 
 ## 6. IMU / 数学库
 

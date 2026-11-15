@@ -1,6 +1,6 @@
 # 双主控应用与执行器：接口与调用参考
 
-当前正式应用概览按 `81578dd`（2026-11-15）源码整理。两个 sentry 应用分别在自己的 `main.cpp` 中装配，不再调用 `samples::vehicle::run()`。完整源码、物理资源和参数见文末链接。
+当前正式应用概览按 `dd3f673`（2026-11-15）源码整理。两个 sentry 应用分别在自己的 `main.cpp` 中装配，不再调用 `samples::vehicle::run()`。完整源码、物理资源和参数见文末链接。
 
 **接入状态：应用已装配视觉、导航、外置头部 IMU 和发射执行器，实板待确认。** 板载 BMI088 提供载体角速度，底盘使用 v4 世界角速度及原生大 Yaw 角反馈。27 项编译、链接通过是 2026-10-25 旧基线；本次文档更新未重新构建、测试、烧录或实板验证，实测功率闭环仍未完成。
 
@@ -34,7 +34,7 @@
 | `config/vehicle/installed/` | 两板资源、DMA、基础系统输出策略与可选 CAN IMU 后端 |
 | `include/robotics/vehicle/calibration.hpp` | ID、方向、传动、零点、限位、安装变换与确认值 |
 | `gimbal_profile.hpp` / `chassis_profile.hpp` / `swerve_profile.hpp` / `big_yaw_profile.hpp` | 共享硬件、PID 与执行器参数 |
-| `manual_profile.hpp` | 最终手动应用命令、惯性与回中策略 |
+| `manual_profile.hpp` | 最终应用的命令参数、双 Yaw 分配、回中与惯性外环策略 |
 | `bringup_policy.hpp` / `bringup_chassis_policy.hpp` | 阶段保守动作幅度与电流上限 |
 | `diagnostics_config.hpp` | 唯一的 Log/Vofa 编译期选择、诊断波特率和候选版本标识 |
 

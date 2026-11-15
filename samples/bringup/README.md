@@ -31,7 +31,7 @@ west flash -d ../build/bringup/gimbal_yaw_encoder
 
 每工程一个固定build目录，不叠加EXTRA_CONF_FILE。先对照[共享资源](../../config/vehicle/installed/README.md)确认DAPLink实际串口：当前代码基线采用UART7/PE8-TX→DAPLink RX、共地，115200 8N1；云台板间USART10，底盘板间USART1，460800 8N1。该接线未经过本次现场核对。UART7是诊断唯一所有者，视觉需先分配其他资源。
 
-输入授权：真实遥控双拨Down，摇杆/拨轮归中保持500ms，先把左拨切Middle建立解锁，再拨左 Up 手动运行；左Down停止。遥控过期或双板对端离线/重启后重新解锁。先观察、再小幅动作；不使用永久有效授权，不上电自动运行轨迹。正常小幅动作、撤销输入、断流、恢复，双板再加单板重启与执行状态停更，由现场操作并记录结果。
+输入授权：真实遥控双拨Down，摇杆/拨轮满足 `centered()`（原始值 ±33）后左Down→Middle 建立解锁，再拨左 Up 手动运行；左Down停止。500 ms 归中保持要求已删除，但上电首帧快捷解锁只在映射判定“解锁后不会主动产生动作”时成立。遥控过期或双板对端离线/重启后重新解锁。先观察、再小幅动作；不使用永久有效授权，不上电自动运行轨迹。正常小幅动作、撤销输入、断流、恢复，双板再加单板重启与执行状态停更，由现场操作并记录结果。
 
 启用 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS` 后，可修改 `include/robotics/vehicle/diagnostics_config.hpp` 的 `diagnostic_output` 并重编译烧录以切换 Log/Vofa。共享配置当前在云台侧启用、底盘侧默认关闭。UART无console/shell/banner/默认串口后台；LOG和printk统一进自定义后台，Vofa固件丢弃文本，整次运行保持纯JustFloat。两模式用固定16包队列及低优先级输出线程，拥塞丢观测包并计数，控制线程不等串口。故障可能导致波形停流，主机保存时间及原始数据；切换固件不保留先前RAM事件。远端只提供协议已有字段，没有远端内部PID转发。
 
@@ -53,13 +53,13 @@ west flash -d ../build/bringup/gimbal_yaw_encoder
 | 15 / 16 | 共享队列丢包计数低16/高16 |
 | 17 / 18 | extra0 / extra1，物理量与单位见入口README |
 
-reason：0 Boot、1 Ready、2 InitFailed、3 RemoteStale、4 Disarmed、5 FeedbackStale、6 ImuStale、7 PeerStale、8 Configuration、9 Permission、10 CommandStale。日志每秒状态并记录原因变化；BOOT身份包含应用、板角色、源码dirty标识、硬件/标定候选版本和协议v4。reason给首个直接阻塞原因，detail补执行器/电机状态；不能把Ready单独理解成机构通过上车。
+reason：0 Boot、1 Ready、2 InitFailed、3 RemoteStale、4 Disarmed、5 FeedbackStale、6 ImuStale、7 PeerStale、8 Configuration、9 Permission、10 CommandStale、11 Aligning、12 CycleInvalid、13 TransportError。日志每秒状态并记录原因变化；BOOT身份包含应用、板角色、源码dirty标识、硬件/标定候选版本和协议v4。reason给首个直接阻塞原因，detail补执行器/电机状态；不能把Ready单独理解成机构通过上车。
 
 板间字节、物理量、boot/年龄/生产序号规则统一见[协议v4契约](../../docs/protocols/interboard-v4.md)。ChassisFeedback目前没有有效实测速度/功率；不能拿默认0作零速证明。
 
 ## 上车登记
 
-2026-10-25：本目录21个工程、两个最终应用，以及受共享配置迁移影响的gimbal_control、command_gimbal、inertial_gimbal、dual_yaw_centering，共27个工程均通过 `dm_mc02/stm32h723xx` 编译与链接。构建产物位于 `../build/refactor-20261025/<目录路径以双下划线连接>/zephyr/`；每项保留独立bin/elf。编译日志和结果清单位于本机 `/tmp/skywalker-refactor-builds/`。只做编译检查，没有运行测试、烧录或实板验证。
+2026-10-25：本目录21个工程、两个最终应用，以及受共享配置迁移影响的gimbal_control、command_gimbal、inertial_gimbal、dual_yaw_centering，共27个工程均通过 `dm_mc02/stm32h723xx` 编译与链接。该历史批次构建产物位于 `build/refactor-20261025/`（每项独立 bin/elf），临时日志目录已清理；该路径仅作记录，不是当前构建入口。只做编译检查，没有运行测试、烧录或实板验证。
 
 所有工程入口已经具备；实板输入、单机构与组合全部待确认。中央connections/imu/shooter确认bool沿用现值，不能替代现场记录；功率标定仍未完成。原始机械参数和另一套云台/底盘兼容性均未在本次验证。
 

@@ -2,7 +2,15 @@
 
 每次代码变更使用本页待办逐项更新。目录扫描只能自动发现 Markdown，无法判断 API 或运行语义是否正确。接口详情维护在 `docs/api/*.md`，在线浏览器直接读取这些文件；不再另写 JS 接口契约数组。
 
-2026-11-15 入口文档按固件 `81578dd` 更新；架构浏览器图示和未修改的接口页可能保留各自历史基线。文档提交与部署提交不可误写为固件能力基线。2026-10-25 的 27 项编译结果不覆盖之后的实现；本次文档更新未重新构建、测试、烧录或验证在线部署。
+2026-11-15 本轮文档按固件 `dd3f673` 复核：接口页、模块页、指南、协议页、应用 README 与开发索引均已逐页对齐。架构浏览器图示和导航数据可能保留 2026-11-10 的历史基线，正式状态以 Markdown 和源码为准。文档提交与部署提交不可误写为固件能力基线。2026-10-25 的 27 项编译结果不覆盖之后的实现；本次文档更新未重新构建、测试、烧录或验证在线部署。
+
+## 2026-11-15 核对记录
+
+- 代码基线：`dd3f673`（2026-11-15）；检查时工作区无业务源码修改。
+- 范围：`docs/api` 21 页、`docs/modules`、`docs/guides`、`docs/getting-started`、`docs/protocols`、`docs/applications`、两个应用 README、`config/vehicle/installed/README.md`、`samples/bringup/README.md`、根 `README.md`、架构浏览器数据与 `docs/dev` 全量索引。
+- 主要修正：云台 schema 113（32 通道）与底盘 schema 109（49 通道）；`DualYawMotionAllocator` 取代 `YawCenteringController`；命令来源三角色与 `setOperatorGate()`；裁判构建期版本选择；`Motor` 持续目标/逐轴恢复；DM 展开原生位置；UART 中断回退；舵轮仅保留 cos³；2.0 A/20.0 A 电流上限；0.048638 rad 前向零位；500 ms 归中基线删除；DMAMUX 12/13 与 11/8；诊断队列 16×208 B。
+- `docs/dev` 归档 6 篇被当前代码推翻的文档到 `docs/dev/archive/`，其余 44 篇按“现行参考 / 待实施 / 现场排障 / 已落地历史”重建索引。
+- 未执行：构建、测试、烧录、实板验证和 GitHub Pages 部署核验。
 
 ## 文档分工
 
@@ -16,7 +24,7 @@
 | `docs/protocols/interboard-v4.md` | 字节布局、CRC、单位、方向、年龄、boot 与停止语义 | 线协议或其现行默认值变化 |
 | `samples/**/README.md`、`tests/**/README.md` | 独立入口、构建指令、硬件前提和预期现象 | 样例 / 验证入口改变 |
 | 根 `README.md`、`docs/README.md`、主题索引 | 推荐阅读路线、能力摘要、源码基线 | 大改动、迁移、新主题或能力变化 |
-| `docs/dev/**` | 历史设计与待实施方案 | 新设计或需要注明实施状态；不用于现行 API 定义 |
+| `docs/dev/**` | 现行调参/排障参考、已落地历史、待实施方案与状态索引 | 新方案登记状态；落地后补“现行入口”；被推翻时移入 `docs/dev/archive/` 并修复链接；不用于现行 API 定义 |
 | 浏览器 `data.js` | 模块 ID、分类、摘要、状态、依赖、Markdown 路径及关系图布局 | 模块增删、关系或接入状态变化 |
 | `architecture-data.js`、`vehicle-diagram.js` | 当前 / 目标架构、缺口、调用链、主图、源码基线 | 实际装配或工程目标变化 |
 | `workspace_docs.py`、`run.sh`、部署 workflow | 扫描规则、本地服务与静态索引生成 | 文档组织规则或发布方式变化 |

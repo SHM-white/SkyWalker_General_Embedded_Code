@@ -1,5 +1,7 @@
 # 大 Yaw 编码器展开与世界航向闭环：标定与排障
 
+> **历史记录（2026-11-15 复核）**：展开位置与航向跟随已落地；文中零位为当时候选值，当前 `reference_big_yaw_forward_zero_rad=0.048638 rad`。当前行为见[底盘应用 README](../../applications/sentry_chassis/README.md)。
+
 本文对应 `fix/big-yaw-encoder-heading` 分支的两项修复：
 
 1. 底盘平移坐标改用大 Yaw 电机**连续原始编码器坐标**（跨 ±25 rad 协议边界不跳变）。

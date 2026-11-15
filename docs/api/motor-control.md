@@ -1,6 +1,6 @@
 # VelocityMotor / PositionMotor 硬件闭环：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 VelocityMotor / PositionMotor 保存最新目标，各轴独立反馈计算与自动重置历史。
 
@@ -30,13 +30,16 @@ configure 校验 PID、单位、输出限幅和反馈能力，绑定唯一 produ
 
 **错误 / 边界：** 非法 -EINVAL，输出限幅 -ERANGE，模式/能力不支持 -ENOTSUP，producer 冲突返回绑定错误。
 
-### 2. int VelocityMotor::update(float target_rad_s, float dt_s); int PositionMotor::update(double target_position_rad, float dt_s)
+### 2. int VelocityMotor::update(float target_rad_s, float dt_s); int PositionMotor::update(double target_position_rad, float dt_s); int PositionMotor::update(double target_position_rad, float reference_velocity_rad_s, float reference_acceleration_rad_s2, float dt_s)
 
 ```cpp
-int VelocityMotor::update(float target_rad_s, float dt_s); int PositionMotor::update(double target_position_rad, float dt_s)
+int VelocityMotor::update(float target_rad_s, float dt_s);
+int PositionMotor::update(double target_position_rad, float dt_s);
+int PositionMotor::update(double target_position_rad, float reference_velocity_rad_s,
+                         float reference_acceleration_rad_s2, float dt_s);
 ```
 
-合法目标已接受即返回 0，离线/参考等待时仍推进 target_sequence；output_valid 表示实际计算。恢复首可用周期重置本轴历史并提交带执行版本的零 effort。
+合法目标已接受即返回 0，离线/参考等待时仍推进 target_sequence；output_valid 表示实际计算。恢复首可用周期重置本轴历史并提交带执行版本的零 effort。四参数重载把同一可行轨迹的参考速度/加速度送入前馈：`control_motor_position_config::velocity_feedforward_gain` 与 `acceleration_effort_gain` 为零时与旧路径逐位一致。
 
 | 参数 | 含义与边界 |
 | --- | --- |

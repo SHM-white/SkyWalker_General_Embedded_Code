@@ -1,5 +1,5 @@
 'use strict';
-// Current application snapshot: bad529abe5d6 (2026-11-10); historical entries retain their context.
+// Current application snapshot: dd3f673 (2026-11-15); historical entries retain their context.
 window.SKYWALKER_ARCHITECTURE = {
   "history": [
     {
@@ -58,7 +58,7 @@ window.SKYWALKER_ARCHITECTURE = {
     }
   ],
   "current": {
-    "summary": "两个 sentry 最终工程各自独立装配并运行 main：云台为编码器手动双轴、板载 BMI088 角速度补偿、大 Yaw 回中与行走发送，底盘为八电机轮控/大 Yaw 执行；上车工程共用 installed 配置与纯 profile。当前未装配视觉、裁判、发射或实测功率闭环。27 个相关工程的编译记录属于 2026-10-25 旧基线，本轮未重建或实板验证；连接/IMU/发射确认现值 true、功率模型 false，配置值不等于现场通过。",
+    "summary": "两个 sentry 最终工程各自独立装配并运行 main：云台为双 Yaw 分配、遥控/视觉/导航仲裁、CAN3 头部 IMU、板载 BMI088 与发射执行；底盘为八电机轮控/大 Yaw 执行，并经 v4 转发裁判原始帧。27 个相关工程的编译记录属于 2026-10-25 旧基线，本轮未重建或实板验证；视觉自动射击、实测功率与有载发射仍未验收，配置值不等于现场通过。",
     "lanes": [
       {
         "title": "云台板：编码器手动双轴、板载 BMI088 补偿与统一提交",
@@ -66,13 +66,13 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "DR16 与真实 RC 解锁",
             "moduleId": "command-sources",
-            "note": "UART5 RemoteSource；Down/Down 归中 500ms 后左 Middle 解锁，输入失效/peer 重启撤权，CommandManager 外部门控保留原年龄。",
+            "note": "UART5 RemoteSource；摇杆/拨轮回中后左 Down→Middle 解锁，输入失效/peer 重启撤权，CommandManager 外部门控保留原年龄。",
             "status": "ready"
           },
           {
             "title": "后台仲裁快照",
             "moduleId": "command",
-            "note": "当前只注册 RemoteSource；CommandManager worker → CommandSnapshot，执行循环非消费式读取。",
+            "note": "注册 Remote/Aim/Navigation 来源并绑定板间裁判许可；CommandManager worker → CommandSnapshot，执行循环非消费式读取。",
             "status": "ready"
           },
           {
@@ -131,19 +131,19 @@ window.SKYWALKER_ARCHITECTURE = {
         ]
       },
       {
-        "title": "后续能力：当前最终应用未装配",
+        "title": "后续能力与仍需验收",
         "steps": [
           {
             "title": "摩擦轮与拨盘",
             "moduleId": "shooter",
-            "note": "ShooterExecutor 库已有，当前最终云台不创建发射电机；真实热量/许可/归位未接，有载未完成。",
-            "status": "planned"
+            "note": "摩擦轮/拨盘电机与 ShooterExecutor 已装配；真实热量/许可/归位未接，require_heat=false，有载未完成。",
+            "status": "partial"
           },
           {
             "title": "视觉观察/执行阶段",
             "moduleId": "vision",
-            "note": "当前最终应用未创建视觉；UART7 诊断独占，无 vision-uart alias。需独立资源、参考会话及真实反馈后接入。",
-            "status": "planned"
+            "note": "USB CDC VisionSource 已创建并 10 ms 回传；应用覆盖 allow_auto=true，视觉跟踪可用。完整参考会话和弹速/弹数待补。",
+            "status": "partial"
           },
           {
             "title": "功率测量与标定",
@@ -154,8 +154,8 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "搜索与导航",
             "moduleId": "application",
-            "note": "尚只有搜索规划与未装配的车体里程计/导航；不能标成已实现。",
-            "status": "planned"
+            "note": "巡航扫描已实现；导航平移来源与车体里程计仍需独立接入和验收。",
+            "status": "partial"
           }
         ]
       }
@@ -172,13 +172,13 @@ window.SKYWALKER_ARCHITECTURE = {
         "source": "include/robotics/vehicle/chassis_profile.hpp"
       },
       {
-        "title": "有载供弹未装配，真实来源待补",
-        "detail": "当前最终云台不创建发射电机。库 API 保留，真实热量/许可与拨盘可信原点仍需独立接入和机构标定。",
+        "title": "有载供弹已装配，真实来源待补",
+        "detail": "摩擦轮/拨盘与 ShooterExecutor 已装配；真实热量/许可与拨盘可信原点仍需独立接入和机构标定，require_heat=false 不代表可安全有载发射。",
         "source": "include/robotics/shooter/shooter_executor.hpp"
       },
       {
-        "title": "视觉资源与参考会话未补齐",
-        "detail": "当前最终应用未装配视觉。新共享配置无 vision-uart，UART7 由诊断独占；AB 参考会话、真实弹速/弹数需补齐。",
+        "title": "视觉自动射击与参考会话未补齐",
+        "detail": "视觉接收与回传已用 USB CDC 接入且应用覆盖 allow_auto=true；显式参考会话、真实弹速/弹数与执行验收需补齐。",
         "source": "config/vehicle/installed/README.md"
       },
       {
@@ -188,18 +188,18 @@ window.SKYWALKER_ARCHITECTURE = {
       },
       {
         "title": "DAPLink 接线与物理资源待现场核对",
-        "detail": "云台 USART10 板间/板载 SPI BMI088（外置 CAN3 IMU 未启用），底盘 USART1 板间/CAN1舵向/CAN2轮驱/CAN3大Yaw；两板候选 UART7 诊断，DAPLink 实际接线未实查。",
+        "detail": "云台 USART10 板间、SPI BMI088 与 CAN3 头部 IMU，底盘 USART1 板间/CAN1舵向/CAN2轮驱/CAN3大Yaw；两板候选 UART7 诊断，DAPLink 实际接线未实查。",
         "source": "config/vehicle/installed/README.md"
       },
       {
         "title": "编译记录与实板结论分开",
-        "detail": "旧基线 27 个相关工程曾编译通过；本轮未重建或实板运行；方向、停止时限和组合性能仍按独立上车阶段记录。搜索/里程计/导航尚未装配。",
+        "detail": "旧基线 27 个相关工程曾编译通过；本轮未重建或实板运行；方向、停止时限和组合性能仍按独立上车阶段记录。巡航扫描已实现，车体里程计/导航仍待接入。",
         "source": "samples/bringup/README.md"
       }
     ]
   },
   "target": {
-    "summary": "后续在独立工程和共享实车配置上逐级完成接线、安装、方向与机构记录，再接视觉、真实功率与有载发射来源。库实现、最终应用装配、工程编译和硬件通过分别登记；搜索/导航仍为目标。",
+    "summary": "后续在独立工程和共享实车配置上逐级完成接线、安装、方向与机构记录，并补齐真实功率与有载发射来源。库实现、最终应用装配、工程编译和硬件通过分别登记；巡航扫描已实现，导航平移与车体里程计仍为目标。",
     "lanes": [
       {
         "title": "可信输入与机械标定",
@@ -329,7 +329,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "DR16 与真实 RC 解锁",
           "moduleId": "command-sources",
-          "detail": "固定手动入口只注册 UART5 RemoteSource，真实 RC 归中解锁接入外部门控；保留原输入年龄。"
+          "detail": "UART5 RemoteSource 与真实 RC 归中解锁外部门控；并注册视觉/导航来源与板间裁判许可，保留原输入年龄。"
         },
         {
           "title": "后台仲裁快照",
@@ -349,7 +349,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "小 Yaw CAN1 与 Pitch CAN2",
           "moduleId": "motor-dji",
-          "detail": "当前最终云台只装配小 Yaw CAN1 与 Pitch DM CAN2，每周期各提交一次；发射机构未装配。"
+          "detail": "云台装配小 Yaw CAN1、Pitch DM CAN2 与同总线摩擦轮/拨盘，每周期各提交一次。"
         }
       ],
       "sources": [
@@ -370,7 +370,7 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "vision-auto",
       "title": "视觉目标如何进入自动瞄准",
-      "summary": "后续接入路线；库与历史样例已有，当前两个最终应用未装配视觉。",
+      "summary": "视觉接收/回传已接入正式云台；自动射击、参考会话与弹道数据仍需补齐。",
       "steps": [
         {
           "title": "AB 目标下行",
@@ -378,9 +378,9 @@ window.SKYWALKER_ARCHITECTURE = {
           "detail": "29B 下行有限值/CRC 校验，AimMeasurement 保留原时间。"
         },
         {
-          "title": "按阶段注册 VisionSource",
+          "title": "注册 VisionSource",
           "moduleId": "command-sources",
-          "detail": "历史宏样例曾注册 VisionSource；新最终应用未注册，后续需独立观察/执行工程与专属串口。"
+          "detail": "正式云台已注册 VisionSource（USB CDC）；allow_auto=false 时仅观察/跟踪，不进入自动射击。"
         },
         {
           "title": "Auto 仲裁",
@@ -395,7 +395,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "机械执行与真实反馈缺口",
           "moduleId": "gimbal",
-          "detail": "后续在参考一致和真实反馈来源具备后接入机械执行；当前最终应用未启用视觉或 AB 上行。"
+          "detail": "视觉目标进入头部姿态外环；AB 上行已启用，应用覆盖 allow_auto=true，参考会话与弹道数据仍需补齐。"
         }
       ],
       "sources": [
@@ -466,7 +466,7 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "imu-feedback",
       "title": "板载 IMU 如何进入当前手动控制",
-      "summary": "当前正式云台使用板载 BMI088 载体航向/去偏角速度，外置 CAN3 IMU 与视觉回传均未装配。",
+      "summary": "当前正式云台同时使用板载 BMI088（载体航向/角速度）与 CAN3 外置头部 IMU（视觉姿态参考与回传）。",
       "steps": [
         {
           "title": "板载载体采集",
@@ -486,7 +486,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "视觉反馈完整来源",
           "moduleId": "vision",
-          "detail": "后续视觉可使用真实 orientation/gyro；当前未装配视觉，仍缺显式会话与弹速/弹数来源。"
+          "detail": "视觉回传已使用头部 IMU 的真实 orientation/采样时间；仍缺显式会话与弹速/弹数来源。"
         }
       ],
       "sources": [
@@ -558,7 +558,7 @@ window.SKYWALKER_ARCHITECTURE = {
     {
       "id": "shooter",
       "title": "发射请求如何成为供弹动作",
-      "summary": "后续有载发射路线；库/历史样例保留，当前最终云台未创建发射电机。",
+      "summary": "正式云台已创建摩擦轮/拨盘与 ShooterExecutor；热量/许可/归位未接，有载发射未验收。",
       "steps": [
         {
           "title": "仲裁请求与离散事件",
@@ -578,7 +578,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "共享 DJI 提交",
           "moduleId": "motor-dji",
-          "detail": "后续组合需所有 DJI 机构暂存后由唯一 owner 提交；当前最终云台只提交小 Yaw 与 Pitch。"
+          "detail": "所有 DJI 机构暂存后由唯一 owner 提交；正式云台在同一 CAN1 提交小 Yaw、摩擦轮与拨盘。"
         }
       ],
       "sources": [
@@ -604,7 +604,7 @@ window.SKYWALKER_ARCHITECTURE = {
     },
     {
       "title": "3 · 真实 RC 授权与原始输入",
-      "detail": "固定手动云台只注册 RemoteSource；Down/Down 归中 500ms 后左 Middle 解锁，底盘接收原始授权；start 成功不代表测量有效。"
+"detail": "云台注册 Remote/Aim/Navigation 并绑定裁判许可；归中后左 Down→Middle 解锁，底盘接收原始授权；start 成功不代表测量有效。"
     },
     {
       "title": "4 · 唯一执行 owner",

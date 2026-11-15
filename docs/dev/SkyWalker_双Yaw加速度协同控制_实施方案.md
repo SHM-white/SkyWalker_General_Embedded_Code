@@ -1,5 +1,7 @@
 # SkyWalker 双 Yaw 加速度协同控制实施方案
 
+> **2026-11-15 复核**：`DualYawMotionAllocator` 已实现并接入正式云台；示例参数以 `dualYawAllocatorConfig()` 为准，本文为设计依据。
+
 复核日期：2026-11-11。主仓库基准为 [SkyWalker `dev@4dc29fb65dc564e9cacd88005fb44c7fe4e75440`](https://github.com/SHM-white/SkyWalker_General_Embedded_Code/commit/4dc29fb65dc564e9cacd88005fb44c7fe4e75440)。参考底盘基准为 [`JJL0612/sentry_onlychassis@dcc8d4ebfb5f91b0836849af7999e3b45849ed2e`](https://github.com/JJL0612/sentry_onlychassis/commit/dcc8d4ebfb5f91b0836849af7999e3b45849ed2e)。
 
 ## 1. 交给实现者的任务
@@ -18,7 +20,7 @@
 | 参考 HAL 底盘 | README 指定兼容对象。先把 `0x0402` 世界速度意图裁到 ±1 rad/s，再积分航向，叠加 P 修正（修正项 ±1.5 rad/s）、速度 PI 与底盘自转补偿；最后直接发原生速度命令。回传约 100 ms 一帧，`0x0403.actual_rate_rad_s` 取电机原生速度 | 云台单改可验证低速主动分配。稳定居中持续转向的速度预算须低于 1 rad/s，给回中和负载留余量；即使瞬时实际速度超过 1，也无法凭此预算承诺 3 rad/s 持续转向。该回传用于健康观测 |
 | SkyWalker Zephyr 底盘 | `BigYawWorldHeadingFollower` 积分世界速度并加航向 P；当前 P=2，修正项上限 6 rad/s，角速度 PI 为 0。减车体陀螺速度后，执行器按 ±10 rad/s 物理关节限速、安装方向、传动比和 20 rad/s² 原生速度斜率执行 | 云台规划的加速度只约束线上意图。最终速度和斜率预算要覆盖航向修正以及自转补偿；原生斜率须换算到关节侧并经负载实测 |
 | 两种底盘的零速捕获 | 参考底盘在请求从非零变成精确零时重新捕获航向；Zephyr 用 `release_epsilon_rad_s=1e-4` 的穿越判定 | 换向或回中与低频项抵消可触发捕获。参考底盘阶段接受并量化这一行为；配套 Zephyr 阶段实现稳定停车捕获 |
-| 视觉 | 正式入口目前 `allow_auto=false`，未启动视觉或 CAN3 头部 IMU。`CommandArbiter` 已校验并限幅 `decision.selected_vision` 的加速度，`GimbalCommand` 仅携带角度和速度 | 从已裁决的 `selected_vision` 构造轨迹，避开绕过权限与参考系校验的旁路 |
+| 视觉 | 本文写作时正式入口为 `allow_auto=false`，未启动视觉或 CAN3 头部 IMU；当前正式云台已接入视觉与 CAN3 头部 IMU，应用 main 覆盖 `allow_auto=true`。`CommandArbiter` 已校验并限幅 `decision.selected_vision` 的加速度，`GimbalCommand` 仅携带角度和速度 | 从已裁决的 `selected_vision` 构造轨迹，避开绕过权限与参考系校验的旁路 |
 
 源码锚点：[云台入口](https://github.com/SHM-white/SkyWalker_General_Embedded_Code/blob/4dc29fb/applications/sentry_gimbal/src/main.cpp#L170-L246) · [小 Yaw 标定](https://github.com/SHM-white/SkyWalker_General_Embedded_Code/blob/4dc29fb/include/robotics/vehicle/gimbal_profile.hpp#L48-L96) · [参考底盘限速及航向环](https://github.com/JJL0612/sentry_onlychassis/blob/dcc8d4e/Skywalker/Application/Src/app_robot.c#L1418-L1517) · [参考底盘回传](https://github.com/JJL0612/sentry_onlychassis/blob/dcc8d4e/Skywalker/Application/Src/app_robot.c#L1690-L1724) · [Zephyr 底盘执行入口](https://github.com/SHM-white/SkyWalker_General_Embedded_Code/blob/4dc29fb/applications/sentry_chassis/src/main.cpp#L156-L201) · [视觉裁决](https://github.com/SHM-white/SkyWalker_General_Embedded_Code/blob/4dc29fb/lib/robotics/command.cpp#L281-L326)。
 

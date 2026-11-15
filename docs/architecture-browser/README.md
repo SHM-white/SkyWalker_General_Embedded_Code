@@ -44,7 +44,7 @@ bash docs/architecture-browser/run.sh
 
 ## 当前源码与发布基线
 
-浏览器图示和导航数据可能保留 2026-11-10 的历史基线，尚未全面同步 `81578dd` 之后的应用变化；正式状态请先查[双主控应用](../applications/dual-controller.md)及各应用源码。本次仅更新 Markdown，未核验 GitHub Pages 或历史私有站点部署；线上内容以部署提交为准。
+浏览器模块摘要、当前装配说明与主图已按 `dd3f673`（2026-11-15）复核；目标蓝图仍是设计目标，不代表已装配。正式状态请先查[双主控应用](../applications/dual-controller.md)及各应用源码。本次未核验 GitHub Pages 或历史私有站点部署；线上内容以部署提交为准。
 
 当前两个 sentry 入口分别拥有 `main.cpp` 装配：云台包含遥控、外置头部 IMU、板载 BMI088、视觉/导航与发射执行器；底盘是四舵轮与独立大 Yaw。它们共享 [installed 配置](../../config/vehicle/installed/README.md) 和 `include/robotics/vehicle/` 纯参数，不再共用 `vehicle_bench.hpp::run()`。21 个固定上车工程见[入口表](../../samples/bringup/README.md)，历史宏组合 sample 仍保留用于理解演进。
 

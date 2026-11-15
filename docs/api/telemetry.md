@@ -1,6 +1,6 @@
 # VOFA、日志与一致快照：接口与调用参考
 
-通用 VOFA 接口基线为 `48984ed90898`（2026-10-25）；实车诊断布局和启用状态按 `81578dd`（2026-11-15）补充。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+通用 VOFA 接口基线为 `48984ed90898`（2026-10-25）；实车诊断布局和启用状态按 `dd3f673`（2026-11-15）核对。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 从同一帧快照解释来源、目标、许可、反馈和错误；JustFloat 有界排队，主机离线不阻塞控制。
 
@@ -28,7 +28,7 @@ void Diagnostics::status(const DiagnosticStatus &sample);
 - `start()` 在线程中尽早调用，提交启动状态；Log 模式输出应用/角色、源码版本、候选硬件/标定版本、协议和动作上限。返回诊断设备状态，通常为 0 或 `-ENODEV`；该结果不代表业务设备已经就绪。`application` 被保存为指针，使用字符串字面量或等同生命周期的存储。
 - `event()` 提交步骤及返回码；第一次负错误保留在该实例内，供后续状态报告，到复位或实例重建为止。Vofa 模式不发送事件文本，错误经状态通道报告。
 - `status()` 最快每 20 ms 提交一次当前状态；Log 模式通常 1 Hz，原因变化另报。`DiagnosticStatus` 包含 reason、valid、enabled、target、feedback、age_ms、dt_us、effort、detail、error、extra0/1，量纲由具体入口声明。
-- 每个 `Diagnostics` 实例只有一个应用/观测线程调用。发送内容复制到共享固定队列，UART 由唯一低优先级 worker 发送；提交不等待串口或主机。队列 16 项、每项最多 192 字节，拥塞丢观测并计数，不改变电机授权。
+- 每个 `Diagnostics` 实例只有一个应用/观测线程调用。发送内容复制到共享固定队列，UART 由唯一低优先级 worker 发送；提交不等待串口或主机。队列固定 16 项，每项报文缓冲 208 字节（扩展帧 200 字节；文本行缓冲 192 字节），拥塞丢观测并计数，不改变电机授权。
 
 先在工程配置中启用 `CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS`；再在 [diagnostics_config.hpp](../../include/robotics/vehicle/diagnostics_config.hpp) 选择 `DiagnosticOutput::Log` 或 `DiagnosticOutput::Vofa`，重新编译烧录。关闭时接口为空实现，不输出诊断。当前候选 `diagnostic-uart` 为 UART7、115200 8N1，经 DAPLink 连接，实物接线仍待确认。
 

@@ -1,6 +1,6 @@
 # 裁判许可与功率预算：接口与调用参考
 
-协议适配基线：`dev@233cb534`（2026-11-10 检查）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+协议适配基线：`dev@233cb534`（2026-11-10 检查）；本文在 `dd3f673`（2026-11-15）复核。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 校验版本化裁判帧，分别记录机构输出许可、功率限额和缓冲能量的有效期。
 
@@ -174,7 +174,7 @@ board_config::referee_uart 来自对应样例/应用。正式 CommandManager 会
 - 当前 parser 仅覆盖两个命令（机器人状态、缓冲能量），不代表已实现 2027 全量协议，如比赛状态、哨兵决策、小地图、UI 交互和自定义终端 MQTT。
 - `0x0201` 更新功率限额与三个输出许可，不刷新实际功率/缓冲能量 stamp；2027 版本额外更新 `robot.bullet_speed_limit_m_s` 和专属 `bullet_speed_limit_stamp`。
 - 两个 profile 的 `0x0202` 前 8 字节为保留字段，不会被当成实测 `chassis_power_w`；功率模型需要应用侧标定。
-- 裁判缺失、过期或禁止时，require_referee_for_motion=true 的命令链撤销相应运动许可。
+- 裁判缺失、过期或禁止时，按机构分别由 `require_referee_for_chassis/gimbal/shooter=true` 撤销对应许可；库默认三项为 true。正式云台在 `main.cpp` 覆盖为 chassis/gimbal=true、shooter=false，因此底盘与云台运动依赖板间裁判许可，发射执行器不要求发射许可。没有全局 `require_referee_for_motion` 字段。
 
 ## 正文与源码
 

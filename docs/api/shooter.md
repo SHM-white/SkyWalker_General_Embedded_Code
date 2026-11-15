@@ -1,6 +1,6 @@
 # 摩擦轮与拨盘发射执行：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 摩擦轮与拨盘独立持续目标；供弹业务检查热量/可信原点/摩擦稳定/头部状态；离散旧事件消费丢弃不重放。
 
@@ -67,8 +67,9 @@ const auto published = dji_bus.commit();
 
 | 配置项 | 作用与前提 |
 | --- | --- |
-| `真实供弹来源` | IShooterHeatSource、IDialHomeSource 默认 Pending 无效；不能将当前点伪造有载原点。 |
+| `真实供弹来源` | `ShooterExecutionInputs` 直接接收 `IShooterHeatSource` 快照与带时间的 `dial_home_reference`；无效/缺失时不可伪造有载原点。`IDialHomeSource` 仅存在于历史 `vehicle_bench.hpp`。 |
 | `软件 shots` | 软件执行统计不是可信裁判弹数，不直接用作 AB 实测反馈。 |
+| `正式云台` | 已构造 ShooterExecutor 并每周期 update，但 `require_heat=false`、`require_permission=false`，热量/许可来源尚未接入。 |
 
 - API 已存在不等于实物标定和闭环通过。
 - 状态生产时间不能被读者/通信刷新。

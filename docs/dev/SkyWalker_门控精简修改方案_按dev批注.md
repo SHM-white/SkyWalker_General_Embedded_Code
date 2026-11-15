@@ -1,5 +1,7 @@
 # SkyWalker 门控精简修改方案：按 dev 批注实施
 
+> **2026-11-15 复核**：P1 编译期检查与逐轮 cos³ 已落地；0.10/0.40 rad 四轮对齐联锁已删除，现行 `SwerveModule` 只保留翻转滞回与逐轮 cos³。
+
 基线：`dev@dc258ec0b9dda91524c2b35f0061f2fb2a4ab356`，2026-11-10。依据：[你批注后的 180 项清单](https://github.com/SHM-white/SkyWalker_General_Embedded_Code/blob/dc258ec0b9dda91524c2b35f0061f2fb2a4ab356/docs/dev/SkyWalker_%E9%97%A8%E6%8E%A7%E5%88%A0%E7%95%99%E5%86%B3%E7%AD%96%E6%B8%85%E5%8D%95_180%E9%A1%B9.md)。原清单的源码行号基于较早的 main；本方案以当前 dev 源码为准。
 
 **本文只交付方案和伪代码，没有改业务源码、配置、测试，也没有提交或推送。** 伪代码表达修改后的逻辑，函数名带说明性质；不能整段复制后假设已有对应 API。

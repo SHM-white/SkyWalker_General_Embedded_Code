@@ -1,6 +1,6 @@
 # 异步 UART 与 DMA：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 把 UART 回调产生的字节复制进有界队列，业务线程按接收时刻解析；同一设备只有一个所有者。
 
@@ -26,7 +26,7 @@ AsyncUart(const device *uart, DmaBuffers &buffers)
 
 | 参数 | 含义与边界 |
 | --- | --- |
-| `uart` | Zephyr UART 设备，支持 async API，且没有被 console、VOFA 或其他接收器占用 |
+| `uart` | Zephyr UART 设备，且没有被 console、VOFA 或其他接收器占用；优先使用 async API，`uart_callback_set`/`uart_rx_enable` 返回 -ENOSYS/-ENOTSUP 时自动回退到中断驱动 UART API（CDC ACM 等） |
 | `buffers` | 实例专属、静态存活的 __nocache DmaBuffers；只有缓冲区放 nocache |
 
 **返回 / 输出：** 构造对象；不可复制。

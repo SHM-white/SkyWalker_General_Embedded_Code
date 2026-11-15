@@ -18,6 +18,8 @@ update 返回 0 表示合法目标已接受。离线、故障、协议恢复和�
 
 恢复后的首个可用周期从实际反馈自动初始化本轴 PID 并提交带执行代次的零 effort。计算输出使用同一份计算快照的 enable_generation；下一周期正常闭环。有限异常 dt 跳过本次积分，不锁存人工复位；负数及非有限 dt 返回调用错误。
 
+位置环可选前馈：`PositionMotor::update(target, reference_velocity_rad_s, reference_acceleration_rad_s2, dt_s)` 把同一可行轨迹的参考速度/加速度送入 `control_motor_position_config` 的 `velocity_feedforward_gain`/`acceleration_effort_gain`。两个增益为 0 时与三参数路径逐位一致；合成速度请求仍受 `requested_velocity_abs_max_rad_s` 限幅，遥测同时保留 raw/前馈/最终值与 `velocity_request_limited`。
+
 | 位置模式 | 目标 | 参考要求 |
 |---|---|---|
 | AbsoluteNearest | 单圈绝对目标的最短路径 | 新鲜绝对角与速度，本地展开，不要求驱动多圈参考 |

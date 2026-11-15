@@ -1,6 +1,6 @@
 # 云台单轴与本地执行：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 机械单轴保存目标；公开双轴 GimbalExecutor 独立计算两轴并由应用统一提交总线。
 
@@ -74,7 +74,11 @@ source_stamp/permission 与命令分别过期；yaw_output_valid/pitch_output_va
 | 参数 | 含义与边界 |
 | --- | --- |
 | `now_us` | 单调本地 µs |
-| `inputs` | command/source_stamp/permission、transport_ready、两轴输出有效性与急停 |
+| `inputs.command` / `source_stamp` / `permission` | 仲裁命令、原始生产时间与机构许可 |
+| `inputs.yaw_trajectory` | 分配器给出的小 Yaw 关节位置/速率/加速度轨迹；有效且新鲜时本周期接管 Yaw 目标 |
+| `inputs.yaw_use_rate_reference` / `pitch_use_rate_reference` | 仅在本周期该轴确实由有效 Active Rate 命令驱动时置位，用于把已执行参考速度送入位置环前馈 |
+| `inputs.yaw_restart_rate_session` / `pitch_restart_rate_session` | 来源切换/恢复时重建 Rate 会话：丢弃旧目标、从实测播种，本周期不积分也不前馈 |
+| `inputs.transport_ready` / `emergency_stop` / `clear_estop` | 总线就绪与急停输入；急停输入必须先释放再清锁存 |
 
 **返回 / 输出：** RunStatus 值副本，生产 stamp、requested 与各轴统计。
 

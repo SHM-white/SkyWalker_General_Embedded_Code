@@ -1,5 +1,7 @@
 # 小 Yaw 机械中心标定
 
+> **2026-11-15 复核**：中心标定思路仍可复用，但数据流已改为 `dualYawAllocatorConfig()` 的 `joint_center_rad`/`center_*`；`YawCenteringController` 已作废。当前中心值见 `calibration.hpp`。
+
 ## 当前情况与目标
 
 当前 `include/robotics/vehicle/calibration.hpp` 用 `(yaw_min_rad + yaw_max_rad) * 0.5f` 作为 `yaw_center_rad`，因此大 Yaw 跟随的目标是**软件限位的中点**。改为现场测得的机械中心后，大 Yaw 在其他条件满足时会跟随小 Yaw，使小 Yaw 相对于大 Yaw 趋近该中心；这不是给小 Yaw 直接下一个机械位置目标。遥控松手也不表示小 Yaw 独立地向该位置转动。

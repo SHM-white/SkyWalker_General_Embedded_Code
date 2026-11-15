@@ -62,9 +62,9 @@ window.SKYWALKER_MODULES = [
     "title": "双主控应用与执行器",
     "category": "机器人与仲裁",
     "status": "partial",
-    "summary": "两个 sentry 工程各自独立装配：云台编码器手动双轴、板载航向补偿与回中发送，底盘四舵轮/大 Yaw 执行，共用实车配置和普通模块 API。",
+    "summary": "两个 sentry 工程各自独立装配：云台双 Yaw 分配、视觉/导航/遥控仲裁与发射，底盘四舵轮/大 Yaw 执行，共用实车配置和普通模块 API。",
     "responsibility": "每个 main 持有长期对象、初始化顺序、执行循环和物理 CAN 提交；固定上车工程共用 installed overlay/conf 与纯配置 profile，不共享整车 run。",
-    "statusNote": "旧基线 27 个相关工程曾编译通过；本轮代码未重新构建或实板验证。正式云台使用板载 BMI088，不实例化 CAN3 外置头部 IMU；视觉/裁判/发射/功率闭环未装配。",
+    "statusNote": "旧基线 27 个相关工程曾编译通过；本轮代码未重新构建或实板验证。正式云台实例化 CAN3 外置头部 IMU、视觉/导航来源和发射执行器，板载 BMI088 提供载体航向；视觉自动射击、实测功率与有载发射仍受配置/验收阻断。",
     "depends": [
       "command",
       "interboard",
@@ -109,7 +109,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "BMI088、达妙 RS485 与 CAN 来源共用带时间戳的快照，独立采集与诊断。",
     "responsibility": "ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度；ImuReceiver 独占采集循环并可管理 ImuHeater。BMI088 可挂 QuaternionEkf 估计姿态；RS485 通过请求应答读取设备四元数；CAN 支持主动上报和被动轮询。",
-    "statusNote": "当前正式云台使用板载 BMI088 做载体航向与角速度补偿，CAN3 外置 IMU 未实例化；独立 IMU 样例/后续惯性方案保留，安装/质量/参考须实测。",
+    "statusNote": "当前正式云台同时使用 CAN3 外置头部 IMU（视觉姿态参考）与板载 BMI088（载体航向/角速度）；安装、质量、参考与实板响应须实测。",
     "depends": [
       "boards",
       "kalman",
@@ -162,7 +162,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "把物理引脚、外设、alias、时钟、DMA与电源连接交给Zephyr，业务参数保留在应用配置。",
     "responsibility": "DTS 描述物理设备；installed overlay/conf 固定板级资源和驱动，calibration/profile 提供标定与纯配置。各独立工程自行装配。",
-    "statusNote": "新上车入口和最终应用共用 config/vehicle/installed；云台 USART10 板间、板载 SPI BMI088（CAN3 外置 IMU 未启用）；底盘 USART1 板间，两板 UART7 诊断。DAPLink 接线尚未实查。",
+    "statusNote": "新上车入口和最终应用共用 config/vehicle/installed；云台 USART10 板间、板载 SPI BMI088 与 CAN3 外置头部 IMU；底盘 USART1 板间，两板 UART7 诊断。DAPLink 接线尚未实查。",
     "depends": [],
     "reference": "docs/api/boards.md"
   },
@@ -199,7 +199,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "校验版本化裁判帧，分别记录机构输出许可、功率限额和缓冲能量的有效期。",
     "responsibility": "RefereeParser 负责 CRC 与已支持命令，RefereeService 计算在线状态，RefereeReceiver 用 poll 推进 UART。裁判许可约束运动命令，不能与遥控或视觉竞争控制来源。",
-    "statusNote": "Rm2026V1_3 库支持 0x0201/0x0202；当前两个最终应用不创建裁判接收器。真实许可、测量及电气适配仍需独立接入。",
+    "statusNote": "构建期 Kconfig 选择 RM2027（默认）或 RM2026，库支持 0x0201/0x0202；底盘创建 RefereeReceiver 并经 v4 0x0201 分片转发，云台用 InterBoardRefereeSource 绑定许可。真实功率测量与电气适配仍需独立接入。",
     "depends": [
       "uart"
     ],
@@ -226,7 +226,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "接收独立的 yaw/pitch 目标请求，提供带参考系与有效期的值；反馈由应用复制姿态等实测数据。",
     "responsibility": "AbProtocol 定义 29 字节下行/43 字节上行线协议；VisionLink 校验参考、时间与反馈；VisionReceiver 驱动独占 UART。模块不持有 IMU，不仲裁机器人命令，不操作电机和发射机构。",
-    "statusNote": "AB 库与历史样例保留；当前最终应用未创建视觉来源，新共享配置不提供 vision-uart，UART7 专用诊断。参考会话和弹速/弹数仍需补齐。",
+    "statusNote": "正式云台用 USB CDC 创建 VisionSource 并以 10 ms 周期回传 43 字节反馈；应用在 alias/接收器存在时覆盖 allow_auto=true，视觉跟踪与自动射击路径可用。参考会话和弹速/弹数仍需补齐。",
     "depends": [
       "uart"
     ],
@@ -239,7 +239,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "按 Safe/Manual/Auto、输入新鲜度、参考系、人工接管和裁判许可发布完整机器人命令。",
     "responsibility": "CommandArbiter 是同步策略核心；CommandManager 注册静态来源、启动来源并周期采样/仲裁，发布非消费快照。执行器负责本地电机反馈、使能与恢复。",
-    "statusNote": "当前固定手动云台只注册 RemoteSource，真实 RC 解锁接入外部门控；视觉/裁判不是额外 conf 开启的当前应用能力。",
+    "statusNote": "正式云台注册 RemoteSource、VisionSource、NavigationSource，并通过 InterBoardRefereeSource 绑定裁判许可；真实 RC 解锁经 setOperatorGate() 外部门控。",
     "depends": [
       "command-sources"
     ],
@@ -252,7 +252,7 @@ window.SKYWALKER_MODULES = [
     "status": "ready",
     "summary": "把接收器快照接到固定 Operator/Aim 角色；裁判单独作为 Permission，保留原始时间与诊断。",
     "responsibility": "ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionSource、RefereePermissionSource 适配接收器。ManualCommandMapper 把遥控值变成归一化操作意图，不输出电机电流。",
-    "statusNote": "RemoteSource、VisionSource 与 RefereePermissionSource API 存在；当前最终云台只注册真实 RemoteSource，快照读取不刷新原输入年龄。",
+    "statusNote": "RemoteSource、VisionSource、NavigationSource、RefereePermissionSource 与 InterBoardRefereeSource 均已实现；正式云台注册前三类来源并绑定板间裁判许可，快照读取不刷新原输入年龄。",
     "depends": [
       "remote",
       "vision",
@@ -307,7 +307,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
     "responsibility": "头部 IMU 与机械反馈将惯性目标转成双轴关节 Rate；两轴数学有效性分别返回，电机恢复不改业务目标。",
-    "statusNote": "CAN3 外置 IMU 惯性适配保留在库及独立样例，当前正式云台使用编码器手动双轴与板载载体角速度补偿，未实例化该适配器。",
+    "statusNote": "正式云台已实例化 InertialGimbalAdapter（head_control）并每周期 update；视觉 Yaw 参考来自分配器，Pitch 用头部四元数测得的关节保持。",
     "depends": [
       "imu",
       "gimbal",
@@ -320,9 +320,9 @@ window.SKYWALKER_MODULES = [
     "title": "大 Yaw 回中与独立速度环",
     "category": "机器人与仲裁",
     "status": "partial",
-    "summary": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
-    "responsibility": "云台小 Yaw 中心外环产生速度请求；底盘大 Yaw 独立连续速度内环，不需绝对零点或轮控恢复授权。",
-    "statusNote": "独立请求/执行/双 Yaw 工程与最终装配已有；执行在底盘 CAN3，线上为关节 rad/s，参考 v4 世界速度意图，不在云台发送端额外乘电机方向；未实板验证。",
+    "summary": "云台分配器拆分小 Yaw 关节轨迹与大 Yaw 世界意图；底盘航向跟随器与独立速度内环执行，不需绝对零点或轮控恢复授权。",
+    "responsibility": "DualYawMotionAllocator 生成可行关节轨迹与大 Yaw 世界速率；BigYawWorldHeadingFollower 与 BigYawExecutor 在底盘完成世界航向闭环和关节速度内环。",
+    "statusNote": "分配器已接入正式云台，执行在底盘 CAN3，线上为世界速率意图，执行器只乘一次方向/传动比；零位、行程与带载响应未实板验证。",
     "depends": [
       "gimbal",
       "motor-control",
@@ -337,7 +337,7 @@ window.SKYWALKER_MODULES = [
     "status": "partial",
     "summary": "摩擦轮与拨盘独立持续目标；供弹业务检查热量/可信原点/摩擦稳定/头部状态；离散旧事件消费丢弃不重放。",
     "responsibility": "摩擦轮与拨盘独立持续目标；供弹业务检查热量/可信原点/摩擦稳定/头部状态；离散旧事件消费丢弃不重放。",
-    "statusNote": "库 API 与历史样例已有，当前最终云台未创建发射电机或执行器；真实热量/许可/可信归位仍待接入，有载发射未完成。",
+    "statusNote": "正式云台已创建摩擦轮/拨盘电机与 ShooterExecutor；require_heat=false、require_permission=false，真实热量/许可/可信归位仍待接入，有载发射未完成。",
     "depends": [
       "command",
       "gimbal",

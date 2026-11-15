@@ -1,6 +1,6 @@
 # 板间协议 v4：参考工程统一合同
 
-本文件描述参考 v4 的核心线协议，原兼容性核对基线为 `bad529abe5d6`（2026-11-10），参考目标为 `JJL0612/sentry_gimbal@3cfbe1c` 与 `JJL0612/sentry_onlychassis@dcc8d4e`。SkyWalker 后续增加 `0x0201` 裁判帧分片扩展，旧参考固件不提供该扩展；新应用的完整行为以源码与各自 README 为准。不承诺兼容旧 `0x0405` 扩展或内部 `mode=2`。
+本文件描述参考 v4 的核心线协议，原兼容性核对基线为 `bad529abe5d6`（2026-11-10），当前文档按 `dd3f673`（2026-11-15）复核，参考目标为 `JJL0612/sentry_gimbal@3cfbe1c` 与 `JJL0612/sentry_onlychassis@dcc8d4e`。SkyWalker 后续增加 `0x0201` 裁判帧分片扩展，旧参考固件不提供该扩展；新应用的完整行为以源码与各自 README 为准。不承诺兼容旧 `0x0405` 扩展或内部 `mode=2`。
 
 ## 物理与帧格式
 
@@ -36,10 +36,11 @@
 mode=0 Disabled；mode=1 BodyVelocity；mode=2 Spin 编码保留但正式云台只发送 mode=0/1。
 global_action=2 Active 才请求运动；0 Disable 为停止。**不需要 `0x0301` 才能执行**。
 接收方使用大 Yaw 绝对编码器相对标定前向零位，把云台系 vx/vy 旋到车体系，再进舵轮运动学；
-没有有效关节角时平移必须置零，旋转按本地执行器状态处理。小陀螺边平移的参考降速
-按旋转前的原始方向选择：有 vy 时 ×0.4，仅 vx 时 ×0.3。
-参考底盘的方向约定为 `theta = -1 * (raw_encoder - (-1.132792rad)) / ratio`，
-实际安装方向和零位仍需实车校准。
+没有有效关节角时平移必须置零，旋转按本地执行器状态处理。小陀螺边平移的参考降速由 `calibration.hpp` 的
+`chassis_spin_forward_scale`/`chassis_spin_lateral_scale` 配置，当前均为 ×1.0
+（历史参考值 ×0.3/×0.4 不再生效）。
+当前方向约定为 `theta = -1 * (raw_encoder - 0.048638rad) / ratio`；
+`reference_big_yaw_forward_zero_rad` 是标定候选值，实际安装方向仍需实车确认。
 
 ### `0x0402` 大 Yaw 世界角速度
 

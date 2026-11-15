@@ -1,6 +1,6 @@
 # 舵轮底盘与功率缩放：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 四轮运动学与八轴独立有效性；公开 SwerveHardware/ChassisExecutor 持续暂存，应用统一 commit。
 
@@ -41,7 +41,7 @@ int SwerveChassis::validate() const; int reset(const ChassisFeedback &); int ste
 int SwerveModule::step(const ModuleTarget &, const ModuleFeedback &, float dt_s, ModuleOutput &out)
 ```
 
-最短转向、翻转迟滞、转向斜坡、Hold/Coast；无对齐门控或 cos 缩速，舵向和轮驱分别恢复。
+最短转向、翻转迟滞、转向斜坡、Hold/Coast 与逐轮 cos³ 驱动缩速（`cosine_compensation` 默认 true）；没有四轮全体对齐互锁，舵向和轮驱分别恢复。`drive_output_valid` 只由本模块反馈/计算决定。
 
 **返回 / 输出：** 0 为接受/配置成功；实际状态单独观测。
 

@@ -9,7 +9,7 @@
 | `dm_mc02/stm32h723xx` | STM32H723 | 192 KB / 512 KB | FDCAN1/2/3、BMI088 SPI2、WS2812 SPI6、USART/RS485、UART5、USART10 | OpenOCD |
 | `rm_typec` | STM32F407 | 128 KB / 1024 KB | CAN1/2、BMI088、USB CDC-ACM、USART1/3/6、音频、蜂鸣器 | OpenOCD + 外部探针 |
 
-MCU 频率和引脚以各自 DTS 为准。表中的 RAM/Flash 是 `board.yml` 元数据；实际链接布局还应查看生成的 linker map 和 build 输出。
+MCU 频率和引脚以各自 DTS 为准。表中的 RAM/Flash 是板级 `board.yaml` 元数据（`board.yml` 只登记 board root/名称）；实际链接布局还应查看生成的 linker map 和 build 输出。
 
 ## 2. 达妙 MC02
 

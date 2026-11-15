@@ -57,7 +57,7 @@ west flash -d build/dual_imu
 
 没有有效姿态或字段已过期时，对应图表数据输出 NaN，不能把初始化单位四元数误认成真实姿态。板载与 CAN 外置全部字段新鲜时均为 mask=15（含温度）。外置质量为 Unknown，表示模块没有公开内部 EKF 收敛标志。
 
-默认云台板配置使用中央 `carrier_reference`（frame_id=2）及 `carrier_sensor_to_body`，对应大 Yaw 载体；头部外置使用 `head_reference`（frame_id=3）及 `head_sensor_to_body`，对应随 Pitch 运动的头部。底盘板配置使用 `chassis_reference`（frame_id=1）及 `chassis_sensor_to_body`，对应底盘车体。frame_id 标识安装位置，epoch 标识该位置的参考会话；三者 yaw 各自有初始化参考，不能据此认定零点相同。中央默认安装旋转是单位四元数，只表示传感器自身坐标。TODO(标定)：记录并更新三处安装变换、参考会话、正方向和原始数据年龄，验收后再将中央 `imu_mounting_confirmed` 设为 true。该确认开关不会阻止此观测样例采集，也不会授权电机输出。外置单位缩放默认为 1，姿态方向默认为 sensor→world，仍须用实物确认。
+默认云台板配置使用中央 `carrier_reference`（frame_id=2）及 `carrier_sensor_to_body`，对应大 Yaw 载体；头部外置使用 `head_reference`（frame_id=3）及 `head_sensor_to_body`，对应随 Pitch 运动的头部。底盘板配置使用 `chassis_reference`（frame_id=1）及 `chassis_sensor_to_body`，对应底盘车体。frame_id 标识安装位置，epoch 标识该位置的参考会话；三者 yaw 各自有初始化参考，不能据此认定零点相同。中央默认安装旋转是单位四元数，只表示传感器自身坐标。TODO(标定)：记录并更新三处安装变换、参考会话、正方向和原始数据年龄。中央 `imu_mounting_confirmed` 当前为 true，重装或改向后必须重新确认；该开关不替代现场记录。该确认开关不会阻止此观测样例采集，也不会授权电机输出。外置单位缩放默认为 1，姿态方向默认为 sensor→world，仍须用实物确认。
 
 ## 三个实际安装位置的观测
 

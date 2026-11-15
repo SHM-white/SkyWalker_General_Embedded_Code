@@ -78,4 +78,4 @@ core 单位为 m/s²、rad/s、rad；四元数为 Hamilton wxyz，表示 B→W�
 启用 SKYWALKER_VISION 编译核心，SKYWALKER_VISION_AB 增加具体协议，SKYWALKER_VISION_RECEIVER 增加依赖 UART_TRANSPORT 的线程端点。关闭 REFEREE/REMOTE_DR16/INTERBOARD 仍可独立构建。
 
 [视觉回显样例](../../../samples/communication/vision/README.md) 提供接线、VOFA 通道和发送器；[主流程验收](../../../tests/vision_imu/README.md) 覆盖流式收包、坏帧恢复、停止请求、过期和反馈编码。尚未实物验证 UART、上位机运行配置和坐标约定。
-\n\n更多对象生命周期与完整调用顺序见[封装模块调用示例](../../../call-examples.md)。\n
+更多对象生命周期与完整调用顺序见[封装模块调用示例](../call-examples.md)。

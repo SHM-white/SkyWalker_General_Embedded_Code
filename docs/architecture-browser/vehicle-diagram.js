@@ -1,5 +1,5 @@
 'use strict';
-// Current assembly reviewed at bad529abe5d6 (2026-11-10); target is future design.
+// Current assembly reviewed at dd3f673 (2026-11-15); target is future design.
 window.SKYWALKER_VEHICLE_MAP = {
   "current": {
     "height": 770,
@@ -18,20 +18,20 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "referee",
-        "title": "裁判 / 测量（待接）",
-        "detail": "当前最终应用未装配",
+        "title": "板间裁判许可",
+        "detail": "底盘 USART10 → v4 0x0201 → 云台",
         "moduleId": "referee",
         "x": 230,
         "y": 24,
         "w": 175,
         "h": 70,
-        "status": "planned",
+        "status": "ready",
         "zone": "input"
       },
       {
         "id": "imu",
-        "title": "板载 BMI088",
-        "detail": "SPI · 载体航向/角速度；CAN3 外置未启用",
+        "title": "BMI088 + CAN3 头部 IMU",
+        "detail": "载体航向 + 视觉姿态参考",
         "moduleId": "imu",
         "x": 470,
         "y": 24,
@@ -42,20 +42,20 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "host",
-        "title": "视觉 AB（待接）",
-        "detail": "无 alias · UART7 诊断独占",
+        "title": "视觉 AB（USB CDC）",
+        "detail": "USB CDC · 10 ms 反馈 · allow_auto 关闭",
         "moduleId": "vision",
         "x": 765,
         "y": 24,
         "w": 250,
         "h": 70,
-        "status": "planned",
+        "status": "partial",
         "zone": "host"
       },
       {
         "id": "command",
         "title": "CommandManager",
-        "detail": "RemoteSource · 真实 RC 门控",
+        "detail": "Remote/Aim/Navigation + 裁判",
         "moduleId": "command",
         "x": 55,
         "y": 175,
@@ -90,8 +90,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "inertial",
-        "title": "编码器手动 + 载体补偿",
-        "detail": "板载角速度补偿小 Yaw；回中须新鲜航向",
+        "title": "双 Yaw 分配 + 头部惯性",
+        "detail": "分配器关节轨迹 · 视觉姿态外环",
         "moduleId": "inertial",
         "x": 55,
         "y": 320,
@@ -114,14 +114,14 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "shooter",
-        "title": "摩擦轮 / 拨盘（待接）",
-        "detail": "当前最终云台未创建电机",
+        "title": "摩擦轮 / 拨盘",
+        "detail": "已装配 · 热量/许可未接",
         "moduleId": "shooter",
         "x": 380,
         "y": 465,
         "w": 245,
         "h": 88,
-        "status": "planned",
+        "status": "partial",
         "zone": "gimbal"
       },
       {
@@ -138,8 +138,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "centering",
-        "title": "小 Yaw 中心外环",
-        "detail": "双轴输出有效 · 关节 rad/s",
+        "title": "双 Yaw 分配器",
+        "detail": "关节轨迹 + 大 Yaw 世界意图",
         "moduleId": "big-yaw",
         "x": 380,
         "y": 320,

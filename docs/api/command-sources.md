@@ -1,14 +1,14 @@
 # 来源适配与手动映射：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
-把接收器快照接到固定 Operator/Aim 角色；裁判单独作为 Permission，保留原始时间与诊断。
+把接收器快照接到固定 Operator/Aim/Navigation 角色；裁判单独作为 Permission，保留原始时间与诊断。
 
-**接入状态：已有代码。** 注册来源与后台服务已实现；整车手动默认 Remote，裁判/视觉按 VEHICLE_* 阶段配置注册，不改变原输入年龄。
+**接入状态：已有代码。** 注册来源与后台服务已实现；正式云台注册 Remote、Vision、Navigation 并绑定板间裁判许可，底盘不创建 CommandManager。所有来源都保留原输入年龄。
 
 ## 职责与关联
 
-ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionSource、RefereePermissionSource 适配接收器。ManualCommandMapper 把遥控值变成归一化操作意图，不输出电机电流。
+ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionSource、NavigationSource、RefereePermissionSource 与 InterBoardRefereeSource 适配接收器。ManualCommandMapper 把遥控值变成归一化操作意图，不输出电机电流。
 
 输入 / 依赖：[DR16 遥控输入](remote.md)、[视觉链路与 AB 协议](vision.md)、[裁判许可与功率预算](referee.md)
 
@@ -22,7 +22,7 @@ ICommandSource/IPermissionSource 是扩展入口；内置 RemoteSource、VisionS
 virtual SourceRole ICommandSource::role() const = 0; virtual int ICommandSource::start() = 0; virtual int ICommandSource::sample(SourceSample &out) = 0
 ```
 
-输入扩展接口。role 固定为 Operator 或 Aim；SourceValue 是 RemoteState 或 Measurement<AimCommand> 的 variant，必须和角色相匹配。
+输入扩展接口。role 固定为 Operator、Aim 或 Navigation；SourceValue 是 RemoteState、Measurement<AimCommand> 或 navigation::Command 的 variant，必须和角色相匹配。
 
 | 参数 | 含义与边界 |
 | --- | --- |
@@ -40,7 +40,7 @@ virtual SourceRole ICommandSource::role() const = 0; virtual int ICommandSource:
 virtual int IPermissionSource::start() = 0; virtual int IPermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) = 0
 ```
 
-单独的许可约束接口；不占据 Operator/Aim 来源槽。
+单独的许可约束接口；不占据 Operator/Aim/Navigation 来源槽。
 
 | 参数 | 含义与边界 |
 | --- | --- |
@@ -118,7 +118,7 @@ start 为 0，真正 I/O 由 sample 调用 receiver.poll；裁判没有单独 wo
 explicit ManualCommandMapper(const Config &config); int ManualCommandMapper::map(const RemoteState &remote, OperatorIntent &out) const
 ```
 
-将中心化遥控值变为 [-1,1] 意图。左开关 Down=Safe/Middle=Manual/Up=Auto；右开关 Up=KeyboardMouse，其余合法档=Remote。
+将中心化遥控值变为 [-1,1] 意图。默认 `RemoteInputProfile::KeyboardMouseSelectable` 下左 Down=Safe、Middle/Up=Manual，右拨杆不再选择键鼠来源；`auto_on_up=true`（仅视觉执行样例）才把左 Up 标为 Auto。`ShooterSelectable` 台架左 Middle/Up 均为 Manual。
 
 | 参数 | 含义与边界 |
 | --- | --- |
@@ -129,7 +129,7 @@ explicit ManualCommandMapper(const Config &config); int ManualCommandMapper::map
 
 **线程 / 时序：** 纯值映射，无 I/O；后续 CommandArbiter 应用物理限速和许可。
 
-**错误 / 边界：** mapper 不自行按当前时刻判断 stamp 年龄，仲裁器必须先检查新鲜度。默认 DR16 不解 wheel，底盘旋转请求因此可能为 0。
+**错误 / 边界：** mapper 不自行按当前时刻判断 stamp 年龄，仲裁器必须先检查新鲜度。`Dr16Decoder` 默认 `decode_wheel=true`：正式云台把拨轮作为小陀螺强度（`dial_deadband` 0.05），底盘旋转由右拨杆 Down 或导航 `wz` 决定。
 
 ## 调用示例
 
@@ -172,7 +172,7 @@ int inspectIntent(const RemoteState &remote, OperatorIntent &intent) {
 // CommandArbiter 会将它乘 max_chassis_vx_m_s 并施加裁判许可。
 ```
 
-遥控 left_y→vx，-left_x→vy，wheel→wz，-right_x→yaw_rate，right_y→pitch_rate；键鼠 W/S、A/D 与鼠标按固定映射提供意图。
+遥控 left_y→vx、-left_x→vy、-right_x→yaw_rate、right_y→pitch_rate；拨轮在正式云台映射为小陀螺强度而不是底盘 `wz`。键鼠 W/S、A/D、Shift/Q/E 与鼠标按固定映射提供意图，摇杆与鼠标按轴取幅值较大者。
 
 ## 调用顺序
 
@@ -185,13 +185,13 @@ int inspectIntent(const RemoteState &remote, OperatorIntent &intent) {
 
 | 配置项 | 作用与前提 |
 | --- | --- |
-| `ManualCommandMapper::Config` | analog_deadband=0.03、channel_range=660、mouse_yaw_scale/mouse_pitch_scale=0.002。 |
-| `来源编译条件` | RemoteSource 需 REMOTE_RECEIVER，VisionSource 需 VISION_RECEIVER，RefereePermissionSource 需 REFEREE 与 UART_TRANSPORT。 |
+| `ManualCommandMapper::Config` | analog_deadband=0.03、channel_range=660、mouse_yaw_scale/mouse_pitch_scale=0.002；`input_profile` 默认 KeyboardMouseSelectable，`auto_on_up=false`、`merge_keyboard_mouse=false`、`cruise_on_middle=false`。 |
+| `来源编译条件` | RemoteSource 需 REMOTE_RECEIVER，VisionSource 需 VISION_RECEIVER，NavigationSource 需 NAVIGATION_RECEIVER，RefereePermissionSource 需 REFEREE 与 UART_TRANSPORT；InterBoardRefereeSource 需 REFEREE 与 INTERBOARD_ENDPOINT。 |
 | `对象所有权` | source 只引用接收器；manager 只引用 source，不拥有它们，不负责释放。 |
 
 - 不要在 sample 中无限等待串口或重新刷新旧值时间；后台周期不能因此停滞。
-- SourceRole 只有 Operator/Aim；没有直接把所有消息源塞入同一优先级队列的接口。
-- 注册多个 Operator 或 Aim 返回 -EEXIST；来源最多两个。
+- SourceRole 为 Operator/Aim/Navigation；没有直接把所有消息源塞入同一优先级队列的接口。
+- 同一角色重复注册返回 -EEXIST；来源最多三个，至少需要一个 Operator。
 - 自定义来源不得发布与 role 不匹配的 variant；诊断的 unavailable 与数值 0 不同。
 
 ## 正文与源码

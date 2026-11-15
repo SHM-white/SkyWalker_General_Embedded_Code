@@ -12,7 +12,7 @@
 
 注意控制能力发生了明确取舍：不依赖外置 IMU后，手动模式不再具有外置头部实测姿态的完整闭环。小 Yaw 通过载体角速度反向补偿来辅助保持方向，Pitch 锁的是相对编码器角。这不等同于保证枪口世界姿态精度。外置 IMU 以后可以只服务视觉，也可以单独扩展为头部稳向功能；后者不在当前实现和后续视觉接入的默认范围内。
 
-当前 `applications/sentry_gimbal` 未实例化 `VisionReceiver`、`VisionSource` 或 `AbProtocol`，`manualCommandConfig().allow_auto=false`。历史 `vision_*.conf` 的存在不能使固定入口自动获得视觉功能。`gimbal_drive_command` 仍是独立底盘行走命令发送端，本次不把它变成视觉或云台控制入口。
+本文写作时 `applications/sentry_gimbal` 未实例化 `VisionReceiver`、`VisionSource` 或 `AbProtocol`，`manualCommandConfig().allow_auto=false`；当前已用 USB CDC 接入并覆盖 `allow_auto`。历史 `vision_*.conf` 的存在不能使固定入口自动获得视觉功能。`gimbal_drive_command` 仍是独立底盘行走命令发送端，本次不把它变成视觉或云台控制入口。
 
 ## 目标数据流
 

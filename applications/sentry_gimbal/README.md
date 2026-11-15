@@ -1,6 +1,6 @@
 # 哨兵云台应用
 
-当前双 Yaw 控制使用 `DualYawMotionAllocator` 分配小 Yaw 与大 Yaw 运动意图。视觉自瞄使用 CAN3 外置头部 IMU 的世界参考；板载 BMI088 为底盘 v4 `0x0404` 提供载体航向/角速度。历史回滚背景见 [双 Yaw 分析](../../docs/dev/双Yaw回滚与控制分工分析.md)，当前行为以本页和源码为准。
+当前双 Yaw 控制使用 `DualYawMotionAllocator` 分配小 Yaw 与大 Yaw 运动意图。视觉自瞄使用 CAN3 外置头部 IMU 的世界参考；板载 BMI088 为底盘 v4 `0x0404` 提供载体航向/角速度。历史回滚背景见 [双 Yaw 分析](../../docs/dev/archive/双Yaw回滚与控制分工分析.md)，当前行为以本页和源码为准。
 
 ```sh
 west build -b dm_mc02/stm32h723xx applications/sentry_gimbal -d ../build/applications/sentry_gimbal
@@ -80,7 +80,7 @@ VS Code 的 `sentry_gimbal` 使用独立构建目录 `applications/sentry_gimbal
 - `manual_profile.hpp`：`dualYawAllocatorConfig()` 配置双 Yaw 分配和回中；`sentryInertialConfig()` 的 Yaw P=3、阻尼=0.1 仅用于视觉姿态外环，世界目标超前角限制为 0（禁用）。
 - `gimbal_profile.hpp`：小 Yaw/Pitch 电机 PID、速度参考斜率、电流/力矩上限。
 - `calibration.hpp`：机械方向、原点、限位、IMU 安装参考；`vision_pitch_horizontal_rad` 为待实测水平零位。手动 Yaw 速度恢复 3 rad/s。
-- `big_yaw_profile.hpp`：底盘侧旧航向 P/速度 PI；原生速度斜率仍为 20 rad/s²，区别于上游回中请求的 0.8 rad/s²。
+- `big_yaw_profile.hpp`：底盘侧旧航向 P/速度 PI；原生速度斜率仍为 20 rad/s²。上游回中由分配器的 `center_rate_max_rad_s=0.8 rad/s` 与 `big_acceleration_max_rad_s2=10.5 rad/s²` 约束。
 
 保留遥控/键鼠、导航、视觉和裁判授权仲裁、变速小陀螺及发射机构。此次需要**同时重新构建并烧录云台和底盘**；编译不能证明实机跟踪性能。
 

@@ -102,7 +102,7 @@ int main() {
 
 ## 3. 裁判系统
 
-`RefereeParser` 不从 payload 长度猜协议版本，必须明确构造 `RefereeVersion`。当前实现 profile 是 `Rm2026V1_3`，识别：
+`RefereeParser` 不从 payload 长度猜协议版本；版本在构建期由 `CONFIG_SKYWALKER_REFEREE_RM2027`（默认）或 `CONFIG_SKYWALKER_REFEREE_RM2026` 互斥选择，运行时没有 `RefereeVersion` 参数。当前默认解析 2027 版，识别：
 
 - `0x0201`：机器人 ID、云台/底盘/发射机构权限和底盘功率上限。
 - `0x0202`：buffer energy 等功率状态。

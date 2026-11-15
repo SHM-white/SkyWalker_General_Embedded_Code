@@ -1,6 +1,6 @@
 # 达妙电机：MIT / 速度 / 位置速度：接口与调用参考
 
-源码基线：`main@99a97c9`（2026-10-05）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
+源码核对基线：`dd3f673`（2026-11-15）。本文维护为独立 Markdown，可在编辑器或 GitHub 直接阅读；在线浏览器读取同一正文。完整源码、硬件配置和未列出的接口以文末链接为准。
 
 统一 Motor/CanBus 持续接收目标，设备独立自动恢复；effort 单位 N·m。
 
@@ -168,7 +168,7 @@ int Motor::setVelocity(float rad_s); int Motor::setPositionVelocity(float rad, f
 MotorInfo Motor::info() const; MotorSnapshot Motor::snapshot() const; bool Motor::active() const
 ```
 
-查询能力、参数和状态值副本；enabled_requested 是运行意图，output_permitted/feedback_fresh 是实际执行条件，retry_count 与 last_fault 是诊断。
+查询能力、参数和状态值副本；enabled_requested 是运行意图，output_permitted/feedback_fresh 是实际执行条件，retry_count 与 last_fault 是诊断。DM 快照另有 `native_position_rad`/`native_position_valid` 与跨 ±PMAX 展开的 `native_unwrapped_position_rad`/`native_unwrapped_position_valid`/`native_wrap_count`；展开坐标保留校准前原始零点，disable/enable 与 `reseedPosition()` 不会重置它，只有电机或主控重启才重建。
 
 **返回 / 输出：** 能力/状态值副本或实际 active 布尔值；快照读取不生产新反馈。
 

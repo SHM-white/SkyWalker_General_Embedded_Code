@@ -1,6 +1,8 @@
 # 哨兵参考工程对照：大 Yaw 原生速度模式（2026-11-03）
 
-状态：软件适配供审查，**默认关闭**；未烧录、未做实车测试。请勿仅因参考仓库能编译便宣称整车已调通。
+> **2026-11-15 复核**：原生速度已不是可选后备，`motion_profile.hpp` 默认 `BigYawBackend::NativeVelocity`，`big_yaw_profile.hpp` 也已选用 `reference_big_yaw`；“默认关闭”只描述当时状态。当前行为见[底盘应用 README](../../applications/sentry_chassis/README.md)。
+
+原状态：软件适配供审查，默认关闭；未烧录、未做实车测试。请勿仅因参考仓库能编译便宣称整车已调通。
 
 ## 固定参考
 
