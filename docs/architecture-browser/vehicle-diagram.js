@@ -9,47 +9,59 @@ window.SKYWALKER_VEHICLE_MAP = {
         "title": "DR16 / 物理遥控",
         "detail": "UART5 · 真实归中解锁",
         "moduleId": "remote",
-        "x": 35,
-        "y": 24,
+        "x": 20,
+        "y": 4,
         "w": 175,
-        "h": 70,
+        "h": 90,
         "status": "ready",
         "zone": "input"
       },
       {
         "id": "referee",
-        "title": "板间裁判许可",
-        "detail": "底盘 USART10 → v4 0x0201 → 云台",
+        "title": "裁判原始帧 / 许可",
+        "detail": "底盘 USART10 → v4 → 云台",
         "moduleId": "referee",
-        "x": 230,
-        "y": 24,
-        "w": 175,
-        "h": 70,
+        "x": 210,
+        "y": 4,
+        "w": 190,
+        "h": 90,
         "status": "ready",
         "zone": "input"
       },
       {
         "id": "imu",
-        "title": "BMI088 + CAN3 头部 IMU",
-        "detail": "载体航向 + 视觉姿态参考",
+        "title": "CAN3 头部 IMU + BMI088",
+        "detail": "头部姿态 / 载体航向",
         "moduleId": "imu",
-        "x": 470,
-        "y": 24,
-        "w": 185,
-        "h": 70,
+        "x": 420,
+        "y": 4,
+        "w": 200,
+        "h": 90,
         "status": "partial",
         "zone": "input"
       },
       {
         "id": "host",
         "title": "视觉 AB（USB CDC）",
-        "detail": "USB CDC · 10 ms 反馈 · allow_auto 关闭",
+        "detail": "allow_auto=true · 10 ms 姿态回传",
         "moduleId": "vision",
-        "x": 765,
-        "y": 24,
-        "w": 250,
-        "h": 70,
+        "x": 640,
+        "y": 4,
+        "w": 200,
+        "h": 90,
         "status": "partial",
+        "zone": "host"
+      },
+      {
+        "id": "navigation",
+        "title": "导航 / 巡航来源",
+        "detail": "USART1 · 导航档与掉线保持",
+        "moduleId": "command-sources",
+        "x": 860,
+        "y": 4,
+        "w": 215,
+        "h": 90,
+        "status": "ready",
         "zone": "host"
       },
       {
@@ -115,7 +127,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "shooter",
         "title": "摩擦轮 / 拨盘",
-        "detail": "已装配 · 热量/许可未接",
+        "detail": "已装配 · 未要求热量/许可",
         "moduleId": "shooter",
         "x": 380,
         "y": 465,
@@ -126,8 +138,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "id": "gmotor",
-        "title": "小 Yaw / Pitch CAN",
-        "detail": "GM6020 CAN1 · DM CAN2",
+        "title": "云台电机 / 共享提交",
+        "detail": "CAN1 小 Yaw/发射 · CAN2 Pitch",
         "moduleId": "motor-dji",
         "x": 55,
         "y": 650,
@@ -151,7 +163,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "chassis",
         "title": "ChassisExecutor",
-        "detail": "低电流机械链 · 无功率闭环",
+        "detail": "云台系平移转换 · 无功率闭环",
         "moduleId": "chassis",
         "x": 770,
         "y": 320,
@@ -194,16 +206,16 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "command",
-        "label": "后续接入",
-        "kind": "planned",
+        "label": "裁判许可",
+        "kind": "permission",
         "from": "referee",
         "points": [
           {
-            "x": 317,
+            "x": 305,
             "y": 94
           },
           {
-            "x": 317,
+            "x": 305,
             "y": 132
           },
           {
@@ -222,16 +234,16 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "command",
-        "label": "后续接入",
-        "kind": "planned",
+        "label": "视觉 Aim",
+        "kind": "command",
         "from": "host",
         "points": [
           {
-            "x": 890,
+            "x": 740,
             "y": 94
           },
           {
-            "x": 890,
+            "x": 740,
             "y": 112
           },
           {
@@ -248,22 +260,22 @@ window.SKYWALKER_VEHICLE_MAP = {
           }
         ],
         "labelPosition": {
-          "x": 700,
+          "x": 680,
           "y": 103
         }
       },
       {
         "to": "inertial",
-        "label": "载体航向 / 角速度",
+        "label": "头部姿态 / 载体角速度",
         "kind": "feedback",
         "from": "imu",
         "points": [
           {
-            "x": 562,
+            "x": 520,
             "y": 94
           },
           {
-            "x": 562,
+            "x": 520,
             "y": 140
           },
           {
@@ -304,8 +316,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "gmotor",
-        "label": "后续接入",
-        "kind": "planned",
+        "label": "共享 CAN1 stage",
+        "kind": "command",
         "from": "shooter",
         "points": [
           {
@@ -332,8 +344,8 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "shooter",
-        "label": "后续接入",
-        "kind": "planned",
+        "label": "发射请求",
+        "kind": "command",
         "from": "command",
         "points": [
           {
@@ -424,13 +436,35 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "centering",
-        "label": "输出有效 / Active",
-        "kind": "feedback",
-        "from": "inertial"
+        "label": "头部世界意图",
+        "kind": "command",
+        "from": "command",
+        "points": [
+          {
+            "x": 300,
+            "y": 263
+          },
+          {
+            "x": 300,
+            "y": 288
+          },
+          {
+            "x": 450,
+            "y": 288
+          },
+          {
+            "x": 450,
+            "y": 320
+          }
+        ],
+        "labelPosition": {
+          "x": 390,
+          "y": 280
+        }
       },
       {
         "to": "glink",
-        "label": "回中请求",
+        "label": "0x0402 世界速度",
         "kind": "command",
         "from": "centering",
         "points": [
@@ -522,7 +556,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "clink",
-        "label": "真实速度 / 状态年龄",
+        "label": "原生角 / 速度 / 状态年龄",
         "kind": "feedback",
         "from": "bigyaw",
         "points": [
@@ -546,6 +580,58 @@ window.SKYWALKER_VEHICLE_MAP = {
         "labelPosition": {
           "x": 1070,
           "y": 410
+        }
+      },
+      {
+        "from": "navigation",
+        "to": "command",
+        "label": "Navigation / 巡航",
+        "kind": "command",
+        "points": [
+          {
+            "x": 967,
+            "y": 94
+          },
+          {
+            "x": 967,
+            "y": 158
+          },
+          {
+            "x": 365,
+            "y": 158
+          },
+          {
+            "x": 365,
+            "y": 242
+          },
+          {
+            "x": 330,
+            "y": 242
+          }
+        ],
+        "labelPosition": {
+          "x": 705,
+          "y": 150
+        }
+      },
+      {
+        "from": "centering",
+        "to": "inertial",
+        "label": "可行参考 / 关节轨迹",
+        "kind": "command",
+        "points": [
+          {
+            "x": 380,
+            "y": 380
+          },
+          {
+            "x": 330,
+            "y": 380
+          }
+        ],
+        "labelPosition": {
+          "x": 355,
+          "y": 420
         }
       }
     ]
@@ -604,7 +690,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       {
         "id": "command",
         "title": "CommandManager",
-        "detail": "可扩展搜索 / 导航目标 · 待实现",
+        "detail": "遥控 / 视觉 / 导航 / 巡航仲裁",
         "moduleId": "command",
         "x": 55,
         "y": 175,
@@ -979,7 +1065,7 @@ window.SKYWALKER_VEHICLE_MAP = {
       },
       {
         "to": "glink",
-        "label": "回中请求",
+        "label": "0x0402 世界速度",
         "kind": "command",
         "from": "centering",
         "points": [

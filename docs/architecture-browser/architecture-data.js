@@ -61,7 +61,7 @@ window.SKYWALKER_ARCHITECTURE = {
     "summary": "两个 sentry 最终工程各自独立装配并运行 main：云台为双 Yaw 分配、遥控/视觉/导航仲裁、CAN3 头部 IMU、板载 BMI088 与发射执行；底盘为八电机轮控/大 Yaw 执行，并经 v4 转发裁判原始帧。27 个相关工程的编译记录属于 2026-10-25 旧基线，本轮未重建或实板验证；视觉自动射击、实测功率与有载发射仍未验收，配置值不等于现场通过。",
     "lanes": [
       {
-        "title": "云台板：编码器手动双轴、板载 BMI088 补偿与统一提交",
+        "title": "云台板：双 Yaw 分配、双 IMU、视觉/导航与发射",
         "steps": [
           {
             "title": "DR16 与真实 RC 解锁",
@@ -78,13 +78,13 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "板载 BMI088 载体航向",
             "moduleId": "inertial",
-            "note": "板载 BMI088 与小 Yaw/Pitch 编码器实现手动闭环；载体角速度补偿小 Yaw，大 Yaw 回中要求航向新鲜；不实例化 CAN3 外置 IMU。",
+            "note": "CAN3 外置头部 IMU 提供视觉姿态参考与回传；板载 BMI088 提供载体航向/角速度，编码器提供关节反馈。",
             "status": "partial"
           },
           {
             "title": "独立双轴执行器",
             "moduleId": "gimbal",
-            "note": "main 每 5ms 更新 GimbalExecutor；小 Yaw CAN1、Pitch CAN2，每周期各提交一次；不创建发射机构。",
+            "note": "main 每 5ms 更新双轴与 ShooterExecutor；CAN1 小 Yaw/摩擦轮/拨盘、CAN2 Pitch，全部 stage 后每物理 CAN 一次 commit。",
             "status": "ready"
           },
           {
@@ -101,19 +101,19 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "板间 v4 输入",
             "moduleId": "interboard",
-            "note": "云台 USART10 / 底盘 USART1，460800；main 推进 endpoint，真实 OperatorControl/boot/原年龄分别检查。",
+            "note": "云台 USART10 / 底盘 USART1，460800；main 推进 endpoint，新鲜 0x0101 / 0x0402 驱动执行，不要求独立 0x0301 授权；boot 与原年龄仍检查。",
             "status": "ready"
           },
           {
             "title": "四舵轮执行器",
             "moduleId": "chassis",
-            "note": "main 独立装配 SwerveHardware/ChassisExecutor，CAN1 舵向、CAN2 轮驱，2ms 绝对节拍；当前仅低电流手动机械链。",
+            "note": "main 装配 SwerveHardware/ChassisExecutor；以大 Yaw 新鲜原生角将云台系平移转换到车体系，CAN1 舵向/CAN2 轮驱，2ms 绝对节拍；无实测功率闭环。",
             "status": "partial"
           },
           {
             "title": "大 Yaw 速度内环",
             "moduleId": "big-yaw",
-            "note": "小 Yaw 中心外环 → v4 关节 rad/s → 底盘 BigYawExecutor/DM CAN3；原始年龄、boot 与本轴反馈独立检查。",
+            "note": "双 Yaw 分配器 → v4 0x0402 世界角速度 → 底盘载体角速度补偿 → BigYawExecutor / DM CAN3 关节速度环；原始年龄、boot 与本轴反馈独立检查。",
             "status": "partial"
           },
           {
@@ -154,7 +154,7 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "搜索与导航",
             "moduleId": "application",
-            "note": "巡航扫描已实现；导航平移来源与车体里程计仍需独立接入和验收。",
+            "note": "USART1 NavigationSource 与巡航扫描已接入；导航档支持掉线保持，车体里程计与实车组合验收仍待完成。",
             "status": "partial"
           }
         ]
@@ -193,13 +193,13 @@ window.SKYWALKER_ARCHITECTURE = {
       },
       {
         "title": "编译记录与实板结论分开",
-        "detail": "旧基线 27 个相关工程曾编译通过；本轮未重建或实板运行；方向、停止时限和组合性能仍按独立上车阶段记录。巡航扫描已实现，车体里程计/导航仍待接入。",
+        "detail": "旧基线 27 个相关工程曾编译通过；本轮未重建或实板运行；方向、停止时限和组合性能仍按独立上车阶段记录。巡航扫描与导航来源已接入，车体里程计及组合验收仍待完成。",
         "source": "samples/bringup/README.md"
       }
     ]
   },
   "target": {
-    "summary": "后续在独立工程和共享实车配置上逐级完成接线、安装、方向与机构记录，并补齐真实功率与有载发射来源。库实现、最终应用装配、工程编译和硬件通过分别登记；巡航扫描已实现，导航平移与车体里程计仍为目标。",
+    "summary": "后续在独立工程和共享实车配置上逐级完成接线、安装、方向与机构记录，并补齐真实功率与有载发射来源。库实现、最终应用装配、工程编译和硬件通过分别登记；巡航扫描与导航来源已接入，车体里程计与组合验收仍为目标。",
     "lanes": [
       {
         "title": "可信输入与机械标定",
@@ -254,7 +254,7 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "大 Yaw 速度内环",
             "moduleId": "big-yaw",
-            "note": "小 Yaw 中心外环 → 底盘 BigYawExecutor → DM CAN3 关节速度内环；boot/来源年龄/反馈独立检查。",
+            "note": "双 Yaw 分配器 → v4 世界速度意图 → 底盘载体补偿 → BigYawExecutor / DM CAN3 关节速度内环；boot/来源年龄/反馈独立检查。",
             "status": "partial"
           }
         ]
@@ -265,7 +265,7 @@ window.SKYWALKER_ARCHITECTURE = {
           {
             "title": "AB 真实反馈闭环",
             "moduleId": "vision",
-            "note": "补弹速/弹数与明确参考会话后才启用上行。",
+            "note": "10 ms 姿态上行已启用；后续补真实弹速/弹数与明确参考会话。",
             "status": "partial"
           },
           {
@@ -339,7 +339,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "板载 BMI088 载体补偿",
           "moduleId": "inertial",
-          "detail": "当前正式云台不启动 CAN3 外置 IMU；板载 BMI088 角速度用于补偿小 Yaw 手动速度和大 Yaw 回中放行。"
+          "detail": "CAN3 外置头部 IMU 提供视觉姿态参考；板载 BMI088 提供载体航向/角速度，分配器协调小 Yaw 关节轨迹与大 Yaw 世界意图。"
         },
         {
           "title": "公开双轴执行器",
@@ -380,7 +380,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "注册 VisionSource",
           "moduleId": "command-sources",
-          "detail": "正式云台已注册 VisionSource（USB CDC）；allow_auto=false 时仅观察/跟踪，不进入自动射击。"
+          "detail": "正式云台已注册 VisionSource（USB CDC），接收器和设备启用时设置 allow_auto=true；实际接管仍受导航档授权、目标新鲜度与参考有效性约束。"
         },
         {
           "title": "Auto 仲裁",
@@ -431,7 +431,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "大 Yaw 速度内环",
           "moduleId": "big-yaw",
-          "detail": "小 Yaw 中心外环 → 底盘 BigYawExecutor → DM CAN3 关节速度内环；boot/来源年龄/反馈独立检查。"
+          "detail": "双 Yaw 分配器 → v4 世界速度意图 → 底盘载体补偿 → BigYawExecutor / DM CAN3 关节速度内环；boot/来源年龄/反馈独立检查。"
         },
         {
           "title": "电机独立自动恢复",
@@ -471,7 +471,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "板载载体采集",
           "moduleId": "imu",
-          "detail": "云台 SPI BMI088 → ImuReceiver → ImuHeadingReference；外置 CAN3 IMU 未启动，板载测量不是独立头部姿态。"
+          "detail": "云台 SPI BMI088 → ImuReceiver → 载体航向/角速度；CAN3 外置头部 IMU 独立采集头部姿态，供视觉外环与 AB 回传。"
         },
         {
           "title": "IMU 与机械快照",
@@ -568,7 +568,7 @@ window.SKYWALKER_ARCHITECTURE = {
         {
           "title": "真实业务条件",
           "moduleId": "shooter",
-          "detail": "真实许可/热量/拨盘原点/摩擦稳定/头部状态全部满足；默认 Pending 测量无效。"
+          "detail": "当前应用 require_permission=false、require_heat=false；供弹仍受摩擦反馈、云台 Active 与拨盘参考约束，有载验收未完成。"
         },
         {
           "title": "摩擦与拨盘独立目标",
@@ -604,7 +604,7 @@ window.SKYWALKER_ARCHITECTURE = {
     },
     {
       "title": "3 · 真实 RC 授权与原始输入",
-"detail": "云台注册 Remote/Aim/Navigation 并绑定裁判许可；归中后左 Down→Middle 解锁，底盘接收原始授权；start 成功不代表测量有效。"
+      "detail": "云台注册 Remote/Aim/Navigation 并绑定裁判许可；归中后左 Down→Middle 解锁，底盘接收原始授权；start 成功不代表测量有效。"
     },
     {
       "title": "4 · 唯一执行 owner",
@@ -620,7 +620,7 @@ window.SKYWALKER_ARCHITECTURE = {
     },
     {
       "title": "7 · 单口诊断与实车记录",
-      "detail": "只改 diagnostic_output 后重编译烧录选择 DAPLink Log/Vofa；27 工程仅编译完成，实板逐级确认，视觉/功率/有载发射继续独立接入。"
+      "detail": "只改 diagnostic_output 后重编译烧录选择 DAPLink Log/Vofa；27 工程编译记录属于 2026-10-25 旧基线；当前实板逐级确认，视觉/功率/有载发射继续验收。"
     }
   ],
   "sources": [
@@ -678,8 +678,8 @@ window.SKYWALKER_ARCHITECTURE = {
     }
   ],
   "baseline": {
-    "branch": "main / dev（代码基线）",
-    "commit": "bad529abe5d682797ca27d49078bbf0a9b00266b",
-    "date": "2026-11-10"
+    "branch": "源码基线",
+    "commit": "dd3f6735aa86ef28e37b986d4437ff8fc58feca9",
+    "date": "2026-11-15"
   }
 };
