@@ -317,12 +317,45 @@ function vehicleSummary(graph) {
       `<div class="notice"><strong>阅读边界：</strong>模块正文说明现行接口；docs/dev 是设计记录与待实施方案。开发记录中的拟议 API 需要结合当前源码判断。</div>${!documents.length && documentMode ? empty('当前工作区没有可索引的 Markdown 文档。') : ''}<div class="docs-layout">${groups.map(group => `<section class="panel doc-group"><h2>${esc(group)}</h2>${documents.filter(doc => doc.group === group).map(doc => `<a class="doc-entry" href="${routeFile(doc.path)}"><span>${esc(doc.title)}<small>${esc(doc.path)}</small></span><span class="doc-arrow">↗</span></a>`).join('')}</section>`).join('')}</div>`;
   }
 
-  function historyPage() {
-    content.innerHTML = heading('06 / Git history', '什么时候变成了覆盖层？', '以下时间来自仓库 Git 记录，均为北京时间。提交记录能说明实际修改与注明的目的，未注明的动机不作猜测。') +
-      `<div class="notice warn"><strong>关键启用点：2026-09-30 03:30:47，d860163。</strong> 前一提交添加刷新脚本，该提交把它插入页面。最初为补视觉 / IMU，后续继续叠加命令服务，导致多代描述依靠运行时覆盖。Markdown 目录始终存在。</div><div class="history-timeline">${architecture.history.map(item => `<article class="history-entry"><time>${esc(item.date)}</time><h3><code class="commit">${esc(item.hash)}</code>${esc(item.title)}</h3><p>${esc(item.detail)}</p></article>`).join('')}</div>
-      ${sectionHeading('这次重建的维护方式')}<div class="panel panel-body"><ol class="steps-list"><li>一个渲染入口 app.js；接口详情维护在 docs/api 的独立 Markdown，页面读取同一正文。</li><li>主图区分“当前实际接入”和“最终上车目标”，模块代码状态与真实装配状态分开显示。</li><li>Markdown 保留为长篇正文并在浏览器内阅读；本地源码入口直接读取工作区，不再固定到过时 GitHub 提交。</li><li>API 修改时更新 docs/api 和模块主题页；应用接入变化时更新架构数据与主图；每轮按照文档同步清单逐项完成。</li></ol><a class="quiet-link" href="#read/docs/architecture-browser/README.md" style="display:block;margin-top:20px">维护与启动说明 →</a></div>`;
+async function historyPage(version) {
+  content.innerHTML = heading('06 / Documentation history', '文档更新记录', '从 Git 历史中自动筛选影响 Markdown、在线文档浏览器和 Pages 部署的提交，不混入纯业务代码提交。') +
+    '<div class="loading" role="status">正在读取文档提交记录…</div>';
+  try {
+    const response = await fetch(new URL('history.json', window.location.href), {cache: 'no-store'});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const history = await response.json();
+    if (history.mode !== 'git' || !Array.isArray(history.commits)) throw new Error('当前服务器无法提供 Git 文档历史');
+    if (version !== renderVersion) return;
+    const entries = history.commits.filter(item => /^[0-9a-f]{40}$/.test(item.sha) && typeof item.title === 'string' &&
+      Array.isArray(item.paths));
+    const renderEntry = item => {
+      const date = new Date(item.date);
+      const when = Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }) : item.date;
+      const url = `https://github.com/SHM-white/SkyWalker_General_Embedded_Code/commit/${item.sha}`;
+      return `<article class="history-entry"><time datetime="${esc(item.date)}">${esc(when)}（北京时间）</time>
+        <h3><a class="commit-link" href="${url}" target="_blank" rel="noopener noreferrer">${esc(item.sha.slice(0, 9))}</a>${esc(item.title)}</h3>
+        <details class="history-files"><summary>查看本次涉及的 ${item.paths.length} 个文档 / 站点文件</summary>
+          <ul>${item.paths.map(file => `<li><code>${esc(file)}</code></li>`).join('')}</ul>
+        </details></article>`;
+    };
+    const latest = entries.slice(0, 35);
+    const older = entries.slice(35);
+    content.innerHTML = heading('06 / Documentation history', '文档更新记录', '来源为当前仓库 Git 提交历史。只展示修改 Markdown、浏览器前端或文档部署流程的提交；标题与时间保留原提交信息。') +
+      `<div class="notice">共收录最近 ${entries.length} 条相关提交。时间统一按北京时间展示；单击提交哈希查看 GitHub 原始改动。若本地仓库历史不完整，记录将受克隆深度限制。</div>` +
+      (entries.length ? `<div class="history-timeline">${latest.map(renderEntry).join('')}</div>` : empty('暂无文档相关提交。')) +
+      (older.length ? `<details class="history-older"><summary>展开更早的 ${older.length} 条文档提交</summary>
+         <div class="history-timeline">${older.map(renderEntry).join('')}</div></details>` : '') +
+      `<p class="count-note">此处不再人工维护提交列表。静态站点在部署时生成历史快照，本地 run.sh 在访问时从 Git 读取。</p>`;
+  } catch (error) {
+    if (version !== renderVersion) return;
+    content.innerHTML = heading('06 / Documentation history', '文档更新记录', '从 Git 提交记录中筛选影响文档的修改。') +
+      `<div class="notice warn history-fallback">当前未能加载文档提交记录：${esc(error.message)}。请使用仓库 run.sh 或等待 GitHub Pages 重新部署。
+      也可直接打开 <a target="_blank" rel="noopener noreferrer" href="https://github.com/SHM-white/SkyWalker_General_Embedded_Code/commits/main/docs/">GitHub 的 docs/ 提交历史</a>。</div>`;
   }
-
+}
   function searchPage(params) {
     const query = (params.get('q') || '').trim();
     input.value = query;
@@ -533,7 +566,7 @@ function vehicleSummary(graph) {
       case 'module': await moduleDetail(id, params, version); return;
       case 'workflows': workflows(id, params); if (params.has('step')) requestAnimationFrame(() => window.scrollTo({top: previousScroll})); break;
       case 'docs': docsPage(); break;
-      case 'history': historyPage(); break;
+      case 'history': await historyPage(version); return;
       case 'search': searchPage(params); break;
       case 'read': await readFile(id, false, params, version); return;
       case 'source': await readFile(id, true, params, version); return;
