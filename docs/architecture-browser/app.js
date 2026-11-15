@@ -137,6 +137,26 @@ function setThemePreference(mode) {
     return lines;
   }
 
+function vehicleSummary(graph) {
+  const names = {input: '外部输入与测量', host: '视觉 / 导航主机', gimbal: '云台主控与机构', chassis: '底盘主控与机构'};
+  const zones = [...new Set(graph.nodes.map(node => node.zone))];
+  return `<section class="vehicle-mobile" aria-label="按控制器划分的架构文字版">${zones.map(zone => {
+    const items = graph.nodes.filter(node => node.zone === zone).sort((a, b) => a.y - b.y || a.x - b.x);
+    return `<div class="vehicle-mobile-zone"><h3>${esc(names[zone] || zone || '其他模块')}</h3><div class="vehicle-mobile-group">${items.map(node => {
+      const inner = `<strong>${esc(node.title)}</strong><small>${esc(node.detail)}</small>`;
+      return byId.has(node.moduleId)
+        ? `<a class="vehicle-mobile-node ${esc(node.status)}" href="#module/${esc(node.moduleId)}">${inner}</a>`
+        : `<div class="vehicle-mobile-node ${esc(node.status)}">${inner}</div>`;
+    }).join('')}</div></div>`;
+  }).join('')}<details class="vehicle-mobile-links"><summary>查看全部数据连接 · ${graph.edges.length} 条</summary>
+    <ul>${graph.edges.map(edge => {
+      const a = graph.nodes.find(node => node.id === edge.from);
+      const b = graph.nodes.find(node => node.id === edge.to);
+      if (!a || !b) return '';
+      return `<li>${esc(a.title)} → ${esc(b.title)}${edge.label ? ` · ${esc(edge.label)}` : ''}</li>`;
+    }).join('')}</ul></details></section>`;
+}
+
   function vehicleDiagram(mode) {
     const graph = window.SKYWALKER_VEHICLE_MAP?.[mode];
     if (!graph) return '';
@@ -171,7 +191,22 @@ function setThemePreference(mode) {
       const body = `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="7"/><circle cx="${node.x + node.w - 12}" cy="${node.y + 13}" r="3"/><text x="${node.x + 12}" y="${node.y + 22}">${titleLines.map((line, index) => `<tspan x="${node.x + 12}" dy="${index ? 16 : 0}">${esc(line)}</tspan>`).join('')}</text><text class="vehicle-detail" x="${node.x + 12}" y="${node.y + 22 + titleLines.length * 16}">${detailLines.map((line, index) => `<tspan x="${node.x + 12}" dy="${index ? 13 : 0}">${esc(line)}</tspan>`).join('')}</text>`;
       return `<g class="vehicle-node ${esc(node.status)}"><title>${esc(node.title)}：${esc(node.detail)}；${statusText[node.status] || ''}</title>${byId.has(node.moduleId) ? `<a href="#module/${esc(node.moduleId)}" aria-label="查看${esc(node.title)}接口">${body}</a>` : body}</g>`;
     }).join('');
-    return `<div class="vehicle-map-wrap"><svg class="vehicle-map" viewBox="0 0 1100 ${graph.height || 560}" role="img" aria-labelledby="vehicle-title"><title id="vehicle-title">${mode === 'current' ? '当前实际接入' : '最终上车目标'}：物理分工和数据流。下方提供对应文字链路。</title><defs>${['command', 'feedback', 'permission', 'planned'].map(kind => `<marker id="vehicle-${kind}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path class="arrow-${kind}" d="M0 0 L10 5 L0 10z"/></marker>`).join('')}</defs>${zones}${edges}${boxes}</svg></div>`;
+    const svg = `<svg class="vehicle-map" viewBox="0 0 1100 ${graph.height || 560}" role="img" aria-labelledby="vehicle-title"><title id="vehicle-title">${mode === 'current' ? '当前实际接入' : '最终上车目标'}：物理分工和数据流。下方提供对应文字链路。</title><defs>${['command', 'feedback', 'permission', 'planned'].map(kind => `<marker id="vehicle-${kind}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path class="arrow-${kind}" d="M0 0 L10 5 L0 10z"/></marker>`).join('')}</defs>${zones}${edges}${boxes}</svg>`;
+    const compactSvg = svg.replace(/vehicle-(command|feedback|permission|planned)/g, 'vehicle-mobile-$1')
+      .replaceAll('vehicle-title', 'vehicle-mobile-title');
+    return `<div class="vehicle-diagram-panel"><div class="diagram-toolbar">
+      <span>按住 Shift 并滚动、或使用下列按钮调整图的显示比例；图内节点可点击查看接口</span>
+      <div class="diagram-zoom-controls" aria-label="架构图缩放">
+        <button type="button" data-diagram-zoom="-1" aria-label="缩小图">−</button>
+        <button type="button" data-diagram-zoom="0">重置</button>
+        <button type="button" data-diagram-zoom="1" aria-label="放大图">＋</button>
+      </div></div>
+      <div class="vehicle-map-wrap">${svg}</div>
+      ${vehicleSummary(graph)}
+      <details class="vehicle-full-toggle"><summary>需要查看连线位置？展开完整矢量架构图（左右滑动）</summary>
+        <div class="vehicle-map-wrap">${compactSvg}</div></details>
+      <div class="vehicle-legend"><span>命令方向</span><span class="feedback">状态 / 反馈</span>
+        <span class="permission">许可来源</span><span class="planned">待实现链路</span></div></div>`;
   }
 
   function overview(params) {
@@ -528,6 +563,18 @@ function setThemePreference(mode) {
     if (copyButton) {
       const code = copyButton.closest('.code-example')?.querySelector('pre code');
       if (code) copy(code.textContent);
+    }
+    const zoomButton = event.target.closest('[data-diagram-zoom]');
+    if (zoomButton) {
+      const wrap = zoomButton.closest('.vehicle-diagram-panel')?.querySelector('.vehicle-map-wrap');
+      const svg = wrap?.querySelector('svg');
+      if (svg) {
+        const previous = Number.parseFloat(svg.style.getPropertyValue('--diagram-zoom')) || 1;
+        const delta = Number.parseInt(zoomButton.dataset.diagramZoom, 10);
+        const next = delta === 0 ? 1 : Math.max(.8, Math.min(1.8, previous + delta * .2));
+        svg.style.setProperty('--diagram-zoom', String(next));
+      }
+      return;
     }
     const step = event.target.closest('[data-workflow]');
     if (step && !step.disabled) window.location.hash = `workflows/${step.dataset.workflow}?step=${step.dataset.step}`;
