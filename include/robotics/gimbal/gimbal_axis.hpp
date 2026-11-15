@@ -26,7 +26,18 @@ struct AxisCommand {
     GimbalMode mode = GimbalMode::Disabled;
     float target_rad = 0;
     float rate_rad_s = 0;
+    // 请求把本轴实际积分出来的关节参考速度交给位置环做速度前馈。只有
+    // Active + Rate、已完成播种且目标未被软限位/超前角投影的周期才可能生效。
+    // 该字段只是“本周期请求”，不是前馈已生效的证据，见 TargetStatus。
+    bool use_rate_reference = false;
+    // 开始新的 Rate 会话：丢弃累计目标和控制历史，用本周期新鲜反馈播种，
+    // 本周期不积分也不前馈。由拥有者按参考来源/会话变化显式置位，
+    // 不能用逐帧递增的序号代替。
+    bool restart_rate_session = false;
 };
+
+// Rate 目标被重建（而不是沿旧目标继续积分）的原因。
+enum class AxisRestartReason : std::uint8_t { None, CommandSession, RequestEdge, UnconsumedCycle, ExplicitReseed };
 
 // Validated joint trajectory for the small Yaw, in encoder coordinates.
 // The allocator produces position/rate/acceleration from one feasible plan; the
@@ -58,6 +69,13 @@ public:
         bool rate_limited = false;
         bool mechanical_limited = false;
         bool lead_limited = false;
+        // Rate 参考桥接诊断：requested 是本周期请求，accepted 表示位置环真的
+        // 收到了与本次积分目标同源、有限的参考速度。accepted=false 时
+        // reference_velocity_rad_s 为 0，而不是残留值。
+        bool reference_requested = false;
+        bool reference_accepted = false;
+        float reference_velocity_rad_s = 0;
+        AxisRestartReason restart_reason = AxisRestartReason::None;
     };
 
     GimbalAxis(motor::Motor &drive, const control::PositionMotor::Config &position_config,
@@ -112,6 +130,12 @@ private:
     bool configured_ = false;
     bool reference_seeded_ = false;
     bool initialized_ = false;
+    // Bridge session state: a request edge marks a new reference owner, and a
+    // motion cycle whose output never reached the drive must reseed instead of
+    // replaying its target debt on the next executed cycle.
+    bool reference_request_previous_ = false;
+    bool rate_restart_pending_ = false;
+    bool explicit_reseed_ = false;
 };
 
 } // namespace skywalker::robotics

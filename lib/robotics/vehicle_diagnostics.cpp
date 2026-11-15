@@ -21,25 +21,26 @@ using namespace skywalker::robotics::vehicle;
 const device *const diagnostic_uart = DEVICE_DT_GET(DT_ALIAS(diagnostic_uart));
 struct Packet {
     std::uint16_t size = 0;
-    // 49 float channels plus the four-byte JustFloat tail are 200 bytes. The
-    // buffer keeps a little slack for a future channel once the baud budget is
-    // re-verified.
+    // Legacy extended frames use 200 bytes; compact gimbal frames use 132.
     std::uint8_t data[208]{};
 };
 K_MSGQ_DEFINE(diagnostic_queue, sizeof(Packet), 16, 4);
 atomic_t dropped_packets = 0;
 int output_error = -EAGAIN;
 
-void enqueue(const std::uint8_t *bytes, std::size_t size) {
+bool enqueue(const std::uint8_t *bytes, std::size_t size) {
     Packet packet{};
     if (size > sizeof(packet.data)) {
         atomic_inc(&dropped_packets);
-        return;
+        return false;
     }
     packet.size = size;
     std::memcpy(packet.data, bytes, size);
-    if (k_msgq_put(&diagnostic_queue, &packet, K_NO_WAIT) != 0)
+    if (k_msgq_put(&diagnostic_queue, &packet, K_NO_WAIT) != 0) {
         atomic_inc(&dropped_packets);
+        return false;
+    }
+    return true;
 }
 int textOutput(std::uint8_t *bytes, std::size_t size, void *) {
     if constexpr (diagnostic_output == DiagnosticOutput::Log)
@@ -105,7 +106,10 @@ int Diagnostics::start(const char *application, const char *role, const char *li
     textLine("%s", "resources: diagnostic=UART7/PE8-TX,PE7-RX; remote=UART5/PD2; see installed overlays\n");
     textLine("limits=%s\n", limits);
     event("diagnostic", output_error);
-    status({.reason = output_error ? DiagnosticReason::InitFailed : DiagnosticReason::Boot, .error = output_error});
+    if (layout_ == DiagnosticLayout::GimbalResponse)
+        (void)gimbalResponse({.error = output_error});
+    else
+        status({.reason = output_error ? DiagnosticReason::InitFailed : DiagnosticReason::Boot, .error = output_error});
     return output_error;
 }
 void Diagnostics::event(const char *step, int result) {
@@ -114,6 +118,8 @@ void Diagnostics::event(const char *step, int result) {
     textLine("%s t=%u step=%s result=%d\n", application_, std::uint32_t(k_uptime_get()), step, result);
 }
 void Diagnostics::status(const DiagnosticStatus &sample) {
+    if (layout_ != DiagnosticLayout::Legacy)
+        return;
     const auto now = static_cast<std::uint64_t>(k_uptime_get());
     const bool changed = sample.reason != last_reason_;
     if (changed) {
@@ -180,6 +186,55 @@ void Diagnostics::status(const DiagnosticStatus &sample) {
             for (std::size_t i = 0; i < sample.extension.size(); i += 3)
                 textLine("diag I%u=%f I%u=%f I%u=%f\n", unsigned(19 + i), double(sample.extension[i]), unsigned(20 + i),
                          double(sample.extension[i + 1]), unsigned(21 + i), double(sample.extension[i + 2]));
+    }
+}
+
+bool Diagnostics::gimbalResponse(const GimbalResponseStatus &sample) {
+    if (layout_ != DiagnosticLayout::GimbalResponse)
+        return false;
+    const auto now = static_cast<std::uint64_t>(k_uptime_get());
+    if (now < next_sample_ms_)
+        return false;
+    if constexpr (diagnostic_output == DiagnosticOutput::Log) {
+        if (now < next_log_ms_)
+            return false;
+        next_log_ms_ = now + 1000;
+    }
+    next_sample_ms_ = now + diagnostic_period_ms;
+    ++sequence_;
+    const auto time = static_cast<std::uint32_t>(sample.time_ms == UINT64_MAX ? now : sample.time_ms);
+    const auto dropped = static_cast<std::uint32_t>(atomic_get(&dropped_packets));
+    std::array<float, 32> values{};
+    values[0] = gimbal_response_schema;
+    values[1] = float(sequence_ & 0xffff);
+    values[2] = float(sequence_ >> 16);
+    values[3] = float(time & 0xffff);
+    values[4] = float(time >> 16);
+    values[5] = float(dropped & 0xffff);
+    values[6] = float(dropped >> 16);
+    values[7] = float(sample.state);
+    values[8] = float(sample.error);
+    std::copy(sample.signals.begin(), sample.signals.end(), values.begin() + 9);
+    values[30] = sample.max_dt_us;
+    values[31] = float(sample.events);
+    if constexpr (diagnostic_output == DiagnosticOutput::Vofa) {
+        std::uint8_t bytes[32 * sizeof(float) + 4];
+        static_assert(sizeof(float) == 4);
+        static_assert(sizeof(bytes) == 132 && sizeof(bytes) <= sizeof(Packet{}.data));
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            std::uint32_t bits;
+            std::memcpy(&bits, &values[i], sizeof(bits));
+            sys_put_le32(bits, bytes + sizeof(float) * i);
+        }
+        sys_put_le32(0x7f800000, bytes + sizeof(float) * values.size());
+        return enqueue(bytes, sizeof(bytes));
+    }
+    else {
+        for (std::size_t i = 0; i + 2 < values.size(); i += 3)
+            textLine("gimbal I%u=%f I%u=%f I%u=%f\n", unsigned(i), double(values[i]), unsigned(i + 1),
+                     double(values[i + 1]), unsigned(i + 2), double(values[i + 2]));
+        textLine("gimbal I30=%f I31=%f\n", double(values[30]), double(values[31]));
+        return true;
     }
 }
 } // namespace skywalker::robotics::vehicle

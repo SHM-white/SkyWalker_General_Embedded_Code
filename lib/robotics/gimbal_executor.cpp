@@ -32,6 +32,7 @@ void GimbalExecutor::withdraw(WaitReason, int, bool) {
     group_.disable();
     yaw_.withdraw();
     pitch_.withdraw();
+    yaw_rate_restart_pending_ = pitch_rate_restart_pending_ = false;
     status_.ready = status_.requested = false;
 }
 RunStatus GimbalExecutor::publish(core::TimeUs now, RunState state, WaitReason reason, int error) {
@@ -56,6 +57,8 @@ RunStatus GimbalExecutor::update(const GimbalExecutionInputs &in, core::TimeUs n
     const float dt = cycle ? float(now - previous_us_) / 1e6f : 0;
     previous_us_ = now;
     have_time_ = true;
+    yaw_rate_restart_pending_ = yaw_rate_restart_pending_ || in.yaw_restart_rate_session;
+    pitch_rate_restart_pending_ = pitch_rate_restart_pending_ || in.pitch_restart_rate_session;
     if (!configured_)
         return suspend(now, WaitReason::Configuration, config_error_ ? config_error_ : -EACCES, true);
     if (in.emergency_stop || in.clear_estop)
@@ -79,6 +82,7 @@ RunStatus GimbalExecutor::update(const GimbalExecutionInputs &in, core::TimeUs n
     if (!have_previous || !cycle) {
         // Keep the enable request pending; do not disable or reset the group for
         // a missed interval. No new axis output is staged this cycle.
+        yaw_rate_restart_pending_ = pitch_rate_restart_pending_ = true;
         status_.ready = false;
         return publish(now, RunState::Recovering, WaitReason::Cycle, error);
     }
@@ -97,16 +101,28 @@ RunStatus GimbalExecutor::update(const GimbalExecutionInputs &in, core::TimeUs n
                                     ? std::isfinite(in.command.pitch_target_rad)
                                     : true;
     int yr = 0, pr = 0;
-    if (yaw_trajectory_ok)
+    if (yaw_trajectory_ok) {
         yr = yaw_.updateTrajectory(in.yaw_trajectory, SafetyAction::Active, in.yaw_output_valid ? dt : 0);
-    else if (yaw_input_ok)
-        yr = yaw_.update({in.command.mode, in.command.yaw_target_rad, in.command.yaw_rate_rad_s}, SafetyAction::Active,
-                         in.yaw_output_valid ? dt : 0);
+        // 轨迹路径没有消费 Rate 会话；下次回到 Rate 时须从反馈重新播种。
+        yaw_rate_restart_pending_ = true;
+    }
+    else if (yaw_input_ok) {
+        yr = yaw_.update({in.command.mode, in.command.yaw_target_rad, in.command.yaw_rate_rad_s,
+                          in.yaw_use_rate_reference && in.yaw_output_valid, yaw_rate_restart_pending_},
+                         SafetyAction::Active, in.yaw_output_valid ? dt : 0);
+        if (in.command.mode == GimbalMode::Rate && yr == 0 && yaw_.telemetry().output_valid)
+            yaw_rate_restart_pending_ = false;
+    }
     else if (!error)
         error = -EINVAL;
-    if (pitch_input_ok)
-        pr = pitch_.update({in.command.mode, in.command.pitch_target_rad, in.command.pitch_rate_rad_s},
+    if (pitch_input_ok) {
+        pr = pitch_.update({in.command.mode, in.command.pitch_target_rad, in.command.pitch_rate_rad_s,
+                            in.pitch_use_rate_reference && in.pitch_output_valid,
+                            pitch_rate_restart_pending_},
                            SafetyAction::Active, in.pitch_output_valid ? dt : 0);
+        if (in.command.mode == GimbalMode::Rate && pr == 0 && pitch_.telemetry().output_valid)
+            pitch_rate_restart_pending_ = false;
+    }
     else if (!error)
         error = -EINVAL;
     const int axis_error = yr < 0 ? yr : pr;

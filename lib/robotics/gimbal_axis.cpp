@@ -147,16 +147,39 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
     if (initialized_ && (snapshot.enable_generation != observed_enable_generation_ ||
                          snapshot.reference_generation != observed_reference_generation_))
         withdraw();
+    const bool hold = action == SafetyAction::Hold || command.mode == GimbalMode::Hold;
+    const bool was_hold = previous_action_ == SafetyAction::Hold || previous_mode_ == GimbalMode::Hold;
+    const bool rate_path = !hold && command.mode == GimbalMode::Rate;
+    // A feedforward request edge means a new owner of the joint reference. The
+    // explicit restart covers leaving/entering the vision path; the pending flag
+    // covers a motion cycle whose output never reached the drive, so its target
+    // debt is not replayed on the next executed cycle.
+    const bool request_edge = command.use_rate_reference && !reference_request_previous_;
+    reference_request_previous_ = command.use_rate_reference;
+    AxisRestartReason restart_reason = AxisRestartReason::None;
+    if (rate_path) {
+        if (command.restart_rate_session)
+            restart_reason = AxisRestartReason::CommandSession;
+        else if (request_edge)
+            restart_reason = AxisRestartReason::RequestEdge;
+        else if (rate_restart_pending_)
+            restart_reason = explicit_reseed_ ? AxisRestartReason::ExplicitReseed : AxisRestartReason::UnconsumedCycle;
+    }
+    const bool was_initialized = initialized_;
+    if (restart_reason != AxisRestartReason::None) {
+        // Drop the old target and control history. The seeding below rebuilds the
+        // target from this cycle's feedback, so the previous session cannot be replayed.
+        withdraw();
+        explicit_reseed_ = false;
+    }
     target_status_ = {};
     target_status_.feedback_healthy = true;
     target_status_.last_dt_s = dt;
     target_status_.measured_rad = config_.topology == AxisTopology::Continuous ? snapshot.feedback.absolute_position_rad
                                                                                : snapshot.feedback.position_rad;
-    const bool hold = action == SafetyAction::Hold || command.mode == GimbalMode::Hold;
-    const bool was_hold = previous_action_ == SafetyAction::Hold || previous_mode_ == GimbalMode::Hold;
     // Do not integrate across a recovery interval. The current input starts on
     // the next valid execution interval after the feedback target is established.
-    const float integration_dt = initialized_ && dt <= 0.02f ? dt : 0;
+    const float integration_dt = was_initialized && restart_reason == AxisRestartReason::None && dt <= 0.02f ? dt : 0;
     if (!initialized_) {
         if (command.mode == GimbalMode::AbsoluteAngle && !hold) {
             target_angle_rad_ = command.target_rad;
@@ -169,6 +192,8 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
     }
     if (hold && !was_hold)
         (void)seed(snapshot);
+    const double q_before = target_angle_rad_; // 本周期积分起点（必要时已重新播种）
+    double executed_delta = 0;                 // 实际写入目标的增量，连续轴取 wrap 前值
     if (initialized_ && !hold) {
         double delta = 0;
         if (command.mode == GimbalMode::Rate) {
@@ -195,6 +220,7 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
             delta = std::clamp(delta, -step, step);
         }
         target_angle_rad_ += delta;
+        executed_delta = delta;
     }
     if (config_.topology == AxisTopology::Limited) {
         const auto candidate = target_angle_rad_;
@@ -214,12 +240,46 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
     }
     else
         target_angle_rad_ = std::remainder(target_angle_rad_, 6.283185307179586);
+    // 有限轴没有 wrap，重算后的目标差才是本周期真正写入的增量（含限位投影）。
+    if (config_.topology == AxisTopology::Limited)
+        executed_delta = target_angle_rad_ - q_before;
     target_status_.target_rad = target_angle_rad_;
     target_status_.target_valid = initialized_;
     target_status_.integration_dt_s = integration_dt;
+    target_status_.restart_reason = restart_reason;
+    target_status_.reference_requested = command.use_rate_reference && rate_path;
+    const bool projected = target_status_.mechanical_limited || target_status_.lead_limited;
+    // 参考速度必须和本次真正施加的目标增量同源：恢复周期、未积分周期、被限位
+    // 投影或超出轴限速时一律不传前馈，而不是用 clamp 掩盖错误的差分。
+    bool reference_accepted = target_status_.reference_requested &&
+                              restart_reason == AxisRestartReason::None && integration_dt > 0.0f && !projected;
+    float reference_velocity = 0.0f;
+    if (reference_accepted) {
+        const double candidate = executed_delta / static_cast<double>(integration_dt);
+        if (std::isfinite(candidate) && std::fabs(candidate) <= static_cast<double>(config_.max_rate_rad_s) * 1.001)
+            reference_velocity = static_cast<float>(candidate);
+        else
+            reference_accepted = false;
+    }
+    target_status_.reference_accepted = reference_accepted;
+    target_status_.reference_velocity_rad_s = reference_velocity;
     previous_action_ = action;
     previous_mode_ = command.mode;
-    return position_.update(target_angle_rad_, initialized_ ? dt : 0);
+    const int ret = reference_accepted ? position_.update(target_angle_rad_, reference_velocity, 0.0f, dt)
+                                       : position_.update(target_angle_rad_, initialized_ ? dt : 0);
+    if (ret < 0 || !position_.telemetry().output_valid) {
+        // 下层没有真正执行本周期（等待/失败）：丢弃本次新增目标，下一有效周期
+        // 从测量重新播种，避免未执行的参考位移变成追赶债务或前馈。
+        target_angle_rad_ = q_before;
+        target_status_.target_rad = target_angle_rad_;
+        target_status_.reference_accepted = false;
+        target_status_.reference_velocity_rad_s = 0.0f;
+        if (rate_path)
+            rate_restart_pending_ = true;
+    }
+    else
+        rate_restart_pending_ = false;
+    return ret;
 }
 int GimbalAxis::updateRate(float rate_rad_s, float dt_s) {
     return update({GimbalMode::Rate, 0, rate_rad_s}, SafetyAction::Active, dt_s);
@@ -307,6 +367,13 @@ int GimbalAxis::reseedTargetFromFeedback() {
     if (!configured_)
         return -EACCES;
     target_status_ = {};
-    return seed(drive_.snapshot());
+    const int ret = seed(drive_.snapshot());
+    if (ret == 0) {
+        // 显式重播种后，下一个有效运动周期只重建会话：不把本周期的速率积分到
+        // 新种子上，也不把播种前的目标债带进前馈。
+        rate_restart_pending_ = true;
+        explicit_reseed_ = true;
+    }
+    return ret;
 }
 } // namespace skywalker::robotics

@@ -31,6 +31,10 @@ struct InertialGimbalOutput {
     float yaw_error_rad = 0, pitch_error_rad = 0;
     bool stabilization_valid = false;
     bool yaw_output_valid = false, pitch_output_valid = false;
+    // 适配器内部实际使用的载体速率估计（头部世界速率减关节编码器速率）。
+    // 仅供诊断导出，不参与控制公式；与分配器使用的 BMI088 载体速率不是同一个量。
+    float carrier_yaw_rate_rad_s = 0, carrier_pitch_rate_rad_s = 0;
+    bool carrier_yaw_rate_valid = false, carrier_pitch_rate_valid = false;
 };
 
 // One execution-thread owner. Adapts a head inertial goal into joint commands;

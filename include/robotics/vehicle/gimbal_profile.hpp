@@ -19,6 +19,12 @@ namespace skywalker::robotics::vehicle {
 // their devices, receivers, motor instances, startup order and execution loops.
 inline constexpr std::uint32_t gimbal_command_timeout_ms = 100;
 inline constexpr core::TimeUs gimbal_period_us = 5000;
+// 视觉 Rate 桥接的速度前馈增益（docs/dev/云台MPC轨迹跟踪响应优化实施指南.md 第 8.2 节）。
+// 0 只接通数据、不改变响应；0.25/0.5 为逐轮实验值，先确认 gain=0 记录中的参考连续性与
+// 合成速度限幅未频繁介入，再按轴、按轮提高。1.0 不是必须达到的目标，yaw 与 pitch 分开评估。
+inline constexpr float yaw_velocity_feedforward_gain = 0.5f;
+// Pitch 几何追赶参考尚无实机连续性基线；先保留桥接观测，关闭额外速度前馈。
+inline constexpr float pitch_velocity_feedforward_gain = 0.0f;
 static_assert(small_yaw.gear_ratio == 1 && pitch.gear_ratio == 1,
               "Native joint profiles require an explicit external gearbox transform otherwise");
 static_assert(yaw_low_ticks < yaw_high_ticks && yaw_high_ticks < 8192 && small_yaw.encoder_zero_ticks < 8192);
@@ -100,14 +106,16 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     // 调参：内环速度/电流上限；与硬件能力协调，鼠标灵敏度独立设置。
     c.loop.velocity.requested_velocity_abs_max_rad_s = 15.0f;
     c.loop.velocity.effort_abs_max = 3.0f;
+    // 视觉 Rate 桥接：只在本轴确实由视觉 Rate 路径驱动时生效，默认增益见文件顶部。
+    c.loop.velocity_feedforward_gain = yaw_velocity_feedforward_gain;
     return c;
 }
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     skywalker::control::PositionMotor::Config c{};
     c.effort_unit = skywalker::control::EffortUnit::NewtonMeter;
     c.reference = skywalker::control::PositionReference::DriverContinuous;
-    // 调参：Pitch位置外环，保持既有PID；deadband=0.01 rad约0.57°。
-    // 先记录重力负载、静止噪声和跟踪误差，再逐项调整增益/死区/积分。
+    // 调参：Pitch位置外环，保持既有PID；deadband=0.005 rad约0.29°。
+    // 第一轮只缩小死区，其余参数与轨迹保持基线，先确认平台残差与静止噪声再动 D。
     c.loop.position = {.kp = 30.0f,
                        .ki = 0.6f,
                        .kd = 2.0f,
@@ -116,7 +124,7 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
                        .integral_max = 1.2f,
                        .output_min = -5.0f,
                        .output_max = 5.0f,
-                       .deadband = 0.01f,
+                       .deadband = 0.005f,
                        .dt_min_s = 0.001f,
                        .dt_max_s = 0.020f};
     // 调参：Pitch速度内环输出单位N·m；先看速度跟踪与力矩饱和，
@@ -141,6 +149,9 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     // 调参：机构速度/力矩上限，保留原值并按安全机械能力逐步确认。
     c.loop.velocity.requested_velocity_abs_max_rad_s = 6.0f;
     c.loop.velocity.effort_abs_max = 5.0f;
+    // 视觉 Rate 桥接：Pitch 参考由几何追赶生成，先以零增益取得连续性基线；
+    // 记录中若 v_ref 反复跳变，保持增益为 0 并补受限关节参考。
+    c.loop.velocity_feedforward_gain = pitch_velocity_feedforward_gain;
     return c;
 }
 

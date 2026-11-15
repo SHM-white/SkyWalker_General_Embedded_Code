@@ -88,19 +88,34 @@ int control_motor_position_step(control_motor_position_state *state, const contr
         return ret;
     }
 
+    /* The velocity loop rejects, rather than saturates, an out-of-range request.
+     * Clamp the combined position correction and joint feedforward here so a
+     * legitimate cycle always reaches the regulator, and report whether the
+     * limit actually changed the value. Zero feedforward keeps the legacy
+     * request bit-identical because the position output is already validated
+     * against the same bound. */
+    const float velocity_feedforward = config->velocity_feedforward_gain *
+                                       (input->has_reference_velocity ? input->reference_velocity_rad_s : 0.0f);
+    const float velocity_request_raw = local.position.output + velocity_feedforward;
+    if (!isfinite(velocity_feedforward) || !isfinite(velocity_request_raw)) {
+        return -ERANGE;
+    }
+    float velocity_request = velocity_request_raw;
+    if (velocity_request > config->velocity.requested_velocity_abs_max_rad_s) {
+        velocity_request = config->velocity.requested_velocity_abs_max_rad_s;
+    }
+    else if (velocity_request < -config->velocity.requested_velocity_abs_max_rad_s) {
+        velocity_request = -config->velocity.requested_velocity_abs_max_rad_s;
+    }
+
     const control_motor_velocity_input velocity_input = {
-        .requested_velocity_rad_s = local.position.output +
-                                    config->velocity_feedforward_gain *
-                                        (input->has_reference_velocity ? input->reference_velocity_rad_s : 0.0f),
+        .requested_velocity_rad_s = velocity_request,
         .measured_velocity_rad_s = input->measured_velocity_rad_s,
         .position_reference_rad = input->has_position_reference ? input->position_reference_rad
                                                                 : input->continuous_target_rad,
         .dt_s = input->dt_s,
         .freeze_integrator = false,
     };
-    if (!isfinite(velocity_input.requested_velocity_rad_s)) {
-        return -ERANGE;
-    }
     const control_motor_velocity_state velocity_state_before = next.velocity;
     ret = control_motor_velocity_step(&next.velocity, &config->velocity, &velocity_input, &local.velocity);
     if (ret < 0) {
@@ -135,6 +150,10 @@ int control_motor_position_step(control_motor_position_state *state, const contr
     }
 
     local.effort_command = effort_total;
+    local.velocity_request_raw_rad_s = velocity_request_raw;
+    local.velocity_feedforward_rad_s = velocity_feedforward;
+    local.velocity_request_rad_s = velocity_request;
+    local.velocity_request_limited = velocity_request != velocity_request_raw;
     if (!isfinite(local.effort_command)) {
         return -ERANGE;
     }

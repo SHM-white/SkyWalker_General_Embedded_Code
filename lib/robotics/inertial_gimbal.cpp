@@ -45,6 +45,8 @@ void InertialGimbalAdapter::withdraw() {
     output_.source_stamp = {};
     output_.stabilization_valid = false;
     output_.yaw_output_valid = output_.pitch_output_valid = false;
+    output_.carrier_yaw_rate_rad_s = output_.carrier_pitch_rate_rad_s = 0;
+    output_.carrier_yaw_rate_valid = output_.carrier_pitch_rate_valid = false;
 }
 
 InertialGimbalOutput InertialGimbalAdapter::publish(core::TimeUs now, WaitReason reason, int error, bool active) {
@@ -82,6 +84,7 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
         return suspend(now, WaitReason::Configuration, -EINVAL);
     output_.yaw_output_valid = output_.pitch_output_valid = false;
     output_.stabilization_valid = false;
+    output_.carrier_yaw_rate_valid = output_.carrier_pitch_rate_valid = false;
     output_.command = in.command;
     output_.command.mode = GimbalMode::Rate;
     output_.command.yaw_rate_rad_s = output_.command.pitch_rate_rad_s = 0;
@@ -176,6 +179,10 @@ InertialGimbalOutput InertialGimbalAdapter::update(const InertialGimbalInputs &i
     const float carrier_yaw_rate = yaw_available ? yaw_rate - c.yaw_direction * in.yaw.feedback.velocity_rad_s : 0;
     const float carrier_pitch_rate = pitch_available ? pitch_rate - c.pitch_direction * in.pitch.feedback.velocity_rad_s
                                                      : 0;
+    output_.carrier_yaw_rate_rad_s = carrier_yaw_rate;
+    output_.carrier_pitch_rate_rad_s = carrier_pitch_rate;
+    output_.carrier_yaw_rate_valid = yaw_available && cycle;
+    output_.carrier_pitch_rate_valid = pitch_available && cycle;
     output_.command = in.command;
     output_.command.mode = GimbalMode::Rate;
     output_.command.yaw_rate_rad_s = yaw_available && cycle

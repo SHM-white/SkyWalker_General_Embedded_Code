@@ -23,6 +23,14 @@ struct GimbalExecutionInputs {
     bool require_permission = false;
     bool transport_ready = false;
     bool yaw_output_valid = true, pitch_output_valid = true;
+    // 视觉 Rate 桥接：只有本周期该轴确实由有效的 Active Rate 命令驱动时才置位。
+    // 默认关闭；手动、Hold、Disabled 和有效 yaw_trajectory 路径保持原有行为。
+    bool yaw_use_rate_reference = false;
+    bool pitch_use_rate_reference = false;
+    // 本周期重建该轴 Rate 会话（来源切换/恢复）：轴层丢弃旧目标并从测量播种，
+    // 本周期不积分也不前馈。
+    bool yaw_restart_rate_session = false;
+    bool pitch_restart_rate_session = false;
     bool emergency_stop = false;
     bool clear_estop = false;
 };
@@ -94,6 +102,8 @@ private:
     std::uint32_t production_sequence_ = 0;
     int config_error_ = 0;
     bool configured_ = false, begin_attempted_ = false, have_time_ = false;
+    // 重启事件须保留到对应 Rate 轴实际输出；提前返回和另一轴成功均不消费事件。
+    bool yaw_rate_restart_pending_ = false, pitch_rate_restart_pending_ = false;
 };
 
 } // namespace skywalker::robotics

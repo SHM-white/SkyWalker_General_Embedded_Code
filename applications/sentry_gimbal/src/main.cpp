@@ -50,7 +50,7 @@ std::uint32_t age(const core::Stamp &stamp, core::TimeUs now_us) {
 } // namespace
 
 int main() {
-    static installed::Diagnostics diagnostics;
+    static installed::Diagnostics diagnostics(installed::DiagnosticLayout::GimbalResponse);
     diagnostics.start("sentry_gimbal", "gimbal",
                       "dual-yaw allocation; CAN head IMU for vision; carrier BMI088 for big yaw");
     static led::StatusLed status_led;
@@ -142,8 +142,10 @@ int main() {
     static motor::CanBus yaw_bus(DEVICE_DT_GET(DT_NODELABEL(can1)));
     static motor::CanBus pitch_bus(DEVICE_DT_GET(DT_NODELABEL(can2)));
     static motor::Group group(yaw, pitch);
-    static GimbalExecutor gimbal(yaw, pitch, group, installed::yawMotorConfig(), installed::yawAxisConfig(),
-                                 installed::pitchMotorConfig(), installed::pitchAxisConfig(),
+    static const auto yaw_motor_config = installed::yawMotorConfig();
+    static const auto pitch_motor_config = installed::pitchMotorConfig();
+    static GimbalExecutor gimbal(yaw, pitch, group, yaw_motor_config, installed::yawAxisConfig(),
+                                 pitch_motor_config, installed::pitchAxisConfig(),
                                  installed::gimbalExecutionConfig());
     // 发射机构与 GM6020 小 Yaw 共用 CAN1：GM6020 走 0x1FF，M3508/M2006 走 0x200，
     // 反馈 0x207 与 0x201/0x202/0x204 互不冲突。摩擦轮与拨盘各自成组，共用一次 commit。
@@ -211,11 +213,11 @@ int main() {
     bool peer_feedback_was_valid = false;
     std::uint64_t last_peer_boot = 0;
     bool was_peer_online = false;
-    core::TimeUs previous_cycle_us = 0, last_heading_loss_dt_us = 0;
-    bool heading_was_fresh = false, have_heading_loss = false;
-    HeadingWaitReason last_heading_loss_reason = HeadingWaitReason::None;
-    core::TimeUs heading_loss_start_us = 0, heading_loss_duration_us = 0;
-    bool vision_pitch_was_active = false;
+    core::TimeUs previous_cycle_us = 0;
+    // 仅记录上一周期已建立且成功输出的视觉 Pitch 参考；视觉被选中不等于轴已执行。
+    bool vision_pitch_reference_ready = false;
+    // 视觉 Rate 桥接会话：只在视觉驱动的 Rate 周期请求前馈；进入/退出时重建两轴会话。
+    bool vision_rate_session_previous = false;
     bool keyboard_spin_latched = false, shift_was_down = false;
     SpinOwner previous_spin_owner = SpinOwner::None;
     bool scan_entry_pending = false, scan_was_selected = false;
@@ -223,6 +225,13 @@ int main() {
     core::OrientationReference last_head_reference{};
     bool head_reference_known = false, head_was_ready = false;
     ControlSource last_head_source = ControlSource::None;
+#if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
+    float response_big_yaw_rate = std::numeric_limits<float>::quiet_NaN();
+    float response_max_dt_us = 0;
+    std::uint32_t response_events = 0;
+    int response_error = 0;
+    ControlSource response_previous_source = ControlSource::None;
+#endif
     for (;;) {
         // Snapshot before taking the validation time: a higher-priority IMU
         // update must not make a new gyro stamp appear to be in our future.
@@ -326,23 +335,6 @@ int main() {
         constexpr auto expected_manual_source = ControlSource::KeyboardMouse;
         const auto heading = planarYawHeading(carrier_snapshot, now_us);
         const bool heading_fresh = heading.valid && core::fresh(heading.stamp, now_us, 20000);
-        const auto heading_reason = !heading.valid   ? heading.reason
-                                    : !heading_fresh ? HeadingWaitReason::ControlStale
-                                                     : HeadingWaitReason::None;
-        // Retain transient losses even when heading recovers before the next
-        // diagnostic packet. Motor execution errors remain separate in error.
-        if (heading_was_fresh && !heading_fresh) {
-            have_heading_loss = true;
-            last_heading_loss_reason = heading_reason;
-            last_heading_loss_dt_us = dt_us;
-            heading_loss_start_us = now_us;
-        }
-        if (heading_loss_start_us) {
-            heading_loss_duration_us = now_us - heading_loss_start_us;
-            if (heading_fresh)
-                heading_loss_start_us = 0;
-        }
-        heading_was_fresh = heading_fresh;
         // 外置 IMU 保留原始采样时间；只接受新鲜姿态/角速度和已知的有效参考。
         const auto &head_sample = head_snapshot.sample;
         auto head_orientation = head_sample.orientation.value;
@@ -402,6 +394,13 @@ int main() {
         const bool pitch_valid = ps.feedback_fresh && ps.position_reference_valid &&
                                  bool(ps.feedback.valid & motor::FeedbackPosition) &&
                                  std::isfinite(ps.feedback.position_rad);
+        const auto previous_pitch_execution = gimbal.pitchTelemetry();
+        const bool pitch_reference_continuous =
+            vision_pitch_reference_ready && pitch_valid && dt_us > 0 && dt_us <= 20000 &&
+            ps.state == motor::MotorState::Active && ps.output_permitted &&
+            previous_pitch_execution.output_valid && gimbal.pitchTargetDiagnostics().target_valid &&
+            ps.enable_generation == previous_pitch_execution.motor.enable_generation &&
+            ps.reference_generation == previous_pitch_execution.motor.reference_generation;
         const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
         // 把 Pitch 实测角推给命令线程：巡航扫描用它作为摆头中心。
@@ -556,15 +555,18 @@ int main() {
                                                 installed::pitch.direction *
                                                     std::atan2(-joint_ray.z, std::hypot(joint_ray.x, joint_ray.y)),
                                             installed::pitch_min_rad, installed::pitch_max_rad);
-            const float seed = vision_pitch_was_active ? static_cast<float>(gimbal.pitchTargetRad())
-                                                       : ps.feedback.position_rad;
+            const float seed = pitch_reference_continuous ? static_cast<float>(gimbal.pitchTargetRad())
+                                                         : ps.feedback.position_rad;
             const float dt = dt_us > 0 && dt_us <= 20000 ? float(dt_us) * 1e-6f : 0;
             // Keep Rate mode for BOTH axes: AbsoluteAngle would replace the
             // IMU yaw correction with a world angle interpreted as a joint angle.
-            input.command.pitch_rate_rad_s = dt > 0 ? std::clamp((target - seed) / dt,
-                                                                 -installed::manual_max_gimbal_pitch_rate_rad_s,
-                                                                 installed::manual_max_gimbal_pitch_rate_rad_s)
-                                                    : 0;
+            // 恢复周期先让轴从新鲜反馈播种。不能把基于旧目标算出的追赶速率
+            // 积分到新种子上；下一次连续执行周期再追踪几何目标。
+            input.command.pitch_rate_rad_s = pitch_reference_continuous && dt > 0
+                                                 ? std::clamp((target - seed) / dt,
+                                                              -installed::manual_max_gimbal_pitch_rate_rad_s,
+                                                              installed::manual_max_gimbal_pitch_rate_rad_s)
+                                                 : 0;
         }
         else if (input.command.mode == GimbalMode::Rate) {
             // 小 Yaw 关节速率直接来自分配器：已含实测载体补偿、头部加速度窗和
@@ -579,11 +581,28 @@ int main() {
             // 摇杆与鼠标已合并，在此统一转换以保留两者现有操控方向。
             input.command.pitch_rate_rad_s = -raw_pitch_rate_rad_s * installed::pitch.direction;
         }
-        vision_pitch_was_active = vision_active;
         input.pitch_output_valid = pitch_valid;
+        // --- 视觉 Rate 桥接：把轴实际积分的关节参考速度交给位置环 -------------
+        // 仅当本周期确实由视觉 Rate 路径驱动、且该轴输出有效时才请求；手动、
+        // Hold、Disabled 与分配器轨迹路径保持原行为。进入/退出视觉会话时两轴都
+        // 重建 Rate 会话，避免上一来源的积分目标被继续积分或当作追赶债务执行。
+        const bool vision_rate_session = vision_active && input.command.mode == GimbalMode::Rate;
+        const bool rate_session_changed = vision_rate_session != vision_rate_session_previous;
+        vision_rate_session_previous = vision_rate_session;
+        input.yaw_use_rate_reference = vision_rate_session && input.yaw_output_valid;
+        input.pitch_use_rate_reference = vision_rate_session && pitch_valid;
+        input.yaw_restart_rate_session =
+            rate_session_changed || (vision_rate_session && allocation.joint_reseed_requested);
+        input.pitch_restart_rate_session =
+            rate_session_changed || (vision_rate_session && !pitch_reference_continuous);
         input.transport_ready = setup_ready;
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
+        // 执行器可能因漏周期直接返回，也可能只有 Yaw 成功；不能只看 vision_active
+        // 或整机 Active。首个成功播种周期允许下一周期追赶，不要求已接受速度前馈。
+        vision_pitch_reference_ready = vision_rate_session && status.state == RunState::Active &&
+                                       gimbal.pitchTelemetry().output_valid &&
+                                       gimbal.pitchTargetDiagnostics().target_valid;
         // 板间大 Yaw 的发送门控仍然在本周期执行结果之后再判断：分配器只提供
         // 世界速率意图，能不能发出去由仲裁、对端在线、对端反馈和本机执行状态决定。
         const auto center_yaw = yaw.snapshot();
@@ -661,6 +680,9 @@ int main() {
             }
             request.stamp = {now_ms, ++request_sequence, true};
             endpoint.submitBigYaw(request);
+#if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
+            response_big_yaw_rate = request.target_rate_rad_s;
+#endif
             auto wheel_command = decision.command.chassis;
             // 普通导航失联保活且没有导航速度指令时，发零速 BodyVelocity 保持底盘
             // 使能。巡航已由仲裁器主动产生合法零平移命令，不依赖这个补丁。
@@ -690,13 +712,21 @@ int main() {
         // bus once. Shooter shares CAN1 and remains in that same commit.
         if (yaw_started) {
             const int error = yaw_bus.commit().error;
-            if (error < 0)
+            if (error < 0) {
                 status.error = error;
+#if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
+                response_events |= 1u << 14;
+#endif
+            }
         }
         if (pitch_started) {
             const int error = pitch_bus.commit().error;
-            if (error < 0)
+            if (error < 0) {
                 status.error = error;
+#if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
+                response_events |= 1u << 15;
+#endif
+            }
         }
         endpoint.setStatus(status);
         const auto reason = !setup_ready || onboard_error || (vision_selected && head_error)
@@ -715,87 +745,127 @@ int main() {
             installed::statusLedFor(reason, status.state == RunState::Active, false, status.error));
 #if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
         const float unavailable = std::numeric_limits<float>::quiet_NaN();
-        // Fixed channel map documented in docs/dev/双Yaw速度加速度分配与视觉轨迹控制方案.md
-        // (schema 112, I19..I48). I38/I43/I48 now describe the dual-Yaw allocator
-        // instead of the retired centering controller; I37 is a context bitmap.
+        // Schema 113: 32 channels only. Window events are collected at control
+        // rate and cleared only after Diagnostics accepts a complete frame.
         if (startup_test.reasons != last_startup_reasons) {
             last_startup_reasons = startup_test.reasons;
             diagnostics.event("startup_action", static_cast<int>(startup_test.reasons));
         }
-        const std::array<float, 30>
-            trace{112,                             // I19 dual-Yaw allocation + CAN vision schema
-                  float(unsigned(heading_reason)), // I20 live reason
-                  float(unsigned(carrier_snapshot.sample.attitude_quality)), // I21 quality
-                  float(heading_fresh),                                      // I22 heading usable
-                  heading_fresh ? heading.yaw_rad : unavailable,             // I23 world yaw
-                  carrier_snapshot.sample.gyro_rad_s.stamp.valid ? carrier_snapshot.sample.gyro_rad_s.value.z
-                                                                 : unavailable, // I24 gyro z
-                  carrier_snapshot.sample.accel_m_s2.stamp.valid ? core::norm(carrier_snapshot.sample.accel_m_s2.value)
-                                                                 : unavailable,         // I25 accel norm
-                  float(head_reference_changed ? 10u : head_reason),                    // I26 head IMU reason
-                  head_usable ? head_euler.yaw : unavailable,                           // I27 measured head world yaw
-                  head_usable ? head_euler.pitch : unavailable,                         // I28 measured head world pitch
-                  inertial.yaw_output_valid ? inertial.yaw_error_rad : unavailable,     // I29 head yaw error
-                  inertial.pitch_output_valid ? inertial.pitch_error_rad : unavailable, // I30 head pitch error
-                  float((head_orientation_fresh ? 1u : 0u) | (head_gyro_fresh ? 2u : 0u) | (head_quality_ok ? 4u : 0u) |
-                        (head_reference_valid ? 8u : 0u) | (head_ready ? 16u : 0u) |
-                        (inertial.yaw_output_valid ? 32u : 0u) |
-                        (inertial.pitch_output_valid ? 64u : 0u)),     // I31 head/control validity bits
-                  float(head_snapshot.diagnostics.io_errors & 0xffff), // I32 head I/O errors
-                  ps.feedback.position_rad,                            // I33 pitch joint position rad
-                  float(age(head_sample.orientation.stamp, now_us)),   // I34 head orientation age ms
-                  float(age(head_sample.gyro_rad_s.stamp, now_us)),    // I35 head gyro age ms
-                  ps.feedback.velocity_rad_s,                          // I36 pitch joint velocity rad/s
-                  float((!setup_ready ? 1u : 0u) |
-                        ((!operator_state.fresh && !operator_state.navigation_hold) ? 2u : 0u) |
-                        (!gimbal_allowed ? 4u : 0u) | (!peer_state.online ? 8u : 0u) |
-                        (!installed::imu_mounting_confirmed ? 16u : 0u) | (!heading_fresh ? 32u : 0u) |
-                        (!joint_valid ? 64u : 0u) | (!yaw_running ? 128u : 0u) | (!head_ready ? 256u : 0u) |
-                        (operator_state.armed ? 512u : 0u) | (operator_state.fresh ? 1024u : 0u) |
-                        (operator_state.navigation_hold ? 2048u : 0u) |
-                        (static_cast<unsigned>(operator_state.autonomous) << 12) |
-                        (static_cast<unsigned>(decision.gimbal_behavior) << 14) |
-                        (startup_test.known ? (1u << 16) : 0u) | (startup_test.noAction() ? (1u << 17) : 0u) |
-                        (decision_matches ? (1u << 18) : 0u) | (scan_entry_pending ? (1u << 19) : 0u)),
-                  // I37 控制上下文位图：bit0..8 失能前提、bit9 已解锁、bit10 遥控新鲜、
-                  // bit11 掉线自主保持、bit12..13 AutonomousMode、bit14..15 GimbalBehavior、
-                  // bit16 启动动作判定已知、bit17 判定为无动作、bit18 决策匹配、
-                  // bit19 扫描入口仍等待准备。不能按整值判断“是否禁止运行”。
-                  allocation.big.rate_rad_s,                                     // I38 big-Yaw world intent
-                  peer_feedback_valid ? float(feedback.armed) : unavailable,     // I39 peer armed
-                  float(age(carrier_snapshot.sample.orientation.stamp, now_us)), // I40 orientation age
-                  float(age(carrier_snapshot.sample.gyro_rad_s.stamp, now_us)),  // I41 gyro age
-                  spin_out.applied_rad_s,                                        // I42 applied variable spin rate
-                  std::min(allocation.brake_margin_pos_rad,
-                           allocation.brake_margin_neg_rad), // I43 tightest outward travel
-                  float(input.command.pitch_rate_rad_s),     // I44 pitch joint rate command
-                  float(dt_us),                              // I45 current cycle
-                  raw_head_rate_rad_s,                       // I46 raw head world-rate target
-                  allocation.joint_rate_rad_s,               // I47 allocated small joint rate
-                  float((allocation.enabled ? 1u : 0u) | (allocation.travel_limited ? 2u : 0u) |
-                        (allocation.big_saturated ? 4u : 0u) | (allocation.tracking_limited ? 8u : 0u) |
-                        (big_channel_ready ? 16u : 0u) | (allocation.joint_reseed_requested ? 32u : 0u) |
-                        (allocation.head_reference_valid ? 64u : 0u) | (vision_active ? 512u : 0u) |
-                        (static_cast<unsigned>(allocation.reason) << 10))}; // I48 allocator flags/reason
-
-        diagnostics.status({.reason = reason,
-                            .valid = joint_valid && (!vision_selected || head_ready),
-                            .enabled = status.state == RunState::Active,
-                            .target = static_cast<float>(gimbal.yawTargetRad()),
-                            .feedback = ys.feedback.position_rad,
-                            .age_ms = age(head_sample.orientation.stamp, now_us),
-                            .dt_us = float(have_heading_loss ? last_heading_loss_dt_us : dt_us),
-                            .effort = gimbal.yawTelemetry().effort_command,
-                            .detail = float(unsigned(have_heading_loss ? last_heading_loss_reason : heading_reason)),
-                            .error = status.error ? status.error
-                                     : head_error ? head_error
-                                     : !head_usable && head_snapshot.diagnostics.last_error
-                                         ? head_snapshot.diagnostics.last_error
-                                         : onboard_error,
-                            .extra0 = installed::small_yaw.direction * allocation.center_error_rad,
-                            .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN(),
-                            .extended = true,
-                            .extension = trace});
+        const auto yaw_execution = gimbal.yawTelemetry();
+        const auto pitch_execution = gimbal.pitchTelemetry();
+        const auto &yaw_target = gimbal.yawTargetDiagnostics();
+        const auto &pitch_target = gimbal.pitchTargetDiagnostics();
+        const bool cycle_invalid = dt_us == 0 || dt_us > 20000 || status.reason == WaitReason::Cycle;
+        const bool yaw_executed = !cycle_invalid && status.state == RunState::Active && input.yaw_output_valid &&
+                                  yaw_execution.output_valid;
+        const bool pitch_executed = !cycle_invalid && status.state == RunState::Active && input.pitch_output_valid &&
+                                    pitch_execution.output_valid;
+        const bool yaw_reference_accepted = yaw_executed && yaw_target.reference_accepted;
+        const bool pitch_reference_accepted = pitch_executed && pitch_target.reference_accepted;
+        const bool yaw_velocity_valid = ys.feedback_fresh && bool(ys.feedback.valid & motor::FeedbackVelocity) &&
+                                        std::isfinite(ys.feedback.velocity_rad_s);
+        const bool pitch_velocity_valid = ps.feedback_fresh && bool(ps.feedback.valid & motor::FeedbackVelocity) &&
+                                          std::isfinite(ps.feedback.velocity_rad_s);
+        static_assert(unsigned(ControlSource::LocalBehavior) < 16 && unsigned(GimbalMode::AbsoluteAngle) < 8);
+        const std::uint32_t response_state =
+            unsigned(input.command.source) | (unsigned(input.command.mode) << 4) |
+            (yaw_executed ? 1u << 7 : 0u) | (pitch_executed ? 1u << 8 : 0u) |
+            (input.yaw_use_rate_reference ? 1u << 9 : 0u) | (input.pitch_use_rate_reference ? 1u << 10 : 0u) |
+            (yaw_reference_accepted ? 1u << 11 : 0u) | (pitch_reference_accepted ? 1u << 12 : 0u) |
+            (vision_active ? 1u << 13 : 0u) | (head_usable ? 1u << 14 : 0u) |
+            (joint_valid ? 1u << 15 : 0u) | (pitch_valid ? 1u << 16 : 0u) |
+            (big_channel_ready ? 1u << 17 : 0u);
+        const auto axisEvents = [](const control::PositionMotor::Telemetry &execution,
+                                   const GimbalAxis::TargetStatus &target, bool executed, bool observed,
+                                   float effort_limit, unsigned axis) {
+            const auto &out = execution.output;
+            std::uint32_t events = 0;
+            if (executed) {
+                if (out.velocity_request_limited)
+                    events |= 1u << axis;
+                if (std::fabs(out.velocity_request_rad_s - out.velocity.velocity_reference_rad_s) >
+                    1e-5f * (1 + std::fabs(out.velocity_request_rad_s)))
+                    events |= 1u << (2 + axis);
+                if (out.position.saturated)
+                    events |= 1u << (4 + axis);
+                if (out.velocity.regulator.feedback.saturated ||
+                    std::fabs(out.velocity.regulator.output) > effort_limit ||
+                    std::fabs(execution.effort_command) >= effort_limit)
+                    events |= 1u << (6 + axis);
+            }
+            else
+                events |= 1u << (12 + axis);
+            if (observed) {
+                if (target.mechanical_limited || target.lead_limited)
+                    events |= 1u << (8 + axis);
+                if (target.restart_reason != AxisRestartReason::None ||
+                    (target.target_valid && target.integration_dt_s == 0 && target.reference_requested))
+                    events |= 1u << (10 + axis);
+                if (execution.error)
+                    events |= 1u << (14 + axis);
+            }
+            return events;
+        };
+        response_events |= axisEvents(yaw_execution, yaw_target, yaw_executed, !cycle_invalid,
+                                      yaw_motor_config.loop.velocity.effort_abs_max, 0);
+        response_events |= axisEvents(pitch_execution, pitch_target, pitch_executed, !cycle_invalid,
+                                      pitch_motor_config.loop.velocity.effort_abs_max, 1);
+        if (allocation.travel_limited ||
+            (vision_active && allocation.joint_rate_valid &&
+             std::fabs(inertial.command.yaw_rate_rad_s - input.command.yaw_rate_rad_s) > 1e-5f))
+            response_events |= 1u << 16;
+        if (input.command.source != response_previous_source || head_reference_changed || rate_session_changed)
+            response_events |= 1u << 17;
+        response_previous_source = input.command.source;
+        if (cycle_invalid)
+            response_events |= 1u << 18;
+        if (!heading_fresh || (vision_selected && !head_ready))
+            response_events |= 1u << 19;
+        if (allocation.tracking_limited)
+            response_events |= 1u << 20;
+        if (allocation.big_saturated)
+            response_events |= 1u << 21;
+        const int cycle_error = status.error ? status.error
+                                : yaw_execution.error ? yaw_execution.error
+                                : pitch_execution.error ? pitch_execution.error
+                                : vision_selected && !head_usable ? head_snapshot.diagnostics.last_error
+                                                                 : 0;
+        if (cycle_error)
+            response_error = cycle_error;
+        response_max_dt_us = std::max(response_max_dt_us, float(dt_us));
+        const bool consumed = diagnostics.gimbalResponse({
+            .time_ms = now_ms,
+            .state = response_state,
+            .error = response_error,
+            .signals = {
+                vision_active ? inertial_input.yaw_reference_rad : unavailable, // I9 head world yaw reference
+                head_usable ? head_euler.yaw : unavailable,                    // I10 measured world yaw
+                vision_active ? vision_pitch_rad : unavailable,               // I11 predicted world pitch target
+                head_usable ? head_euler.pitch : unavailable,                  // I12 measured world pitch
+                yaw_executed && yaw_target.target_valid ? float(gimbal.yawTargetRad()) : unavailable, // I13
+                joint_valid ? ys.feedback.position_rad : unavailable,                              // I14
+                yaw_reference_accepted ? yaw_target.reference_velocity_rad_s : unavailable,         // I15
+                yaw_executed ? yaw_execution.output.velocity_request_rad_s : unavailable,            // I16
+                yaw_executed ? yaw_execution.output.velocity.velocity_reference_rad_s : unavailable, // I17
+                yaw_velocity_valid ? ys.feedback.velocity_rad_s : unavailable,                       // I18
+                yaw_executed ? yaw_execution.effort_command : unavailable,                           // I19 A
+                pitch_executed && pitch_target.target_valid ? float(gimbal.pitchTargetRad()) : unavailable, // I20
+                pitch_valid ? ps.feedback.position_rad : unavailable,                                      // I21
+                pitch_reference_accepted ? pitch_target.reference_velocity_rad_s : unavailable,            // I22
+                pitch_executed ? pitch_execution.output.velocity_request_rad_s : unavailable,               // I23
+                pitch_executed ? pitch_execution.output.velocity.velocity_reference_rad_s : unavailable,    // I24
+                pitch_velocity_valid ? ps.feedback.velocity_rad_s : unavailable,                            // I25
+                pitch_executed ? pitch_execution.effort_command : unavailable,                              // I26 Nm
+                alloc_input.carrier_valid ? alloc_input.carrier_rate_rad_s : unavailable,                   // I27
+                inertial.carrier_yaw_rate_valid ? inertial.carrier_yaw_rate_rad_s : unavailable,              // I28
+                response_big_yaw_rate}, // I29 last submitted, permission-gated big-Yaw world intent
+            .max_dt_us = response_max_dt_us,
+            .events = response_events});
+        if (consumed) {
+            response_events = 0;
+            response_error = 0;
+            response_max_dt_us = 0;
+        }
 #endif
         deadline += period;
         const auto ticks = k_uptime_ticks();

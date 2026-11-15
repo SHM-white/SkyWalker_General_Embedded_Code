@@ -50,6 +50,14 @@ typedef struct {
     control_motor_velocity_output velocity;
     /* Actuator effort: amperes for DJI, N*m for DM MIT mode. */
     float effort_command;
+    /* Position-loop velocity request before the joint reference feedforward. */
+    float velocity_request_raw_rad_s;
+    /* Reference velocity actually added through velocity_feedforward_gain. */
+    float velocity_feedforward_rad_s;
+    /* Final request handed to the velocity loop after the shared clamp. */
+    float velocity_request_rad_s;
+    /* True when the clamp changed the combined request. */
+    bool velocity_request_limited;
 } control_motor_position_output;
 
 int control_motor_position_validate(const control_motor_position_config *config);
