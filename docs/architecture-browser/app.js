@@ -16,6 +16,47 @@
   const statusText = {ready: '已有代码', partial: '接入 / 配置未完成', planned: '目标 / 待实现'};
   let renderVersion = 0;
   let toastTimer;
+function loadPreference(key, values, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return values.includes(value) ? value : fallback;
+  } catch { return fallback; }
+}
+
+function persistPreference(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* Private browsing may disable storage. */ }
+}
+
+function applyThemePreference(mode) {
+  const root = document.documentElement;
+  root.dataset.theme = mode === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : mode;
+  document.getElementById('theme-choice').value = mode;
+}
+
+function applyCodePreference(mode) {
+  const root = document.documentElement;
+  const result = mode === 'auto'
+    ? (window.matchMedia('(max-width: 760px)').matches ? 'wrap' : 'scroll') : mode;
+  root.dataset.codeLayout = result;
+  document.getElementById('code-layout-choice').value = mode;
+  document.querySelectorAll('[data-wrap-code]').forEach(button => {
+    button.textContent = result === 'wrap' ? '全部横向滚动' : '全部自动换行';
+    button.setAttribute('aria-pressed', String(result === 'wrap'));
+  });
+}
+  let themeMode = loadPreference('skywalker-doc-theme', ['system', 'light', 'dark'], 'system');
+  let codeMode = loadPreference('skywalker-code-layout', ['auto', 'wrap', 'scroll'], 'auto');
+
+function setCodePreference(mode) {
+  if (!['auto','wrap','scroll'].includes(mode)) return;
+  codeMode=mode;persistPreference('skywalker-code-layout',mode);applyCodePreference(mode);
+}
+function setThemePreference(mode) {
+  if (!['system','light','dark'].includes(mode)) return;
+  themeMode=mode;persistPreference('skywalker-doc-theme',mode);applyThemePreference(mode);
+}
+
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
   const text = value => Array.isArray(value) ? value.join('；') : String(value ?? '');
@@ -308,11 +349,11 @@
         index++;
         while (index < lines.length && !new RegExp(`^\\s*${fence[1][0]}{${fence[1].length},}\\s*$`).test(lines[index])) block.push(lines[index++]);
         if (index < lines.length) index++;
-        const softWrap = window.matchMedia('(max-width: 760px)').matches;
+        const softWrap = document.documentElement.dataset.codeLayout === 'wrap';
         chunks.push((language === 'mermaid' ? '<div class="unrendered-diagram">此正文中的 Mermaid 原始定义如下；交互架构图见“整车架构”和“模块关系”。</div>' : '') +
           '<div class="code-example"><div class="code-heading"><strong>' + esc(language || 'text') +
           '</strong><div class="code-actions"><button type="button" data-wrap-code aria-pressed="' + String(softWrap) + '">' +
-          (softWrap ? '横向滚动' : '自动换行') + '</button><button type="button" data-copy-code>复制代码</button></div></div><pre><code class="language-' +
+          (softWrap ? '全部横向滚动' : '全部自动换行') + '</button><button type="button" data-copy-code>复制代码</button></div></div><pre><code class="language-' +
           esc(language) + '">' + highlightCode(block.join('\n'), language) + '</code></pre></div>');
         continue;
       }
@@ -482,15 +523,7 @@
     const category = event.target.closest('[data-category]');
     if (category) window.location.hash = `modules?category=${encodeURIComponent(category.dataset.category)}`;
     const wrapButton = event.target.closest('[data-wrap-code]');
-    if (wrapButton) {
-      const shouldWrap = wrapButton.getAttribute('aria-pressed') !== 'true';
-      const block = wrapButton.closest('.code-example');
-      block.classList.toggle('force-wrap', shouldWrap);
-      block.classList.toggle('no-wrap', !shouldWrap);
-      wrapButton.setAttribute('aria-pressed', String(shouldWrap));
-      wrapButton.textContent = shouldWrap ? '横向滚动' : '自动换行';
-      return;
-    }
+    if (wrapButton) { setCodePreference(document.documentElement.dataset.codeLayout === 'wrap' ? 'scroll' : 'wrap'); return; }
     const copyButton = event.target.closest('[data-copy-code]');
     if (copyButton) {
       const code = copyButton.closest('.code-example')?.querySelector('pre code');
@@ -499,6 +532,20 @@
     const step = event.target.closest('[data-workflow]');
     if (step && !step.disabled) window.location.hash = `workflows/${step.dataset.workflow}?step=${step.dataset.step}`;
   });
+  document.getElementById('theme-choice').addEventListener('change', event => setThemePreference(event.target.value));
+  document.getElementById('code-layout-choice').addEventListener('change', event => setCodePreference(event.target.value));
+  document.addEventListener('click', event => {
+    const settings = document.getElementById('display-settings');
+    if (!settings.contains(event.target)) settings.open = false;
+  });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (themeMode === 'system') applyThemePreference(themeMode);
+  });
+  window.matchMedia('(max-width: 760px)').addEventListener('change', () => {
+    if (codeMode === 'auto') applyCodePreference(codeMode);
+  });
+  applyThemePreference(themeMode);
+  applyCodePreference(codeMode);
   nav();
   window.addEventListener('hashchange', render);
   render();
