@@ -30,7 +30,7 @@ html[data-code-layout="wrap"] .markdown-body .code-example pre { white-space: pr
 html[data-code-layout="scroll"] .markdown-body .code-example pre { white-space: pre; overflow-wrap: normal; }
 html[data-code-layout="wrap"] .markdown-body .code-example pre code { overflow-wrap: anywhere; }
 html[data-code-layout="scroll"] .markdown-body .code-example pre code { overflow-wrap: normal; }
-.relation-compact, .relation-mobile-select, .vehicle-mobile, .workflow-mobile-steps { display: none; }
+.relation-compact, .relation-mobile-select, .vehicle-mobile, .vehicle-full-toggle, .workflow-mobile-steps { display: none; }
 .relation-map-details > summary { display: none; }
 .relation-map-details[open] { min-width: 0; }
 .diagram-toolbar {
