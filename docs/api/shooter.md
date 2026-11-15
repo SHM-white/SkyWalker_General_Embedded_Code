@@ -16,10 +16,11 @@
 
 ## 接口契约
 
-### 1. ShooterExecutor(Motor &left, Motor &right, Motor &dial, Group &friction, Group &feed, const VelocityMotor::Config &, const PositionMotor::Config &, const Config &); int begin()
+### 1. `ShooterExecutor()` / `begin()`
 
 ```cpp
-ShooterExecutor(Motor &left, Motor &right, Motor &dial, Group &friction, Group &feed, const VelocityMotor::Config &, const PositionMotor::Config &, const Config &); int begin()
+ShooterExecutor(Motor &left, Motor &right, Motor &dial, Group &friction, Group &feed, const VelocityMotor::Config &, const PositionMotor::Config &, const Config &);
+int begin()
 ```
 
 注入三电机、两批量组与环参数；应用先 attach/start，不在执行器内 commit。
@@ -30,10 +31,11 @@ ShooterExecutor(Motor &left, Motor &right, Motor &dial, Group &friction, Group &
 
 **错误 / 边界：** 非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。
 
-### 2. ShooterStatus update(const ShooterExecutionInputs &, core::TimeUs now_us); ShooterStatus suspend(core::TimeUs, WaitReason, int error = 0)
+### 2. `update()` / `suspend()`
 
 ```cpp
-ShooterStatus update(const ShooterExecutionInputs &, core::TimeUs now_us); ShooterStatus suspend(core::TimeUs, WaitReason, int error = 0)
+ShooterStatus update(const ShooterExecutionInputs &, core::TimeUs now_us);
+ShooterStatus suspend(core::TimeUs, WaitReason, int error = 0)
 ```
 
 输入原始命令/事件、source_stamp、热量/许可、拨盘参考、云台状态、allow_feed 与急停；单发去重，忙碌/过期/恢复中旧事件丢弃。
