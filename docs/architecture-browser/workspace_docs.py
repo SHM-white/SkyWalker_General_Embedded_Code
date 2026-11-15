@@ -8,10 +8,18 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 from urllib.parse import urlsplit
 
 
 INDEX_PATH = "/docs/architecture-browser/docs-index.json"
+HISTORY_PATH = "/docs/architecture-browser/history.json"
+# A commit qualifies only when it changed a Markdown file, the documentation
+# browser, or its Pages deployment. Pure firmware commits are not indexed.
+DOC_PATHS = (
+    "README.md", ":(glob)**/*.md", "docs/architecture-browser/",
+    ".github/workflows/deploy-architecture-pages.yml",
+)
 EXCLUDED_DIRS = {
     "node_modules", "build", "dist", "_site", "target", "vendor",
     "__pycache__", "venv", "env", "coverage", "htmlcov",
@@ -95,15 +103,49 @@ def scan(root, mode):
     return {"mode": mode, "documents": documents}
 
 
+def scan_history(root):
+    """Read the real repository history, filtering to documentation-bearing commits."""
+    try:
+        run = subprocess.run(
+            ["git", "-C", str(root), "log", "-n", "100",
+             "--format=%H%x1f%aI%x1f%s%x1e", "--name-only",
+             "--", *DOC_PATHS],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=12, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return {"mode": "unavailable", "commits": []}
+
+    commits = []
+    for record in run.stdout.split("\x1e"):
+        lines = [line.strip() for line in record.splitlines() if line.strip()]
+        if not lines:
+            continue
+        header = lines[0].split("\x1f", 2)
+        if len(header) != 3 or not re.fullmatch(r"[0-9a-f]{40}", header[0]):
+            continue
+        paths = [p for p in lines[1:] if not p.startswith("commit ")]
+        commits.append({
+            "sha": header[0],
+            "date": header[1],
+            "title": header[2],
+            "paths": paths,
+        })
+    return {"mode": "git", "commits": commits}
+
+
 class WorkspaceHandler(SimpleHTTPRequestHandler):
     def serve_index(self, head=False):
-        if urlsplit(self.path).path != INDEX_PATH:
+        requested = urlsplit(self.path).path
+        if requested not in (INDEX_PATH, HISTORY_PATH):
             return False
         try:
-            body = (json.dumps(scan(Path(self.directory), "workspace"), ensure_ascii=False) + "\n").encode("utf-8")
+            result = (scan_history(Path(self.directory)) if requested == HISTORY_PATH
+                      else scan(Path(self.directory), "workspace"))
+            body = (json.dumps(result, ensure_ascii=False) + "\n").encode("utf-8")
         except OSError as error:
-            self.log_error("Markdown scan failed: %s", error)
-            self.send_error(500, "Markdown scan failed")
+            self.log_error("Documentation request failed: %s", error)
+            self.send_error(500, "Documentation request failed")
             return True
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -129,7 +171,13 @@ def main():
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--serve", type=int, metavar="PORT")
     action.add_argument("--output", type=Path, help="Write a static JSON index for the deployment tree")
+    parser.add_argument("--history-root", type=Path, help="Checkout containing .git (static deployment)")
+    parser.add_argument("--history-output", type=Path, help="Write filtered commit history JSON")
     args = parser.parse_args()
+    if args.history_output and not args.output:
+        parser.error("--history-output requires --output")
+    if args.history_root and not args.history_output:
+        parser.error("--history-root requires --history-output")
     root = args.root.resolve()
     if not root.is_dir():
         parser.error("--root must be a workspace directory")
@@ -147,6 +195,15 @@ def main():
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"Generated Markdown index: {len(result['documents'])} documents → {args.output}")
+        if args.history_output:
+            history = scan_history((args.history_root or root).resolve())
+            if history["mode"] != "git":
+                parser.error("Unable to read Git documentation history")
+            args.history_output.parent.mkdir(parents=True, exist_ok=True)
+            args.history_output.write_text(
+                json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"Generated doc history: {len(history['commits'])} commits → {args.history_output}")
 
 
 if __name__ == "__main__":
