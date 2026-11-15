@@ -16,10 +16,13 @@ DTS描述物理设备与连接，overlay选择应用实际使用的设备，Kcon
 
 ## 接口契约
 
-### 1. DEVICE_DT_GET(DT_NODELABEL(can1)); DEVICE_DT_GET(DT_ALIAS(remote_uart)); DEVICE_DT_GET(DT_ALIAS(accel0)); DEVICE_DT_GET(DT_ALIAS(gyro0))
+### 1. `DEVICE_DT_GET()` / `DT_NODELABEL()` / `DT_ALIAS()`
 
 ```cpp
-DEVICE_DT_GET(DT_NODELABEL(can1)); DEVICE_DT_GET(DT_ALIAS(remote_uart)); DEVICE_DT_GET(DT_ALIAS(accel0)); DEVICE_DT_GET(DT_ALIAS(gyro0))
+DEVICE_DT_GET(DT_NODELABEL(can1));
+DEVICE_DT_GET(DT_ALIAS(remote_uart));
+DEVICE_DT_GET(DT_ALIAS(accel0));
+DEVICE_DT_GET(DT_ALIAS(gyro0))
 ```
 
 取得Zephyr已描述设备的指针；node label指DTS节点标号，alias指应用连接名称。获取指针不启动业务驱动或允许电机输出。
