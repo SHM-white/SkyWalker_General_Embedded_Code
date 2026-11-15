@@ -5,8 +5,8 @@
 ## 当前调用链
 
 ~~~text
-通信接收器
-  → RemoteSource / VisionSource / RefereePermissionSource
+遥控 / 视觉 / 导航接收器 + 板间裁判原始帧
+  → RemoteSource / VisionSource / NavigationSource + InterBoardRefereeSource
   → CommandManager worker
   → CommandArbiter
   → CommandSnapshot
@@ -18,7 +18,7 @@ CommandArbiter 是同步策略核心，接收 CommandInputs 并返回 CommandDec
 
 ## 命令来源服务
 
-启动时注册 Operator 来源，按策略可注册 Aim 与 Navigation 来源，并绑定许可来源；随后调用 CommandManager::start()。最多三个来源，每个角色一个。后台线程按配置周期采样来源、调用 CommandArbiter、发布 CommandSnapshot。执行线程用 snapshot() 读取完整诊断帧，或用 current() 读取最终 RobotCommand。读快照不会消费结果，也不会延长旧输入的有效期。
+启动时注册 Operator 来源，按策略可注册 Aim 与 Navigation 来源，并绑定许可来源；随后调用 CommandManager::start()。最多三个来源，每个角色一个。后台线程按配置周期采样来源、按原始队列处理遥控事件、调用 CommandArbiter、发布 CommandSnapshot。执行线程用 setOperatorGate() 把运行意图、会话和档位选择作为同一版本写入，并用 setPlantState() 提供本地巡航 Pitch 的真实角度；无绑定裁判来源不会单独阻止 manager.start。执行线程用 snapshot() 读取完整诊断帧，或用 current() 读取最终 RobotCommand。读快照不会消费结果，也不会延长旧输入的有效期。
 
 完整注册、错误语义、静态生命周期和同步仲裁入口见[命令来源与后台服务](command-service.md)。三源运行入口见 samples/robotics/command_manager/src/main.cpp。
 
