@@ -126,8 +126,6 @@ jobs:
       ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-1.0.1
       SHARD_ID: ${{ matrix.shard }}
       SHARD_COUNT: 12
-      CCACHE_COMPILERCHECK: content
-      CCACHE_MAXSIZE: 300M
     defaults:
       run:
         shell: bash
@@ -139,20 +137,6 @@ jobs:
 
       - name: Link prebuilt Zephyr modules
         run: bash skywalker_code/.github/ci/link-prebuilt-workspace.sh
-
-      - name: Configure compiler cache
-        run: |
-          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-          mkdir -p "$GITHUB_WORKSPACE/.ccache"
-
-      - name: Restore cached object files
-        uses: actions/cache@v4
-        with:
-          path: .ccache
-          key: arm-ccache-v1-${{ hashFiles('skywalker_code/west.yml') }}-shard${{ matrix.shard }}-${{ github.sha }}
-          restore-keys: |
-            arm-ccache-v1-${{ hashFiles('skywalker_code/west.yml') }}-shard${{ matrix.shard }}-
 
       - name: Build this shard of all applications and samples
         run: |
@@ -183,8 +167,7 @@ jobs:
                 -d "build/ci/$build_name" \
                 "$project" \
                 -- -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE/skywalker_code" \
-                   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-                   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache; then
+                   -DUSE_CCACHE=0; then
               echo "PASS: $relative"
             else
               echo "::error title=Firmware build failed::$relative"
@@ -206,10 +189,6 @@ jobs:
             printf 'Build failed: %s\n' "${failures[@]}" >&2
             exit 1
           fi
-
-      - name: Print ccache statistics
-        if: always()
-        run: ccache --show-stats || true
 
       - name: Upload failed build diagnostics
         if: failure()
