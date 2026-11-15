@@ -104,7 +104,8 @@ int vofa_set_handler(Vofa *vofa, uint8_t *rx_buf, size_t rx_buf_size, vofa_cmd_h
 ### 4. int Latest<T>::put(const T &value); int Latest<T>::get(T &value)
 
 ```cpp
-int Latest<T>::put(const T &value); int Latest<T>::get(T &value)
+int Latest<T>::put(const T &value);
+int Latest<T>::get(T &value)
 ```
 
 用 K_NO_WAIT mutex 拷贝完整最新值，没有 I/O 和回调；get 非消费且不保证新的序号。
@@ -119,10 +120,11 @@ int Latest<T>::put(const T &value); int Latest<T>::get(T &value)
 
 **错误 / 边界：** Latest 本身没有 have_value/时间有效性标志；读者必须检查值里的 stamp.valid/sequence，-EAGAIN 时保留旧值仍要过期。
 
-### 5. int bench::Telemetry::start(const device *vofa_uart); void bench::Telemetry::emit(const skywalker::robotics::CommandSnapshot &frame)
+### 5. `start()` / `emit()`
 
 ```cpp
-int bench::Telemetry::start(const device *vofa_uart); void bench::Telemetry::emit(const skywalker::robotics::CommandSnapshot &frame)
+int bench::Telemetry::start(const device *vofa_uart);
+void bench::Telemetry::emit(const skywalker::robotics::CommandSnapshot &frame)
 ```
 
 命令 sample 私有封装：日志约每 100 ms 输出同帧的模式/来源/年龄/原因，VOFA 可选每 20 ms 输出最终命令与拆分原因位。
