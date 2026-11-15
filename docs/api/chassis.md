@@ -16,10 +16,12 @@ SwerveKinematics 分目标，SwerveModule 独立转向/轮驱计算与翻转迟�
 
 ## 接口契约
 
-### 1. int SwerveChassis::validate() const; int reset(const ChassisFeedback &); int step(const ChassisCommand &, const ChassisFeedback &, float dt_s, ChassisOutput &out)
+### 1. `validate()` / `reset()` / `step()`
 
 ```cpp
-int SwerveChassis::validate() const; int reset(const ChassisFeedback &); int step(const ChassisCommand &, const ChassisFeedback &, float dt_s, ChassisOutput &out)
+int SwerveChassis::validate() const;
+int reset(const ChassisFeedback &);
+int step(const ChassisCommand &, const ChassisFeedback &, float dt_s, ChassisOutput &out)
 ```
 
 持续解算，不等待全轮反馈；ModuleFeedback.steer_valid/drive_valid 与各轴 generation 独立决定 effort 有效性。
@@ -49,10 +51,13 @@ int SwerveModule::step(const ModuleTarget &, const ModuleFeedback &, float dt_s,
 
 **错误 / 边界：** 非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。
 
-### 3. int SwerveHardware::begin(); int read(ChassisFeedback &); int stage(const ChassisOutput &, float steer_scale, float drive_scale); void suspend()
+### 3. `begin()` / `read()` / `stage()` 等接口
 
 ```cpp
-int SwerveHardware::begin(); int read(ChassisFeedback &); int stage(const ChassisOutput &, float steer_scale, float drive_scale); void suspend()
+int SwerveHardware::begin();
+int read(ChassisFeedback &);
+int stage(const ChassisOutput &, float steer_scale, float drive_scale);
+void suspend()
 ```
 
 应用注入八台 Motor 和批量 Group；stage 独立携带计算 enable generation，不 commit 总线。
@@ -63,10 +68,12 @@ int SwerveHardware::begin(); int read(ChassisFeedback &); int stage(const Chassi
 
 **错误 / 边界：** 非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。
 
-### 4. ChassisExecutor(SwerveHardware &, const SwerveChassis::Config &, const Config &); int begin(); RunStatus update(const ChassisExecutionInputs &, core::TimeUs now_us)
+### 4. `ChassisExecutor()` / `begin()` / `update()`
 
 ```cpp
-ChassisExecutor(SwerveHardware &, const SwerveChassis::Config &, const Config &); int begin(); RunStatus update(const ChassisExecutionInputs &, core::TimeUs now_us)
+ChassisExecutor(SwerveHardware &, const SwerveChassis::Config &, const Config &);
+int begin();
+RunStatus update(const ChassisExecutionInputs &, core::TimeUs now_us)
 ```
 
 注入硬件，不绑定 Endpoint；消费原输入、权限、预算和真实功率。
@@ -84,7 +91,8 @@ ChassisExecutor(SwerveHardware &, const SwerveChassis::Config &, const Config &)
 ### 5. int ChassisPowerLimiter::reset(); int step(const ChassisPowerInput &, float dt_s, ChassisPowerDecision &out)
 
 ```cpp
-int ChassisPowerLimiter::reset(); int step(const ChassisPowerInput &, float dt_s, ChassisPowerDecision &out)
+int ChassisPowerLimiter::reset();
+int step(const ChassisPowerInput &, float dt_s, ChassisPowerDecision &out)
 ```
 
 标定后以 measured_power_w、预算 W、缓冲 J 计算 [0,1] 缩放；预算不可冒充测量。

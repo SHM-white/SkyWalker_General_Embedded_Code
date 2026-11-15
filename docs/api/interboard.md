@@ -33,7 +33,8 @@ ConfiguredInterBoardTransport(const Config &, AsyncUart::DmaBuffers *dma = nullp
 ### 2. InterBoardEndpoint(InterBoardTransport &, const Config &); void poll(uint64_t now_ms)
 
 ```cpp
-InterBoardEndpoint(InterBoardTransport &, const Config &); void poll(uint64_t now_ms)
+InterBoardEndpoint(InterBoardTransport &, const Config &);
+void poll(uint64_t now_ms)
 ```
 
 `poll()` 由唯一通信 owner 推进；默认命令接收 100 ms、状态接收 100 ms、心跳接收 200 ms，TX 截止时限 60 ms。独立应用在自己的控制循环内调用，云台 5 ms、底盘 2 ms；部分上车工程使用独立通信线程，以具体入口为准。
@@ -44,10 +45,16 @@ InterBoardEndpoint(InterBoardTransport &, const Config &); void poll(uint64_t no
 
 **错误 / 边界：** 非法输入/配置返回负 errno；普通设备等待不拒绝合法目标。
 
-### 3. void submit(const ChassisCommand &); void setReferee(const RefereeState &); void setStatus(const RunStatus &); void submitBigYaw(const BigYawRequest &); void setBigYawFeedback(const BigYawFeedback &); int submitRefereeFrame(const uint8_t *, size_t, uint64_t receive_ms); int readRefereeFrame(RefereeRelayFrame &)
+### 3. `submit()` / `setReferee()` / `setStatus()` 等接口
 
 ```cpp
-void submit(const ChassisCommand &); void setReferee(const RefereeState &); void setStatus(const RunStatus &); void submitBigYaw(const BigYawRequest &); void setBigYawFeedback(const BigYawFeedback &); int submitRefereeFrame(const uint8_t *, size_t, uint64_t receive_ms); int readRefereeFrame(RefereeRelayFrame &)
+void submit(const ChassisCommand &);
+void setReferee(const RefereeState &);
+void setStatus(const RunStatus &);
+void submitBigYaw(const BigYawRequest &);
+void setBigYawFeedback(const BigYawFeedback &);
+int submitRefereeFrame(const uint8_t *, size_t, uint64_t receive_ms);
+int readRefereeFrame(RefereeRelayFrame &)
 ```
 
 复制原生产值与年龄；反复提交/重发同 producer 不续期，状态 stamp 由执行 owner 生产。
@@ -63,7 +70,8 @@ void submit(const ChassisCommand &); void setReferee(const RefereeState &); void
 ### 4. int submitOperatorControl(const OperatorControl &); Snapshot snapshot() const
 
 ```cpp
-int submitOperatorControl(const OperatorControl &); Snapshot snapshot() const
+int submitOperatorControl(const OperatorControl &);
+Snapshot snapshot() const
 ```
 
 独立操作管理传 run_allowed/estop/clear event 与 boot/原年龄；snapshot 含心跳、行走命令、底盘约束、底盘反馈、操作控制、大 Yaw 请求/反馈与 `gimbal_imu` 八类消息，以及 online/error/transport/parser_stats。
@@ -74,10 +82,12 @@ int submitOperatorControl(const OperatorControl &); Snapshot snapshot() const
 
 **错误 / 边界：** 非云台 producer -EACCES，矛盾运行/停止/清除请求 -EINVAL；重复事件不改绑新 boot。
 
-### 5. int InterBoardTransport::service(uint64_t); int read(RxChunk &); int send(const uint8_t *, size_t, uint32_t timeout_ms = 60)
+### 5. `service()` / `read()` / `send()`
 
 ```cpp
-int InterBoardTransport::service(uint64_t); int read(RxChunk &); int send(const uint8_t *, size_t, uint32_t timeout_ms = 60)
+int InterBoardTransport::service(uint64_t);
+int read(RxChunk &);
+int send(const uint8_t *, size_t, uint32_t timeout_ms = 60)
 ```
 
 批次完整复制，背压不积压运动目标；原始接收时刻随 chunk 保留。

@@ -53,7 +53,7 @@ int control_pid_reset(control_pid_state *state, float current_measurement)
 
 **错误 / 边界：** 失败不写state；正积分下限的配置须自行保证初始I=0也落在范围内。
 
-### 3. int control_pid_step(control_pid_state *state, const control_pid_config *config, const control_pid_input *input, control_pid_result *result)
+### 3. `control_pid_step()`
 
 ```cpp
 int control_pid_step(control_pid_state *state, const control_pid_config *config, const control_pid_input *input, control_pid_result *result)
@@ -75,10 +75,11 @@ int control_pid_step(control_pid_state *state, const control_pid_config *config,
 
 **错误 / 边界：** -EINVAL：空指针/非有限输入或配置；-ERANGE：dt越界、积分状态越界或计算溢出。调用方必须处理失败并停止使用本周期旧result。
 
-### 4. int control_feedforward_validate(const control_feedforward_config *config); int control_feedforward_calculate(const control_feedforward_config *config, const control_feedforward_reference *reference, float *output)
+### 4. `control_feedforward_validate()` / `control_feedforward_calculate()`
 
 ```cpp
-int control_feedforward_validate(const control_feedforward_config *config); int control_feedforward_calculate(const control_feedforward_config *config, const control_feedforward_reference *reference, float *output)
+int control_feedforward_validate(const control_feedforward_config *config);
+int control_feedforward_calculate(const control_feedforward_config *config, const control_feedforward_reference *reference, float *output)
 ```
 
 计算偏置、静摩擦方向项、速度项、加速度项与可选sin/cos重力项的总和。优先由速度参考确定静摩擦方向，速度近零时再看加速度。
@@ -95,10 +96,12 @@ int control_feedforward_validate(const control_feedforward_config *config); int 
 
 **错误 / 边界：** -EINVAL：指针/非有限值/负阈值/无效gravity_model；-ERANGE：计算溢出。
 
-### 5. int control_feedforward_pid_validate(const control_feedforward_pid_config *config); int control_feedforward_pid_reset(control_feedforward_pid_state *state, float current_measurement); int control_feedforward_pid_step(control_feedforward_pid_state *state, const control_feedforward_pid_config *config, const control_feedforward_pid_input *input, control_feedforward_pid_result *result)
+### 5. `control_feedforward_pid_validate()` / `control_feedforward_pid_reset()` / `control_feedforward_pid_step()`
 
 ```cpp
-int control_feedforward_pid_validate(const control_feedforward_pid_config *config); int control_feedforward_pid_reset(control_feedforward_pid_state *state, float current_measurement); int control_feedforward_pid_step(control_feedforward_pid_state *state, const control_feedforward_pid_config *config, const control_feedforward_pid_input *input, control_feedforward_pid_result *result)
+int control_feedforward_pid_validate(const control_feedforward_pid_config *config);
+int control_feedforward_pid_reset(control_feedforward_pid_state *state, float current_measurement);
+int control_feedforward_pid_step(control_feedforward_pid_state *state, const control_feedforward_pid_config *config, const control_feedforward_pid_input *input, control_feedforward_pid_result *result)
 ```
 
 先算前馈，再在PID内部合成和限幅；抗积分饱和考虑PID+前馈总量，而不是先限PID再另加前馈。
@@ -116,10 +119,12 @@ int control_feedforward_pid_validate(const control_feedforward_pid_config *confi
 
 **错误 / 边界：** 透传PID/前馈的-EINVAL/-ERANGE；每种量纲的系数须按输出单位配套。
 
-### 6. int control_slew_rate_validate(const control_slew_rate_config *config); int control_slew_rate_reset(control_slew_rate_state *state, float current_value); int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config, float requested_value, float dt_s, float *limited_value, float *limited_rate)
+### 6. `control_slew_rate_validate()` / `control_slew_rate_reset()` / `control_slew_rate_step()`
 
 ```cpp
-int control_slew_rate_validate(const control_slew_rate_config *config); int control_slew_rate_reset(control_slew_rate_state *state, float current_value); int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config, float requested_value, float dt_s, float *limited_value, float *limited_rate)
+int control_slew_rate_validate(const control_slew_rate_config *config);
+int control_slew_rate_reset(control_slew_rate_state *state, float current_value);
+int control_slew_rate_step(control_slew_rate_state *state, const control_slew_rate_config *config, float requested_value, float dt_s, float *limited_value, float *limited_rate)
 ```
 
 斜坡限制每周期目标变化，输出限制后的值和真实变化率。上升/下降按数值方向选择，不是按速度绝对值变大/变小选择。
@@ -137,10 +142,11 @@ int control_slew_rate_validate(const control_slew_rate_config *config); int cont
 
 **错误 / 边界：** -EACCES：未reset；-EINVAL：空指针/非有限值/负配置；-ERANGE：dt≤0或计算溢出。率=0表示该方向不变化。
 
-### 7. int control_angle_unwrap_reset(control_angle_unwrapper *state, float wrapped_rad); int control_angle_unwrap_step(control_angle_unwrapper *state, float wrapped_rad, float *continuous_rad)
+### 7. `control_angle_unwrap_reset()` / `control_angle_unwrap_step()`
 
 ```cpp
-int control_angle_unwrap_reset(control_angle_unwrapper *state, float wrapped_rad); int control_angle_unwrap_step(control_angle_unwrapper *state, float wrapped_rad, float *continuous_rad)
+int control_angle_unwrap_reset(control_angle_unwrapper *state, float wrapped_rad);
+int control_angle_unwrap_step(control_angle_unwrapper *state, float wrapped_rad, float *continuous_rad)
 ```
 
 把每次单圈角度展开成连续角度；增量选[-π,π)的最短方向，要求相邻真实运动少于半圈。
@@ -157,10 +163,11 @@ int control_angle_unwrap_reset(control_angle_unwrapper *state, float wrapped_rad
 
 **错误 / 边界：** -EACCES：未初始化；-EINVAL：指针/非有限数；-ERANGE：运算溢出。不能恢复丢帧期间未知圈数。
 
-### 8. int control_shortest_angle_error(float target_rad, float measurement_rad, float *error_rad); int control_angle_nearest_continuous_target(float requested_absolute_rad, float measured_absolute_rad, float measured_continuous_rad, float *continuous_target_rad)
+### 8. `control_shortest_angle_error()` / `control_angle_nearest_continuous_target()`
 
 ```cpp
-int control_shortest_angle_error(float target_rad, float measurement_rad, float *error_rad); int control_angle_nearest_continuous_target(float requested_absolute_rad, float measured_absolute_rad, float measured_continuous_rad, float *continuous_target_rad)
+int control_shortest_angle_error(float target_rad, float measurement_rad, float *error_rad);
+int control_angle_nearest_continuous_target(float requested_absolute_rad, float measured_absolute_rad, float measured_continuous_rad, float *continuous_target_rad)
 ```
 
 前者算最短角度误差，后者把单圈绝对目标映射到当前连续坐标中最近的一圈。恰好+π会规范化成-π。
@@ -178,10 +185,12 @@ int control_shortest_angle_error(float target_rad, float measurement_rad, float 
 
 **错误 / 边界：** -EINVAL：非有限/空输出；-ERANGE：差值或加法溢出。绝对测量与连续测量必须来自同一电机参考。
 
-### 9. int control_motor_velocity_validate(const control_motor_velocity_config *config); int control_motor_velocity_reset(control_motor_velocity_state *state, float measured_velocity_rad_s, float initial_reference_rad_s); int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config, const control_motor_velocity_input *input, control_motor_velocity_output *output)
+### 9. `control_motor_velocity_validate()` / `control_motor_velocity_reset()` / `control_motor_velocity_step()`
 
 ```cpp
-int control_motor_velocity_validate(const control_motor_velocity_config *config); int control_motor_velocity_reset(control_motor_velocity_state *state, float measured_velocity_rad_s, float initial_reference_rad_s); int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config, const control_motor_velocity_input *input, control_motor_velocity_output *output)
+int control_motor_velocity_validate(const control_motor_velocity_config *config);
+int control_motor_velocity_reset(control_motor_velocity_state *state, float measured_velocity_rad_s, float initial_reference_rad_s);
+int control_motor_velocity_step(control_motor_velocity_state *state, const control_motor_velocity_config *config, const control_motor_velocity_input *input, control_motor_velocity_output *output)
 ```
 
 纯速度环串联测量低通、目标斜坡、软死区、前馈PID和执行量限幅。它不检查电机在线或发送CAN。
@@ -199,10 +208,12 @@ int control_motor_velocity_validate(const control_motor_velocity_config *config)
 
 **错误 / 边界：** -EACCES：没reset；-EINVAL：配置/非有限值；-ERANGE：目标/dt超限或数值异常。effort单位由调用者决定。
 
-### 10. int control_motor_position_validate(const control_motor_position_config *config); int control_motor_position_reset(control_motor_position_state *state, const control_motor_position_config *config, float measured_position_rad, float measured_velocity_rad_s); int control_motor_position_step(control_motor_position_state *state, const control_motor_position_config *config, const control_motor_position_input *input, control_motor_position_output *output)
+### 10. `control_motor_position_validate()` / `control_motor_position_reset()` / `control_motor_position_step()`
 
 ```cpp
-int control_motor_position_validate(const control_motor_position_config *config); int control_motor_position_reset(control_motor_position_state *state, const control_motor_position_config *config, float measured_position_rad, float measured_velocity_rad_s); int control_motor_position_step(control_motor_position_state *state, const control_motor_position_config *config, const control_motor_position_input *input, control_motor_position_output *output)
+int control_motor_position_validate(const control_motor_position_config *config);
+int control_motor_position_reset(control_motor_position_state *state, const control_motor_position_config *config, float measured_position_rad, float measured_velocity_rad_s);
+int control_motor_position_step(control_motor_position_state *state, const control_motor_position_config *config, const control_motor_position_input *input, control_motor_position_output *output)
 ```
 
 串级位置环：外环位置PID给速度参考，内环速度控制给执行量。当前位置环I项冻结；不会因配置ki而持续积累位置积分。

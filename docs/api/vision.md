@@ -16,10 +16,11 @@ AbProtocol 定义 29 字节下行/43 字节上行线协议；VisionLink 校验�
 
 ## 接口契约
 
-### 1. VisionReceiver(const device *uart, AsyncUart::DmaBuffers &dma, VisionProtocol &protocol, const Config &config); int VisionReceiver::start()
+### 1. `VisionReceiver()` / `start()`
 
 ```cpp
-VisionReceiver(const device *uart, AsyncUart::DmaBuffers &dma, VisionProtocol &protocol, const Config &config); int VisionReceiver::start()
+VisionReceiver(const device *uart, AsyncUart::DmaBuffers &dma, VisionProtocol &protocol, const Config &config);
+int VisionReceiver::start()
 ```
 
 绑定 UART、DMA 与长生命周期 codec；start 初始化 Link 并启动独立 worker。反馈周期默认 0，仅收包。
@@ -51,10 +52,11 @@ VisionReceiver::Snapshot VisionReceiver::snapshot() const
 
 **错误 / 边界：** 必须同时检查 aim_fresh、aim.stamp.valid 与 aim.value.control_requested；合法 stop 可能是新鲜消息，但不能控制电机。
 
-### 3. int VisionReceiver::setFeedback(const Feedback &feedback); int VisionLink::setFeedback(const Feedback &feedback)
+### 3. `setFeedback()`
 
 ```cpp
-int VisionReceiver::setFeedback(const Feedback &feedback); int VisionLink::setFeedback(const Feedback &feedback)
+int VisionReceiver::setFeedback(const Feedback &feedback);
+int VisionLink::setFeedback(const Feedback &feedback)
 ```
 
 复制应用提供的反馈，保留姿态、gyro、弹速、计数各自的原始时间；不填造任何缺失测量。
@@ -69,10 +71,12 @@ int VisionReceiver::setFeedback(const Feedback &feedback); int VisionLink::setFe
 
 **错误 / 边界：** -EACCES：Link 尚未初始化；-EINVAL：未知 mode、未来时间、非法参考/非有限值、无效四元数或负弹速。
 
-### 4. int VisionLink::init(); int VisionLink::processRxBytes(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us); void VisionLink::discardPartial()
+### 4. `init()` / `processRxBytes()` / `discardPartial()`
 
 ```cpp
-int VisionLink::init(); int VisionLink::processRxBytes(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us); void VisionLink::discardPartial()
+int VisionLink::init();
+int VisionLink::processRxBytes(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us);
+void VisionLink::discardPartial()
 ```
 
 不使用 Receiver 时的纯链路入口；init 校验配置并清状态，processRxBytes 流式解析，零长度推进半帧超时，断流时 discardPartial。
@@ -107,10 +111,12 @@ int VisionLink::encodeFeedback(std::uint8_t *out, std::size_t capacity)
 
 **错误 / 边界：** -EACCES：未初始化；-EINVAL：空输出或值非法；-EMSGSIZE：容量不足；-ENODATA：必要字段无效/过期；-ESTALE：参考不一致或姿态/gyro 不同步；-ERANGE：ZYX pitch 接近 ±π/2。
 
-### 6. AbProtocol(const Config &config); int AbProtocol::validateConfig() const; int AbProtocol::consume(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us, CommandSink &sink)
+### 6. `AbProtocol()` / `validateConfig()` / `consume()`
 
 ```cpp
-AbProtocol(const Config &config); int AbProtocol::validateConfig() const; int AbProtocol::consume(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us, CommandSink &sink)
+AbProtocol(const Config &config);
+int AbProtocol::validateConfig() const;
+int AbProtocol::consume(const std::uint8_t *bytes, std::size_t size, core::TimeUs rx_us, CommandSink &sink)
 ```
 
 AB 下行 mode=0 停止、1 控制、2 控制并请求开火；yaw/pitch 角度 rad、速度 rad/s、加速度 rad/s²，float32 小端，帧经 CRC 校验后调用 sink。

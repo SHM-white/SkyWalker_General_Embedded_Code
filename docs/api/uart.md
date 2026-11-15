@@ -105,10 +105,12 @@ int AsyncUart::send(const std::uint8_t *bytes, std::size_t size, std::uint32_t t
 
 **错误 / 边界：** -EINVAL：未初始化、空指针、长度或期限非法；-EAGAIN：TX 忙；其他负值来自 UART 驱动。
 
-### 6. bool AsyncUart::txBusy() const; int AsyncUart::txError() const; atomic_val_t AsyncUart::droppedChunks() const
+### 6. `txBusy()` / `txError()` / `droppedChunks()`
 
 ```cpp
-bool AsyncUart::txBusy() const; int AsyncUart::txError() const; atomic_val_t AsyncUart::droppedChunks() const
+bool AsyncUart::txBusy() const;
+int AsyncUart::txError() const;
+atomic_val_t AsyncUart::droppedChunks() const
 ```
 
 读取发送占用、最近发送结果与累计丢块数，供通信诊断。

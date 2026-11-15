@@ -101,14 +101,15 @@ CAN callback → CanBus I/O worker → Motor snapshot
 ### 命令链路
 
 ~~~text
-RemoteReceiver / VisionReceiver / RefereeReceiver
-  → RemoteSource / VisionSource / RefereePermissionSource
+RemoteReceiver / VisionReceiver / NavigationReceiver
+  → RemoteSource / VisionSource / NavigationSource ─┐
+  → InterBoardRefereeSource（或独立裁判 UART source）┘
   → CommandManager worker → CommandArbiter
   → non-consuming CommandSnapshot
   → execution threads / telemetry / InterBoardEndpoint
 ~~~
 
-在 CommandManager::start() 前注册来源和权限源。start 返回 0 不代表输入有效；snapshot() 首次发布前返回 -EAGAIN。快照读取不会消费数据，也不会刷新消息时间戳。完整合同见[命令来源服务](../modules/robotics/command-service.md)。
+在 CommandManager::start() 前注册 Operator 和可选 Aim/Navigation 来源，按工程需要绑定独立裁判许可来源；正式云台通过板间原始帧提供裁判数据，底盘直接消费板间运动请求而不运行 CommandManager。未绑定许可来源不会单独使 start 失败。执行线程可通过 setOperatorGate() 发布运行意图与操作会话、通过 setPlantState() 提供巡航 Pitch 反馈。start 返回 0 不代表输入有效；snapshot() 首次发布前返回 -EAGAIN。快照读取不会消费数据，也不会刷新消息时间戳。完整合同见[命令来源服务](../modules/robotics/command-service.md)。
 
 ### 应用线程
 

@@ -16,10 +16,12 @@ ImuSource 负责某种真实输入；ImuState 按字段发布测量与新鲜度�
 
 ## 接口契约
 
-### 1. virtual int ImuSource::init(); virtual int ImuSource::service(); virtual Snapshot ImuSource::snapshot() const
+### 1. `init()` / `service()` / `snapshot()`
 
 ```cpp
-virtual int ImuSource::init(); virtual int ImuSource::service(); virtual Snapshot ImuSource::snapshot() const
+virtual int ImuSource::init();
+virtual int ImuSource::service();
+virtual Snapshot ImuSource::snapshot() const
 ```
 
 所有输入源的最小契约：init 初始化；service 驱动一次采集/解析；snapshot 读取副本。构造不执行I/O。
@@ -30,10 +32,12 @@ virtual int ImuSource::init(); virtual int ImuSource::service(); virtual Snapsho
 
 **错误 / 边界：** Running 不表示每个字段都新鲜；检查 fresh_mask 和 Measurement.stamp.valid。
 
-### 2. Bmi088Imu::Bmi088Imu(const device *accel, const device *gyro, const Config &c, control::QuaternionEkf *estimator = nullptr); int Bmi088Imu::init(); int Bmi088Imu::service()
+### 2. `Bmi088Imu()` / `init()` / `service()`
 
 ```cpp
-Bmi088Imu::Bmi088Imu(const device *accel, const device *gyro, const Config &c, control::QuaternionEkf *estimator = nullptr); int Bmi088Imu::init(); int Bmi088Imu::service()
+Bmi088Imu::Bmi088Imu(const device *accel, const device *gyro, const Config &c, control::QuaternionEkf *estimator = nullptr);
+int Bmi088Imu::init();
+int Bmi088Imu::service()
 ```
 
 通过Zephyr传感器API读取加速度/角速度/温度；可选独立EKF生成姿态，sensor_to_body 将传感器轴旋转到机器人机体轴。
@@ -50,10 +54,13 @@ Bmi088Imu::Bmi088Imu(const device *accel, const device *gyro, const Config &c, c
 
 **错误 / 边界：** -EALREADY：重复init；-EINVAL：周期/安装旋转不合法；-ENODEV：传感器不可用；-ENOTSUP：传入EKF但未编入；-EACCES：未初始化；-ESTALE：加速度/陀螺仪时间差超限；透传sensor错误。
 
-### 3. DmImuRs485Source::DmImuRs485Source(const device *uart, communication::AsyncUart::DmaBuffers &dma, const Config &c); int DmImuRs485Source::init(); int DmImuRs485Source::service(); int DmImuRs485Source::resetReference()
+### 3. `DmImuRs485Source()` / `init()` / `service()` 等接口
 
 ```cpp
-DmImuRs485Source::DmImuRs485Source(const device *uart, communication::AsyncUart::DmaBuffers &dma, const Config &c); int DmImuRs485Source::init(); int DmImuRs485Source::service(); int DmImuRs485Source::resetReference()
+DmImuRs485Source::DmImuRs485Source(const device *uart, communication::AsyncUart::DmaBuffers &dma, const Config &c);
+int DmImuRs485Source::init();
+int DmImuRs485Source::service();
+int DmImuRs485Source::resetReference()
 ```
 
 请求并消费 DM-IMU-L1 固件 2.x 的 RS485 应答，应用缩放和安装旋转；遇UART故障可内部重试。resetReference在已知设备复位/清零/标定后递增epoch并撤销旧姿态，不向设备发送配置命令。
@@ -72,10 +79,11 @@ DmImuRs485Source::DmImuRs485Source(const device *uart, communication::AsyncUart:
 
 **错误 / 边界：** -EINVAL：配置错误；-EALREADY：重复init；-EACCES：尚未初始化；-EAGAIN：无新帧/等待恢复；传输溢出丢掉半帧并记录transportGap；帧错误在diagnostics报告，当前 RS485 帧没有 CRC。
 
-### 4. ImuReceiver::ImuReceiver(ImuSource &source, const Config &config, ImuHeater *heater = nullptr); int ImuReceiver::start()
+### 4. `ImuReceiver()` / `start()`
 
 ```cpp
-ImuReceiver::ImuReceiver(ImuSource &source, const Config &config, ImuHeater *heater = nullptr); int ImuReceiver::start()
+ImuReceiver::ImuReceiver(ImuSource &source, const Config &config, ImuHeater *heater = nullptr);
+int ImuReceiver::start()
 ```
 
 启动一个源的专有工作线程，在线程内部异步init并持续service；可选加热器与此线程同所有者。
@@ -96,7 +104,8 @@ ImuReceiver::ImuReceiver(ImuSource &source, const Config &config, ImuHeater *hea
 ### 5. Snapshot ImuReceiver::snapshot() const; ImuReceiver::Status ImuReceiver::status() const
 
 ```cpp
-Snapshot ImuReceiver::snapshot() const; ImuReceiver::Status ImuReceiver::status() const
+Snapshot ImuReceiver::snapshot() const;
+ImuReceiver::Status ImuReceiver::status() const
 ```
 
 snapshot直接让source按读取时刻算freshness；status分别报告异步初始化、service以及heater错误/占空比。没有第二份样本缓存。
@@ -107,10 +116,12 @@ snapshot直接让source按读取时刻算freshness；status分别报告异步初
 
 **错误 / 边界：** start成功后立即读到Uninitialized属于正常；业务要等姿态字段新鲜且quality达到要求。
 
-### 6. int ImuState::init(uint32_t capabilities, core::OrientationReference reference); int ImuState::publish(const Update &update); Snapshot ImuState::snapshot() const
+### 6. `init()` / `publish()` / `snapshot()`
 
 ```cpp
-int ImuState::init(uint32_t capabilities, core::OrientationReference reference); int ImuState::publish(const Update &update); Snapshot ImuState::snapshot() const
+int ImuState::init(uint32_t capabilities, core::OrientationReference reference);
+int ImuState::publish(const Update &update);
+Snapshot ImuState::snapshot() const
 ```
 
 具体source共享的字段发布器，Update.updated_mask指示本次真正更新的字段；其余字段保留独立时间戳。
@@ -127,10 +138,13 @@ int ImuState::init(uint32_t capabilities, core::OrientationReference reference);
 
 **错误 / 边界：** 无效/非有限更新不应视作新测量；diagnostics.invalid_updates报告被拒绝内容。
 
-### 7. int DmImuParser::init(); int DmImuParser::consume(const uint8_t *bytes, size_t size, core::TimeUs now, DmImuSink &sink); void DmImuParser::discardPartial(); Statistics DmImuParser::statistics() const
+### 7. `init()` / `consume()` / `discardPartial()` 等接口
 
 ```cpp
-int DmImuParser::init(); int DmImuParser::consume(const uint8_t *bytes, size_t size, core::TimeUs now, DmImuSink &sink); void DmImuParser::discardPartial(); Statistics DmImuParser::statistics() const
+int DmImuParser::init();
+int DmImuParser::consume(const uint8_t *bytes, size_t size, core::TimeUs now, DmImuSink &sink);
+void DmImuParser::discardPartial();
+Statistics DmImuParser::statistics() const
 ```
 
 主动帧字节组装、CRC与更新投递；consume(nullptr,0,now,sink)也可推进组装超时；传输缺口要discardPartial，避免拼接缺失帧。
@@ -147,10 +161,13 @@ int DmImuParser::init(); int DmImuParser::consume(const uint8_t *bytes, size_t s
 
 **错误 / 边界：** CRC错误/无效帧/组装超时计数分别见Statistics；不执行配置写命令，不实现CAN。
 
-### 8. int ImuHeater::init(); int ImuHeater::update(const core::Measurement<float> &temperature, core::TimeUs now); int ImuHeater::disable(); ImuHeater::Snapshot ImuHeater::snapshot() const
+### 8. `init()` / `update()` / `disable()` 等接口
 
 ```cpp
-int ImuHeater::init(); int ImuHeater::update(const core::Measurement<float> &temperature, core::TimeUs now); int ImuHeater::disable(); ImuHeater::Snapshot ImuHeater::snapshot() const
+int ImuHeater::init();
+int ImuHeater::update(const core::Measurement<float> &temperature, core::TimeUs now);
+int ImuHeater::disable();
+ImuHeater::Snapshot ImuHeater::snapshot() const
 ```
 
 独立温控PID与PWM安全管理。init明确写0占空比；温度过期、超上限或无效时尝试关闭；snapshot分别保留原因和关闭操作错误。

@@ -19,7 +19,8 @@ QuaternionEkf维护每实例四元数、协方差、零偏和静止初始化。K
 ### 1. QuaternionEkf::QuaternionEkf(const Config &c); int QuaternionEkf::init()
 
 ```cpp
-QuaternionEkf::QuaternionEkf(const Config &c); int QuaternionEkf::init()
+QuaternionEkf::QuaternionEkf(const Config &c);
+int QuaternionEkf::init()
 ```
 
 构造保存配置，init验证全部正数/范围并重置每实例状态。不依赖通用线性Kalman，也不动态分配内存。
@@ -54,10 +55,13 @@ int QuaternionEkf::update(const Input &input)
 
 **错误 / 边界：** -EACCES：未init；-EINVAL：非有限输入；-ESTALE：时间重复/倒退；-ERANGE：数值异常并重置。超过dt_max_s也会重置，generation递增。
 
-### 3. void QuaternionEkf::reset(); core::Quaternion QuaternionEkf::attitude() const; Quality QuaternionEkf::quality() const; uint32_t QuaternionEkf::generation() const
+### 3. `reset()` / `attitude()` / `quality()` 等接口
 
 ```cpp
-void QuaternionEkf::reset(); core::Quaternion QuaternionEkf::attitude() const; Quality QuaternionEkf::quality() const; uint32_t QuaternionEkf::generation() const
+void QuaternionEkf::reset();
+core::Quaternion QuaternionEkf::attitude() const;
+Quality QuaternionEkf::quality() const;
+uint32_t QuaternionEkf::generation() const
 ```
 
 reset清除历史和零偏、进入Initializing、增加非零generation。attitude为q_WS，表示传感器坐标→局部重力对齐世界坐标的旋转。
@@ -124,10 +128,12 @@ void KalmanFilter_Correct(KalmanFilter *kf, const Matrix *z)
 
 **错误 / 边界：** 当前实现不传播Matrix_Inverse失败；不可逆/错误维度/非有限数可污染状态，调用方须建立模型并保证条件。
 
-### 7. Matrix_Init(Matrix *matrix, uint16_t rows, uint16_t cols, float *buffer); void Matrix_Zero(Matrix *matrix); void Matrix_SetDiag(Matrix *matrix, float value)
+### 7. `Matrix_Init()` / `Matrix_Zero()` / `Matrix_SetDiag()`
 
 ```cpp
-Matrix_Init(Matrix *matrix, uint16_t rows, uint16_t cols, float *buffer); void Matrix_Zero(Matrix *matrix); void Matrix_SetDiag(Matrix *matrix, float value)
+Matrix_Init(Matrix *matrix, uint16_t rows, uint16_t cols, float *buffer);
+void Matrix_Zero(Matrix *matrix);
+void Matrix_SetDiag(Matrix *matrix, float value)
 ```
 
 Matrix是arm_matrix_instance_f32别名。Init绑定已有缓冲，Zero清零，SetDiag先清零再置对角元素；矩阵不拥有buffer。

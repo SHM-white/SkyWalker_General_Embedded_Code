@@ -19,7 +19,9 @@ VelocityMotor / PositionMotor 保存最新目标，各轴独立反馈计算与�
 ### 1. VelocityMotor(Motor &, const Config &); PositionMotor(Motor &, const Config &); int configure()
 
 ```cpp
-VelocityMotor(Motor &, const Config &); PositionMotor(Motor &, const Config &); int configure()
+VelocityMotor(Motor &, const Config &);
+PositionMotor(Motor &, const Config &);
+int configure()
 ```
 
 configure 校验 PID、单位、输出限幅和反馈能力，绑定唯一 producer；按 attach/start/configure 顺序装配。
@@ -30,7 +32,7 @@ configure 校验 PID、单位、输出限幅和反馈能力，绑定唯一 produ
 
 **错误 / 边界：** 非法 -EINVAL，输出限幅 -ERANGE，模式/能力不支持 -ENOTSUP，producer 冲突返回绑定错误。
 
-### 2. int VelocityMotor::update(float target_rad_s, float dt_s); int PositionMotor::update(double target_position_rad, float dt_s); int PositionMotor::update(double target_position_rad, float reference_velocity_rad_s, float reference_acceleration_rad_s2, float dt_s)
+### 2. `update()`
 
 ```cpp
 int VelocityMotor::update(float target_rad_s, float dt_s);
@@ -55,7 +57,8 @@ int PositionMotor::update(double target_position_rad, float reference_velocity_r
 ### 3. int VelocityMotor::reset(); int PositionMotor::reset()
 
 ```cpp
-int VelocityMotor::reset(); int PositionMotor::reset()
+int VelocityMotor::reset();
+int PositionMotor::reset()
 ```
 
 清本轴控制历史、作废 computed effort；不能重定义 StartupRelative 原点。
@@ -69,7 +72,8 @@ int VelocityMotor::reset(); int PositionMotor::reset()
 ### 4. VelocityMotor::Telemetry telemetry() const; PositionMotor::Telemetry telemetry() const
 
 ```cpp
-VelocityMotor::Telemetry telemetry() const; PositionMotor::Telemetry telemetry() const
+VelocityMotor::Telemetry telemetry() const;
+PositionMotor::Telemetry telemetry() const
 ```
 
 值副本含 target_valid、target_sequence、output_valid、issue/error、同周期 MotorSnapshot 和计算输出。

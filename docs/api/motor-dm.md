@@ -16,10 +16,12 @@ Motor 保存运行意图、最新命令和真实反馈；CanBus 处理物理 I/O
 
 ## 接口契约
 
-### 1. dm::Config dm::j4310Mit(const J4310Options &options); dm::Config dm::j4310Velocity(const J4310Options &options); dm::Config dm::j4310PositionVelocity(const J4310Options &options)
+### 1. `j4310Mit()` / `j4310Velocity()` / `j4310PositionVelocity()`
 
 ```cpp
-dm::Config dm::j4310Mit(const J4310Options &options); dm::Config dm::j4310Velocity(const J4310Options &options); dm::Config dm::j4310PositionVelocity(const J4310Options &options)
+dm::Config dm::j4310Mit(const J4310Options &options);
+dm::Config dm::j4310Velocity(const J4310Options &options);
+dm::Config dm::j4310PositionVelocity(const J4310Options &options)
 ```
 
 构建 MIT、速度或位置速度模式配置；主控工厂不会把驱动器固件自动切换模式。
@@ -38,10 +40,11 @@ dm::Config dm::j4310Mit(const J4310Options &options); dm::Config dm::j4310Veloci
 
 **错误 / 边界：** 全部配置验证在 CanBus::start()；不支持型号/模式 -EINVAL；范围错误 -ERANGE。
 
-### 2. int dm::describe(const Config &config, Descriptor &out); int dm::controlFrameId(ControlMode mode, uint16_t motor_id, uint16_t &out)
+### 2. `describe()` / `controlFrameId()`
 
 ```cpp
-int dm::describe(const Config &config, Descriptor &out); int dm::controlFrameId(ControlMode mode, uint16_t motor_id, uint16_t &out)
+int dm::describe(const Config &config, Descriptor &out);
+int dm::controlFrameId(ControlMode mode, uint16_t motor_id, uint16_t &out)
 ```
 
 计算三模式控制帧 ID：MIT=id，位置速度=0x100+id，速度=0x200+id；反馈 ID 来自 master_id，并用帧内 motor_id 分流。
@@ -79,10 +82,11 @@ MIT 量化编码工具；位置16位，速度/kp/kd/力矩各12位。正常应�
 
 **错误 / 边界：** 协议范围不等于应用 torque_limit_nm；绕过 Motor 会绕开生命周期和软件力矩限幅。
 
-### 4. int dm::buildVelocityFrame(uint16_t motor_id, float velocity_rad_s, can_frame &out); int dm::buildPositionVelocityFrame(uint16_t motor_id, float position_rad, float velocity_rad_s, can_frame &out)
+### 4. `buildVelocityFrame()` / `buildPositionVelocityFrame()`
 
 ```cpp
-int dm::buildVelocityFrame(uint16_t motor_id, float velocity_rad_s, can_frame &out); int dm::buildPositionVelocityFrame(uint16_t motor_id, float position_rad, float velocity_rad_s, can_frame &out)
+int dm::buildVelocityFrame(uint16_t motor_id, float velocity_rad_s, can_frame &out);
+int dm::buildPositionVelocityFrame(uint16_t motor_id, float position_rad, float velocity_rad_s, can_frame &out)
 ```
 
 编码速度/位置速度模式的浮点命令帧；仅构造字节，不建立整车权限。
@@ -99,10 +103,12 @@ int dm::buildVelocityFrame(uint16_t motor_id, float velocity_rad_s, can_frame &o
 
 **错误 / 边界：** 地址/非有限输入错误返回负 errno；主控应调用 Motor setter，以免漏 PMAX/VMAX 校验。
 
-### 5. int dm::buildSpecialFrame(ControlMode mode, uint16_t motor_id, SpecialCommand command, can_frame &out); int dm::decodeFeedback(const can_frame &frame, uint8_t expected_motor_id, const Limits &limits, DecodedFeedback &out); bool dm::isFaultStatus(DriveStatus status)
+### 5. `buildSpecialFrame()` / `decodeFeedback()` / `isFaultStatus()`
 
 ```cpp
-int dm::buildSpecialFrame(ControlMode mode, uint16_t motor_id, SpecialCommand command, can_frame &out); int dm::decodeFeedback(const can_frame &frame, uint8_t expected_motor_id, const Limits &limits, DecodedFeedback &out); bool dm::isFaultStatus(DriveStatus status)
+int dm::buildSpecialFrame(ControlMode mode, uint16_t motor_id, SpecialCommand command, can_frame &out);
+int dm::decodeFeedback(const can_frame &frame, uint8_t expected_motor_id, const Limits &limits, DecodedFeedback &out);
+bool dm::isFaultStatus(DriveStatus status)
 ```
 
 特殊命令 Enable/Disable/ClearError/SaveZero、反馈状态和温度解码。SaveZero 是底层协议能力，统一 Motor 不公开保存硬件零点操作。
@@ -120,10 +126,11 @@ int dm::buildSpecialFrame(ControlMode mode, uint16_t motor_id, SpecialCommand co
 
 **错误 / 边界：** 不能仅以 CAN TX完成认为已禁用：DM stop 的 DriveConfirmed 才表示后续反馈确认禁用；Unreachable 表示无法确认。
 
-### 6. int Motor::setTorque(float newton_meter); int Motor::setTorque(float newton_meter, uint64_t sampled_enable_generation)
+### 6. `setTorque()`
 
 ```cpp
-int Motor::setTorque(float newton_meter); int Motor::setTorque(float newton_meter, uint64_t sampled_enable_generation)
+int Motor::setTorque(float newton_meter);
+int Motor::setTorque(float newton_meter, uint64_t sampled_enable_generation)
 ```
 
 MIT 纯力矩目标，computed effort 使用计算快照执行版本。
@@ -151,7 +158,8 @@ MIT 位置/速度/kp/kd/前馈目标，量化范围须匹配真实固件 PMAX/VM
 ### 8. int Motor::setVelocity(float rad_s); int Motor::setPositionVelocity(float rad, float max_rad_s)
 
 ```cpp
-int Motor::setVelocity(float rad_s); int Motor::setPositionVelocity(float rad, float max_rad_s)
+int Motor::setVelocity(float rad_s);
+int Motor::setPositionVelocity(float rad, float max_rad_s)
 ```
 
 固件原生速度或位置速度模式；主控模式配置不自动修改固件模式。
@@ -165,7 +173,9 @@ int Motor::setVelocity(float rad_s); int Motor::setPositionVelocity(float rad, f
 ### 9. MotorInfo Motor::info() const; MotorSnapshot Motor::snapshot() const; bool Motor::active() const
 
 ```cpp
-MotorInfo Motor::info() const; MotorSnapshot Motor::snapshot() const; bool Motor::active() const
+MotorInfo Motor::info() const;
+MotorSnapshot Motor::snapshot() const;
+bool Motor::active() const
 ```
 
 查询能力、参数和状态值副本；enabled_requested 是运行意图，output_permitted/feedback_fresh 是实际执行条件，retry_count 与 last_fault 是诊断。DM 快照另有 `native_position_rad`/`native_position_valid` 与跨 ±PMAX 展开的 `native_unwrapped_position_rad`/`native_unwrapped_position_valid`/`native_wrap_count`；展开坐标保留校准前原始零点，disable/enable 与 `reseedPosition()` 不会重置它，只有电机或主控重启才重建。
@@ -179,7 +189,8 @@ MotorInfo Motor::info() const; MotorSnapshot Motor::snapshot() const; bool Motor
 ### 10. int Motor::enable(); int Motor::disable()
 
 ```cpp
-int Motor::enable(); int Motor::disable()
+int Motor::enable();
+int Motor::disable()
 ```
 
 enable 幂等保存运行意图，离线也可接受；disable 在真→假时取消旧命令和旧协议操作，停止后重复 disable 不清掉之后新提交的目标。Group 成员也可直接操作。
@@ -244,7 +255,8 @@ CanBus(const device *can, BusOptions options = {}); int CanBus::attach(Motor &mo
 ### 14. CommitResult CanBus::commit(); BusStatus CanBus::status() const
 
 ```cpp
-CommitResult CanBus::commit(); BusStatus CanBus::status() const
+CommitResult CanBus::commit();
+BusStatus CanBus::status() const
 ```
 
 commit 发布完整总线最新快照，Recovering 时继续接受。status 含 latest_submitted_sequence、last_tx、rx_overflows、rx_invalid_frames、superseded_batches 和 last_recovery。
@@ -255,10 +267,14 @@ commit 发布完整总线最新快照，Recovering 时继续接受。status 含 
 
 **错误 / 边界：** 未启动/永久配置错误返回调用错误；成功不代表远端收到或执行。
 
-### 15. Group(Motor &first, Others &...others); Group(std::span<Motor *const> members); int Group::enable(); void Group::disable(); GroupStatus Group::status() const
+### 15. `Group()` / `enable()` / `disable()` 等接口
 
 ```cpp
-Group(Motor &first, Others &...others); Group(std::span<Motor *const> members); int Group::enable(); void Group::disable(); GroupStatus Group::status() const
+Group(Motor &first, Others &...others);
+Group(std::span<Motor *const> members);
+int Group::enable();
+void Group::disable();
+GroupStatus Group::status() const
 ```
 
 固定成员批量启停和统计，无故障传播、就绪屏障、成员所有权或独立恢复状态。

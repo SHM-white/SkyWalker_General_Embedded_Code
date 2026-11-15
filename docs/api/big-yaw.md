@@ -16,10 +16,12 @@
 
 ## 接口契约
 
-### 1. DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInputs &, core::TimeUs now_us); int validate() const; void reset()
+### 1. `update()` / `validate()` / `reset()`
 
 ```cpp
-DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInputs &, core::TimeUs now_us); int validate() const; void reset()
+DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInputs &, core::TimeUs now_us);
+int validate() const;
+void reset()
 ```
 
 把头部世界速率意图拆成小 Yaw 关节轨迹与大 Yaw 世界意图。`head` 是经小 Yaw 行程/制动包络约束后仍可执行的头部世界速率，`big.rate_rad_s` 是发给底盘的持续分量；`joint_rate_rad_s`/`joint_position_rad` 已按 `joint_direction` 只换算一次到编码器坐标。视觉有效时由角度误差生成头部目标，否则使用 `head_rate_target_rad_s`。
@@ -34,10 +36,13 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
 
 `YawCenteringOutput YawCenteringController::update(const YawCenteringInputs &, core::TimeUs now_us)` 仅保留给历史样例和 `tests/robotics_contracts`。正式云台不再构造该对象；回中由 `dualYawAllocatorConfig()` 的 `center_*` 参数和分配器内部慢调节完成，不要按旧接口新增调用。
 
-### 3. BigYawExecutor(Motor &, const VelocityMotor::Config &, const Config &); int begin(); RunStatus update(const BigYawExecutionInputs &, core::TimeUs now_us); BigYawFeedback feedback() const
+### 3. `BigYawExecutor()` / `begin()` / `update()` 等接口
 
 ```cpp
-BigYawExecutor(Motor &, const VelocityMotor::Config &, const Config &); int begin(); RunStatus update(const BigYawExecutionInputs &, core::TimeUs now_us); BigYawFeedback feedback() const
+BigYawExecutor(Motor &, const VelocityMotor::Config &, const Config &);
+int begin();
+RunStatus update(const BigYawExecutionInputs &, core::TimeUs now_us);
+BigYawFeedback feedback() const
 ```
 
 消费 v4 request、实际 local_boot_id、peer_online、transport_ready 和输入撤销条件；只暂存，不 commit。

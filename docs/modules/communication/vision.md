@@ -12,7 +12,7 @@ const int ret = receiver.start();
 const auto snapshot = receiver.snapshot();
 if (snapshot.link.aim_fresh) {
     const auto command = snapshot.link.aim.value;
-    // 交给未来调用者；本模块只表达 control_requested/fire_requested。
+    // 交给上层命令来源；本模块只表达 control_requested/fire_requested。
 }
 ~~~
 
@@ -21,6 +21,12 @@ if (snapshot.link.aim_fresh) {
 VisionLink 可脱离 UART 单独使用：init 后，单一所有者调用 processRxBytes/discardPartial/encodeFeedback；其他线程可以 setFeedback 和 snapshot。构造不做 I/O。零长度输入周期推进半包超时；快照读取时按当前时钟判断已接受命令是否过期，即使接收线程卡住仍会过期。
 
 命令 sequence 是本地接受计数，不是远端采样序号。接收块 timestamp_ms 换算成 time_us 后仍只有毫秒粒度。mode=0 是合法停止消息，会清空目标并覆盖旧 active。aim_fresh 只判断消息时间是否新鲜，因此刚收到的停止消息也可能为 true；消费者必须同时检查 aim_fresh 与 aim.value.control_requested，停止消息的 control_requested 为 false。
+
+## 正式云台中的接入位置
+
+当前 [sentry_gimbal](../../../applications/sentry_gimbal/README.md) 已创建 VisionReceiver 并注册 VisionSource，视觉目标经 CommandManager 仲裁后进入本地云台/发射链路；现场是否实际执行仍受来源有效期、模式、参考与执行条件约束。云台还按自身姿态与弹速有效性向 AB 上位机提供反馈，数据是否有效需按来源时间和参考判断，而不能由“链路已装配”推断已实测成功。
+
+独立 [视觉通信样例](../../../samples/communication/vision/README.md) 只用于验证协议收发；它不代表正式应用的 UART/USB 设备映射或发射许可。具体设备与实际装配以应用源码和 [双主控文档](../../applications/dual-controller.md) 为准。
 
 ## 已确认的线协议
 
