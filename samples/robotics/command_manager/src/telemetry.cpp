@@ -29,6 +29,8 @@ const char *mode(robotics::OperatorMode m) {
         return "Manual";
     case robotics::OperatorMode::Auto:
         return "Auto";
+    case robotics::OperatorMode::Navigation:
+        return "Navigation";
     }
     return "Unknown";
 }
