@@ -39,7 +39,8 @@ RefereeReceiver(const device *device, AsyncUart::DmaBuffers &dma, std::uint32_t 
 ### 2. robotics::RefereeState RefereeReceiver::poll(std::uint64_t now_ms); int RefereeReceiver::error() const
 
 ```cpp
-robotics::RefereeState RefereeReceiver::poll(std::uint64_t now_ms); int RefereeReceiver::error() const
+robotics::RefereeState RefereeReceiver::poll(std::uint64_t now_ms);
+int RefereeReceiver::error() const
 ```
 
 懒初始化、持续恢复 UART、最多读取 8 个块、丢弃断流半帧，并返回按当前时刻判断的裁判值副本。
@@ -54,10 +55,11 @@ robotics::RefereeState RefereeReceiver::poll(std::uint64_t now_ms); int RefereeR
 
 **错误 / 边界：** 初始化失败约 100 ms 后重试；-EOVERFLOW 丢弃半帧；error=0 仅表示 I/O 没有当前错误，不能替代许可有效性检查。
 
-### 3. int RefereeParser::reset(); int RefereeParser::consume(const std::uint8_t *bytes, std::size_t size, std::uint64_t timestamp_ms)
+### 3. `reset()` / `consume()`
 
 ```cpp
-int RefereeParser::reset(); int RefereeParser::consume(const std::uint8_t *bytes, std::size_t size, std::uint64_t timestamp_ms)
+int RefereeParser::reset();
+int RefereeParser::consume(const std::uint8_t *bytes, std::size_t size, std::uint64_t timestamp_ms)
 ```
 
 纯解析入口：reset 清除状态与统计；consume 只做帧头、CRC8、帧总长与 CRC16 校验，成功后直接调用编译期选中的解析类。两个版本的命令长度检查与字段解码分别位于 `referee_2026.cpp` 和 `referee_2027.cpp`。只有成功解码才发布新状态、更新时间戳和序号。
@@ -73,10 +75,11 @@ int RefereeParser::reset(); int RefereeParser::consume(const std::uint8_t *bytes
 
 **错误 / 边界：** 版本在编译期固定，不再存在 `Unspecified`。坏 CRC、长度不符或未知命令由 Stats 记录并跳过，不把坏帧伪装成新的许可。
 
-### 4. int RefereeService::processBytes(const std::uint8_t *bytes, std::size_t size, std::uint64_t now_ms); int RefereeService::snapshot(std::uint64_t now_ms, robotics::RefereeState &out) const
+### 4. `processBytes()` / `snapshot()`
 
 ```cpp
-int RefereeService::processBytes(const std::uint8_t *bytes, std::size_t size, std::uint64_t now_ms); int RefereeService::snapshot(std::uint64_t now_ms, robotics::RefereeState &out) const
+int RefereeService::processBytes(const std::uint8_t *bytes, std::size_t size, std::uint64_t now_ms);
+int RefereeService::snapshot(std::uint64_t now_ms, robotics::RefereeState &out) const
 ```
 
 自定义输入线程的服务封装；snapshot 根据整体 stamp 判在线，但机器人许可与功率字段各有自己的 stamp。
