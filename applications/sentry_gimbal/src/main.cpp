@@ -168,6 +168,7 @@ int main() {
     if (command_error == 0)
         command_error = commands.bindPermissions(referee_source);
 #endif
+    const int link_error = endpoint.start();
     if (command_error == 0)
         command_error = commands.start();
     const int onboard_error = onboard.start();
@@ -184,6 +185,7 @@ int main() {
     const int shooter_error = yaw_started ? shooter.begin() : -ENODEV;
     const int power_error = installed::connections_confirmed ? regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)))
                                                              : -ENODEV;
+    diagnostics.event("interboard", link_error);
     diagnostics.event("command", command_error);
     diagnostics.event("carrier_imu", onboard_error);
     diagnostics.event("head_imu", head_error);
@@ -233,14 +235,14 @@ int main() {
     ControlSource response_previous_source = ControlSource::None;
 #endif
     for (;;) {
-        // Snapshot before taking the validation time: a higher-priority IMU
-        // update must not make a new gyro stamp appear to be in our future.
+        // Snapshot before taking the validation time: higher-priority IMU
+        // or interboard worker updates must not make a new stamp appear in our future.
         const auto carrier_snapshot = onboard.snapshot();
         const auto head_snapshot = head.snapshot();
+        const auto peer_state = endpoint.snapshot();
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
         previous_cycle_us = now_us;
-        endpoint.poll(now_ms);
         // 先用管理线程现有快照判定“解锁后是否会产生动作”，再把新鲜遥控帧交给状态机。
         const bool have_action_snapshot = commands.snapshot(frame) == 0;
         (void)remote.snapshot(remote_frame);
@@ -249,7 +251,6 @@ int main() {
                                                                  command_config, installed::spinProfileConfig(),
                                                                  now_us);
         auto operator_state = controls.update(remote_frame.remote, now_ms, startup_test.noAction());
-        const auto peer_state = endpoint.snapshot();
         const bool peer_revoked = (was_peer_online && !peer_state.online) ||
                                   (last_peer_boot && peer_state.peer.sender_boot_id &&
                                    last_peer_boot != peer_state.peer.sender_boot_id);
@@ -729,7 +730,7 @@ int main() {
             }
         }
         endpoint.setStatus(status);
-        const auto reason = !setup_ready || onboard_error || (vision_selected && head_error)
+        const auto reason = !setup_ready || link_error || onboard_error || (vision_selected && head_error)
                                 ? installed::DiagnosticReason::InitFailed
                             // 遥控离线但已授权自主保持时不再报告链路故障。
                             : (!operator_state.fresh && !operator_state.navigation_hold)

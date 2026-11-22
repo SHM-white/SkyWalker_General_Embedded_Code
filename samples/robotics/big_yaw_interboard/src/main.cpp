@@ -30,19 +30,15 @@ constexpr float manual_rate_max_rad_s = 0.1f;
 communication::AsyncUart::DmaBuffers link_dma __nocache;
 communication::UartInterBoardTransport transport(DEVICE_DT_GET(DT_ALIAS(interboard_uart)), link_dma);
 communication::InterBoardEndpoint endpoint(transport, {role});
-
-void communicationTask(void *, void *, void *) {
-    for (;;) {
-        endpoint.poll(k_uptime_get());
-        k_sleep(K_MSEC(1));
-    }
-}
 } // namespace
-
-K_THREAD_DEFINE(big_yaw_link_worker, 4096, communicationTask, nullptr, nullptr, nullptr, 6, K_FP_REGS, 0);
 
 int main() {
     LOG_INF("manual bigYaw role=%u UART1=460800; no IMU", unsigned(role));
+    const int link_error = endpoint.start();
+    if (link_error < 0) {
+        LOG_ERR("interboard start failed: %d", link_error);
+        return link_error;
+    }
 #if defined(CONFIG_BIG_YAW_INTERBOARD_CHASSIS_ROLE)
     static motor::Motor drive(vehicle::bigYawHardware());
     static motor::CanBus bus(samples::chassis::big_yaw_can);
@@ -67,8 +63,8 @@ int main() {
     std::uint64_t next_log_ms = 0;
     int commit_error = 0;
     for (;;) {
-        const auto now = core::monotonicTimeUs(), ms = now / 1000;
         const auto rx = endpoint.snapshot();
+        const auto now = core::monotonicTimeUs(), ms = now / 1000;
         const auto controls = operator_controls.update(rx, ms);
         BigYawExecutionInputs input{};
         input.request = rx.big_yaw_request;

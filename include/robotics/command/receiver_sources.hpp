@@ -25,6 +25,8 @@ class InterBoardRefereeSource final : public IPermissionSource {
 public:
     explicit InterBoardRefereeSource(communication::InterBoardEndpoint &endpoint) : endpoint_(endpoint) {
     }
+    // Endpoint is started explicitly by the application before CommandManager::start();
+    // referee permission sources do not own or restart the shared interboard worker.
     int start() override {
         return 0;
     }

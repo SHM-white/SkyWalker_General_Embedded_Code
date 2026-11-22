@@ -44,12 +44,6 @@ communication::InterBoardEndpoint endpoint(transport, endpointConfig());
 #if !defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
 atomic_t input_paused = 0;
 #endif
-void commTask(void *, void *, void *) {
-    for (;;) {
-        endpoint.poll(k_uptime_get());
-        k_sleep(K_MSEC(1));
-    }
-}
 #if !defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
 communication::AsyncUart::DmaBuffers remote_dma __nocache;
 communication::RemoteReceiver remote(board_config::remote_uart, remote_dma, samples::control::receiverConfig());
@@ -87,9 +81,13 @@ YawCenteringController::Config centeringConfig() {
 YawCenteringController centering(centeringConfig());
 #endif
 }
-K_THREAD_DEFINE(interboard_worker, 4096, commTask, nullptr, nullptr, nullptr, 6, K_FP_REGS, 0);
 int main() {
     LOG_INF("dualYaw role=%u controls=physical RC; confirmed=%d", unsigned(role), vehicle::connections_confirmed);
+    const int link_error = endpoint.start();
+    if (link_error < 0) {
+        LOG_ERR("interboard start failed: %d", link_error);
+        return link_error;
+    }
 #if defined(CONFIG_DUAL_YAW_CHASSIS_ROLE)
     static motor::Motor drive(vehicle::bigYawHardware());
     static motor::CanBus bus(skywalker::samples::chassis::big_yaw_can);
@@ -114,8 +112,8 @@ int main() {
     BigYawRequest cached_request{};
     int commit_error = 0;
     for (;;) {
-        const auto now = core::monotonicTimeUs();
         const auto rx = endpoint.snapshot();
+        const auto now = core::monotonicTimeUs();
         const auto operator_state = operator_controls.update(rx, now / 1000);
         const auto exercise = diagnostics.update(now / 1000, axis.status().state == RunState::Active,
                                                  !operator_state.run_allowed);

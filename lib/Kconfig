@@ -63,6 +63,18 @@ config SKYWALKER_REFEREE
     default y
     depends on SKYWALKER_LIB_COMMUNICATION
 
+config SKYWALKER_REFEREE_RX_STACK_SIZE
+    int "Referee receiver stack bytes"
+    depends on SKYWALKER_REFEREE && SKYWALKER_UART_TRANSPORT
+    default 3072
+    range 2048 16384
+
+config SKYWALKER_REFEREE_RX_PRIORITY
+    int "Referee receiver thread priority"
+    depends on SKYWALKER_REFEREE && SKYWALKER_UART_TRANSPORT
+    default 6
+    range 0 15
+
 choice SKYWALKER_REFEREE_PROTOCOL
     prompt "Referee protocol version (compile-time selection)"
     depends on SKYWALKER_REFEREE
@@ -90,6 +102,18 @@ config SKYWALKER_INTERBOARD_ENDPOINT
     bool "Interboard endpoint with selectable transport"
     depends on SKYWALKER_INTERBOARD && ENTROPY_GENERATOR
     default y if SKYWALKER_UART_TRANSPORT
+
+config SKYWALKER_INTERBOARD_STACK_SIZE
+    int "Interboard endpoint thread stack bytes"
+    depends on SKYWALKER_INTERBOARD_ENDPOINT
+    default 4096
+    range 2048 16384
+
+config SKYWALKER_INTERBOARD_PRIORITY
+    int "Interboard endpoint thread priority"
+    depends on SKYWALKER_INTERBOARD_ENDPOINT
+    default 6
+    range 0 15
 
 config SKYWALKER_INTERBOARD_RS485
     bool "Interboard two-wire RS485 polling transport"

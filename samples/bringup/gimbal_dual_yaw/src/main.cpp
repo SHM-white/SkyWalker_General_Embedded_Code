@@ -62,18 +62,13 @@ DualYawAllocatorConfig dualYawConfig() {
     return c;
 }
 DualYawMotionAllocator dual_yaw(dualYawConfig());
-void communicationTask(void *, void *, void *) {
-    for (;;) {
-        endpoint.poll(k_uptime_get());
-        k_sleep(K_MSEC(1));
-    }
-}
 } // namespace
-K_THREAD_DEFINE(dual_yaw_link_worker, 4096, communicationTask, nullptr, nullptr, nullptr, 6, K_FP_REGS, 0);
 
 int main() {
     diagnostics.start("gimbal_dual_yaw", "gimbal",
                       "yaw<=1rad/s,pitch<=0.8rad/s,big_yaw_world<=1rad/s,dual_yaw_allocator");
+    const int link_error = endpoint.start();
+    diagnostics.event("interboard", link_error);
     const int onboard_error = onboard.start();
     diagnostics.event("onboard.start", onboard_error);
     const int power_error = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
@@ -110,6 +105,7 @@ int main() {
     bool peer_feedback_was_valid = false;
     std::uint32_t chassis_sequence = 0, big_sequence = 0;
     for (;;) {
+        const auto peer = endpoint.snapshot();
         const auto now = core::monotonicTimeUs(), ms = now / 1000;
         const auto dt_us = previous_us && now > previous_us ? now - previous_us : 0;
         previous_us = now;
@@ -126,7 +122,6 @@ int main() {
         const auto ys = yaw.snapshot();
         const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
-        const auto peer = endpoint.snapshot();
         const auto &feedback = peer.big_yaw_feedback;
         // The reference peer publishes BigYawFeedback at 100 ms intervals.
         // A 50 ms timeout would repeatedly invalidate feedback and drop the
@@ -231,7 +226,8 @@ int main() {
         chassis.stamp = {ms, ++chassis_sequence, true};
         endpoint.submit(chassis);
         endpoint.setStatus(run);
-        const auto reason = setup_error || source_error || onboard_error ? vehicle::DiagnosticReason::InitFailed
+        const auto reason = setup_error || link_error || source_error || onboard_error
+                                ? vehicle::DiagnosticReason::InitFailed
                             : !op.fresh                                  ? vehicle::DiagnosticReason::RemoteStale
                             : !op.run_allowed                            ? vehicle::DiagnosticReason::Disarmed
                             : !vehicle::imu_mounting_confirmed           ? vehicle::DiagnosticReason::Configuration
@@ -251,7 +247,8 @@ int main() {
                             .dt_us = float(dt_us),
                             .effort = gimbal.yawTelemetry().effort_command,
                             .detail = float(unsigned(allocation.reason)),
-                            .error = setup_error     ? setup_error
+                            .error = link_error      ? link_error
+                                     : setup_error   ? setup_error
                                      : source_error  ? source_error
                                      : onboard_error ? onboard_error
                                      : yaw_error     ? yaw_error

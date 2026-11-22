@@ -45,19 +45,20 @@ ImuHeadingReference head_heading;
 int main() {
     installed::Diagnostics diagnostics;
     diagnostics.start("gimbal_big_yaw_command", "gimbal", "big-yaw world rate + head imu");
+    const int link_error = endpoint.start();
+    diagnostics.event("interboard", link_error);
     const int setup = remote.start();
     diagnostics.event("remote.start", setup);
     const int head_error = onboard.start();
     diagnostics.event("head_imu", head_error);
-    const bool ready = setup == 0 && head_error == 0;
+    const bool ready = link_error == 0 && setup == 0 && head_error == 0;
     samples::control::RcControlAdapter controls;
     samples::control::OperatorControlPublisher authority;
     communication::RemoteReceiver::Snapshot received{};
     std::uint32_t sequence = 0, chassis_sequence = 0;
     for (;;) {
-        const auto now_us = core::monotonicTimeUs(), now = now_us / 1000;
-        endpoint.poll(now);
         const auto peer = endpoint.snapshot();
+        const auto now_us = core::monotonicTimeUs(), now = now_us / 1000;
         (void)remote.snapshot(received);
         const auto &state = controls.update(received.remote, now);
         const bool revoked = authority.publish(endpoint, state.run_allowed, false, received.remote.stamp,
@@ -130,7 +131,9 @@ int main() {
                          installed::reference_big_yaw.gear_ratio,
              .age_ms = age,
              .detail = float(unsigned(request.mode)),
-             .error = !ready ? (setup ? setup : head_error) : peer.error,
+             .error = link_error ? link_error
+                      : !ready   ? (setup ? setup : head_error)
+                                 : peer.error,
              .extra0 = heading_fresh ? heading.yaw_rad : std::numeric_limits<float>::quiet_NaN(),
              .extra1 = heading_fresh ? heading.rate_rad_s : std::numeric_limits<float>::quiet_NaN()});
         k_sleep(K_MSEC(5));

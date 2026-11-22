@@ -38,15 +38,18 @@ int main() {
     if (!setup)
         setup = regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)));
     diagnostics.event("big_yaw.setup", setup);
+    const int link_error = endpoint.start();
+    diagnostics.event("interboard", link_error);
+    if (!setup)
+        setup = link_error;
     samples::control::OperatorControlConsumer controls;
     std::uint64_t peer_boot = 0;
     auto previous = core::monotonicTimeUs();
     for (;;) {
+        const auto peer = endpoint.snapshot();
         const auto now = core::monotonicTimeUs(), now_ms = now / 1000;
         const auto dt = now - previous;
         previous = now;
-        endpoint.poll(now_ms);
-        const auto peer = endpoint.snapshot();
         const auto authority = controls.update(peer, now_ms);
         if (peer.peer.stamp.valid && peer_boot != peer.peer.sender_boot_id) {
             peer_boot = peer.peer.sender_boot_id;

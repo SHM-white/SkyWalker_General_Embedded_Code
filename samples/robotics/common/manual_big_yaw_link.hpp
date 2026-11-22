@@ -17,13 +17,6 @@ inline control::OperatorControlPublisher operator_controls;
 inline BigYawRequest request{};
 inline constexpr float manual_rate_max_rad_s = 0.1f;
 
-inline void communicationTask(void *, void *, void *) {
-    for (;;) {
-        endpoint.poll(k_uptime_get());
-        k_sleep(K_MSEC(1));
-    }
-}
-
 inline void update(const control::RcControlState &local, bool emergency, bool paused, std::uint64_t now_ms) {
     const auto &rc = controls.update(local.remote, now_ms);
     const bool allowed = local.run_allowed && rc.run_allowed && !paused && !emergency;

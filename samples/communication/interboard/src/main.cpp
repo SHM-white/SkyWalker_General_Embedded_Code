@@ -3,6 +3,7 @@
 #include <cstring>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <communication/interboard/interboard_endpoint.hpp>
 #include <communication/wire.hpp>
 #include "../../../robotics/common/sample_diagnostics.hpp"
@@ -15,7 +16,7 @@ class DiagnosticTransport final : public skywalker::communication::InterBoardTra
 public:
     explicit DiagnosticTransport(InterBoardTransport &inner) : inner_(inner) {
     }
-    bool invalid_protocol = false;
+    atomic_t invalid_protocol = 0;
     skywalker::communication::InterBoardTransportKind kind() const override {
         return inner_.kind();
     }
@@ -29,7 +30,7 @@ public:
         return inner_.txBusy();
     }
     int send(const std::uint8_t *data, std::size_t size, std::uint32_t timeout) override {
-        if (!invalid_protocol)
+        if (!atomic_get(&invalid_protocol))
             return inner_.send(data, size, timeout);
         if (!data || !size || size > kTxCapacity)
             return -EINVAL;
@@ -62,6 +63,11 @@ int main() {
     static ConfiguredInterBoardTransport physical_transport(bench::transport, &dma_buffers);
     static DiagnosticTransport transport(physical_transport);
     static InterBoardEndpoint link(transport, {bench::role});
+    const int link_error = link.start();
+    if (link_error < 0) {
+        LOG_ERR("interboard start failed: %d", link_error);
+        return link_error;
+    }
     skywalker::samples::control::SampleDiagnostics diagnostics;
     LOG_INF("transport=%u role=%u protocol=%u; autonomous protocol exercise, no actuators", unsigned(transport.kind()),
             unsigned(bench::role), kInterBoardProtocolVersion);
@@ -73,10 +79,10 @@ int main() {
     BigYawRequest big_yaw_request{};
     BigYawFeedback big_yaw_feedback{};
     for (;;) {
-        const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const auto previous = link.snapshot();
+        const auto now = static_cast<std::uint64_t>(k_uptime_get());
         const auto diagnostic = diagnostics.update(now, previous.online, false);
-        transport.invalid_protocol = diagnostic.invalid_protocol;
+        atomic_set(&transport.invalid_protocol, diagnostic.invalid_protocol ? 1 : 0);
         if (bench::role == BoardRole::GimbalController && !diagnostic.input_paused && now >= next_command) {
             next_command = now + 10;
             command.mode = ChassisMode::BodyVelocity;
@@ -131,7 +137,6 @@ int main() {
             big_yaw_feedback.stamp = status.stamp;
             link.setBigYawFeedback(big_yaw_feedback);
         }
-        link.poll(now);
         if (now >= next_log) {
             next_log = now + 200;
             const auto rx = link.snapshot();

@@ -283,6 +283,7 @@ inline void produceShotEvent(const MessageStamp &stamp, std::uint32_t &counter) 
 // Communication and command production exchange snapshots only. Motor setters
 // and controller updates belong exclusively to run()'s execution thread.
 inline void communicationTask(void *, void *, void *) {
+    (void)endpoint.start();
 #if !defined(CONFIG_VEHICLE_CHASSIS_ROLE)
     CommandSnapshot frame{};
     communication::RemoteReceiver::Snapshot raw{};
@@ -390,7 +391,6 @@ inline void communicationTask(void *, void *, void *) {
             endpoint.setReferee(frame.observed.referee);
         }
 #endif
-        endpoint.poll(now_ms);
         k_sleep(K_MSEC(1));
     }
 }
@@ -544,8 +544,8 @@ inline int run(IPowerMeasurementSource *power_source = nullptr, IShooterHeatSour
     BigYawRequest cached_big_request{};
     samples::chassis::PeriodicDeadline deadline;
     for (;;) {
-        const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto rx = endpoint.snapshot();
+        const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto peer_operator = operator_controls.update(rx, now_ms);
 #if defined(CONFIG_VEHICLE_SAMPLE_CONTROLS)
         const auto exercise = diagnostics.update(now_ms,

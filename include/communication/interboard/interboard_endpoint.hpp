@@ -4,10 +4,15 @@
 #include <communication/interboard/interboard_link.hpp>
 #include <robotics/execution/run_status.hpp>
 #include <robotics/messages/referee.hpp>
+#include <zephyr/kernel.h>
 #include <zephyr/spinlock.h>
+#include <zephyr/sys/atomic.h>
+
 namespace skywalker::communication {
-// poll() has one communication-thread owner. Other calls exchange owned copies
-// under a short lock. Endpoint, transport and callback storage live until reboot.
+// Call start() once to launch the dedicated interboard worker thread, or drive
+// poll() manually from a single communication thread (mutually exclusive;
+// used by deterministic unit tests). Other calls exchange owned copies under a
+// short lock. Endpoint, transport and callback storage live until reboot.
 class InterBoardEndpoint {
 public:
     struct Config {
@@ -19,7 +24,9 @@ public:
         // is reduced to 20 Hz and IMU samples remain at 50 Hz.
         std::uint32_t heartbeat_period_ms = 50, control_period_ms = 10;
         std::uint32_t imu_period_ms = 20, aux_period_ms = 20;
+        std::uint32_t poll_period_ms = 1;
     };
+    enum class State : std::uint8_t { NotStarted, Starting, Running, InitFailed };
     struct Snapshot {
         robotics::BoardHeartbeat peer{};
         robotics::RemoteChassisControl control{};
@@ -31,6 +38,7 @@ public:
         robotics::GimbalImuYaw gimbal_imu{};
         bool operator_control_valid = false;
         std::uint64_t local_boot_id = 0;
+        State state = State::NotStarted;
         bool online = false;
         int error = 0;
         InterBoardTransportKind transport = InterBoardTransportKind::Uart;
@@ -47,6 +55,11 @@ public:
     }
     InterBoardEndpoint(const InterBoardEndpoint &) = delete;
     InterBoardEndpoint &operator=(const InterBoardEndpoint &) = delete;
+    // Thread context only. 0 schedules the background I/O worker; inspect
+    // Snapshot::state and Snapshot::error for transport readiness.
+    // -EINVAL: config; -EALREADY: already started; -EBUSY: poll() used;
+    // -EWOULDBLOCK: ISR.
+    [[nodiscard]] int start();
     void submit(const robotics::ChassisCommand &);
     // Thread-only. 0 copies; -EACCES for a non-gimbal producer; -EINVAL for
     // contradictory run/stop/clear requests. Ages are measured at value.stamp.
@@ -58,6 +71,8 @@ public:
     void submitBigYaw(const robotics::BigYawRequest &);
     void setBigYawFeedback(const robotics::BigYawFeedback &);
     Snapshot snapshot() const;
+    // Manual single-thread step for deterministic tests and unmigrated samples.
+    // Ignored once start() owns the transport.
     void poll(std::uint64_t now_ms);
     // Bounded thread-only copies. TX is chassis-only, RX is gimbal-only.
     // Frames are bound to the current peer boot and expire after 300 ms.
@@ -65,6 +80,11 @@ public:
     int readRefereeFrame(RefereeRelayFrame &);
 
 private:
+    static constexpr atomic_val_t kOwnerIdle = 0, kOwnerWorker = 1, kOwnerManual = 2;
+    bool configValid() const;
+    void serviceOnce(std::uint64_t now_ms, bool live_clock);
+    static void threadEntry(void *self, void *, void *);
+    void run();
     void receiveRefereeFragment(const RefereeFragment &);
     std::array<RefereeRelayFrame, 8> referee_tx_{}, referee_rx_{};
     std::size_t referee_tx_head_ = 0, referee_tx_count_ = 0, referee_rx_head_ = 0, referee_rx_count_ = 0;
@@ -96,5 +116,8 @@ private:
     bool peer_online_ = false, have_baseline_ = false;
     bool have_big_yaw_baseline_ = false;
     int error_ = 0;
+    atomic_t owner_ = kOwnerIdle;
+    k_thread thread_{};
+    K_KERNEL_STACK_MEMBER(thread_stack_, CONFIG_SKYWALKER_INTERBOARD_STACK_SIZE);
 };
-}
+} // namespace skywalker::communication

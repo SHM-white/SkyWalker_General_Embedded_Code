@@ -17,15 +17,6 @@ using namespace robotics;
 namespace installed = robotics::vehicle;
 namespace stage = installed::bringup;
 communication::AsyncUart::DmaBuffers link_dma __nocache;
-K_THREAD_STACK_DEFINE(link_stack, 4096);
-k_thread link_thread;
-void linkTask(void *context, void *, void *) {
-    auto &endpoint = *static_cast<communication::InterBoardEndpoint *>(context);
-    for (;;) {
-        endpoint.poll(k_uptime_get());
-        k_sleep(K_MSEC(1));
-    }
-}
 std::uint32_t age(const MessageStamp &stamp, std::uint64_t now_ms) {
     return stamp.valid && now_ms >= stamp.timestamp_ms
                ? static_cast<std::uint32_t>(std::min<std::uint64_t>(now_ms - stamp.timestamp_ms, UINT32_MAX))
@@ -43,8 +34,8 @@ int main() {
                                                                    .uart = DEVICE_DT_GET(DT_ALIAS(interboard_uart))},
                                                                   &link_dma);
     static communication::InterBoardEndpoint endpoint(transport, {BoardRole::ChassisController});
-    k_thread_create(&link_thread, link_stack, K_THREAD_STACK_SIZEOF(link_stack), linkTask, &endpoint, nullptr, nullptr,
-                    6, 0, K_NO_WAIT);
+    const int link_error = endpoint.start();
+    diagnostics.event("interboard", link_error);
     static motor::Motor s0(installed::steerHardware(0)), s1(installed::steerHardware(1)),
         s2(installed::steerHardware(2)), s3(installed::steerHardware(3));
     static motor::Motor d0(installed::wheelHardware(0)), d1(installed::wheelHardware(1)),
@@ -69,7 +60,8 @@ int main() {
     diagnostics.event("drive_bus", drive_error);
     diagnostics.event("chassis", controller_error);
     diagnostics.event("motor_rail", power_error);
-    const int init_error = steer_error        ? steer_error
+    const int init_error = link_error         ? link_error
+                           : steer_error      ? steer_error
                            : drive_error      ? drive_error
                            : controller_error ? controller_error
                                               : power_error;
@@ -80,10 +72,10 @@ int main() {
     std::int64_t deadline = k_uptime_ticks();
     const auto period = k_us_to_ticks_ceil64(installed::chassis_period_us);
     for (;;) {
+        const auto rx = endpoint.snapshot();
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const float dt_us = previous_us && now_us > previous_us ? float(now_us - previous_us) : 0;
         previous_us = now_us;
-        const auto rx = endpoint.snapshot();
         const auto authority = operator_controls.update(rx, now_ms);
         if (authority.emergency_stop)
             emergency_latched = true;

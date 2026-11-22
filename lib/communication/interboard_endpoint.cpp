@@ -8,6 +8,9 @@
 #include <communication/interboard/interboard_endpoint.hpp>
 namespace skywalker::communication {
 using namespace robotics;
+BUILD_ASSERT(CONFIG_SKYWALKER_INTERBOARD_PRIORITY >= 0 &&
+             CONFIG_SKYWALKER_INTERBOARD_PRIORITY < CONFIG_NUM_PREEMPT_PRIORITIES,
+             "InterBoard endpoint priority must be a valid preemptive priority");
 namespace {
 std::uint32_t age(const MessageStamp &stamp, std::uint64_t now) {
     return stamp.valid && now >= stamp.timestamp_ms
@@ -80,7 +83,10 @@ int InterBoardEndpoint::readRefereeFrame(RefereeRelayFrame &out) {
         const auto &frame = referee_rx_[referee_rx_head_];
         referee_rx_head_ = (referee_rx_head_ + 1) % referee_rx_.size();
         --referee_rx_count_;
-        if (!published_.online || frame.sender_boot_id != published_.peer.sender_boot_id ||
+        const bool link_online =
+            published_.online &&
+            (atomic_get(&owner_) != kOwnerWorker || isFresh(published_.peer.stamp, now, config_.heartbeat_timeout_ms));
+        if (!link_online || frame.sender_boot_id != published_.peer.sender_boot_id ||
             frame.receiver_boot_id != published_.local_boot_id || now < frame.receive_ms || frame.source_age_ms > 300 ||
             now - frame.receive_ms > 300 - frame.source_age_ms)
             continue;
@@ -149,19 +155,114 @@ void InterBoardEndpoint::setBigYawFeedback(const BigYawFeedback &feedback) {
     k_spin_unlock(&lock_, key);
 }
 InterBoardEndpoint::Snapshot InterBoardEndpoint::snapshot() const {
-    const auto key = k_spin_lock(&lock_);
-    const auto value = published_;
-    k_spin_unlock(&lock_, key);
+    Snapshot value{};
+    {
+        const auto key = k_spin_lock(&lock_);
+        value = published_;
+        k_spin_unlock(&lock_, key);
+    }
+    if (atomic_get(&owner_) == kOwnerWorker) {
+        const auto now = core::monotonicTimeUs() / 1000;
+        value.online = value.online && isFresh(value.peer.stamp, now, config_.heartbeat_timeout_ms);
+        if (!value.online) {
+            value.control = {};
+            value.constraint = {};
+            value.feedback = {};
+            value.operator_control = {};
+            value.operator_control_valid = false;
+            value.big_yaw_request = {};
+            value.big_yaw_feedback = {};
+            value.gimbal_imu = {};
+        }
+        else {
+            if (value.gimbal_imu.receiver_boot_id != value.local_boot_id ||
+                value.gimbal_imu.sender_boot_id != value.peer.sender_boot_id ||
+                !forwardedFresh(value.gimbal_imu.stamp, value.gimbal_imu.source_age_ms, now, 50))
+                value.gimbal_imu.valid = false;
+            const auto &op = value.operator_control;
+            value.operator_control_valid = op.sender_boot_id == value.peer.sender_boot_id &&
+                                           op.receiver_boot_id == value.local_boot_id &&
+                                           forwardedFresh(op.stamp, op.source_age_ms, now, config_.command_timeout_ms);
+            if (!forwardedFresh(value.big_yaw_request.stamp,
+                                std::max(value.big_yaw_request.command_age_ms, value.big_yaw_request.source_age_ms),
+                                now, config_.command_timeout_ms))
+                value.big_yaw_request = {};
+            if (!value.big_yaw_feedback.valid ||
+                !forwardedFresh(value.big_yaw_feedback.stamp, value.big_yaw_feedback.production_age_ms, now,
+                                config_.status_timeout_ms)) {
+                value.big_yaw_feedback.valid = false;
+                value.big_yaw_feedback.ready = false;
+                value.big_yaw_feedback.armed = false;
+            }
+        }
+    }
     return value;
 }
-void InterBoardEndpoint::poll(std::uint64_t now) {
-    if ((config_.role != BoardRole::GimbalController && config_.role != BoardRole::ChassisController) ||
-        !config_.command_timeout_ms || !config_.heartbeat_timeout_ms || !config_.tx_timeout_ms ||
-        config_.tx_timeout_ms > 1000 || !config_.status_timeout_ms || !config_.heartbeat_period_ms ||
-        !config_.control_period_ms || !config_.imu_period_ms || !config_.aux_period_ms) {
+bool InterBoardEndpoint::configValid() const {
+    return (config_.role == BoardRole::GimbalController || config_.role == BoardRole::ChassisController) &&
+           config_.command_timeout_ms && config_.heartbeat_timeout_ms && config_.tx_timeout_ms &&
+           config_.tx_timeout_ms <= 1000 && config_.status_timeout_ms && config_.heartbeat_period_ms &&
+           config_.control_period_ms && config_.imu_period_ms && config_.aux_period_ms && config_.poll_period_ms &&
+           config_.poll_period_ms <= 1000;
+}
+int InterBoardEndpoint::start() {
+    if (k_is_in_isr())
+        return -EWOULDBLOCK;
+    if (!configValid()) {
         const auto key = k_spin_lock(&lock_);
         published_ = {};
         published_.transport = transport_.kind();
+        published_.state = State::InitFailed;
+        published_.error = -EINVAL;
+        k_spin_unlock(&lock_, key);
+        return -EINVAL;
+    }
+    if (!atomic_cas(&owner_, kOwnerIdle, kOwnerWorker))
+        return atomic_get(&owner_) == kOwnerWorker ? -EALREADY : -EBUSY;
+    {
+        const auto key = k_spin_lock(&lock_);
+        published_.transport = transport_.kind();
+        published_.state = State::Starting;
+        published_.error = 0;
+        k_spin_unlock(&lock_, key);
+    }
+    std::uint32_t options = 0;
+#if defined(CONFIG_FPU) && defined(CONFIG_FPU_SHARING)
+    options |= K_FP_REGS;
+#endif
+    k_thread_create(&thread_, thread_stack_, K_KERNEL_STACK_SIZEOF(thread_stack_), threadEntry, this, nullptr, nullptr,
+                    CONFIG_SKYWALKER_INTERBOARD_PRIORITY, options, K_NO_WAIT);
+    return 0;
+}
+void InterBoardEndpoint::threadEntry(void *self, void *, void *) {
+    static_cast<InterBoardEndpoint *>(self)->run();
+}
+void InterBoardEndpoint::run() {
+    for (;;) {
+        serviceOnce(core::monotonicTimeUs() / 1000, true);
+        k_sleep(K_MSEC(config_.poll_period_ms));
+    }
+}
+void InterBoardEndpoint::poll(std::uint64_t now) {
+    if (k_is_in_isr())
+        return;
+    auto owner = atomic_get(&owner_);
+    if (owner == kOwnerIdle) {
+        if (atomic_cas(&owner_, kOwnerIdle, kOwnerManual))
+            owner = kOwnerManual;
+        else
+            owner = atomic_get(&owner_);
+    }
+    if (owner != kOwnerManual)
+        return;
+    serviceOnce(now, false);
+}
+void InterBoardEndpoint::serviceOnce(std::uint64_t now, bool live_clock) {
+    if (!configValid()) {
+        const auto key = k_spin_lock(&lock_);
+        published_ = {};
+        published_.transport = transport_.kind();
+        published_.state = State::InitFailed;
         published_.error = -EINVAL;
         k_spin_unlock(&lock_, key);
         return;
@@ -189,13 +290,15 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
         }
         (void)link_.processRxBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
     }
-    (void)link_.processRxBytes(nullptr, 0, now);
     Outgoing outgoing{};
     {
         const auto key = k_spin_lock(&lock_);
         outgoing = outgoing_;
         k_spin_unlock(&lock_, key);
     }
+    if (live_clock)
+        now = std::max(now, core::monotonicTimeUs() / 1000);
+    (void)link_.processRxBytes(nullptr, 0, now);
     Snapshot next{};
     next.transport = transport_.kind();
     next.local_boot_id = boot_id_;
@@ -394,6 +497,8 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                     referee_pending_ = referee_tx_[referee_tx_head_];
                     referee_tx_head_ = (referee_tx_head_ + 1) % referee_tx_.size();
                     --referee_tx_count_;
+                    if (live_clock && now < referee_pending_.receive_ms)
+                        now = std::max(now, core::monotonicTimeUs() / 1000);
                     if (referee_pending_.receiver_boot_id != peer_boot_ || now < referee_pending_.receive_ms ||
                         now - referee_pending_.receive_ms > 300)
                         continue;
@@ -436,6 +541,9 @@ void InterBoardEndpoint::poll(std::uint64_t now) {
                 error_ = ret;
         }
     }
+    next.state = transport_ready ? State::Running
+                 : error_ < 0    ? State::InitFailed
+                                 : State::Starting;
     next.error = error_;
     next.parser_stats = link_.stats();
     next.rejected_frames = link_.rejectedFrames();

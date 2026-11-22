@@ -87,13 +87,16 @@ int VisionSource::sample(SourceSample &out) {
 #endif
 #if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
 int RefereePermissionSource::start() {
-    return 0;
+    return receiver_.start();
 }
-int RefereePermissionSource::sample(std::uint64_t now_ms, RefereeState &out, SourceDiagnostics &diagnostics) {
-    out = receiver_.poll(now_ms);
+int RefereePermissionSource::sample(std::uint64_t, RefereeState &out, SourceDiagnostics &diagnostics) {
+    const auto value = receiver_.snapshot();
+    out = value.referee;
     diagnostics = {};
-    diagnostics.error = receiver_.error();
-    // RefereeReceiver does not expose transport drop counters.
+    diagnostics.error = value.uart_error;
+    diagnostics.state = static_cast<std::uint32_t>(value.state);
+    diagnostics.dropped = value.dropped;
+    diagnostics.dropped_available = true;
     return 0;
 }
 #endif

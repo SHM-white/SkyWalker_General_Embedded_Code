@@ -160,6 +160,8 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
 #if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
     static communication::AsyncUart::DmaBuffers referee_dma __nocache;
     static communication::RefereeReceiver receiver(referee_uart, referee_dma);
+    if (with_power && referee_uart && device_is_ready(referee_uart))
+        (void)receiver.start();
 #endif
     printk("8 motors FL/FR/RL/RR: steer IDs=%u/%u/%u/%u drive IDs=%u/%u/%u/%u; topology=%d config=%d\n",
            unsigned(calibration::steer[0].id), unsigned(calibration::steer[1].id), unsigned(calibration::steer[2].id),
@@ -168,6 +170,10 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
     printk(
         "RC safe+center 0.5s then left Middle, Up=manual; left stick xy, right Down spin; console is telemetry only\n");
     for (;;) {
+#if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
+        if (with_power && referee_uart && device_is_ready(referee_uart))
+            referee = receiver.snapshot().referee;
+#endif
         const auto now_us = core::monotonicTimeUs();
         const auto now_ms = now_us / 1000;
         (void)remote.snapshot(remote_snapshot);
@@ -191,10 +197,6 @@ inline int run(const device *steer_can, const device *drive_can, bool with_power
         inputs.clear_estop = rc.clear_estop;
         inputs.transport_ready = topology_error == 0;
         inputs.require_permission = with_power;
-#if defined(CONFIG_SKYWALKER_REFEREE) && defined(CONFIG_SKYWALKER_UART_TRANSPORT)
-        if (with_power && referee_uart && device_is_ready(referee_uart))
-            referee = receiver.poll(now_ms);
-#endif
         if (!diagnostic.permission_paused)
             inputs.permission = referee.robot.chassis_output;
         inputs.power_budget = referee.power;

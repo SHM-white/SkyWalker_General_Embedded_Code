@@ -1,61 +1,49 @@
 #pragma once
 #include <cerrno>
+#include <cstdint>
 #include <communication/async_uart.hpp>
 #include <communication/referee/referee_service.hpp>
+#include <zephyr/kernel.h>
+#include <zephyr/spinlock.h>
+#include <zephyr/sys/atomic.h>
+
 namespace skywalker::communication {
-// One owner task polls. This object and DMA buffers must outlive callbacks.
+// One receiver exclusively owns its UART. Both the receiver and its external
+// static __nocache DMA storage must outlive device callbacks (including on error).
+// No stop/restart or destruction while the system is running is supported.
 class RefereeReceiver {
 public:
+    enum class State : std::uint8_t { NotStarted, Starting, Running, InitFailed };
+    struct Snapshot {
+        robotics::RefereeState referee{};
+        State state = State::NotStarted;
+        std::uint32_t rx_chunks = 0, resets = 0, dropped = 0;
+        int uart_error = 0;
+    };
     RefereeReceiver(const device *device, AsyncUart::DmaBuffers &dma, std::uint32_t timeout_ms = 500)
-        : uart_(device, dma), service_(timeout_ms) {
+        : uart_(device, dma), service_(timeout_ms), timeout_ms_(timeout_ms) {
     }
-    robotics::RefereeState poll(std::uint64_t now_ms) {
-        if (now_ms >= retry_ms_) {
-            int ret = uart_.service(now_ms);
-            if (ret == -EACCES)
-                ret = uart_.init();
-            if (ret < 0 && ret != -EAGAIN) {
-                error_ = ret;
-                retry_ms_ = now_ms + 100;
-            }
-            if (ret == 0) {
-                error_ = 0;
-                AsyncUart::RxChunk chunk{};
-                for (unsigned budget = 0; budget < 8; ++budget) {
-                    ret = uart_.read(chunk);
-                    if (ret == -EOVERFLOW) {
-                        service_.discardPartial();
-                        continue;
-                    }
-                    if (ret == -EAGAIN)
-                        break;
-                    if (ret < 0) {
-                        error_ = ret;
-                        break;
-                    }
-                    ret = service_.processBytes(chunk.bytes, chunk.size, chunk.timestamp_ms);
-                    if (ret < 0)
-                        error_ = ret;
-                }
-            }
-        }
-        service_.processBytes(nullptr, 0, now_ms);
-        robotics::RefereeState result{};
-        service_.snapshot(now_ms, result);
-        return result;
-    }
-    int error() const {
-        return error_;
-    }
-    // Bind before the owner thread starts polling; callback must not block.
-    void setFrameHandler(RefereeParser::FrameHandler handler, void *context) {
-        service_.setFrameHandler(handler, context);
-    }
+    RefereeReceiver(const RefereeReceiver &) = delete;
+    RefereeReceiver &operator=(const RefereeReceiver &) = delete;
+    // Bind before start(); callback runs on the receiver thread and must not block.
+    int setFrameHandler(RefereeParser::FrameHandler handler, void *context);
+    // Thread context only. 0 schedules the worker; inspect Snapshot for UART
+    // initialization results. -EINVAL: configuration; -EALREADY: already started;
+    // -EWOULDBLOCK: ISR.
+    [[nodiscard]] int start();
+    // Thread context, multiple readers allowed. Re-checks online timeout at read time.
+    Snapshot snapshot() const;
 
 private:
+    static void threadEntry(void *self, void *, void *);
+    void run();
     AsyncUart uart_;
     RefereeService service_;
-    std::uint64_t retry_ms_ = 0;
-    int error_ = 0;
+    std::uint32_t timeout_ms_;
+    atomic_t started_ = 0;
+    mutable k_spinlock lock_{};
+    Snapshot value_{};
+    k_thread thread_{};
+    K_KERNEL_STACK_MEMBER(thread_stack_, CONFIG_SKYWALKER_REFEREE_RX_STACK_SIZE);
 };
-}
+} // namespace skywalker::communication

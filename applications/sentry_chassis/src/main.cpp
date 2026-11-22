@@ -80,6 +80,8 @@ int main() {
     // Reference mode=1 requires BMI088 body yaw-rate compensation.
     const bool need_body = true;
     const int body_error = need_body ? body.start() : 0;
+    const int link_error = endpoint.start();
+    const int referee_error = referee.start();
     static const auto big_yaw_config = installed::bigYawExecutionConfig();
     // One owner for the world-heading capture/integral. The executor keeps the
     // native velocity backend, sign, ratio, slew and command limits.
@@ -100,6 +102,8 @@ int main() {
         big_error = big_axis.begin();
     const int power_error = installed::connections_confirmed ? regulator_enable(DEVICE_DT_GET(DT_NODELABEL(power1)))
                                                              : -ENODEV;
+    diagnostics.event("interboard", link_error);
+    diagnostics.event("referee", referee_error);
     diagnostics.event("steer_bus", steer_error);
     diagnostics.event("drive_bus", drive_error);
     diagnostics.event("big_yaw", big_error);
@@ -119,14 +123,14 @@ int main() {
     std::int64_t deadline = k_uptime_ticks();
     const auto period = k_us_to_ticks_ceil64(installed::chassis_period_us);
     for (;;) {
+        const auto rx = endpoint.snapshot();
+        const auto referee_snapshot = referee.snapshot();
+        const auto &referee_state = referee_snapshot.referee;
         const auto now_us = core::monotonicTimeUs(), now_ms = now_us / 1000;
         const auto dt_us = previous_cycle_us && now_us > previous_cycle_us ? now_us - previous_cycle_us : 0;
         const bool cycle_valid = dt_us && dt_us <= big_yaw_config.max_cycle_us;
         previous_cycle_us = now_us;
-        endpoint.poll(now_ms);
-        const auto referee_state = referee.poll(core::monotonicTimeUs() / 1000);
         endpoint.setReferee(referee_state);
-        const auto rx = endpoint.snapshot();
         if (rx.peer.stamp.valid && peer_boot != rx.peer.sender_boot_id) {
             peer_boot = rx.peer.sender_boot_id;
             (void)chassis.suspend(now_us, WaitReason::Reference, -ESTALE);
@@ -251,7 +255,8 @@ int main() {
         }
         big_was_requested = big_status.requested;
         big_was_active = feedback.armed;
-        const auto reason = chassis_error || big_error || power_error ? installed::DiagnosticReason::InitFailed
+        const auto reason = link_error || referee_error || chassis_error || big_error || power_error
+                                ? installed::DiagnosticReason::InitFailed
                             : !rx.online                              ? installed::DiagnosticReason::PeerStale
                             : status.reason == WaitReason::Feedback || big_status.reason == WaitReason::Feedback
                                 ? installed::DiagnosticReason::FeedbackStale

@@ -20,11 +20,14 @@ communication::InterBoardEndpoint endpoint(transport, {BoardRole::GimbalControll
 int main() {
     installed::Diagnostics diagnostics;
     diagnostics.start("gimbal_link_observe", "gimbal", "observe only");
+    const int link_error = endpoint.start();
+    diagnostics.event("interboard", link_error);
     for (;;) {
-        const auto now = static_cast<std::uint64_t>(k_uptime_get());
-        endpoint.poll(now);
         const auto peer = endpoint.snapshot();
-        diagnostics.status({.reason = peer.online ? DiagnosticReason::Ready : DiagnosticReason::PeerStale,
+        const auto now = static_cast<std::uint64_t>(k_uptime_get());
+        diagnostics.status({.reason = link_error  ? DiagnosticReason::InitFailed
+                                      : peer.online ? DiagnosticReason::Ready
+                                                    : DiagnosticReason::PeerStale,
                             .valid = peer.online,
                             .enabled = false,
                             .target = peer.big_yaw_request.target_rate_rad_s,
@@ -33,7 +36,7 @@ int main() {
                                           ? std::uint32_t(now - peer.peer.stamp.timestamp_ms)
                                           : UINT32_MAX,
                             .detail = float(peer.operator_control_valid),
-                            .error = peer.error,
+                            .error = link_error ? link_error : peer.error,
                             .extra0 = float(peer.rejected_frames),
                             .extra1 = float(peer.big_yaw_feedback.valid)});
         k_sleep(K_MSEC(2));

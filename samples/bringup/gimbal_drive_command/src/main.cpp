@@ -28,14 +28,6 @@ communication::RemoteReceiver::Config driveReceiverConfig() {
     return config;
 }
 communication::RemoteReceiver remote(DEVICE_DT_GET(DT_ALIAS(remote_uart)), remote_dma, driveReceiverConfig());
-K_THREAD_STACK_DEFINE(link_stack, 4096);
-k_thread link_thread;
-void linkTask(void *, void *, void *) {
-    for (;;) {
-        endpoint.poll(static_cast<std::uint64_t>(k_uptime_get()));
-        k_sleep(K_MSEC(1));
-    }
-}
 } // namespace
 
 int main() {
@@ -43,8 +35,8 @@ int main() {
     diagnostics.start("gimbal_drive_command", "gimbal", "vx,vy=0.1m/s; wz=0.2rad/s; no wheel channel");
     const int setup = remote.start();
     diagnostics.event("remote.start", setup);
-    k_thread_create(&link_thread, link_stack, K_THREAD_STACK_SIZEOF(link_stack), linkTask, nullptr, nullptr, nullptr, 6,
-                    0, K_NO_WAIT);
+    const int link_error = endpoint.start();
+    diagnostics.event("interboard", link_error);
     samples::control::RcControlAdapter controls({.require_right_middle_to_arm = false});
     samples::control::OperatorControlPublisher authority;
     communication::RemoteReceiver::Snapshot received{};
@@ -71,7 +63,7 @@ int main() {
                                                state.clear_event_id, state.clear_stamp, now);
         if (revoked)
             controls.withdraw();
-        const bool allowed = setup == 0 && state.run_allowed && !revoked && peer.online;
+        const bool allowed = setup == 0 && link_error == 0 && state.run_allowed && !revoked && peer.online;
         const auto age = received.remote.stamp.valid && now >= received.remote.stamp.timestamp_ms
                              ? static_cast<std::uint32_t>(
                                    std::min<std::uint64_t>(now - received.remote.stamp.timestamp_ms, UINT32_MAX))
@@ -94,11 +86,11 @@ int main() {
                                (unsigned(feedback_fresh && peer.feedback.armed) << 7) |
                                (unsigned(state.spin_requested) << 8);
         diagnostics.status(
-            {.reason = setup || received.uart_error ? DiagnosticReason::InitFailed
-                       : !state.fresh               ? DiagnosticReason::RemoteStale
-                       : !peer.online               ? DiagnosticReason::PeerStale
-                       : !allowed                   ? DiagnosticReason::Disarmed
-                                                    : DiagnosticReason::Ready,
+            {.reason = setup || link_error || received.uart_error ? DiagnosticReason::InitFailed
+                       : !state.fresh                             ? DiagnosticReason::RemoteStale
+                       : !peer.online                             ? DiagnosticReason::PeerStale
+                       : !allowed                                 ? DiagnosticReason::Disarmed
+                                                                  : DiagnosticReason::Ready,
              .valid = state.fresh,
              .enabled = allowed,
              .target = request.vx_m_s,
@@ -108,6 +100,7 @@ int main() {
              .effort = float(controls.neutralHeldMs()),
              .detail = float(flags),
              .error = setup                 ? setup
+                      : link_error          ? link_error
                       : received.uart_error ? received.uart_error
                                             : peer.error,
              .extra0 = float(unsigned(received.remote.left_switch) * 4 + unsigned(received.remote.right_switch)),
