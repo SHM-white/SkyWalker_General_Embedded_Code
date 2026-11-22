@@ -67,8 +67,8 @@ inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
 inline constexpr MotorCalibration pitch{1, 0x00, 1, -1, 10.0f, 10, 0};
 inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 10.0f, 10, 0};
 inline constexpr std::array<MotorCalibration, 2> friction{{
-    {1, 0, 19, -1, 2, 100, 0},
-    {2, 0, 19, 1, 2, 100, 0},
+    {1, 0, 1, -1, 20, 2000, 0},
+    {2, 0, 1, 1, 20, 2000, 0},
 }};
 inline constexpr MotorCalibration dial{4, 0, 36, 1, 10.0, 20, 0};
 // Viewed from above with the robot's front at the top, motor IDs run
@@ -263,7 +263,7 @@ inline constexpr float power_idle_w = 5, power_per_abs_amp_w = 8;
 // TODO(shooter): calibrate wheel speed -> projectile speed, dial angle per round,
 // speed tolerance, dwell, jam current/time, heat per round and cooling data.
 // 调参：摩擦轮输出轴速度大小，rad/s；方向由各 friction.direction 决定，先无弹确认两轮转向。
-inline constexpr float friction_speed_rad_s = 80;
+inline constexpr float friction_speed_rad_s = 500;
 // 调参：拨盘每发对应的输出轴角度，rad；当前为九分度，按实际齿数/机构测量后标定。
 inline constexpr float dial_step_rad = two_pi / 9;
 // 调参：拨盘输出轴速度上限，rad/s；独立于位置环增益，连发还受 射频×每格角度 限制。

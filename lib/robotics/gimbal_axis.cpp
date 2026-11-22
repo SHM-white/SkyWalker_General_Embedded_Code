@@ -167,9 +167,9 @@ int GimbalAxis::update(const AxisCommand &command, SafetyAction action, float dt
     }
     const bool was_initialized = initialized_;
     if (restart_reason != AxisRestartReason::None) {
-        // Drop the old target and control history. The seeding below rebuilds the
-        // target from this cycle's feedback, so the previous session cannot be replayed.
-        withdraw();
+        // 电机持续 Active 下的速率会话切换/显式重播种只重设目标角，不调用 position_.reset()，
+        // 保留 Pitch 速度内环托举重力的积分器，避免产生 0 力矩低头。
+        (void)seed(snapshot);
         explicit_reseed_ = false;
     }
     target_status_ = {};

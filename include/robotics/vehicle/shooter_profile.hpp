@@ -29,14 +29,26 @@ inline motor::dji::Config dialHardware() {
 inline control::VelocityMotor::Config frictionMotorConfig() {
     control::VelocityMotor::Config c{};
     c.effort_unit = control::EffortUnit::Ampere;
-    // 调参：摩擦速度 PID 的输出为 A，误差为输出轴 rad/s；先无负载调内环，再标定前馈。
-    // 保留积分 ±0.5 A、输出 ±1 A 与 dt 范围；增益过大会造成振荡或电流饱和。
-    c.loop.regulator.feedback = {0.3f, 0.05f, 0.01f, 0, -0.5f, 0.5f, -1, 1, 0, .001f, .02f};
-    c.loop.reference_slew = {200, 200}; // 调参：升/降速斜率，rad/s²；过小启动慢，过大冲击和电流增加。
+    // 调参：软件摩擦电流上限，A；仍不能超过 calibration 中的电机保护限值。
+    const float current_limit = std::min({10.0f, friction[0].effort_limit, friction[1].effort_limit});
+    const float integral_limit = std::min(3.0f, current_limit);
+    // 调参：摩擦速度 PID 的输出为 A，误差为输出轴 rad/s（gear_ratio = 1 直驱量纲）。
+    // 输出限幅与 effort_abs_max 一致，避免 PID 内部限幅把电流死锁在 1 A。
+    c.loop.regulator.feedback = {.kp = 0.05f,
+                                 .ki = 0.02f,
+                                 .kd = 0.0f,
+                                 .derivative_tau_s = 0.0f,
+                                 .integral_min = -integral_limit,
+                                 .integral_max = integral_limit,
+                                 .output_min = -current_limit,
+                                 .output_max = current_limit,
+                                 .deadband = 0.0f,
+                                 .dt_min_s = 0.001f,
+                                 .dt_max_s = 0.020f};
+    c.loop.reference_slew = {2000, 2000}; // 调参：升/降速斜率，rad/s²；过小启动慢，过大冲击和电流增加。
     c.loop.requested_velocity_abs_max_rad_s = std::min(friction[0].velocity_limit_rad_s,
                                                        friction[1].velocity_limit_rad_s);
-    // 调参：软件摩擦电流上限，A；仍不能超过 calibration 中的电机保护限值。
-    c.loop.effort_abs_max = std::min({1.0f, friction[0].effort_limit, friction[1].effort_limit});
+    c.loop.effort_abs_max = current_limit;
     return c;
 }
 inline control::PositionMotor::Config dialMotorConfig() {
@@ -72,6 +84,9 @@ inline control::PositionMotor::Config dialMotorConfig() {
 inline ShooterExecutor::Config shooterExecutionConfig(bool unloaded_relative = false) {
     ShooterExecutor::Config c{};
     c.friction_speed_rad_s = friction_speed_rad_s;
+    // 调参：直驱摩擦轮就绪容差（rad/s）与稳定驻留时间（ms）；按 target ≈ 500 rad/s 的 ±5% 起步。
+    c.friction_tolerance_rad_s = 25.0f;
+    c.friction_dwell_ms = 150;
     c.friction_direction = {friction[0].direction, friction[1].direction};
     c.dial_direction = dial.direction;
     c.dial_step_rad = dial_step_rad;

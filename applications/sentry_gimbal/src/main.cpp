@@ -225,7 +225,7 @@ int main() {
     bool scan_entry_pending = false, scan_was_selected = false;
     std::uint32_t last_startup_reasons = 0;
     core::OrientationReference last_head_reference{};
-    bool head_reference_known = false, head_was_ready = false;
+    bool head_reference_known = false, head_was_ready = false, gimbal_was_active = false;
     ControlSource last_head_source = ControlSource::None;
 #if defined(CONFIG_SKYWALKER_VEHICLE_DIAGNOSTICS)
     float response_big_yaw_rate = std::numeric_limits<float>::quiet_NaN();
@@ -381,8 +381,25 @@ int main() {
         // 它只说明“这份快照属于当前行为”，不替代命令/来源新鲜度检查。
         const bool gimbal_mode_matches = decision_matches;
         if (!gimbal_allowed || !gimbal_mode_matches ||
-            (operator_state.run_allowed && input.command.source != expected_manual_source))
-            input.command.mode = GimbalMode::Disabled;
+            (operator_state.run_allowed && input.command.source != expected_manual_source)) {
+            // 仅在仍被授权、云台已激活且处于同一次解锁会话时，用本地新鲜 Hold 跨过
+            // 命令线程 ~10 ms 版本同步空窗，避免短暂 Disabled 失能 J4310 并清零重力积分。
+            const bool mode_sync_hold =
+                gimbal_allowed && gimbal_was_active && have_decision &&
+                decision.operator_session == operator_session &&
+                (decision.gimbal_reasons & PermissionDenied) == 0 &&
+                isFresh(decision.command.gimbal.stamp, now_ms, command_config.input_timeout_ms);
+            if (mode_sync_hold) {
+                input.command = {};
+                input.command.mode = GimbalMode::Hold;
+                input.command.source = ControlSource::LocalBehavior;
+                input.command.stamp = {now_ms, decision.command.gimbal.stamp.sequence, true};
+                input.source_stamp = {now_us, decision.command.gimbal.stamp.sequence, true};
+            }
+            else {
+                input.command.mode = GimbalMode::Disabled;
+            }
+        }
         const float raw_head_rate_rad_s = input.command.yaw_rate_rad_s;
         const float raw_pitch_rate_rad_s = input.command.pitch_rate_rad_s;
         if (input.command.source != last_head_source) {
@@ -453,8 +470,19 @@ int main() {
         // 视觉角与外置 IMU 必须属于同一头部世界参考；不再用板载姿态和关节角估算枪头。
         const bool vision_active = vision_selected && head_ready && joint_valid && pitch_valid &&
                                    selected_vision.value.reference == head_sample.reference;
-        if (vision_selected && !vision_active)
-            input.command.mode = GimbalMode::Disabled;
+        if (vision_selected && !vision_active) {
+            if (gimbal_allowed && (decision.gimbal_reasons & PermissionDenied) == 0) {
+                // 视觉跟踪期间 CAN3 IMU 等前提短暂缺失时改为编码器 Hold 保活，不失能 Pitch。
+                input.command = {};
+                input.command.mode = GimbalMode::Hold;
+                input.command.source = ControlSource::LocalBehavior;
+                input.command.stamp = {now_ms, decision.command.gimbal.stamp.sequence, true};
+                input.source_stamp = {now_us, decision.command.gimbal.stamp.sequence, true};
+            }
+            else {
+                input.command.mode = GimbalMode::Disabled;
+            }
+        }
         float vision_angle_rad = 0, vision_rate_rad_s = 0, vision_acceleration_rad_s2 = 0;
         float vision_pitch_rad = 0;
         if (vision_selected) {
@@ -600,6 +628,7 @@ int main() {
         input.transport_ready = setup_ready;
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
+        gimbal_was_active = status.state == RunState::Active;
         // 执行器可能因漏周期直接返回，也可能只有 Yaw 成功；不能只看 vision_active
         // 或整机 Active。首个成功播种周期允许下一周期追赶，不要求已接受速度前馈。
         vision_pitch_reference_ready = vision_rate_session && status.state == RunState::Active &&
@@ -643,6 +672,11 @@ int main() {
                                                        shooter_input.command.source == ControlSource::LocalBehavior);
         if (!gimbal_allowed || !decision_matches || !shooter_source_matches)
             shooter_input.command.mode = ShooterMode::Disabled;
+        else if (vision_selected && !vision_active && shooter_input.command.source == ControlSource::Vision &&
+                 shooter_input.command.mode == ShooterMode::FireContinuous) {
+            shooter_input.command.mode = ShooterMode::Ready;
+            shooter_input.command.fire_rate_hz = 0;
+        }
         shooter_input.source_stamp = sourceStamp(frame, shooter_input.command.source);
         shooter_input.transport_ready = setup_ready && shooter_error == 0;
         shooter_input.gimbal = status;
