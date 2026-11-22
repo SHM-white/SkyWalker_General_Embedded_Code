@@ -3,7 +3,10 @@
 
 namespace skywalker::robotics {
 int MouseShooterGesture::configError() const {
-    return config_.rapid_click_gap_ms && config_.hold_to_auto_ms && config_.input_timeout_ms ? 0 : -EINVAL;
+    return config_.rapid_click_gap_ms && config_.hold_to_auto_ms && config_.input_timeout_ms &&
+                   config_.single_click_timeout_ms
+               ? 0
+               : -EINVAL;
 }
 void MouseShooterGesture::clearFeed() {
     pending_event_ = 0;
@@ -16,21 +19,37 @@ void MouseShooterGesture::withdraw() {
     clearFeed();
     selected_ = right_ = left_ = false;
     source_stamp_ = {};
+    friction_hold_since_ms_ = 0;
+    have_friction_hold_ = false;
     require_release_ = true;
 }
 void MouseShooterGesture::output(std::uint64_t now, MouseFireIntent &out) {
     if (kind_ == MouseFeedKind::RapidContinuous &&
         (!have_click_ || now < last_click_ms_ || now - last_click_ms_ >= config_.rapid_click_gap_ms)) {
         clearFeed();
+        if (selected_ && config_.friction_hold_ms > 0) {
+            friction_hold_since_ms_ = now;
+            have_friction_hold_ = true;
+        }
     }
-    if (pending_event_ && !isFresh(click_stamp_, now, config_.input_timeout_ms)) {
+    if (pending_event_ && !isFresh(click_stamp_, now, config_.single_click_timeout_ms)) {
         pending_event_ = 0;
         click_stamp_ = {};
         if (kind_ == MouseFeedKind::ClickSingle)
             kind_ = MouseFeedKind::Idle;
     }
+    const bool left_active = !require_release_ && left_;
+    const bool active_demand = right_ || left_active || kind_ == MouseFeedKind::RapidContinuous ||
+                               kind_ == MouseFeedKind::HeldContinuous || pending_event_ != 0;
+    const bool hold_active = have_friction_hold_ && config_.friction_hold_ms > 0 &&
+                             now >= friction_hold_since_ms_ &&
+                             now - friction_hold_since_ms_ < config_.friction_hold_ms;
+    if (have_friction_hold_ && !hold_active && !active_demand) {
+        have_friction_hold_ = false;
+        friction_hold_since_ms_ = 0;
+    }
     out = {};
-    out.friction_requested = selected_ && right_;
+    out.friction_requested = selected_ && (active_demand || hold_active);
     out.source_stamp = source_stamp_;
     if (!out.friction_requested)
         return;
@@ -71,24 +90,21 @@ int MouseShooterGesture::update(const RemoteState &r, bool selected, bool allowe
     source_stamp_ = r.stamp;
     const bool entering = !selected_;
     selected_ = true;
-    if (!r.mouse.right) {
+    if (entering) {
         clearFeed();
-        right_ = false;
-        left_ = r.mouse.left;
-        require_release_ = true;
-        output(now, out);
-        return 0;
-    }
-    const bool right_entering = !right_;
-    right_ = true;
-    if (entering || right_entering) {
-        clearFeed();
+        friction_hold_since_ms_ = 0;
+        have_friction_hold_ = false;
         require_release_ = true;
     }
     if (require_release_) {
+        right_ = r.mouse.right;
         left_ = r.mouse.left;
         if (!left_)
             require_release_ = false;
+        if (right_) {
+            friction_hold_since_ms_ = r.stamp.timestamp_ms;
+            have_friction_hold_ = true;
+        }
         output(now, out);
         return 0;
     }
@@ -120,7 +136,19 @@ int MouseShooterGesture::update(const RemoteState &r, bool selected, bool allowe
         have_press_ = false;
         if (kind_ == MouseFeedKind::HeldContinuous)
             clearFeed();
+        friction_hold_since_ms_ = input_time;
+        have_friction_hold_ = true;
     }
+    if (!r.mouse.right && right_) {
+        friction_hold_since_ms_ = input_time;
+        have_friction_hold_ = true;
+    }
+    if (r.mouse.right || r.mouse.left || kind_ == MouseFeedKind::RapidContinuous ||
+        kind_ == MouseFeedKind::HeldContinuous) {
+        friction_hold_since_ms_ = input_time;
+        have_friction_hold_ = true;
+    }
+    right_ = r.mouse.right;
     left_ = r.mouse.left;
     output(now, out);
     return 0;

@@ -18,8 +18,8 @@ public:
         if (rc.fresh && released)
             release_required_ = false;
         const auto selected = rc.keyboard_mouse_selected ? ControlSource::KeyboardMouse : ControlSource::Remote;
-        if (!rc.fresh || !rc.run_allowed || !rc.friction_requested || release_required_ ||
-            !isFresh(command.stamp, now_ms, 100) ||
+        if (!rc.fresh || !rc.run_allowed || (!rc.keyboard_mouse_selected && !rc.friction_requested) ||
+            release_required_ || !isFresh(command.stamp, now_ms, 100) ||
             (command.source != selected && command.source != ControlSource::Vision)) {
             command.mode = ShooterMode::Disabled;
             return command; // 保留事件身份，执行器拒绝并消费，不能在恢复后补发。

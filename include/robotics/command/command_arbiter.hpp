@@ -23,9 +23,11 @@ public:
         core::OrientationReference expected_vision_reference{1, 1};
         float max_vision_yaw_acceleration_rad_s2 = 30, max_vision_pitch_acceleration_rad_s2 = 20;
         // 调参：RC、鼠标连点和长按共用此射频；应按摩擦轮/拨盘/热量能力标定。
-        float requested_fire_rate_hz = 5;
+        float requested_fire_rate_hz = 15;
         // 调参：250 ms 长按为建议初值，500 ms 连点窗来自用户规则。
         MouseShooterGesture::Config mouse_gesture{};
+        // 调参：视觉中途停火后保持摩擦轮转动的时长，us；0 表示立即停转。
+        core::TimeUs vision_friction_hold_us = 3000000;
         // 台架由执行线程显式授权；开启后 CommandManager 初始门控为关闭。
         bool require_external_run_gate = false;
         float override_enter_norm = 0.15f, override_exit_norm = 0.05f;
@@ -71,6 +73,9 @@ private:
     std::uint64_t navigation_baseline_sequence_ = 0;
     // 最近处理的解锁会话；变化时清理入口基线，避免跨会话复用目标。
     std::uint32_t operator_session_ = 0;
+    core::TimeUs vision_friction_hold_since_us_ = 0;
+    bool vision_friction_armed_ = false;
+    void clearVisionShooter();
     // 巡航 Pitch 摆头：进入扫描时用实测关节角播种，之后由仲裁器按周期积分并在
     // 入口角±幅度与软限位的交集处折返。
     float cruise_pitch_planned_rad_ = 0, cruise_pitch_low_rad_ = 0, cruise_pitch_high_rad_ = 0;

@@ -219,9 +219,9 @@ public:
             if (!state_.keyboard_mouse_selected)
                 mouse_release_seen_ = false;
             state_.spin_requested = manual && right_neutral_seen_ && right == RcSwitch::Down;
-            state_.friction_requested = manual &&
-                                        (state_.keyboard_mouse_selected ? mouse_release_seen_ && remote.mouse.right
-                                                                        : right_neutral_seen_ && right == RcSwitch::Up);
+            state_.friction_requested =
+                manual && (state_.keyboard_mouse_selected ? mouse_release_seen_ && (remote.mouse.right || remote.mouse.left)
+                                                          : right_neutral_seen_ && right == RcSwitch::Up);
             state_.continuous_requested = manual && !state_.keyboard_mouse_selected && right_neutral_seen_ &&
                                           right == RcSwitch::Up;
         }

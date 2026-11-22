@@ -15,7 +15,7 @@ inline constexpr bool connections_confirmed = true;
 inline constexpr bool imu_mounting_confirmed = true;
 // 调参：视觉执行许可。置 true 且构建启用 AB 接收机、板级提供 vision-uart 别名后，
 // 仲裁才会在 Auto 模式选用视觉；启用前必须完成视觉姿态链、参考系与超时验收。
-inline constexpr bool vision_execute_confirmed = false;
+inline constexpr bool vision_execute_confirmed = true;
 // 调参：视觉目标的时间语义。AB 帧不带采样时间戳，解码器只能标本地接收时刻，
 // 因此外推只使用“本地年龄 + 本常量”；确认真实采集/传输延迟后再填，未知时保持 0。
 inline constexpr float vision_capture_latency_s = 0.0f;
@@ -67,8 +67,8 @@ inline constexpr MotorCalibration small_yaw{7, 0, 1, 1, 3.0f, 10, 5670};
 inline constexpr MotorCalibration pitch{1, 0x00, 1, -1, 10.0f, 10, 0};
 inline constexpr MotorCalibration big_yaw{2, 0x12, 1, 1, 10.0f, 10, 0};
 inline constexpr std::array<MotorCalibration, 2> friction{{
-    {1, 0, 19, -1, 2, 60, 0},
-    {2, 0, 19, 1, 2, 60, 0},
+    {1, 0, 19, -1, 2, 100, 0},
+    {2, 0, 19, 1, 2, 100, 0},
 }};
 inline constexpr MotorCalibration dial{4, 0, 36, 1, 10.0, 20, 0};
 // Viewed from above with the robot's front at the top, motor IDs run
@@ -263,7 +263,7 @@ inline constexpr float power_idle_w = 5, power_per_abs_amp_w = 8;
 // TODO(shooter): calibrate wheel speed -> projectile speed, dial angle per round,
 // speed tolerance, dwell, jam current/time, heat per round and cooling data.
 // 调参：摩擦轮输出轴速度大小，rad/s；方向由各 friction.direction 决定，先无弹确认两轮转向。
-inline constexpr float friction_speed_rad_s = 20;
+inline constexpr float friction_speed_rad_s = 80;
 // 调参：拨盘每发对应的输出轴角度，rad；当前为九分度，按实际齿数/机构测量后标定。
 inline constexpr float dial_step_rad = two_pi / 9;
 // 调参：拨盘输出轴速度上限，rad/s；独立于位置环增益，连发还受 射频×每格角度 限制。

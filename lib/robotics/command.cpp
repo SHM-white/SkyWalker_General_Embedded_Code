@@ -94,7 +94,7 @@ int ManualCommandMapper::map(const RemoteState &r, OperatorIntent &out) const {
             n.mouse_yaw_rate_rad_s = -float(r.mouse.x) * config_.mouse_yaw_rate_per_unit;
             n.mouse_pitch_rate_rad_s = -float(r.mouse.y) * config_.mouse_pitch_rate_per_unit;
         }
-        n.friction_requested = r.mouse.right;
+        n.friction_requested = r.mouse.right || r.mouse.left;
         n.fire_requested = r.mouse.left;
     }
     else {
@@ -118,6 +118,7 @@ void CommandArbiter::reset() {
     operator_session_ = 0;
     resetCruisePitch();
     withdrawMouseShooter();
+    clearVisionShooter();
 }
 void CommandArbiter::clearEntryBaselines() {
     // 新会话不允许复用上一会话的“已看到帧”基线。
@@ -128,6 +129,7 @@ void CommandArbiter::clearEntryBaselines() {
     auto_baseline_sequence_ = 0;
     manual_override_ = have_override_quiet_time_ = false;
     resetCruisePitch();
+    clearVisionShooter();
 }
 void CommandArbiter::resetCruisePitch() {
     // 下一次扫描必须重新用当时实测关节角播种，不沿用旧幅度区间。
@@ -146,8 +148,7 @@ float CommandArbiter::cruisePitchRate(const CommandInputs &in, core::TimeUs now)
         const float span = config_.cruise_pitch_span_rad;
         cruise_pitch_low_rad_ = std::max(config_.cruise_pitch_min_rad, in.pitch_joint_rad - span);
         cruise_pitch_high_rad_ = std::min(config_.cruise_pitch_max_rad, in.pitch_joint_rad + span);
-        cruise_pitch_planned_rad_ =
-            std::clamp(in.pitch_joint_rad, cruise_pitch_low_rad_, cruise_pitch_high_rad_);
+        cruise_pitch_planned_rad_ = std::clamp(in.pitch_joint_rad, cruise_pitch_low_rad_, cruise_pitch_high_rad_);
         cruise_pitch_direction_ = 1;
         cruise_pitch_last_us_ = now;
         cruise_pitch_seeded_ = true;
@@ -170,6 +171,10 @@ float CommandArbiter::cruisePitchRate(const CommandInputs &in, core::TimeUs now)
 void CommandArbiter::withdrawMouseShooter() {
     mouse_gesture_.withdraw();
     mouse_fire_ = {};
+}
+void CommandArbiter::clearVisionShooter() {
+    vision_friction_armed_ = false;
+    vision_friction_hold_since_us_ = 0;
 }
 ManualCommandMapper::Config CommandArbiter::mapperConfig() const {
     return effectiveMapperConfig(config_);
@@ -284,9 +289,11 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         // 会话与版本在所有早退上都要随快照一起返回，否则执行线程无法匹配。
         n.operator_session = in.operator_session;
         n.operator_revision = in.operator_revision;
-        // 本地生成云台命令（扫描/自主 Hold）用自己的生产时间；其他来源保留原始戳。
+        // 本地生成云台命令（扫描/自主 Hold）或视觉摩擦轮保活命令用自己的生产时间；其他来源保留原始戳。
         const auto &gimbal = n.command.gimbal;
-        if (gimbal.source == ControlSource::LocalBehavior && gimbal.mode != GimbalMode::Disabled)
+        if ((gimbal.source == ControlSource::LocalBehavior && gimbal.mode != GimbalMode::Disabled) ||
+            (n.command.shooter.source == ControlSource::LocalBehavior &&
+             n.command.shooter.mode != ShooterMode::Disabled))
             n.local_gimbal_stamp = {now, std::uint64_t(stamp.sequence), true};
         else
             n.local_gimbal_stamp = {};
@@ -296,6 +303,7 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     };
     const auto disable = [&](std::uint32_t reason, int ret) {
         withdrawMouseShooter();
+        clearVisionShooter();
         n.mouse_fire = {};
         previous_mode_ = OperatorMode::Safe;
         navigation_active_ = false;
@@ -449,12 +457,15 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         if (previous_mode_ != i.mode) {
             auto_entry_us_ = now;
             auto_baseline_sequence_ = in.vision.stamp.valid ? in.vision.stamp.sequence : 0;
+            clearVisionShooter();
         }
         if (!navigation_mode)
             updateAutoOverride(i, in, now);
     }
-    else
+    else {
         manual_override_ = have_override_quiet_time_ = false;
+        clearVisionShooter();
+    }
     previous_mode_ = i.mode;
     if (!navigation_mode)
         fillManualMotion(i, config_, n.requested);
@@ -520,11 +531,10 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     }
     // 巡航：没有可用视觉目标时由本地生成低速扫描。非法目标/参考不匹配
     // 仍保留原拒绝语义，不用扫描掩盖故障。
+    const bool bad_vision = (n.gimbal_reasons & (InvalidVision | VisionReferenceMismatch)) != 0;
     bool cruise_scan = false;
-    if (cruise_mode && !visual_control && !manual_override_) {
-        const bool bad_vision = (n.gimbal_reasons & (InvalidVision | VisionReferenceMismatch)) != 0;
+    if (cruise_mode && !visual_control && !manual_override_)
         cruise_scan = !bad_vision;
-    }
     if (cruise_scan) {
         // Pitch 摆头方向与幅度由仲裁器自己维护；视觉接管或退出扫描后重新播种。
         n.requested.gimbal = makeCruiseScanCommand(config_.cruise_yaw_rate_rad_s, cruisePitchRate(in, now));
@@ -533,28 +543,61 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
     }
     else
         resetCruisePitch();
-    if (navigation_mode || !config_.enable_shooter || !i.friction_requested)
+    if (!config_.enable_shooter) {
+        clearVisionShooter();
         n.shooter_reasons |= ShooterNotArmed;
+    }
+    else if (i.mode == OperatorMode::Manual || manual_override_) {
+        clearVisionShooter();
+        if (!i.friction_requested)
+            n.shooter_reasons |= ShooterNotArmed;
+        else {
+            auto &s = n.requested.shooter;
+            s.mode = ShooterMode::Ready;
+            s.source = i.source;
+            if (i.fire_requested) {
+                const bool mouse_single = i.source == ControlSource::KeyboardMouse &&
+                                          mouse_fire_.kind == MouseFeedKind::ClickSingle;
+                s.mode = mouse_single ? ShooterMode::FireSingle : ShooterMode::FireContinuous;
+                s.fire_rate_hz = config_.requested_fire_rate_hz;
+                if (mouse_single) {
+                    // 此戳只来自实际按下帧；仲裁 finish 仅刷新普通命令戳。
+                    s.fire_event_id = mouse_fire_.click_event_id;
+                    s.fire_event_stamp = mouse_fire_.click_stamp;
+                }
+            }
+        }
+    }
     else {
-        auto &s = n.requested.shooter;
-        s.mode = ShooterMode::Ready;
-        s.source = i.source;
-        const bool fire = i.mode == OperatorMode::Manual || manual_override_
-                              ? i.fire_requested
-                              : visual_control && in.vision.value.fire_requested &&
-                                    (config_.mapper.input_profile != RemoteInputProfile::PhysicalRemote ||
-                                     i.fire_requested);
-        if (fire) {
-            const bool mouse_single = i.source == ControlSource::KeyboardMouse &&
-                                      (i.mode == OperatorMode::Manual || manual_override_) &&
-                                      mouse_fire_.kind == MouseFeedKind::ClickSingle;
-            s.mode = mouse_single ? ShooterMode::FireSingle : ShooterMode::FireContinuous;
-            s.source = visual_control ? ControlSource::Vision : i.source;
+        if (gr || sr || bad_vision)
+            clearVisionShooter();
+        const bool vision_fire = !gr && !sr && visual_control && in.vision.value.fire_requested;
+        if (vision_fire) {
+            vision_friction_armed_ = true;
+            vision_friction_hold_since_us_ = now;
+            auto &s = n.requested.shooter;
+            s.mode = ShooterMode::FireContinuous;
+            s.source = ControlSource::Vision;
             s.fire_rate_hz = config_.requested_fire_rate_hz;
-            if (mouse_single) {
-                // 此戳只来自实际按下帧；仲裁 finish 仅刷新普通命令戳。
-                s.fire_event_id = mouse_fire_.click_event_id;
-                s.fire_event_stamp = mouse_fire_.click_stamp;
+        }
+        else {
+            const bool vision_hold = vision_friction_armed_ && !gr && !sr && !bad_vision &&
+                                     config_.vision_friction_hold_us > 0 && now >= vision_friction_hold_since_us_ &&
+                                     now - vision_friction_hold_since_us_ < config_.vision_friction_hold_us;
+            if (vision_hold) {
+                auto &s = n.requested.shooter;
+                s.mode = ShooterMode::Ready;
+                s.source = visual_control ? ControlSource::Vision : ControlSource::LocalBehavior;
+            }
+            else {
+                clearVisionShooter();
+                if (!navigation_mode && i.friction_requested) {
+                    auto &s = n.requested.shooter;
+                    s.mode = ShooterMode::Ready;
+                    s.source = i.source;
+                }
+                else
+                    n.shooter_reasons |= ShooterNotArmed;
             }
         }
     }
@@ -585,8 +628,10 @@ CommandDecision CommandArbiter::update(const CommandInputs &in) {
         n.shooter_reasons |= AimNotControlling;
         withdrawMouseShooter();
     }
-    if (gr || sr)
+    if (gr || sr) {
         withdrawMouseShooter();
+        clearVisionShooter();
+    }
     return finish(0);
 }
 }

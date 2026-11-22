@@ -61,6 +61,8 @@ public:
         std::uint32_t command_timeout_ms = 100;
         // 调参：原始单击事件有效期，ms；延长会增加迟到点击的可接受时间，不由命令重发续期。
         std::uint32_t event_timeout_ms = 100;
+        // 调参：冷启动单击等待摩擦轮提速与拨盘使能的最长保持时间，ms。
+        std::uint32_t single_spinup_timeout_ms = 2500;
         core::TimeUs source_timeout_us = 100000;
         // 调参：裁判输出许可、热量、云台执行状态有效期，ms；失效立即撤销供弹。
         std::uint32_t permission_timeout_ms = 300, heat_timeout_ms = 300, gimbal_timeout_ms = 100;
@@ -128,7 +130,7 @@ private:
     std::uint64_t dial_reference_ = 0;
     double dial_phase_origin_rad_ = 0, continuous_budget_end_rad_ = 0, progress_position_rad_ = 0;
     float dial_velocity_limit_rad_s_ = 0, dial_deceleration_rad_s2_ = 0, heat_model_ = 0;
-    std::uint32_t heat_sequence_ = 0, production_sequence_ = 0;
+    std::uint32_t heat_sequence_ = 0, production_sequence_ = 0, pending_spinup_event_id_ = 0;
     int configuration_error_ = 0;
     bool configured_ = false, begin_attempted_ = false, have_time_ = false;
     bool have_dial_reference_ = false, have_heat_model_ = false;

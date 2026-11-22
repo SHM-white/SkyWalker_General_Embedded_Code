@@ -32,9 +32,10 @@ int ShooterExecutor::begin() {
         return -EALREADY;
     begin_attempted_ = true;
     const bool valid = config_.max_cycle_us && config_.max_cycle_us <= 20000 && config_.command_timeout_ms &&
-                       config_.event_timeout_ms && config_.source_timeout_us && config_.permission_timeout_ms &&
-                       config_.heat_timeout_ms && config_.gimbal_timeout_ms && config_.friction_dwell_ms &&
-                       config_.dial_settle_ms && config_.jam_timeout_ms && config_.dial_brake_timeout_ms &&
+                       config_.event_timeout_ms && config_.single_spinup_timeout_ms && config_.source_timeout_us &&
+                       config_.permission_timeout_ms && config_.heat_timeout_ms && config_.gimbal_timeout_ms &&
+                       config_.friction_dwell_ms && config_.dial_settle_ms && config_.jam_timeout_ms &&
+                       config_.dial_brake_timeout_ms &&
                        std::isfinite(config_.friction_speed_rad_s) && config_.friction_speed_rad_s > 0 &&
                        std::isfinite(config_.friction_tolerance_rad_s) && config_.friction_tolerance_rad_s > 0 &&
                        std::isfinite(config_.dial_step_rad) && config_.dial_step_rad > 0 &&
@@ -64,6 +65,7 @@ int ShooterExecutor::begin() {
 void ShooterExecutor::stopFriction(WaitReason reason, int error) {
     friction_group_.disable();
     friction_good_since_ms_ = 0;
+    pending_spinup_event_id_ = 0;
     status_.friction_ready = false;
     status_.friction.requested = false;
     status_.friction.state = RunState::Disabled;
@@ -113,6 +115,8 @@ bool ShooterExecutor::newEvent(const ShooterCommand &command) const {
 }
 
 void ShooterExecutor::consumeEvent(const ShooterCommand &command, bool accepted) {
+    if (command.fire_event_id == pending_spinup_event_id_)
+        pending_spinup_event_id_ = 0;
     if (!newEvent(command))
         return;
     status_.last_event_id = command.fire_event_id;
@@ -239,8 +243,32 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
                            (isFresh(in.heat.stamp, now, config_.heat_timeout_ms) && std::isfinite(in.heat.heat) &&
                             in.heat.heat >= 0 && std::isfinite(in.heat.limit) && in.heat.limit > 0 &&
                             std::isfinite(in.heat.cooling_per_s) && in.heat.cooling_per_s >= 0);
+    const std::uint32_t spinup_window_ms = std::max(config_.event_timeout_ms, config_.single_spinup_timeout_ms);
+    const auto deferSingleSpinup = [&]() -> bool {
+        if (in.command.mode != ShooterMode::FireSingle || !newEvent(in.command)) {
+            pending_spinup_event_id_ = 0;
+            return false;
+        }
+        if (pending_spinup_event_id_ != in.command.fire_event_id) {
+            if (!isFresh(in.command.fire_event_stamp, now, config_.event_timeout_ms)) {
+                pending_spinup_event_id_ = 0;
+                return false;
+            }
+            pending_spinup_event_id_ = in.command.fire_event_id;
+        }
+        if (!isFresh(in.command.fire_event_stamp, now, spinup_window_ms)) {
+            pending_spinup_event_id_ = 0;
+            return false;
+        }
+        return true;
+    };
     if (!in.allow_feed || !status_.friction_ready || !aiming || !heat_good || status_.jammed) {
-        consumeEvent(in.command);
+        const bool defer = !status_.friction_ready && in.allow_feed && aiming && heat_good && !status_.jammed &&
+                           deferSingleSpinup();
+        if (!defer) {
+            pending_spinup_event_id_ = 0;
+            consumeEvent(in.command);
+        }
         stopFeed(!aiming ? WaitReason::Reference : !heat_good ? WaitReason::Power : WaitReason::Drive, -EAGAIN);
         if (status_.jammed)
             status_.feed.state = RunState::Blocked;
@@ -267,6 +295,7 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
                                 std::isfinite(dial.feedback.position_rad) &&
                                 std::isfinite(dial.feedback.velocity_rad_s);
     if (!dial_available) {
+        pending_spinup_event_id_ = 0;
         consumeEvent(in.command);
         stopFeed(!dial.position_reference_valid ? WaitReason::Reference : WaitReason::Feedback, -EAGAIN);
         status_.feed.state = RunState::Recovering;
@@ -281,6 +310,7 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
         have_dial_reference_ = true;
         if (changed) {
             // Old positions and accepted travel never survive coordinate changes.
+            pending_spinup_event_id_ = 0;
             consumeEvent(in.command);
             status_.feed.state = RunState::Recovering;
             return finish();
@@ -293,7 +323,10 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
     }
     dial = dial_.snapshot();
     if (dial.state != motor::MotorState::Active || !dial.output_permitted) {
-        consumeEvent(in.command);
+        if (!deferSingleSpinup()) {
+            pending_spinup_event_id_ = 0;
+            consumeEvent(in.command);
+        }
         status_.feed.state = RunState::Recovering;
         status_.feed.ready = false;
         status_.feed.reason = WaitReason::Drive;
@@ -395,11 +428,15 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
     }
 
     if (newEvent(in.command)) {
+        const std::uint32_t event_window_ms = pending_spinup_event_id_ == in.command.fire_event_id
+                                                  ? spinup_window_ms
+                                                  : config_.event_timeout_ms;
         const bool accept = in.command.mode == ShooterMode::FireSingle &&
-                            isFresh(in.command.fire_event_stamp, now, config_.event_timeout_ms) &&
+                            isFresh(in.command.fire_event_stamp, now, event_window_ms) &&
                             status_.dial_mode == DialControlMode::HoldPosition &&
                             std::fabs(dial.feedback.velocity_rad_s) <= config_.dial_settle_velocity_rad_s &&
                             heatAvailable();
+        pending_spinup_event_id_ = 0;
         consumeEvent(in.command, accept);
         if (accept) {
             reserveRound();
@@ -409,6 +446,9 @@ ShooterStatus ShooterExecutor::update(const ShooterExecutionInputs &in, core::Ti
             dial_settled_since_us_ = 0;
             setDialMode(DialControlMode::SinglePosition);
         }
+    }
+    else if (in.command.mode != ShooterMode::FireSingle) {
+        pending_spinup_event_id_ = 0;
     }
 
     WaitReason feed_reason = WaitReason::None;
