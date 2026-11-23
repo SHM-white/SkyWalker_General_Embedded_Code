@@ -8,7 +8,7 @@
          * board DTS. No DMA and no separate UART pin is consumed.
          */
         vision-uart = &cdc_acm_uart0;
-        /* Navigation: USART1 PA9/PA10, 115200 8N1. DMA is board-global. */
+        /* Navigation: USART1 PA9/PA10, 921600 8N1. DMA is board-global. */
         navigation-uart = &usart1;
     };
 
@@ -24,7 +24,7 @@
 
 &usart1 {
     status = "okay";
-    current-speed = <115200>;
+    current-speed = <921600>;
     data-bits = <8>;
     parity = "none";
     stop-bits = "1";

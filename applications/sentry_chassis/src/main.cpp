@@ -139,7 +139,7 @@ int main() {
         ChassisExecutionInputs input{};
         input.command = rx.control.command;
         input.permission = referee_state.robot.chassis_output;
-        input.require_permission = true;
+        input.require_permission = false;
         if (rx.control.global_action != SafetyAction::Active || !rx.online || !rx.local_boot_id ||
             rx.control.receiver_boot_id != rx.local_boot_id)
             input.command.mode = ChassisMode::Disabled;
@@ -257,7 +257,7 @@ int main() {
         big_was_active = feedback.armed;
         const auto reason = link_error || referee_error || chassis_error || big_error || power_error
                                 ? installed::DiagnosticReason::InitFailed
-                            : !rx.online                              ? installed::DiagnosticReason::PeerStale
+                            : !rx.online ? installed::DiagnosticReason::PeerStale
                             : status.reason == WaitReason::Feedback || big_status.reason == WaitReason::Feedback
                                 ? installed::DiagnosticReason::FeedbackStale
                             : status.state == RunState::Active || big_status.state == RunState::Active

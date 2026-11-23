@@ -114,8 +114,8 @@ int main() {
         config.requested_fire_rate_hz = installed::requested_fire_rate_hz;
         config.mapper.cruise_on_middle = true;
         config.mapper.navigation_on_middle = true;
-        config.require_referee_for_chassis = true;
-        config.require_referee_for_gimbal = true;
+        config.require_referee_for_chassis = false;
+        config.require_referee_for_gimbal = false;
         return config;
     }();
     static CommandManager commands(command_config);
