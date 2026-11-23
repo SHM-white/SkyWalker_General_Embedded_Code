@@ -14,7 +14,7 @@
 #include <core/attitude.hpp>
 #include <robotics/gimbal/dual_yaw_motion_allocator.hpp>
 #include <robotics/gimbal/gimbal_executor.hpp>
-#include <robotics/gimbal/inertial_gimbal.hpp>
+#include <robotics/gimbal/head_imu_vision_controller.hpp>
 #include <robotics/vehicle/diagnostics.hpp>
 #include <robotics/vehicle/led_status.hpp>
 #include <drivers/led/status_led.hpp>
@@ -72,7 +72,7 @@ int main() {
     static communication::vision::AbProtocol vision_protocol(
         {.command_reference = installed::head_reference, .allow_unknown_ballistics = true});
     static communication::vision::VisionReceiver vision(DEVICE_DT_GET(DT_ALIAS(vision_uart)), vision_dma,
-                                                        vision_protocol, {.feedback_period_us = 10000});
+                                                        vision_protocol, {.feedback_period_us = 5000});
     static VisionSource vision_source(vision);
 #endif
 #if DT_HAS_ALIAS(navigation_uart) && IS_ENABLED(CONFIG_SKYWALKER_NAVIGATION_RECEIVER)
@@ -131,8 +131,8 @@ int main() {
     static imu::ImuReceiver onboard(onboard_source, {.poll_interval_us = 500, .priority = 5});
     static imu::DmImuCanSource head_source(installed::headSensorConfig());
     static imu::ImuReceiver head(head_source, {.poll_interval_us = 1000, .priority = 6});
-    static const auto inertial_config = installed::sentryInertialConfig();
-    static InertialGimbalAdapter head_control(inertial_config);
+    static const auto vision_imu_config = installed::sentryVisionImuConfig();
+    static HeadImuVisionController vision_control(vision_imu_config);
     // 双 Yaw 分配器是正式链路里唯一的大小 Yaw 分工点：大 Yaw 主动承担持续运动
     // 与回中，小 Yaw 补偿实测残差并守住行程。旧的 YawCenteringController
     // （robotics/gimbal/yaw_centering.hpp）已作废，不再参与本应用。
@@ -191,6 +191,8 @@ int main() {
     diagnostics.event("head_imu", head_error);
     diagnostics.event("yaw_bus", yaw_error);
     diagnostics.event("pitch_bus", pitch_error);
+    const int vision_imu_error = vision_control.validate();
+    diagnostics.event("vision_imu", vision_imu_error);
     diagnostics.event("gimbal", control_error);
     // 非零表示分配器参数非法：此时它按 Configuration 拒绝运行，回退旧编码器路径。
     diagnostics.event("dual_yaw", dual_yaw.validate());
@@ -198,7 +200,7 @@ int main() {
     diagnostics.event("motor_rail", power_error);
     // 载体 IMU 门控大 Yaw；外置头部 IMU 门控视觉，手动保持旧编码器控制。
     const bool setup_ready = command_error == 0 && yaw_error == 0 && pitch_error == 0 && control_error == 0 &&
-                             power_error == 0;
+                             vision_imu_error == 0 && power_error == 0;
     // 左 Middle 导航档失联不撤权；左 Up 手动档失联仍立即锁定。
     // 巡航拨杆与“解锁后无动作”的快捷解锁只在正式应用启用；
     // 两个字段位于 Config 末尾，其余参数保留默认值。
@@ -216,10 +218,8 @@ int main() {
     std::uint64_t last_peer_boot = 0;
     bool was_peer_online = false;
     core::TimeUs previous_cycle_us = 0;
-    // 仅记录上一周期已建立且成功输出的视觉 Pitch 参考；视觉被选中不等于轴已执行。
-    bool vision_pitch_reference_ready = false;
-    // 视觉 Rate 桥接会话：只在视觉驱动的 Rate 周期请求前馈；进入/退出时重建两轴会话。
-    bool vision_rate_session_previous = false;
+    // 视觉外置 IMU 直控会话：进入/退出视觉直控时同步会话切换事件与编码器重建标志。
+    bool vision_direct_session_previous = false;
     bool keyboard_spin_latched = false, shift_was_down = false;
     SpinOwner previous_spin_owner = SpinOwner::None;
     bool scan_entry_pending = false, scan_was_selected = false;
@@ -341,26 +341,33 @@ int main() {
         auto head_orientation = head_sample.orientation.value;
         const bool head_quaternion_valid = core::normalize(head_orientation);
         const auto head_euler = core::euler(head_quaternion_valid ? head_orientation : core::Quaternion{});
+        constexpr core::TimeUs head_imu_timeout_us = 20000;
         const bool head_orientation_fresh = (head_snapshot.fresh_mask & imu::Orientation) &&
-                                            core::fresh(head_sample.orientation.stamp, now_us,
-                                                        inertial_config.imu_timeout_us);
+                                            core::fresh(head_sample.orientation.stamp, now_us, head_imu_timeout_us);
         const bool head_gyro_fresh = (head_snapshot.fresh_mask & imu::Gyro) &&
-                                     core::fresh(head_sample.gyro_rad_s.stamp, now_us, inertial_config.imu_timeout_us);
+                                     core::fresh(head_sample.gyro_rad_s.stamp, now_us, head_imu_timeout_us);
         const bool head_quality_ok = head_sample.attitude_quality == imu::AttitudeQuality::Tracking ||
-                                     (inertial_config.allow_unknown_quality &&
-                                      head_sample.attitude_quality == imu::AttitudeQuality::Unknown);
+                                     head_sample.attitude_quality == imu::AttitudeQuality::Unknown;
         const bool head_reference_valid = head_sample.reference.frame_id && head_sample.reference.epoch;
-        const unsigned head_reason = head_error                                                              ? 1u
-                                     : head_snapshot.state != imu::State::Running                            ? 2u
-                                     : !head_orientation_fresh                                               ? 3u
-                                     : !head_gyro_fresh                                                      ? 4u
-                                     : !head_quality_ok                                                      ? 5u
-                                     : !head_reference_valid                                                 ? 6u
-                                     : !head_quaternion_valid                                                ? 7u
-                                     : !core::finite(head_sample.gyro_rad_s.value)                           ? 8u
-                                     : std::fabs(head_euler.pitch) >= inertial_config.max_inertial_pitch_rad ? 9u
-                                                                                                             : 0u;
+        const unsigned head_reason = head_error                                                                ? 1u
+                                     : head_snapshot.state != imu::State::Running                              ? 2u
+                                     : !head_orientation_fresh                                                 ? 3u
+                                     : !head_gyro_fresh                                                        ? 4u
+                                     : !head_quality_ok                                                        ? 5u
+                                     : !head_reference_valid                                                   ? 6u
+                                     : !head_quaternion_valid                                                  ? 7u
+                                     : !core::finite(head_sample.gyro_rad_s.value)                             ? 8u
+                                     : std::fabs(head_euler.pitch) >= vision_imu_config.max_inertial_pitch_rad ? 9u
+                                                                                                               : 0u;
         const bool head_usable = head_reason == 0;
+        const auto head_gyro = head_sample.gyro_rad_s.value;
+        const float head_yaw_rate_rad_s =
+            head_usable
+                ? (std::sin(head_euler.roll) * head_gyro.y + std::cos(head_euler.roll) * head_gyro.z) /
+                      std::cos(head_euler.pitch)
+                : 0.0f;
+        const float head_pitch_rate_rad_s =
+            head_usable ? std::cos(head_euler.roll) * head_gyro.y - std::sin(head_euler.roll) * head_gyro.z : 0.0f;
         const bool head_reference_changed = head_usable && head_reference_known &&
                                             last_head_reference != head_sample.reference;
         if (head_usable) {
@@ -371,7 +378,6 @@ int main() {
         if (!head_ready || !head_was_ready) {
             if (last_head_source == ControlSource::Vision)
                 dual_yaw.reset();
-            (void)head_control.suspend(now_us, WaitReason::Reference);
         }
         head_was_ready = head_ready;
         GimbalExecutionInputs input{};
@@ -404,7 +410,6 @@ int main() {
         const float raw_pitch_rate_rad_s = input.command.pitch_rate_rad_s;
         if (input.command.source != last_head_source) {
             dual_yaw.reset();
-            (void)head_control.suspend(now_us, WaitReason::Command);
             last_head_source = input.command.source;
         }
         const auto ys = yaw.snapshot();
@@ -412,15 +417,6 @@ int main() {
         const bool pitch_valid = ps.feedback_fresh && ps.position_reference_valid &&
                                  bool(ps.feedback.valid & motor::FeedbackPosition) &&
                                  std::isfinite(ps.feedback.position_rad);
-        const auto previous_pitch_execution = gimbal.pitchTelemetry();
-        const bool pitch_reference_continuous = vision_pitch_reference_ready && pitch_valid && dt_us > 0 &&
-                                                dt_us <= 20000 && ps.state == motor::MotorState::Active &&
-                                                ps.output_permitted && previous_pitch_execution.output_valid &&
-                                                gimbal.pitchTargetDiagnostics().target_valid &&
-                                                ps.enable_generation ==
-                                                    previous_pitch_execution.motor.enable_generation &&
-                                                ps.reference_generation ==
-                                                    previous_pitch_execution.motor.reference_generation;
         const bool joint_valid = ys.feedback_fresh && ys.position_reference_valid &&
                                  bool(ys.feedback.valid & motor::FeedbackPosition);
         // 把 Pitch 实测角推给命令线程：巡航扫描用它作为摆头中心。
@@ -450,7 +446,6 @@ int main() {
         if (scan_selected && scan_entry_pending) {
             if (joint_valid && pitch_valid && heading_fresh) {
                 dual_yaw.reset();
-                (void)head_control.suspend(now_us, WaitReason::Command);
                 // 两个调用都成功才允许输出扫描速率；丢弃上一视觉会话的积分目标。
                 // Pitch 重播种把摆头起点钉在当前实测角，与仲裁器的播种一致。
                 if (gimbal.reseedYawTarget() == 0 && gimbal.reseedPitchTarget() == 0)
@@ -484,7 +479,7 @@ int main() {
             }
         }
         float vision_angle_rad = 0, vision_rate_rad_s = 0, vision_acceleration_rad_s2 = 0;
-        float vision_pitch_rad = 0;
+        float vision_pitch_rad = 0, vision_pitch_rate_rad_s = 0, vision_pitch_acceleration_rad_s2 = 0;
         if (vision_selected) {
             const auto &v = selected_vision.value.yaw;
             // AB carries no sample timestamp: the decoder stamps the local byte
@@ -500,6 +495,8 @@ int main() {
             vision_acceleration_rad_s2 = v.acceleration_rad_s2;
             const auto &p = selected_vision.value.pitch;
             vision_pitch_rad = p.angle_rad + p.rate_rad_s * age_s + 0.5f * p.acceleration_rad_s2 * age_s * age_s;
+            vision_pitch_rate_rad_s = p.rate_rad_s + p.acceleration_rad_s2 * age_s;
+            vision_pitch_acceleration_rad_s2 = p.acceleration_rad_s2;
         }
         // --- 双 Yaw 分配：每周期唯一一次，必须早于头部外环 --------------------
         // 输入是“已仲裁的头部世界速率意图”（手动）或视觉轨迹（角度/速度/加速度），
@@ -507,8 +504,10 @@ int main() {
         DualYawAllocatorInputs alloc_input{};
         alloc_input.head_rate_target_rad_s = raw_head_rate_rad_s;
         alloc_input.joint_rad = ys.feedback.position_rad;
-        alloc_input.joint_rate_rad_s = bool(ys.feedback.valid & motor::FeedbackVelocity) ? ys.feedback.velocity_rad_s
-                                                                                         : 0.0f;
+        alloc_input.joint_rate_rad_s =
+            head_usable && heading_fresh
+                ? installed::small_yaw.direction * (head_yaw_rate_rad_s - heading.rate_rad_s)
+                : (bool(ys.feedback.valid & motor::FeedbackVelocity) ? ys.feedback.velocity_rad_s : 0.0f);
         alloc_input.joint_stamp = {ys.feedback.timestamp_ms * 1000ULL, ys.feedback.timestamp_ms, joint_valid};
         alloc_input.carrier_rate_rad_s = heading_fresh ? heading.rate_rad_s : 0.0f;
         alloc_input.carrier_stamp = heading.stamp;
@@ -540,64 +539,40 @@ int main() {
         const auto allocation = dual_yaw.update(alloc_input, now_us);
         if (allocation.joint_reseed_requested)
             (void)gimbal.reseedYawTarget();
-        InertialGimbalInputs inertial_input{};
-        inertial_input.head = head_snapshot;
-        inertial_input.yaw = ys;
-        inertial_input.pitch = ps;
-        inertial_input.command = input.command;
-        inertial_input.source_stamp = input.source_stamp;
-        inertial_input.prerequisites_ready = setup_ready && installed::imu_mounting_confirmed;
-        // The received target and the feedback quaternion share the CAN IMU's
-        // reference. Never rebuild this target in the carrier's independent zero.
-        // 分配器给出可行头部世界角/速率，头部外环只负责把实测姿态闭环到它；
-        // 分配器不可用时才退回视觉原始目标，保证失配时仍有旧的视觉行为。
-        inertial_input.yaw_reference_valid = vision_active;
-        inertial_input.yaw_reference_rad = allocation.head_reference_valid ? allocation.head_angle_rad
-                                                                           : vision_angle_rad;
-        inertial_input.yaw_reference_rate_rad_s = allocation.head_reference_valid ? allocation.head_reference_rate_rad_s
-                                                                                  : vision_rate_rad_s;
-        inertial_input.command.mode = vision_active ? GimbalMode::Rate : GimbalMode::Disabled;
-        const auto inertial = head_control.update(inertial_input, now_us);
+        const float yaw_world_ref_rad = allocation.head_reference_valid ? allocation.head_angle_rad : vision_angle_rad;
+        const float yaw_world_rate_rad_s =
+            allocation.head_reference_valid ? allocation.head_reference_rate_rad_s : vision_rate_rad_s;
+        HeadImuVisionOutput vision_out{};
         if (vision_active) {
-            input.command = inertial.command;
-            input.source_stamp = inertial.source_stamp;
-            input.yaw_output_valid = inertial.yaw_output_valid;
-            // 头部外环的关节速率仍必须服从分配器实时的行程/制动余量，否则
-            // 视觉修正可以把小 Yaw 推过软端点。
-            if (allocation.joint_rate_valid)
-                input.command.yaw_rate_rad_s = std::clamp(input.command.yaw_rate_rad_s,
-                                                          -allocation.outward_budget_neg_rad_s,
-                                                          allocation.outward_budget_pos_rad_s);
-            // Remove the measured Pitch joint from the *head CAN quaternion*.
-            // This leaves the yaw-stage pose in exactly the vision world frame.
-            const auto yaw_pose = core::multiply(head_orientation,
-                                                 core::fromEuler({0,
-                                                                  -installed::pitch.direction *
-                                                                      (ps.feedback.position_rad -
-                                                                       installed::vision_pitch_horizontal_rad),
-                                                                  0}));
-            const float cp = std::cos(vision_pitch_rad);
-            const core::Vec3 world_ray{cp * std::cos(vision_angle_rad), cp * std::sin(vision_angle_rad),
-                                       -std::sin(vision_pitch_rad)};
-            const auto joint_ray = core::rotate(core::conjugate(yaw_pose), world_ray);
-            // A target behind the current yaw must not produce a 180-degree
-            // Pitch command. Aim elevation first; yaw alignment finishes the ray.
-            const float target = std::clamp(installed::vision_pitch_horizontal_rad +
-                                                installed::pitch.direction *
-                                                    std::atan2(-joint_ray.z, std::hypot(joint_ray.x, joint_ray.y)),
-                                            installed::pitch_min_rad, installed::pitch_max_rad);
-            const float seed = pitch_reference_continuous ? static_cast<float>(gimbal.pitchTargetRad())
-                                                          : ps.feedback.position_rad;
-            const float dt = dt_us > 0 && dt_us <= 20000 ? float(dt_us) * 1e-6f : 0;
-            // Keep Rate mode for BOTH axes: AbsoluteAngle would replace the
-            // IMU yaw correction with a world angle interpreted as a joint angle.
-            // 恢复周期先让轴从新鲜反馈播种。不能把基于旧目标算出的追赶速率
-            // 积分到新种子上；下一次连续执行周期再追踪几何目标。
-            input.command.pitch_rate_rad_s = pitch_reference_continuous && dt > 0
-                                                 ? std::clamp((target - seed) / dt,
-                                                              -installed::manual_max_gimbal_pitch_rate_rad_s,
-                                                              installed::manual_max_gimbal_pitch_rate_rad_s)
-                                                 : 0;
+            HeadImuVisionInputs vision_in{};
+            vision_in.head_yaw_rad = head_euler.yaw;
+            vision_in.head_pitch_rad = head_euler.pitch;
+            vision_in.head_yaw_rate_rad_s = head_yaw_rate_rad_s;
+            vision_in.head_pitch_rate_rad_s = head_pitch_rate_rad_s;
+            vision_in.head_valid = head_ready;
+            vision_in.yaw_target_rad = yaw_world_ref_rad;
+            vision_in.yaw_target_rate_rad_s = yaw_world_rate_rad_s;
+            vision_in.yaw_target_acc_rad_s2 = allocation.travel_limited ? 0.0f : vision_acceleration_rad_s2;
+            vision_in.yaw_target_valid = true;
+            vision_in.pitch_target_rad = vision_pitch_rad;
+            vision_in.pitch_target_rate_rad_s = vision_pitch_rate_rad_s;
+            vision_in.pitch_target_acc_rad_s2 = vision_pitch_acceleration_rad_s2;
+            vision_in.pitch_target_valid = true;
+            vision_in.yaw_joint_rad = ys.feedback.position_rad;
+            vision_in.yaw_joint_valid = joint_valid;
+            vision_in.pitch_joint_rad = ps.feedback.position_rad;
+            vision_in.pitch_joint_valid = pitch_valid;
+            vision_in.carrier_rate_rad_s = alloc_input.carrier_rate_rad_s;
+            vision_in.carrier_valid = heading_fresh;
+            vision_in.yaw_outward_budget_pos_rad_s = allocation.outward_budget_pos_rad_s;
+            vision_in.yaw_outward_budget_neg_rad_s = allocation.outward_budget_neg_rad_s;
+            vision_in.yaw_budget_valid = allocation.joint_rate_valid;
+            vision_out = vision_control.update(vision_in);
+            input.command.mode = GimbalMode::Rate;
+            input.yaw_output_valid = vision_out.yaw_valid;
+            input.pitch_output_valid = vision_out.pitch_valid;
+            input.yaw_direct = {vision_out.yaw_valid, vision_out.yaw_limit_clamped, vision_out.yaw_input};
+            input.pitch_direct = {vision_out.pitch_valid, vision_out.pitch_limit_clamped, vision_out.pitch_input};
         }
         else if (input.command.mode == GimbalMode::Rate) {
             // 小 Yaw 关节速率直接来自分配器：已含实测载体补偿、头部加速度窗和
@@ -612,28 +587,19 @@ int main() {
             // 摇杆与鼠标已合并，在此统一转换以保留两者现有操控方向。
             input.command.pitch_rate_rad_s = -raw_pitch_rate_rad_s * installed::pitch.direction;
         }
-        input.pitch_output_valid = pitch_valid;
-        // --- 视觉 Rate 桥接：把轴实际积分的关节参考速度交给位置环 -------------
-        // 仅当本周期确实由视觉 Rate 路径驱动、且该轴输出有效时才请求；手动、
-        // Hold、Disabled 与分配器轨迹路径保持原行为。进入/退出视觉会话时两轴都
-        // 重建 Rate 会话，避免上一来源的积分目标被继续积分或当作追赶债务执行。
-        const bool vision_rate_session = vision_active && input.command.mode == GimbalMode::Rate;
-        const bool rate_session_changed = vision_rate_session != vision_rate_session_previous;
-        vision_rate_session_previous = vision_rate_session;
-        input.yaw_use_rate_reference = vision_rate_session && input.yaw_output_valid;
-        input.pitch_use_rate_reference = vision_rate_session && pitch_valid;
-        input.yaw_restart_rate_session = rate_session_changed ||
-                                         (vision_rate_session && allocation.joint_reseed_requested);
-        input.pitch_restart_rate_session = rate_session_changed || (vision_rate_session && !pitch_reference_continuous);
+        if (!vision_active)
+            input.pitch_output_valid = pitch_valid;
+        const bool vision_direct_session = vision_active && input.command.mode == GimbalMode::Rate;
+        const bool rate_session_changed = vision_direct_session != vision_direct_session_previous;
+        vision_direct_session_previous = vision_direct_session;
+        input.yaw_use_rate_reference = false;
+        input.pitch_use_rate_reference = false;
+        input.yaw_restart_rate_session = rate_session_changed && !vision_direct_session;
+        input.pitch_restart_rate_session = rate_session_changed && !vision_direct_session;
         input.transport_ready = setup_ready;
         auto status = control_error == 0 ? gimbal.update(input, now_us)
                                          : gimbal.suspend(now_us, WaitReason::Configuration, control_error, true);
         gimbal_was_active = status.state == RunState::Active;
-        // 执行器可能因漏周期直接返回，也可能只有 Yaw 成功；不能只看 vision_active
-        // 或整机 Active。首个成功播种周期允许下一周期追赶，不要求已接受速度前馈。
-        vision_pitch_reference_ready = vision_rate_session && status.state == RunState::Active &&
-                                       gimbal.pitchTelemetry().output_valid &&
-                                       gimbal.pitchTargetDiagnostics().target_valid;
         // 板间大 Yaw 的发送门控仍然在本周期执行结果之后再判断：分配器只提供
         // 世界速率意图，能不能发出去由仲裁、对端在线、对端反馈和本机执行状态决定。
         const auto center_yaw = yaw.snapshot();
@@ -813,8 +779,9 @@ int main() {
         static_assert(unsigned(ControlSource::LocalBehavior) < 16 && unsigned(GimbalMode::AbsoluteAngle) < 8);
         const std::uint32_t response_state = unsigned(input.command.source) | (unsigned(input.command.mode) << 4) |
                                              (yaw_executed ? 1u << 7 : 0u) | (pitch_executed ? 1u << 8 : 0u) |
-                                             (input.yaw_use_rate_reference ? 1u << 9 : 0u) |
-                                             (input.pitch_use_rate_reference ? 1u << 10 : 0u) |
+                                             ((input.yaw_use_rate_reference || input.yaw_direct.valid) ? 1u << 9 : 0u) |
+                                             ((input.pitch_use_rate_reference || input.pitch_direct.valid) ? 1u << 10
+                                                                                                           : 0u) |
                                              (yaw_reference_accepted ? 1u << 11 : 0u) |
                                              (pitch_reference_accepted ? 1u << 12 : 0u) |
                                              (vision_active ? 1u << 13 : 0u) | (head_usable ? 1u << 14 : 0u) |
@@ -855,9 +822,7 @@ int main() {
                                       yaw_motor_config.loop.velocity.effort_abs_max, 0);
         response_events |= axisEvents(pitch_execution, pitch_target, pitch_executed, !cycle_invalid,
                                       pitch_motor_config.loop.velocity.effort_abs_max, 1);
-        if (allocation.travel_limited ||
-            (vision_active && allocation.joint_rate_valid &&
-             std::fabs(inertial.command.yaw_rate_rad_s - input.command.yaw_rate_rad_s) > 1e-5f))
+        if (allocation.travel_limited || (vision_active && vision_out.yaw_limit_clamped))
             response_events |= 1u << 16;
         if (input.command.source != response_previous_source || head_reference_changed || rate_session_changed)
             response_events |= 1u << 17;
@@ -882,10 +847,10 @@ int main() {
             {.time_ms = now_ms,
              .state = response_state,
              .error = response_error,
-             .signals = {vision_active ? inertial_input.yaw_reference_rad : unavailable, // I9 head world yaw reference
-                         head_usable ? head_euler.yaw : unavailable,                     // I10 measured world yaw
-                         vision_active ? vision_pitch_rad : unavailable, // I11 predicted world pitch target
-                         head_usable ? head_euler.pitch : unavailable,   // I12 measured world pitch
+             .signals = {vision_active ? yaw_world_ref_rad : unavailable, // I9 head world yaw reference
+                         head_usable ? head_euler.yaw : unavailable,      // I10 measured world yaw
+                         vision_active ? vision_pitch_rad : unavailable,  // I11 predicted world pitch target
+                         head_usable ? head_euler.pitch : unavailable,    // I12 measured world pitch
                          yaw_executed && yaw_target.target_valid ? float(gimbal.yawTargetRad()) : unavailable, // I13
                          joint_valid ? ys.feedback.position_rad : unavailable,                                 // I14
                          yaw_reference_accepted ? yaw_target.reference_velocity_rad_s : unavailable,           // I15
@@ -902,7 +867,9 @@ int main() {
                          pitch_velocity_valid ? ps.feedback.velocity_rad_s : unavailable,                         // I25
                          pitch_executed ? pitch_execution.effort_command : unavailable,                   // I26 Nm
                          alloc_input.carrier_valid ? alloc_input.carrier_rate_rad_s : unavailable,        // I27
-                         inertial.carrier_yaw_rate_valid ? inertial.carrier_yaw_rate_rad_s : unavailable, // I28
+                         head_usable && yaw_velocity_valid
+                             ? (head_yaw_rate_rad_s - installed::small_yaw.direction * ys.feedback.velocity_rad_s)
+                             : unavailable,      // I28
                          response_big_yaw_rate}, // I29 last submitted, permission-gated big-Yaw world intent
              .max_dt_us = response_max_dt_us,
              .events = response_events});

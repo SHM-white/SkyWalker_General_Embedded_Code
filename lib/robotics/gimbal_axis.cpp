@@ -363,6 +363,58 @@ int GimbalAxis::updateTrajectory(const GimbalJointTrajectory &trajectory, Safety
     // position loop only has to supply the tracking correction.
     return position_.update(target_angle_rad_, reference_rate, reference_acceleration, dt);
 }
+int GimbalAxis::updateExternalVelocity(const control::PositionMotor::ExternalVelocityInput &input, bool limit_clamped,
+                                       SafetyAction action, float dt) {
+    if (!configured_)
+        return -EACCES;
+    if (action > SafetyAction::Active || !std::isfinite(dt) || dt < 0)
+        return -EINVAL;
+    if (action == SafetyAction::Disable) {
+        withdraw();
+        return position_.update(target_angle_rad_, 0);
+    }
+    (void)poll(drive_.snapshot().feedback.timestamp_ms);
+    const auto snapshot = drive_.snapshot();
+    const int feedback_error = feedbackError(snapshot);
+    if (feedback_error < 0 || snapshot.state != motor::MotorState::Active || !snapshot.output_permitted) {
+        withdraw();
+        target_status_ = {};
+        target_status_.feedback_healthy = feedback_error == 0;
+        target_status_.last_dt_s = dt;
+        if (!feedback_error)
+            target_status_.measured_rad = config_.topology == AxisTopology::Continuous
+                                              ? snapshot.feedback.absolute_position_rad
+                                              : snapshot.feedback.position_rad;
+        const int ret = position_.update(target_angle_rad_, 0);
+        return feedback_error < 0 ? feedback_error : ret;
+    }
+    if (initialized_ && (snapshot.enable_generation != observed_enable_generation_ ||
+                         snapshot.reference_generation != observed_reference_generation_))
+        withdraw();
+    const int ret = position_.updateExternalVelocity(input, dt);
+    (void)seed(snapshot);
+    rate_restart_pending_ = true;
+    explicit_reseed_ = true;
+    target_status_ = {};
+    target_status_.feedback_healthy = true;
+    target_status_.last_dt_s = dt;
+    target_status_.integration_dt_s = dt;
+    target_status_.measured_rad = config_.topology == AxisTopology::Continuous
+                                      ? snapshot.feedback.absolute_position_rad
+                                      : snapshot.feedback.position_rad;
+    target_status_.target_rad = target_angle_rad_;
+    target_status_.target_valid = initialized_;
+    target_status_.mechanical_limited = limit_clamped;
+    target_status_.requested_rate_rad_s = input.velocity_request_rad_s;
+    target_status_.limited_rate_rad_s = input.velocity_request_rad_s;
+    target_status_.reference_requested = true;
+    target_status_.reference_accepted = ret == 0 && position_.telemetry().output_valid;
+    target_status_.reference_velocity_rad_s =
+        target_status_.reference_accepted ? input.reference_velocity_rad_s : 0.0f;
+    previous_action_ = action;
+    previous_mode_ = GimbalMode::Rate;
+    return ret;
+}
 int GimbalAxis::reseedTargetFromFeedback() {
     if (!configured_)
         return -EACCES;

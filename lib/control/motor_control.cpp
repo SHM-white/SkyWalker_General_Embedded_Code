@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <control/angle.h>
+#include <control/feedforward.h>
 
 namespace skywalker::control {
 namespace {
@@ -181,6 +182,17 @@ int PositionMotor::configure() {
     ret = validateEffort(info, config_.effort_unit, config_.loop.velocity.effort_abs_max);
     if (ret < 0)
         return ret;
+    if (config_.has_external_velocity) {
+        ret = control_motor_velocity_validate(&config_.external_velocity);
+        if (ret < 0)
+            return ret;
+        if (!std::isfinite(config_.external_acceleration_effort_gain) ||
+            config_.external_acceleration_effort_gain < 0.0f)
+            return -EINVAL;
+        ret = validateEffort(info, config_.effort_unit, config_.external_velocity.effort_abs_max);
+        if (ret < 0)
+            return ret;
+    }
     const auto required = motor::FeedbackVelocity |
                           (config_.reference == PositionReference::AbsoluteNearest ? motor::FeedbackAbsolutePosition
                                                                                    : motor::FeedbackPosition);
@@ -239,6 +251,8 @@ int PositionMotor::reset() {
     if (!configured_)
         return -EACCES;
     history_valid_ = false;
+    external_history_valid_ = false;
+    active_loop_ = ActiveLoop::None;
     absolute_local_valid_ = false;
     (void)motor_.invalidateComputedEffortFrom(producer_);
     return 0;
@@ -260,6 +274,8 @@ int PositionMotor::stageEffort(float effort, std::uint64_t generation) {
 }
 int PositionMotor::fail(int error, const motor::MotorSnapshot &s, ControlIssue issue) {
     history_valid_ = false;
+    external_history_valid_ = false;
+    active_loop_ = ActiveLoop::None;
     absolute_local_valid_ = false;
     if (configured_)
         (void)motor_.invalidateComputedEffortFrom(producer_);
@@ -321,9 +337,14 @@ int PositionMotor::updateImpl(double target, float reference_velocity_rad_s, flo
     int ret = resolveMeasurement(snapshot, position);
     if (ret < 0)
         return fail(ret, snapshot, ControlIssue::InvalidMeasurement);
-    const bool initialize = !history_valid_ || snapshot.enable_generation != observed_enable_generation_ ||
-                            snapshot.reference_generation != observed_reference_generation_;
-    if (initialize) {
+    const bool same_gen = snapshot.enable_generation == observed_enable_generation_ &&
+                          snapshot.reference_generation == observed_reference_generation_;
+    const bool handover_from_external =
+        active_loop_ == ActiveLoop::ExternalVelocity && external_history_valid_ && same_gen &&
+        telemetry_.output_valid;
+    const float prev_effort = telemetry_.effort_command;
+    const bool initialize = !handover_from_external && (!history_valid_ || !same_gen);
+    if (initialize || handover_from_external) {
         ret = resetFrom(snapshot, position);
         if (ret < 0)
             return fail(ret, snapshot, ControlIssue::InvalidMeasurement);
@@ -340,6 +361,22 @@ int PositionMotor::updateImpl(double target, float reference_velocity_rad_s, flo
     }
     if (!finiteFloat(resolved))
         return fail(-ERANGE, snapshot, ControlIssue::InvalidTarget);
+    if (handover_from_external) {
+        const float v_max = config_.loop.velocity.requested_velocity_abs_max_rad_s;
+        const float init_vel = std::clamp(snapshot.feedback.velocity_rad_s, -v_max, v_max);
+        ret = control_motor_velocity_reset(&state_.velocity, snapshot.feedback.velocity_rad_s, init_vel);
+        if (ret < 0)
+            return fail(ret, snapshot, ControlIssue::InvalidMeasurement);
+        const control_feedforward_reference ff_ref{static_cast<float>(resolved), init_vel, 0.0f};
+        float ff_out = 0.0f;
+        if (control_feedforward_calculate(&config_.loop.velocity.regulator.feedforward, &ff_ref, &ff_out) == 0 &&
+            std::isfinite(ff_out)) {
+            const auto &vpid = config_.loop.velocity.regulator.feedback;
+            state_.velocity.regulator.feedback.integral_output =
+                std::clamp(prev_effort - ff_out, vpid.integral_min, vpid.integral_max);
+        }
+        external_history_valid_ = false;
+    }
     control_motor_position_output output{};
     if (!initialize) {
         auto next = state_;
@@ -372,6 +409,7 @@ int PositionMotor::updateImpl(double target, float reference_velocity_rad_s, flo
     ret = stageEffort(output.effort_command, snapshot.enable_generation);
     if (ret < 0)
         return fail(ret, snapshot);
+    active_loop_ = ActiveLoop::EncoderPosition;
     Telemetry next{};
     next.motor = snapshot;
     next.output = output;
@@ -383,6 +421,126 @@ int PositionMotor::updateImpl(double target, float reference_velocity_rad_s, flo
                                   (config_.reference == PositionReference::StartupRelative ? initial_position_rad_ : 0);
     next.dt_s = dt;
     next.effort_command = output.effort_command;
+    next.effort_unit = config_.effort_unit;
+    next.target_valid = next.output_valid = true;
+    next.target_sequence = target_sequence_;
+    publish(next);
+    return 0;
+}
+
+int PositionMotor::updateExternalVelocity(const ExternalVelocityInput &ext, float dt) {
+    const auto snapshot = motor_.snapshot();
+    if (!configured_)
+        return fail(-EACCES, snapshot, ControlIssue::NotConfigured);
+    if (!config_.has_external_velocity)
+        return fail(-ENOTSUP, snapshot, ControlIssue::InvalidTarget);
+    if (!std::isfinite(ext.velocity_request_rad_s) || !std::isfinite(ext.measured_velocity_rad_s) ||
+        !std::isfinite(ext.position_reference_rad) || !std::isfinite(ext.reference_velocity_rad_s) ||
+        !std::isfinite(ext.acceleration_ff_rad_s2) || !std::isfinite(ext.outer_position_error_rad) ||
+        !std::isfinite(ext.outer_output_rad_s))
+        return fail(-EINVAL, snapshot, ControlIssue::InvalidTarget);
+    if (!std::isfinite(dt) || dt < 0)
+        return fail(-EINVAL, snapshot, ControlIssue::InvalidPeriod);
+    if (target_sequence_ == std::numeric_limits<std::uint64_t>::max())
+        return fail(-EOVERFLOW, snapshot, ControlIssue::InvalidTarget);
+    latest_dt_s_ = dt;
+    ++target_sequence_;
+    const bool absolute = config_.reference == PositionReference::AbsoluteNearest;
+    const auto required = motor::FeedbackVelocity |
+                          (absolute ? motor::FeedbackAbsolutePosition : motor::FeedbackPosition);
+    if (!absolute && !snapshot.position_reference_valid)
+        return wait(snapshot, ControlIssue::ReferenceLost);
+    const auto measurement = checkMeasurement(snapshot, required);
+    if (measurement.error < 0)
+        return wait(snapshot, measurement.issue);
+    if (snapshot.state != motor::MotorState::Active)
+        return wait(snapshot, ControlIssue::NotActive);
+    const auto &ext_pid = config_.external_velocity.regulator.feedback;
+    if (dt < ext_pid.dt_min_s || dt > ext_pid.dt_max_s)
+        return wait(snapshot, ControlIssue::InvalidPeriod);
+    double position = 0;
+    int ret = resolveMeasurement(snapshot, position);
+    if (ret < 0)
+        return fail(ret, snapshot, ControlIssue::InvalidMeasurement);
+    latest_target_rad_ = position;
+    const bool same_gen = snapshot.enable_generation == observed_enable_generation_ &&
+                          snapshot.reference_generation == observed_reference_generation_;
+    const bool handover_from_encoder =
+        active_loop_ == ActiveLoop::EncoderPosition && history_valid_ && same_gen && telemetry_.output_valid;
+    const bool need_init =
+        !external_history_valid_ || !same_gen || active_loop_ != ActiveLoop::ExternalVelocity;
+    const float v_max = config_.external_velocity.requested_velocity_abs_max_rad_s;
+    if (need_init) {
+        const float prev_effort = telemetry_.effort_command;
+        const float init_vel = std::clamp(ext.measured_velocity_rad_s, -v_max, v_max);
+        ret = control_motor_velocity_reset(&external_state_, ext.measured_velocity_rad_s, init_vel);
+        if (ret < 0)
+            return fail(ret, snapshot, ControlIssue::InvalidMeasurement);
+        if (handover_from_encoder) {
+            const control_feedforward_reference ff_ref{ext.position_reference_rad, init_vel, 0.0f};
+            float ff_out = 0.0f;
+            if (control_feedforward_calculate(&config_.external_velocity.regulator.feedforward, &ff_ref, &ff_out) == 0 &&
+                std::isfinite(ff_out)) {
+                external_state_.regulator.feedback.integral_output =
+                    std::clamp(prev_effort - ff_out, ext_pid.integral_min, ext_pid.integral_max);
+            }
+        }
+        observed_enable_generation_ = snapshot.enable_generation;
+        observed_reference_generation_ = snapshot.reference_generation;
+        external_history_valid_ = true;
+        history_valid_ = false;
+    }
+    const float velocity_request = std::clamp(ext.velocity_request_rad_s, -v_max, v_max);
+    const control_motor_velocity_input vel_input{
+        velocity_request, ext.measured_velocity_rad_s, ext.position_reference_rad, dt, false};
+    control_motor_velocity_state next_ext = external_state_;
+    const control_motor_velocity_state state_before = next_ext;
+    control_motor_position_output output{};
+    ret = control_motor_velocity_step(&next_ext, &config_.external_velocity, &vel_input, &output.velocity);
+    if (ret < 0)
+        return fail(ret, snapshot);
+    const float effort_ff = config_.external_acceleration_effort_gain * ext.acceleration_ff_rad_s2;
+    if (!std::isfinite(effort_ff))
+        return fail(-ERANGE, snapshot);
+    float effort_total = output.velocity.effort_command + effort_ff;
+    if (std::fabs(effort_total) > config_.external_velocity.effort_abs_max) {
+        control_motor_velocity_input retry = vel_input;
+        retry.freeze_integrator = true;
+        next_ext = state_before;
+        ret = control_motor_velocity_step(&next_ext, &config_.external_velocity, &retry, &output.velocity);
+        if (ret < 0)
+            return fail(ret, snapshot);
+        effort_total = output.velocity.effort_command + effort_ff;
+    }
+    effort_total = std::clamp(effort_total, -config_.external_velocity.effort_abs_max,
+                              config_.external_velocity.effort_abs_max);
+    if (!std::isfinite(effort_total))
+        return fail(-ERANGE, snapshot);
+    ret = stageEffort(effort_total, snapshot.enable_generation);
+    if (ret < 0)
+        return fail(ret, snapshot);
+    external_state_ = next_ext;
+    active_loop_ = ActiveLoop::ExternalVelocity;
+    output.position.error = ext.outer_position_error_rad;
+    output.position.effective_error = ext.outer_position_error_rad;
+    output.position.output = ext.outer_output_rad_s;
+    output.position.saturated = ext.outer_saturated;
+    output.effort_command = effort_total;
+    output.velocity_request_raw_rad_s = ext.velocity_request_rad_s;
+    output.velocity_feedforward_rad_s = ext.reference_velocity_rad_s;
+    output.velocity_request_rad_s = velocity_request;
+    output.velocity_request_limited = ext.velocity_request_limited || (velocity_request != ext.velocity_request_rad_s);
+    Telemetry next{};
+    next.motor = snapshot;
+    next.output = output;
+    next.requested_position_rad = position;
+    next.target_position_rad = position;
+    next.position_rad = absolute
+                            ? static_cast<double>(snapshot.feedback.absolute_position_rad)
+                            : position -
+                                  (config_.reference == PositionReference::StartupRelative ? initial_position_rad_ : 0);
+    next.dt_s = dt;
+    next.effort_command = effort_total;
     next.effort_unit = config_.effort_unit;
     next.target_valid = next.output_valid = true;
     next.target_sequence = target_sequence_;

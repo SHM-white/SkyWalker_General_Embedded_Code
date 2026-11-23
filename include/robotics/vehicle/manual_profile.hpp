@@ -3,6 +3,7 @@
 #include <robotics/chassis/spin_speed_profile.hpp>
 #include <robotics/command/command_manager.hpp>
 #include <robotics/gimbal/dual_yaw_motion_allocator.hpp>
+#include <robotics/gimbal/head_imu_vision_controller.hpp>
 #include <robotics/gimbal/inertial_gimbal.hpp>
 #include <robotics/gimbal/yaw_centering.hpp>
 #include <robotics/vehicle/gimbal_profile.hpp>
@@ -75,6 +76,30 @@ inline InertialGimbalAdapter::Config sentryInertialConfig() {
     c.pitch_max_goal_lead_rad = 0;
     return c;
 }
+inline HeadImuVisionController::Config sentryVisionImuConfig() {
+    HeadImuVisionController::Config c{};
+    c.yaw_direction = small_yaw.direction;
+    c.pitch_direction = pitch.direction;
+    c.yaw_min_rad = yaw_min_rad;
+    c.yaw_max_rad = yaw_max_rad;
+    c.pitch_min_rad = pitch_min_rad;
+    c.pitch_max_rad = pitch_max_rad;
+    c.max_inertial_pitch_rad = 0.9f;
+    c.yaw_angle_kp = 15.0f;
+    c.yaw_angle_deadband_rad = 0.0015f;
+    c.yaw_rate_ff_gain = 1.0f;
+    c.yaw_max_rate_rad_s = 5.0f;
+    c.pitch_angle_kp = 14.0f;
+    c.pitch_angle_deadband_rad = 0.0015f;
+    c.pitch_rate_ff_gain = 1.0f;
+    c.pitch_max_rate_rad_s = 4.0f;
+    c.yaw_brake_decel_rad_s2 = 12.0f;
+    c.yaw_limit_margin_rad = 0.03f;
+    c.pitch_brake_decel_rad_s2 = 20.0f;
+    c.pitch_limit_margin_rad = 0.02f;
+    c.limit_return_kp = 6.0f;
+    return c;
+}
 // 调参：变速小陀螺。曲线本身在 calibration.hpp 的 spinRateCurveRadS()。
 inline constexpr SpinSpeedProfile::Config spinProfileConfig() {
     SpinSpeedProfile::Config c{};
@@ -145,10 +170,10 @@ inline DualYawAllocatorConfig dualYawAllocatorConfig() {
     // 小 Yaw 可执行关节速度上限（rad/s，编码器坐标），直接取 GM6020 输出轴标定。
     c.joint_rate_max_rad_s = small_yaw.velocity_limit_rad_s;
     // ---- 头部世界速率预算（大小 Yaw 合计能产生的世界角速度）----
-    // 头部世界速率硬上限（rad/s）：手动满幅就是它，也是可行域的外层上限。
-    c.head_rate_max_rad_s = manual_max_gimbal_yaw_rate_rad_s;
+    // 头部世界速率硬上限（rad/s）：允许视觉短时高带宽修正；持续预算仍限制在 3 rad/s。
+    c.head_rate_max_rad_s = 5.0f;
     // 头部世界加速度上限（rad/s²）：决定推杆后多久到满速、反向时多久停住。
-    c.head_acceleration_max_rad_s2 = 10.0f;
+    c.head_acceleration_max_rad_s2 = 20.0f;
     // 头部 jerk 上限（rad/s³）：0 = 关闭 jerk 整形，只做每周期加速度钳制。
     c.head_jerk_max_rad_s3 = 0;
     // 持续运动预算（rad/s）：长期可交给大 Yaw 的世界速率，必须 ≤ head_rate_max。
@@ -167,10 +192,10 @@ inline DualYawAllocatorConfig dualYawAllocatorConfig() {
     // ---- 快慢分离（决定高频由谁承担）----
     // 手动持续运动提取时间常数（s）：越大 → 大 Yaw 越晚参与，小 Yaw 承担更多快变。
     c.slow_tau_s = 0.12f;
-    // 视觉持续运动时间常数（s）：比手动更长，让大 Yaw 承担更多慢变跟踪。
-    c.vision_slow_tau_s = 0.24f;
+    // 视觉持续运动时间常数（s）：加长滤波，让大 Yaw 只跟低频慢变，小幅高频交给小 Yaw。
+    c.vision_slow_tau_s = 0.60f;
     // 视觉角度误差 → 头部速率增益（1/s）：决定视觉目标收敛快慢。
-    c.vision_angle_gain_s_inv = 8.0f;
+    c.vision_angle_gain_s_inv = 15.0f;
     // ---- 小 Yaw 关节加减速能力（用来收紧头部加速度窗）----
     // 正/负向关节加速度能力（rad/s²）：载体加速度新鲜时，头部加速度窗被夹到
     // 载体加速度 ± 该值，避免要求小 Yaw 输出它做不到的相对加速度。未实测前保持保守。
@@ -179,6 +204,8 @@ inline DualYawAllocatorConfig dualYawAllocatorConfig() {
     // ---- 回中（附加的慢调节，不替代持续前馈）----
     // 回中死区（rad，约 0.5°）：中心附近不动，避免来回微抖。
     c.center_deadband_rad = 0.0087f;
+    // 视觉专用回中死区（rad，约 5.7°）：在负向 13.2° 余量内吸收小幅自瞄，避免大 Yaw 滞后叠加过冲。
+    c.vision_center_deadband_rad = 0.10f;
     // 回中比例增益（rad/s per rad）：偏角每 1 rad 产生多少大 Yaw 世界速率。
     c.center_kp_rad_s_per_rad = 2.0f;
     // 回中速率上限（rad/s）：限制回中这条慢调节自身的速度。

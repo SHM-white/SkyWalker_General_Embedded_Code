@@ -88,6 +88,8 @@ struct DualYawAllocatorConfig {
     // Minimum spacing between two `joint_reseed_requested` requests, us. 0 keeps
     // the legacy request on every over-envelope cycle.
     core::TimeUs reseed_interval_us = 0;
+    // Optional vision-only centering deadband, rad. Negative inherits `center_deadband_rad`.
+    float vision_center_deadband_rad = -1.0f;
 };
 
 struct DualYawAllocatorInputs {

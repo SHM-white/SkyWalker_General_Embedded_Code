@@ -62,7 +62,8 @@ int DualYawMotionAllocator::validate() const {
                         std::isfinite(c.tracking_budget_scale_min) && std::isfinite(c.tracking_budget_slew_per_s) &&
                         std::isfinite(c.still_rate_epsilon_rad_s) &&
                         std::isfinite(c.still_acceleration_epsilon_rad_s2) &&
-                        std::isfinite(c.head_angle_lead_max_rad) && std::isfinite(c.brake_release_scale);
+                        std::isfinite(c.head_angle_lead_max_rad) && std::isfinite(c.brake_release_scale) &&
+                        std::isfinite(c.vision_center_deadband_rad);
     if (!finite || std::fabs(c.joint_direction) != 1 || !(c.joint_margin_rad >= 0) || !(c.joint_tolerance_rad >= 0) ||
         !(c.head_rate_max_rad_s > 0) || !(c.head_acceleration_max_rad_s2 > 0) || !(c.head_jerk_max_rad_s3 >= 0) ||
         !(c.head_steady_rate_max_rad_s > 0) || c.head_steady_rate_max_rad_s > c.head_rate_max_rad_s ||
@@ -302,8 +303,11 @@ DualYawAllocatorOutput DualYawMotionAllocator::update(const DualYawAllocatorInpu
     slow_rad_s_ += alpha * (head_intent_.rate_rad_s - slow_rad_s_);
     center_error_rad_ += alpha * (center_error_target - center_error_rad_);
     const float slow_acceleration = (slow_rad_s_ - slow_previous) / dt;
+    const float center_deadband = vision && c.vision_center_deadband_rad >= 0.0f
+                                      ? c.vision_center_deadband_rad
+                                      : c.center_deadband_rad;
     const float center_rate = std::clamp(c.center_kp_rad_s_per_rad *
-                                             softDeadband(center_error_rad_, c.center_deadband_rad),
+                                             softDeadband(center_error_rad_, center_deadband),
                                          -c.center_rate_max_rad_s, c.center_rate_max_rad_s);
 
     // --- Big-Yaw world intent ------------------------------------------------

@@ -92,16 +92,22 @@ RunStatus GimbalExecutor::update(const GimbalExecutionInputs &in, core::TimeUs n
                                    std::isfinite(in.yaw_trajectory.acceleration_rad_s2) &&
                                    core::fresh(in.yaw_trajectory.stamp, now,
                                                static_cast<core::TimeUs>(config_.command_timeout_ms) * 1000ULL);
-    const bool yaw_input_ok = yaw_trajectory_ok ||
+    const bool yaw_input_ok = in.yaw_direct.valid || yaw_trajectory_ok ||
                               (in.command.mode == GimbalMode::Rate            ? std::isfinite(in.command.yaw_rate_rad_s)
                                : in.command.mode == GimbalMode::AbsoluteAngle ? std::isfinite(in.command.yaw_target_rad)
                                                                               : true);
-    const bool pitch_input_ok = in.command.mode == GimbalMode::Rate ? std::isfinite(in.command.pitch_rate_rad_s)
-                                : in.command.mode == GimbalMode::AbsoluteAngle
-                                    ? std::isfinite(in.command.pitch_target_rad)
-                                    : true;
+    const bool pitch_input_ok = in.pitch_direct.valid ||
+                                (in.command.mode == GimbalMode::Rate ? std::isfinite(in.command.pitch_rate_rad_s)
+                                 : in.command.mode == GimbalMode::AbsoluteAngle
+                                     ? std::isfinite(in.command.pitch_target_rad)
+                                     : true);
     int yr = 0, pr = 0;
-    if (yaw_trajectory_ok) {
+    if (in.yaw_direct.valid) {
+        yr = yaw_.updateExternalVelocity(in.yaw_direct.input, in.yaw_direct.limit_clamped, SafetyAction::Active,
+                                         in.yaw_output_valid ? dt : 0);
+        yaw_rate_restart_pending_ = true;
+    }
+    else if (yaw_trajectory_ok) {
         yr = yaw_.updateTrajectory(in.yaw_trajectory, SafetyAction::Active, in.yaw_output_valid ? dt : 0);
         // 轨迹路径没有消费 Rate 会话；下次回到 Rate 时须从反馈重新播种。
         yaw_rate_restart_pending_ = true;
@@ -115,7 +121,12 @@ RunStatus GimbalExecutor::update(const GimbalExecutionInputs &in, core::TimeUs n
     }
     else if (!error)
         error = -EINVAL;
-    if (pitch_input_ok) {
+    if (in.pitch_direct.valid) {
+        pr = pitch_.updateExternalVelocity(in.pitch_direct.input, in.pitch_direct.limit_clamped, SafetyAction::Active,
+                                           in.pitch_output_valid ? dt : 0);
+        pitch_rate_restart_pending_ = true;
+    }
+    else if (pitch_input_ok) {
         pr = pitch_.update({in.command.mode, in.command.pitch_target_rad, in.command.pitch_rate_rad_s,
                             in.pitch_use_rate_reference && in.pitch_output_valid,
                             pitch_rate_restart_pending_},

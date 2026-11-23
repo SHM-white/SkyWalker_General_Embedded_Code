@@ -10,6 +10,12 @@
 namespace skywalker::robotics {
 
 struct GimbalExecutionInputs {
+    struct DirectAxisCommand {
+        bool valid = false;
+        bool limit_clamped = false;
+        control::PositionMotor::ExternalVelocityInput input{};
+    };
+
     GimbalCommand command{};
     // Optional small-Yaw joint trajectory in encoder coordinates, produced by the
     // dual-Yaw allocator. When valid and fresh it owns the Yaw target for this
@@ -17,6 +23,8 @@ struct GimbalExecutionInputs {
     // existing position loop, rate/acceleration are carried for diagnostics and
     // the stage-C velocity/effort feedforward.
     GimbalJointTrajectory yaw_trajectory{};
+    DirectAxisCommand yaw_direct{};
+    DirectAxisCommand pitch_direct{};
     // Source production time, preserved independently of arbitration time.
     core::Stamp source_stamp{};
     OutputPermission permission{};

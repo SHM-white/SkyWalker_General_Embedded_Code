@@ -77,7 +77,7 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     c.loop.position = {.kp = 35.0f,
                        .ki = 0.5f,
                        .kd = 3.6f,
-                       .derivative_tau_s = 0.0f,
+                       .derivative_tau_s = 0.01f,
                        .integral_min = -0.6f,
                        .integral_max = 0.6f,
                        .output_min = -4.0f,
@@ -91,8 +91,8 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
                                           .ki = 0.4f,
                                           .kd = 0.0f,
                                           .derivative_tau_s = 0.0f,
-                                          .integral_min = -1.2f,
-                                          .integral_max = 1.2f,
+                                          .integral_min = -0.6f,
+                                          .integral_max = 0.6f,
                                           .output_min = -3.0f,
                                           .output_max = 3.0f,
                                           .deadband = 0.0f,
@@ -108,6 +108,25 @@ inline skywalker::control::PositionMotor::Config yawMotorConfig() {
     c.loop.velocity.effort_abs_max = 3.0f;
     // 视觉 Rate 桥接：只在本轴确实由视觉 Rate 路径驱动时生效，默认增益见文件顶部。
     c.loop.velocity_feedforward_gain = yaw_velocity_feedforward_gain;
+    // 视觉模式外置头部 IMU 陀螺速度内环（绕过 GM6020 1-RPM 量化与偏置）。
+    c.has_external_velocity = true;
+    c.external_velocity.regulator.feedback = {.kp = 1.2f,
+                                              .ki = 1.5f,
+                                              .kd = 0.0f,
+                                              .derivative_tau_s = 0.0f,
+                                              .integral_min = -0.45f,
+                                              .integral_max = 0.45f,
+                                              .output_min = -3.0f,
+                                              .output_max = 3.0f,
+                                              .deadband = 0.0f,
+                                              .dt_min_s = 0.001f,
+                                              .dt_max_s = 0.020f};
+    c.external_velocity.reference_slew = {80.0f, 80.0f};
+    c.external_velocity.measurement_filter_tau_s = 0.003f;
+    c.external_velocity.soft_deadband_rad_s = 0.0f;
+    c.external_velocity.requested_velocity_abs_max_rad_s = 10.0f;
+    c.external_velocity.effort_abs_max = small_yaw.effort_limit;
+    c.external_acceleration_effort_gain = 0.0f;
     return c;
 }
 inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
@@ -119,7 +138,7 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     c.loop.position = {.kp = 30.0f,
                        .ki = 0.6f,
                        .kd = 2.0f,
-                       .derivative_tau_s = 0.0f,
+                       .derivative_tau_s = 0.01f,
                        .integral_min = -1.2f,
                        .integral_max = 1.2f,
                        .output_min = -5.0f,
@@ -152,6 +171,33 @@ inline skywalker::control::PositionMotor::Config pitchMotorConfig() {
     // 视觉 Rate 桥接：Pitch 参考由几何追赶生成，先以零增益取得连续性基线；
     // 记录中若 v_ref 反复跳变，保持增益为 0 并补受限关节参考。
     c.loop.velocity_feedforward_gain = pitch_velocity_feedforward_gain;
+    // 视觉模式外置头部 IMU 陀螺速度内环 + 水平余弦重力前馈（+0.92 N·m 对应电机正方向抬头）。
+    c.has_external_velocity = true;
+    c.external_velocity.regulator.feedback = {.kp = 1.8f,
+                                              .ki = 2.5f,
+                                              .kd = 0.0f,
+                                              .derivative_tau_s = 0.0f,
+                                              .integral_min = -1.2f,
+                                              .integral_max = 1.2f,
+                                              .output_min = -5.0f,
+                                              .output_max = 5.0f,
+                                              .deadband = 0.0f,
+                                              .dt_min_s = 0.001f,
+                                              .dt_max_s = 0.020f};
+    c.external_velocity.regulator.feedforward = {.k_bias = 0.0f,
+                                                 .k_static = 0.0f,
+                                                 .k_velocity = 0.0f,
+                                                 .k_acceleration = 0.0f,
+                                                 .k_gravity = 0.92f,
+                                                 .velocity_epsilon = 0.0f,
+                                                 .acceleration_epsilon = 0.0f,
+                                                 .gravity_model = CONTROL_GRAVITY_COS};
+    c.external_velocity.reference_slew = {40.0f, 40.0f};
+    c.external_velocity.measurement_filter_tau_s = 0.005f;
+    c.external_velocity.soft_deadband_rad_s = 0.0f;
+    c.external_velocity.requested_velocity_abs_max_rad_s = 6.0f;
+    c.external_velocity.effort_abs_max = 5.0f;
+    c.external_acceleration_effort_gain = 0.0f;
     return c;
 }
 
